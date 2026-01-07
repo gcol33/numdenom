@@ -1,0 +1,324 @@
+---
+title: "Getting Started with quotr"
+author: "Gilles Colling"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with quotr}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  dev = "svglite",
+  fig.ext = "svg",
+  eval = FALSE
+)
+```
+
+## Installation
+
+quotr requires CmdStan for Bayesian inference. Install in order:
+
+```{r install, eval = FALSE}
+# 1. Install cmdstanr (Stan interface)
+install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))
+
+# 2. Install CmdStan (one-time setup)
+cmdstanr::install_cmdstan()
+
+# 3. Install quotr
+# install.packages("pak")
+pak::pak("gcol33/quotr")
+```
+
+Verify installation:
+
+```{r verify, eval = FALSE}
+library(quotr)
+cmdstanr::cmdstan_version()
+```
+
+## Basic Usage
+
+### Example: CPUE Analysis
+
+Catch per unit effort with site-level variation:
+
+```{r cpue-example}
+library(quotr)
+
+# Simulated trawl data
+set.seed(123)
+n_sites <- 20
+n_obs <- 200
+
+trawl_data <- data.frame(
+  site = factor(rep(1:n_sites, each = n_obs/n_sites)),
+  depth = rnorm(n_obs, 50, 15),
+  season = factor(sample(c("spring", "summer", "fall"), n_obs, replace = TRUE)),
+  catch = rpois(n_obs, lambda = 15),
+  effort = rgamma(n_obs, shape = 5, rate = 1)
+)
+
+# Fit joint model
+fit <- quotr(
+  numerator = catch ~ depth + season + (1 | site),
+  denominator = effort ~ season + (1 | site),
+  shared = ~ (1 | site),
+  data = trawl_data,
+  family = quotr_poisson_gamma(),
+  chains = 4,
+  iter = 2000
+)
+
+# View results
+print(fit)
+summary(fit)
+```
+
+### Extract CPUE Posteriors
+
+```{r cpue-extract}
+# Observation-level CPUE
+cpue <- ratio(fit)
+summary(cpue)
+
+# Site-level CPUE (averaged within site)
+cpue_site <- ratio(fit, by = "site")
+summary(cpue_site)
+
+# Compare CPUE between seasons
+ratio_contrast(fit, ~ season)
+```
+
+## The Three Families
+
+### Count/Count Ratios: `quotr_negbin_negbin()`
+
+When both numerator and denominator are counts:
+
+```{r negbin-example}
+# Relative abundance: species count / total count
+fit_abundance <- quotr(
+  numerator = species_count ~ habitat + (1 | plot),
+  denominator = total_count ~ (1 | plot),
+  shared = ~ (1 | plot),
+  data = survey_data,
+  family = quotr_negbin_negbin()
+)
+```
+
+### Trial-Based Proportions: `quotr_binomial()`
+
+When numerator is successes out of denominator trials:
+
+```{r binomial-example}
+# Detection probability: detections / availability
+fit_detection <- quotr(
+  numerator = detections ~ effort + (1 | site),
+  denominator = available ~ (1 | site),
+  shared = ~ (1 | site),
+  data = camera_data,
+  family = quotr_binomial()
+)
+
+# Extract detection probabilities
+probs <- ratio(fit_detection)
+```
+
+### Count/Effort Ratios: `quotr_poisson_gamma()`
+
+When denominator is continuous effort:
+
+```{r poisson-gamma-example}
+# CPUE: catch count / fishing hours
+fit_cpue <- quotr(
+  numerator = catch ~ depth + season + (1 | vessel),
+  denominator = hours ~ weather + (1 | vessel),
+  shared = ~ (1 | vessel),
+  data = fishing_data,
+  family = quotr_poisson_gamma()
+)
+```
+
+## Shared Structure
+
+### Default: Shared Random Effects
+
+When the same grouping variable appears in both formulas, quotr shares the random effect by default:
+```{r shared-default}
+# site effect shared between catch and effort
+fit <- quotr(
+  numerator = catch ~ x + (1 | site),
+  denominator = effort ~ (1 | site),
+  data = df,
+  family = quotr_poisson_gamma()
+)
+# Equivalent to: shared = ~ (1 | site)
+```
+
+### Explicit Shared Structure
+
+Specify shared structure explicitly:
+
+```{r shared-explicit}
+fit <- quotr(
+  numerator = catch ~ x + (1 | site) + (1 | observer),
+  denominator = effort ~ (1 | site),
+  shared = ~ (1 | site),  # Only site is shared; observer is numerator-specific
+  data = df,
+  family = quotr_poisson_gamma()
+)
+```
+
+### Independence (Use With Caution)
+
+Request independent random effects:
+
+```{r shared-independent}
+fit <- quotr(
+  numerator = successes ~ treatment + (1 | block),
+  denominator = trials ~ (1 | block),
+  shared = ~ 0,  # Triggers warning about independence assumption
+  data = experiment_data,
+  family = quotr_binomial()
+)
+```
+
+## Spatial Structure
+
+### CAR Model (Areal Data)
+
+```{r spatial-car}
+# Create adjacency matrix for sites
+adj <- matrix(0, n_sites, n_sites)
+# ... fill in neighbor relationships ...
+
+# Fit with spatial structure
+fit_spatial <- quotr(
+  numerator = count ~ x + (1 | site),
+  denominator = effort ~ (1 | site),
+  shared = ~ (1 | site),
+  spatial = spatial_car(adj, level = "group", group_var = "site"),
+  data = df,
+  family = quotr_poisson_gamma()
+)
+```
+
+### BYM2 Model (Interpretable Spatial Fraction)
+
+```{r spatial-bym2}
+fit_bym2 <- quotr(
+  numerator = cases ~ age + (1 | region),
+  denominator = population ~ (1 | region),
+  shared = ~ (1 | region),
+  spatial = spatial_bym2(adj, level = "group", group_var = "region"),
+  data = epi_data,
+  family = quotr_binomial()
+)
+```
+
+## Model Checking
+
+### Posterior Predictive Checks
+
+```{r pp-check}
+# Density overlay
+pp_check(fit, type = "dens_overlay", component = "numerator")
+pp_check(fit, type = "dens_overlay", component = "denominator")
+
+# Both components side by side
+pp_check(fit, type = "dens_overlay", component = "both")
+
+# Predictive intervals
+pp_check(fit, type = "intervals")
+```
+
+### Model Comparison
+
+```{r model-comparison}
+# Compare nested models
+fit1 <- quotr(numerator = y ~ x, denominator = n ~ 1, ...)
+fit2 <- quotr(numerator = y ~ x + z, denominator = n ~ 1, ...)
+
+# LOO comparison
+quotr_compare(fit1, fit2)
+
+# Or compute LOO/WAIC individually
+loo(fit1)
+waic(fit1)
+```
+
+## Priors
+
+### Default PC Priors
+
+quotr uses penalized complexity priors that favor simpler models:
+
+```{r priors-default}
+# Default: P(sigma > 1) = 0.01
+fit <- quotr(..., priors = quotr_priors())
+```
+
+### Custom Priors
+
+```{r priors-custom}
+# More informative: expect smaller random effects
+fit <- quotr(
+  ...,
+  priors = quotr_priors(
+    sigma_U = 0.5,      # P(sigma > 0.5) = 0.01
+    sigma_alpha = 0.01
+  )
+)
+
+# Less informative: allow larger effects
+fit <- quotr(
+  ...,
+  priors = quotr_priors(
+    sigma_U = 2.0,
+    sigma_alpha = 0.05  # P(sigma > 2) = 0.05
+  )
+)
+```
+
+## Quick Reference
+
+### Main Functions
+
+| Function | Purpose |
+|----------|---------|
+| `quotr()` | Fit a quotr model |
+| `ratio()` | Extract ratio posteriors |
+| `ratio_contrast()` | Compare ratios between groups |
+| `pp_check()` | Posterior predictive checks |
+| `loo()`, `waic()` | Model comparison criteria |
+| `quotr_compare()` | Compare multiple models |
+
+### Families
+
+| Family | Numerator | Denominator |
+|--------|-----------|-------------|
+| `quotr_negbin_negbin()` | Overdispersed counts | Overdispersed counts |
+| `quotr_binomial()` | Successes | Trials (fixed) |
+| `quotr_poisson_gamma()` | Counts | Continuous effort |
+
+### Spatial Functions
+
+| Function | Type | Use Case |
+|----------|------|----------|
+| `spatial_car()` | ICAR | Simple areal smoothing |
+| `spatial_bym2()` | BYM2 | Interpretable spatial fraction |
+
+## See Also
+
+- `vignette("philosophy")` - Why ratios are not data
+- `?quotr` - Main function documentation
+- `?quotr_priors` - Prior specification
+- `?spatial_car` - Spatial structure

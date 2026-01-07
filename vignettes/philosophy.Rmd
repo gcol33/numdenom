@@ -1,0 +1,214 @@
+---
+title: "Why Ratios Are Not Data"
+author: "Gilles Colling"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Why Ratios Are Not Data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+ collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  dev = "svglite",
+  fig.ext = "svg"
+)
+```
+
+## The Core Problem
+
+Ecologists routinely analyse ratios: catch per unit effort (CPUE), species per unit area, biomass per trawl hour, detections per camera-night. The standard approach is to compute the ratio and model it directly:
+
+```r
+# The WRONG approach (don't do this)
+data$cpue <- data$catch / data$effort
+lm(cpue ~ depth + season, data = data)
+```
+This approach is fundamentally flawed. Here's why.
+
+## Ratios Inherit Correlated Errors
+
+When you divide two measured quantities, the ratio inherits uncertainty from both. If catch and effort share any common drivers—observer effects, site conditions, temporal autocorrelation—those dependencies propagate into the ratio in complex, non-linear ways.
+
+Consider a simple example: two sites with identical true CPUE, but different effort levels.
+
+| Site | True rate | Effort | Expected catch | Observed catch | Observed CPUE |
+|------|-----------|--------|----------------|----------------|---------------|
+| A | 5 | 10 | 50 | 48 | 4.8 |
+| B | 5 | 100 | 500 | 512 | 5.12 |
+
+Site B's CPUE estimate is more precise simply because it has more effort. But a ratio-based model treats both CPUE values as equally informative. This is **heteroscedasticity by construction**.
+## The Offset Fallacy
+
+A common "fix" is to use an offset:
+
+```r
+# Still wrong
+glm(catch ~ depth + season + offset(log(effort)), family = poisson, data = data)
+```
+
+This assumes the ratio is the quantity of interest and that effort affects catch proportionally with coefficient exactly 1. Neither assumption is generally true:
+
+1. **Effort has its own structure**: Effort varies systematically—more effort in accessible sites, during good weather, when funding permits. These patterns create confounding.
+
+2. **The proportionality assumption fails**: A 10% increase in effort rarely yields exactly 10% more catch. Saturation effects, interference between sampling units, and diminishing returns are common.
+
+3. **Uncertainty in effort is ignored**: Effort measurements have error. Offset models treat effort as fixed and known.
+
+## The quotr Solution: Joint Modelling
+
+quotr takes a different approach. Instead of modelling the ratio, we jointly model the two processes that generate it:
+
+$$
+Y_i \sim \text{Distribution}_1(\mu_Y, \phi_Y) \quad \text{(numerator)}
+$$
+$$
+N_i \sim \text{Distribution}_2(\mu_N, \phi_N) \quad \text{(denominator)}
+$$
+
+with linked linear predictors:
+
+$$
+\log(\mu_Y) = X\beta_Y + \underbrace{b_{\text{shared}}}_{\text{enters both}} + \eta_i
+$$
+$$
+\log(\mu_N) = Z\beta_N + \underbrace{b_{\text{shared}}}_{\text{enters both}} + \xi_i
+$$
+
+The ratio is then a **derived quantity**, computed in the posterior:
+
+$$
+r_i = \frac{\mathbb{E}[Y_i \mid \cdot]}{\mathbb{E}[N_i \mid \cdot]} = \exp(\eta_i - \xi_i)
+$$
+
+## Why Shared Structure Matters
+
+The key insight is the **shared random effect** $b_{\text{shared}}$. This term enters both the numerator and denominator linear predictors identically.
+
+Why does this matter? Consider what happens without shared structure:
+
+1. Site A has high catch AND high effort (good conditions)
+2. Site B has low catch AND low effort (poor conditions)
+3. An independent model sees: "A has high catch given its predictors" and "A has high effort given its predictors"
+4. These residuals are **positively correlated** but modeled as independent
+5. The ratio inherits **spurious variation** from this ignored correlation
+
+With shared structure:
+
+1. The shared effect $b_{\text{shared}}$ captures "site quality"
+2. High-quality sites have high $b_{\text{shared}}$, boosting BOTH catch and effort expectations
+3. The shared effect **cancels in the ratio** (it appears in both $\eta$ and $\xi$)
+4. What remains is the **true ratio signal**, not confounded by site quality
+
+This is why quotr makes shared structure the **default**. Independence is a special case that must be explicitly requested—and triggers a warning.
+
+## The Three Families
+
+quotr provides three model families for different data types:
+
+### 1. Two-Process Counts: `quotr_negbin_negbin()`
+
+Both numerator and denominator are overdispersed counts:
+
+$$
+Y_i \sim \text{NegBin}(\mu_Y, \phi_Y), \quad N_i \sim \text{NegBin}(\mu_N, \phi_N)
+$$
+
+**Use cases**: Species count / total count, events / opportunities
+
+This is the family for the "hard case"—what people cannot do correctly with binomial models.
+
+### 2. Trial-Based: `quotr_binomial()`
+
+Successes out of known trials:
+
+$$
+Y_i \sim \text{Binomial}(N_i, p_i)
+$$
+
+**Use cases**: Detections / availability, successes / attempts
+
+Here the denominator is treated as known (though it can be modeled if uncertain).
+
+### 3. Count/Effort: `quotr_poisson_gamma()`
+
+Count numerator, continuous positive denominator:
+
+$$
+Y_i \sim \text{Poisson}(\mu_Y), \quad E_i \sim \text{Gamma}(\alpha, \beta)
+$$
+
+**Use cases**: CPUE, observations per hour, catch per trawl
+
+## Full Uncertainty Propagation
+
+Because ratios are computed in Stan's `generated quantities` block, every posterior draw of the ratio reflects uncertainty in:
+
+- Fixed effect estimates
+- Random effect realizations
+- Overdispersion parameters
+- Spatial/temporal structure
+
+This is **exact** posterior inference on the ratio, not an approximation or delta-method estimate.
+
+```r
+# Extract ratio posteriors
+cpue_posterior <- ratio(fit)
+
+# Full posterior distribution, not just point estimate
+summary(cpue_posterior)
+#>   obs  mean    sd   q2.5   q50  q97.5
+#>     1  4.82  0.31   4.24  4.81   5.46
+#>     2  5.14  0.28   4.62  5.13   5.71
+#>   ...
+```
+
+## When Independence Is Appropriate
+
+There are cases where shared structure is not needed:
+
+1. **Designed experiments**: If effort is controlled and randomized, it may be independent of the outcome process.
+
+2. **Known denominators**: Population counts from a census, predetermined sample sizes.
+
+3. **Different observation processes**: If numerator and denominator are measured by completely independent methods with no common drivers.
+
+In these cases, use `shared = ~ 0`:
+
+```r
+fit <- quotr(
+  numerator = successes ~ treatment,
+  denominator = trials ~ 1,
+  shared = ~ 0,  # Explicit independence (triggers warning)
+  family = quotr_binomial(),
+  data = experiment_data
+)
+```
+
+The warning reminds you that this is a strong assumption.
+
+## Summary
+
+| Approach | Problem |
+|----------|---------|
+| Model ratio directly | Heteroscedasticity, ignores denominator uncertainty |
+| Use offset | Assumes proportionality, ignores effort structure |
+| Independent joint model | Spurious ratio effects from shared unmeasured drivers |
+| **quotr (shared structure)** | Correct propagation of uncertainty, shared drivers cancel |
+
+quotr enforces the correct approach by design:
+
+- **No offsets allowed**
+- **Shared structure by default**
+- **Independence requires explicit request**
+- **Ratios computed post hoc with full uncertainty**
+
+## Further Reading
+- Simpson, D. et al. (2017). Penalising model component complexity. *Statistical Science*.
+- Conn, P. B. et al. (2017). Hierarchical modeling of false-positive errors in acoustic surveys. *Ecology*.
+- Royle, J. A. & Dorazio, R. M. (2008). *Hierarchical Modeling and Inference in Ecology*. Academic Press.
