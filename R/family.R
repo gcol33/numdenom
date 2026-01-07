@@ -28,11 +28,9 @@ NULL
 #' \dontrun{
 #' # Relative abundance: species count / total count
 #' fit <- quotr(
-#'   numerator = sp_count ~ habitat + (1 | site),
-#'   denominator = total_count ~ habitat + (1 | site),
-#'   shared = ~ (1 | site),
-#'   family = quotr_negbin_negbin(),
-#'   data = abundance_data
+#'   sp_count | total_count ~ habitat + (1 | site),
+#'   data = abundance_data,
+#'   family = quotr_negbin_negbin()
 #' )
 #' }
 #'
@@ -78,14 +76,12 @@ quotr_negbin_negbin <- function(link_num = "log", link_denom = "log") {
 #' @return A `quotr_family` object
 #'
 #' @examples
-#' \dontrun
+#' \dontrun{
 #' # Detection given availability
 #' fit <- quotr(
-#'   numerator = detections ~ effort + (1 | site),
-#'   denominator = availability ~ (1 | site),
-#'   shared = ~ (1 | site),
-#'   family = quotr_binomial(),
-#'   data = detection_data
+#'   detections | availability ~ effort + (1 | site),
+#'   data = detection_data,
+#'   family = quotr_binomial()
 #' )
 #' }
 #'
@@ -137,11 +133,9 @@ quotr_binomial <- function(link = "logit", denominator_known = TRUE) {
 #' \dontrun{
 #' # CPUE: catch count / fishing effort (hours)
 #' fit <- quotr(
-#'   numerator = catch ~ depth + season + (1 | vessel),
-#'   denominator = effort_hours ~ (1 | vessel),
-#'   shared = ~ (1 | vessel),
-#'   family = quotr_poisson_gamma(),
-#'   data = trawl_data
+#'   catch | effort_hours ~ depth + season + (1 | vessel),
+#'   data = trawl_data,
+#'   family = quotr_poisson_gamma()
 #' )
 #' }
 #'

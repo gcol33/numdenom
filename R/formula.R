@@ -1,68 +1,269 @@
 #' Parse and validate quotr formulas
 #'
 #' @description
-#' Internal functions for parsing the numerator, denominator, and shared
-#' formulas into a structured specification for Stan model building.
+#' Internal functions for parsing quotr formulas into a structured
+#' specification for Stan model building.
+#'
+#' quotr supports a combined formula syntax:
+#' - `num | denom ~ x + (1|group)` for shared predictors
+#' - Separate `formula_num` and `formula_denom` for different predictors
 #'
 #' @name quotr_formula
 #' @keywords internal
 NULL
 
-#' Create a quotr formula specification
+#' Parse a quotr formula
 #'
-#' @param numerator Formula for the numerator process
-#' @param denominator Formula for the denominator process
-#' @param shared Formula for shared random effects (NULL = infer from formulas)
-#' @param data Data frame
+#' @description
+#' Parses the main formula and optional process-specific formulas into
+#' a structured specification. Supports both combined syntax
+#' (`num | denom ~ x`) and separate formulas.
+#'
+#' @param formula Main formula. Can be:
+#'   - Combined: `num | denom ~ predictors`
+#'   - Numerator only: `num ~ predictors` (requires formula_denom)
+#' @param formula_num Optional formula for numerator-specific predictors.
+#'   Added to those from the main formula.
+#' @param formula_denom Optional formula for denominator-specific predictors.
+#'   Required if main formula has single response.
+#' @param shared Formula for shared random effects. NULL = infer from formulas,
+#'   `~ 0` = independence (triggers warning).
+#' @param data Data frame containing all variables.
 #'
 #' @return A `quotr_formula` object
 #' @keywords internal
-quotr_formula <- function(numerator, denominator, shared = NULL, data) {
+quotr_formula <- function(formula,
+                          formula_num = NULL,
+                          formula_denom = NULL,
+                          shared = NULL,
+                          data) {
 
- # Validate formulas
-  validate_formula(numerator, "numerator")
-  validate_formula(denominator, "denominator")
+  # Parse the main formula
+  parsed <- parse_main_formula(formula, data)
 
-  # Check for offset() usage - this is forbidden
-  check_no_offset(numerator, "numerator")
-  check_no_offset(denominator, "denominator")
+  # Handle combined vs separate formula specifications
 
-  # Parse formulas into components
-  num_parsed <- parse_formula(numerator, data, prefix = "num")
-  denom_parsed <- parse_formula(denominator, data, prefix = "denom")
+  if (parsed$type == "combined") {
+    # Combined syntax: num | denom ~ predictors
+    num_response <- parsed$num_var
+    denom_response <- parsed$denom_var
+    base_rhs <- parsed$rhs
+
+    # Build numerator formula
+    num_formula <- build_process_formula(
+      response = num_response,
+      base_rhs = base_rhs,
+      additional = formula_num,
+      data = data
+    )
+
+    # Build denominator formula
+    denom_formula <- build_process_formula(
+      response = denom_response,
+      base_rhs = base_rhs,
+      additional = formula_denom,
+      data = data
+    )
+
+  } else {
+    # Single response: require formula_denom
+    if (is.null(formula_denom))
+
+      stop(
+        "When using single-response formula, `formula_denom` is required.\n",
+        "Either use combined syntax: num | denom ~ x\n",
+        "Or provide both formula and formula_denom.",
+        call. = FALSE
+      )
+
+    num_response <- parsed$response
+    base_rhs <- parsed$rhs
+
+    num_formula <- build_process_formula(
+      response = num_response,
+      base_rhs = base_rhs,
+      additional = formula_num,
+      data = data
+    )
+
+    denom_formula <- parse_denom_formula(formula_denom, data)
+    denom_response <- denom_formula$response_var
+  }
+
+  # Validate - no offsets allowed
+  check_no_offset(num_formula$full_formula, "numerator")
+  check_no_offset(denom_formula$full_formula, "denominator")
 
   # Handle shared structure
-  shared_parsed <- parse_shared(shared, num_parsed, denom_parsed, data)
+  shared_parsed <- parse_shared(shared, num_formula, denom_formula, data)
 
   structure(
     list(
-      numerator = num_parsed,
-      denominator = denom_parsed,
+      numerator = num_formula,
+      denominator = denom_formula,
       shared = shared_parsed,
-      original = list(
-        numerator = numerator,
-        denominator = denominator,
-        shared = shared
-      )
+      original_formula = formula
     ),
     class = "quotr_formula"
   )
 }
 
-#' Validate a formula
+#' Parse main formula to detect combined vs single syntax
 #'
-#' @param f Formula to validate
-#' @param name Name for error messages
+#' @param formula The formula to parse
+#' @param data Data frame
+#' @return List with type, response(s), and RHS
 #' @keywords internal
-validate_formula <- function(f, name) {
-  if (!inherits(f, "formula")) {
-    stop(sprintf("`%s` must be a formula", name), call. = FALSE)
+parse_main_formula <- function(formula, data) {
+  if (!inherits(formula, "formula")) {
+    stop("`formula` must be a formula object", call. = FALSE)
   }
 
-  if (length(f) < 3) {
-    stop(sprintf("`%s` must have a response variable (e.g., y ~ x)", name),
+  if (length(formula) < 3) {
+    stop("Formula must have response and predictors: response ~ predictors",
          call. = FALSE)
   }
+
+  lhs <- formula[[2]]
+  rhs <- formula[[3]]
+
+  # Check for combined syntax: num | denom
+  lhs_text <- deparse(lhs, width.cutoff = 500)
+  lhs_text <- paste(lhs_text, collapse = " ")
+
+  if (grepl("\\|", lhs_text)) {
+    # Combined syntax
+    parts <- strsplit(lhs_text, "\\|")[[1]]
+    if (length(parts) != 2) {
+      stop("Combined formula must have exactly two responses: num | denom ~ x",
+           call. = FALSE)
+    }
+
+    num_var <- trimws(parts[1])
+    denom_var <- trimws(parts[2])
+
+    # Validate variables exist
+    if (!num_var %in% names(data)) {
+      stop(sprintf("Numerator variable '%s' not found in data", num_var),
+           call. = FALSE)
+    }
+    if (!denom_var %in% names(data)) {
+      stop(sprintf("Denominator variable '%s' not found in data", denom_var),
+           call. = FALSE)
+    }
+
+    list(
+      type = "combined",
+      num_var = num_var,
+      denom_var = denom_var,
+      rhs = rhs
+    )
+  } else {
+    # Single response
+    response <- as.character(lhs)
+    if (!response %in% names(data)) {
+      stop(sprintf("Response variable '%s' not found in data", response),
+           call. = FALSE)
+    }
+
+    list(
+      type = "single",
+      response = response,
+      rhs = rhs
+    )
+  }
+}
+
+#' Build a process-specific formula
+#'
+#' @param response Response variable name
+#' @param base_rhs RHS from main formula
+#' @param additional Optional additional formula
+#' @param data Data frame
+#' @return Parsed formula specification
+#' @keywords internal
+build_process_formula <- function(response, base_rhs, additional, data) {
+  # Start with base formula
+  base_rhs_text <- deparse(base_rhs, width.cutoff = 500)
+  base_rhs_text <- paste(base_rhs_text, collapse = " ")
+
+  # Add additional terms if provided
+  if (!is.null(additional)) {
+    if (!inherits(additional, "formula")) {
+      stop("Additional formula must be a formula object", call. = FALSE)
+    }
+    # One-sided formula: ~ extra_terms
+    if (length(additional) == 2) {
+      add_rhs <- deparse(additional[[2]], width.cutoff = 500)
+      add_rhs <- paste(add_rhs, collapse = " ")
+      base_rhs_text <- paste(base_rhs_text, "+", add_rhs)
+    }
+  }
+
+  # Build full formula
+  full_formula <- as.formula(
+    paste(response, "~", base_rhs_text),
+    env = parent.frame(2)
+  )
+
+  # Parse into components
+  parse_formula_components(full_formula, data)
+}
+
+#' Parse denominator-only formula
+#'
+#' @param formula Formula for denominator (response ~ predictors or ~ predictors)
+#' @param data Data frame
+#' @return Parsed formula specification
+#' @keywords internal
+parse_denom_formula <- function(formula, data) {
+  if (!inherits(formula, "formula")) {
+    stop("`formula_denom` must be a formula", call. = FALSE)
+  }
+
+  if (length(formula) == 3) {
+    # Two-sided: response ~ predictors
+    parse_formula_components(formula, data)
+  } else {
+    stop("`formula_denom` must include response: denom ~ predictors",
+         call. = FALSE)
+  }
+}
+
+#' Parse formula into fixed and random effect components
+#'
+#' @param f Formula with response
+#' @param data Data frame
+#' @return List with response, fixed effects matrix, random effects
+#' @keywords internal
+parse_formula_components <- function(f, data) {
+  response_var <- as.character(f[[2]])
+
+  if (!response_var %in% names(data)) {
+    stop(sprintf("Variable '%s' not found in data", response_var),
+         call. = FALSE)
+  }
+
+  response <- data[[response_var]]
+
+  rhs_text <- deparse(f[[3]], width.cutoff = 500)
+  rhs_text <- paste(rhs_text, collapse = " ")
+
+  # Extract random effects
+  random_effects <- extract_random_effects(rhs_text, data)
+
+  # Build fixed effects matrix
+  fixed_formula <- remove_random_effects(f)
+  X <- build_model_matrix(fixed_formula, data)
+
+  list(
+    response_var = response_var,
+    response = response,
+    full_formula = f,
+    fixed_formula = fixed_formula,
+    X = X,
+    random_effects = random_effects
+  )
 }
 
 #' Check formula does not contain offset()
@@ -92,52 +293,10 @@ check_no_offset <- function(f, name) {
   }
 }
 
-#' Parse a single formula into components
-#'
-#' @param f Formula
-#' @param data Data frame
-#' @param prefix Prefix for naming ("num" or "denom")
-#'
-#' @return List with response, fixed effects, and random effects
-#' @keywords internal
-parse_formula <- function(f, data, prefix) {
-  # Extract response variable
-  response_var <- as.character(f[[2]])
-
-  if (!(response_var %in% names(data))) {
-    stop(sprintf("Response variable '%s' not found in data", response_var),
-         call. = FALSE)
-  }
-
-  response <- data[[response_var]]
-
-  # Parse right-hand side
-  rhs <- f[[3]]
-  rhs_text <- deparse(rhs, width.cutoff = 500)
-  rhs_text <- paste(rhs_text, collapse = " ")
-
-  # Extract random effects (terms with |)
-  random_effects <- extract_random_effects(rhs_text, data)
-
-  # Build fixed effects formula (removing random effects)
-  fixed_formula <- remove_random_effects(f)
-  X <- build_model_matrix(fixed_formula, data)
-
-  list(
-    response_var = response_var,
-    response = response,
-    fixed_formula = fixed_formula,
-    X = X,
-    random_effects = random_effects,
-    prefix = prefix
-  )
-}
-
 #' Extract random effect specifications from formula text
 #'
 #' @param rhs_text Right-hand side of formula as text
 #' @param data Data frame
-#'
 #' @return List of random effect specifications
 #' @keywords internal
 extract_random_effects <- function(rhs_text, data) {
@@ -161,7 +320,7 @@ extract_random_effects <- function(rhs_text, data) {
     lhs <- trimws(parts[1])
     group_var <- trimws(parts[2])
 
-    if (!(group_var %in% names(data))) {
+    if (!group_var %in% names(data)) {
       stop(sprintf("Grouping variable '%s' not found in data", group_var),
            call. = FALSE)
     }
@@ -171,7 +330,6 @@ extract_random_effects <- function(rhs_text, data) {
     slope_vars <- NULL
 
     if (lhs != "1") {
-      # Extract slope variables
       slope_terms <- gsub("\\b1\\b", "", lhs)
       slope_terms <- gsub("^\\s*\\+\\s*|\\s*\\+\\s*$", "", slope_terms)
       if (nchar(trimws(slope_terms)) > 0) {
@@ -196,7 +354,6 @@ extract_random_effects <- function(rhs_text, data) {
 #' Remove random effects from formula to get fixed effects only
 #'
 #' @param f Formula with potential random effects
-#'
 #' @return Formula with only fixed effects
 #' @keywords internal
 remove_random_effects <- function(f) {
@@ -208,17 +365,14 @@ remove_random_effects <- function(f) {
   rhs_clean <- gsub(re_pattern, "", rhs_text, perl = TRUE)
 
   # Clean up leftover + signs
-
   rhs_clean <- gsub("\\+\\s*\\+", "+", rhs_clean)
   rhs_clean <- gsub("^\\s*\\+\\s*|\\s*\\+\\s*$", "", rhs_clean)
   rhs_clean <- trimws(rhs_clean)
 
-  # Handle empty RHS (intercept only)
   if (rhs_clean == "" || rhs_clean == "1") {
     rhs_clean <- "1"
   }
 
-  # Rebuild formula
   as.formula(paste(deparse(f[[2]]), "~", rhs_clean), env = environment(f))
 }
 
@@ -226,13 +380,11 @@ remove_random_effects <- function(f) {
 #'
 #' @param f Formula (response ~ fixed effects)
 #' @param data Data frame
-#'
 #' @return Model matrix X
 #' @keywords internal
 build_model_matrix <- function(f, data) {
   mf <- model.frame(f, data = data, na.action = na.pass)
-  X <- model.matrix(f, data = mf)
-  X
+  model.matrix(f, data = mf)
 }
 
 #' Parse shared formula specification
@@ -241,18 +393,14 @@ build_model_matrix <- function(f, data) {
 #' @param num_parsed Parsed numerator formula
 #' @param denom_parsed Parsed denominator formula
 #' @param data Data frame
-#'
 #' @return Shared structure specification
 #' @keywords internal
 parse_shared <- function(shared, num_parsed, denom_parsed, data) {
-  # If shared is NULL, infer from random effects
   if (is.null(shared)) {
-    # Default: share all random effects that appear in both formulas
-    shared <- infer_shared_structure(num_parsed, denom_parsed)
-    return(shared)
+    # Default: infer from matching random effects
+    return(infer_shared_structure(num_parsed, denom_parsed))
   }
 
-  # Check for explicit independence request
   if (inherits(shared, "formula")) {
     shared_text <- deparse(shared, width.cutoff = 500)
     shared_text <- paste(shared_text, collapse = " ")
@@ -267,9 +415,8 @@ parse_shared <- function(shared, num_parsed, denom_parsed, data) {
       ))
     }
 
-    # Parse shared random effects
+    # Parse shared random effects (one-sided formula)
     if (length(shared) == 2) {
-      # One-sided formula ~ (1 | group)
       rhs_text <- deparse(shared[[2]], width.cutoff = 500)
       rhs_text <- paste(rhs_text, collapse = " ")
     } else {
@@ -279,7 +426,7 @@ parse_shared <- function(shared, num_parsed, denom_parsed, data) {
     shared_re <- extract_random_effects(rhs_text, data)
 
     return(list(
-      type = "shared",
+      type = "explicit",
       random_effects = shared_re,
       warned = FALSE
     ))
@@ -292,26 +439,28 @@ parse_shared <- function(shared, num_parsed, denom_parsed, data) {
 #'
 #' @param num_parsed Parsed numerator
 #' @param denom_parsed Parsed denominator
-#'
 #' @return Shared structure specification
 #' @keywords internal
 infer_shared_structure <- function(num_parsed, denom_parsed) {
-  # Find grouping variables that appear in both
-  num_groups <- vapply(num_parsed$random_effects, `[[`, character(1), "group_var")
-  denom_groups <- vapply(denom_parsed$random_effects, `[[`, character(1), "group_var")
+  num_groups <- vapply(num_parsed$random_effects,
+                       function(x) x$group_var, character(1))
+  denom_groups <- vapply(denom_parsed$random_effects,
+                         function(x) x$group_var, character(1))
+
+  if (length(num_groups) == 0) num_groups <- character(0)
+  if (length(denom_groups) == 0) denom_groups <- character(0)
 
   shared_groups <- intersect(num_groups, denom_groups)
 
   if (length(shared_groups) == 0) {
-    # No shared structure inferred, but don't warn (user didn't explicitly request independence)
     return(list(
-      type = "none_inferred",
+      type = "none",
       random_effects = list(),
       warned = FALSE
     ))
   }
 
-  # Use the random effect specs from numerator for shared groups
+  # Use RE specs from numerator for shared groups
   shared_re <- num_parsed$random_effects[num_groups %in% shared_groups]
 
   list(
@@ -322,7 +471,6 @@ infer_shared_structure <- function(num_parsed, denom_parsed) {
 }
 
 #' Warn about independence assumption
-#'
 #' @keywords internal
 warn_independence <- function() {
   warning(
@@ -330,8 +478,7 @@ warn_independence <- function() {
     "numerator and denominator processes.\n\n",
     "This assumption is often violated in practice and can lead to spurious ",
     "ratio effects when both processes share unmeasured drivers.\n\n",
-    "Consider whether shared random effects or latent factors would be more ",
-    "appropriate for your data.",
+    "Consider whether shared random effects would be more appropriate.",
     call. = FALSE,
     immediate. = TRUE
   )
@@ -341,31 +488,25 @@ warn_independence <- function() {
 #'
 #' @param x A quotr_formula object
 #' @param ... Ignored
-#'
 #' @export
 #' @keywords internal
 print.quotr_formula <- function(x, ...) {
   cat("quotr formula specification\n")
   cat("===========================\n\n")
 
-  cat("Numerator:\n")
-  cat("  ", deparse(x$original$numerator), "\n")
-  cat("  Response:", x$numerator$response_var, "\n")
+  cat("Numerator:", x$numerator$response_var, "\n")
   cat("  Fixed effects:", ncol(x$numerator$X), "coefficients\n")
-  cat("  Random effects:", length(x$numerator$random_effects), "terms\n\n")
+  cat("  Random effects:", length(x$numerator$random_effects), "terms\n")
 
-  cat("Denominator:\n")
-  cat("  ", deparse(x$original$denominator), "\n")
-  cat("  Response:", x$denominator$response_var, "\n")
+  cat("\nDenominator:", x$denominator$response_var, "\n")
   cat("  Fixed effects:", ncol(x$denominator$X), "coefficients\n")
-  cat("  Random effects:", length(x$denominator$random_effects), "terms\n\n")
+  cat("  Random effects:", length(x$denominator$random_effects), "terms\n")
 
-  cat("Shared structure:\n")
-  if (x$shared$type == "independent") {
-    cat("  INDEPENDENT (no shared effects)\n")
-  } else {
-    cat("  Type:", x$shared$type, "\n")
-    cat("  Shared random effects:", length(x$shared$random_effects), "terms\n")
+  cat("\nShared structure:", x$shared$type, "\n")
+  if (length(x$shared$random_effects) > 0) {
+    groups <- vapply(x$shared$random_effects,
+                     function(r) r$group_var, character(1))
+    cat("  Groups:", paste(groups, collapse = ", "), "\n")
   }
 
   invisible(x)

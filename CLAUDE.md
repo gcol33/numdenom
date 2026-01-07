@@ -184,13 +184,33 @@ vignettes/
 
 ### Formula Specification
 
+**Combined syntax (recommended):**
 ```r
 quotr(
-  numerator = count ~ x + (1 | site),    # Response ~ predictors + RE
+  count | effort ~ x + (1 | site),       # num | denom ~ predictors
+  data = df,
+  family = quotr_poisson_gamma()
+)
+```
 
-  denominator = effort ~ (1 | site),     # Can have different predictors
-  shared = ~ (1 | site),                 # Explicit shared structure
-  ...
+**With process-specific terms:**
+```r
+quotr(
+  count | effort ~ (1 | site),           # Shared structure
+  formula_num = ~ depth + season,         # Numerator-only predictors
+  formula_denom = ~ weather,              # Denominator-only predictors
+  data = df,
+  family = quotr_poisson_gamma()
+)
+```
+
+**Separate formulas:**
+```r
+quotr(
+  count ~ x + (1 | site),                # Numerator formula
+  formula_denom = effort ~ (1 | site),   # Denominator formula
+  data = df,
+  family = quotr_poisson_gamma()
 )
 ```
 
