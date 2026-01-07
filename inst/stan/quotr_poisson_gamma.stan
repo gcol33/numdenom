@@ -73,7 +73,7 @@ parameters {
 
   // Spatial effects (if used)
   vector[use_spatial ? n_spatial : 0] spatial_raw;
-  real<lower=0> sigma_spatial[use_spatial ? 1 : 0];
+  array[use_spatial ? 1 : 0] real<lower=0> sigma_spatial;
 }
 
 transformed parameters {
