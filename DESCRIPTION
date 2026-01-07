@@ -9,7 +9,7 @@ Description: An opinionated framework for Bayesian hierarchical modelling of
     and denominator. Supports shared random effects, spatial structure (CAR/BYM2),
     and full uncertainty propagation to ratio posteriors.
 License: MIT + file LICENSE
-Encoding: UTF-
+Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
@@ -17,14 +17,16 @@ Depends:
     R (>= 4.1.0)
 Imports:
     cmdstanr,
-    instantiate (>= 0.2.0),
     posterior,
-    bayesplot,
     loo,
     Matrix,
     stats,
     methods
 Suggests:
+    instantiate (>= 0.2.0),
+    bayesplot,
+    patchwork,
+    ggplot2,
     testthat (>= 3.0.0),
     knitr,
     rmarkdown
