@@ -132,6 +132,14 @@ quotr <- function(formula,
     )
   }
 
+  # Suggest alternative backends based on data characteristics
+suggest_backend(
+    n_obs = nrow(data),
+    family = family,
+    spatial = spatial,
+    current_backend = backend
+  )
+
   # Parse formula
   formula_spec <- quotr_formula(
     formula = formula,
@@ -190,8 +198,14 @@ quotr <- function(formula,
     stop("rstan backend not yet implemented", call. = FALSE)
   }
 
-  # Check diagnostics
-  check_diagnostics(fit)
+  # Check diagnostics and suggest alternatives if needed
+  check_diagnostics(
+    fit = fit,
+    n_obs = nrow(data),
+    family = family,
+    spatial = spatial,
+    backend = backend
+  )
 
   # Build result object
   result <- structure(
@@ -234,16 +248,105 @@ get_stan_model <- function(model_name, backend = "cmdstanr") {
   }
 }
 
-#' Check MCMC diagnostics
+#' Suggest alternative backends based on data characteristics
+#'
+#' @param n_obs Number of observations
+#' @param family quotr family object
+#' @param spatial Spatial specification (or NULL)
+#' @param current_backend Currently selected backend
+#' @keywords internal
+suggest_backend <- function(n_obs, family, spatial, current_backend) {
+
+ # Thresholds for suggestions
+  LARGE_DATA_THRESHOLD <- 10000
+  VERY_LARGE_DATA_THRESHOLD <- 50000
+
+  suggestions <- character(0)
+
+ # Large dataset warnings
+  if (n_obs >= VERY_LARGE_DATA_THRESHOLD) {
+    if (current_backend %in% c("stan", "cmdstanr")) {
+      if (!is.null(spatial)) {
+        suggestions <- c(suggestions,
+          sprintf("Large spatial dataset (%s observations).", format(n_obs, big.mark = ",")),
+          "Consider backend = 'laplace' for faster approximate inference (v1.2+)."
+        )
+      } else {
+        suggestions <- c(suggestions,
+          sprintf("Large dataset (%s observations).", format(n_obs, big.mark = ",")),
+          "Stan may be slow. Consider:",
+          "  - Reducing data via stratified sampling",
+          "  - backend = 'laplace' for approximate inference (v1.2+)"
+        )
+      }
+    }
+  } else if (n_obs >= LARGE_DATA_THRESHOLD) {
+    if (current_backend %in% c("stan", "cmdstanr")) {
+      suggestions <- c(suggestions,
+        sprintf("Moderately large dataset (%s observations).", format(n_obs, big.mark = ",")),
+        "If fitting is slow, consider:",
+        "  - Fewer iterations (iter = 1000 for initial exploration)",
+        "  - backend = 'laplace' for approximate inference (v1.2+)"
+      )
+    }
+  }
+
+  # Binomial-specific suggestion
+  if (family$name %in% c("binomial_fixed", "binomial_binomial")) {
+    if (current_backend %in% c("stan", "cmdstanr") && n_obs >= 5000) {
+      suggestions <- c(suggestions,
+        "Binomial family with large N: consider backend = 'pg' for faster",
+        "Gibbs sampling via Polya-Gamma augmentation (v1.1+)."
+      )
+    }
+  }
+
+  # Print suggestions as a message (not warning - it's informational)
+  if (length(suggestions) > 0) {
+    message("\n", cli_rule("Backend suggestion"))
+    for (s in suggestions) {
+      message("  ", s)
+    }
+    message(cli_rule(), "\n")
+  }
+
+  invisible(NULL)
+}
+
+#' Simple CLI rule for messages
+#' @keywords internal
+cli_rule <- function(title = NULL) {
+  width <- getOption("width", 80)
+  if (is.null(title)) {
+    paste(rep("-", min(width, 60)), collapse = "")
+  } else {
+    title_len <- nchar(title) + 2
+    side_len <- (min(width, 60) - title_len) / 2
+    paste0(
+      paste(rep("-", floor(side_len)), collapse = ""),
+      " ", title, " ",
+      paste(rep("-", ceiling(side_len)), collapse = "")
+    )
+  }
+}
+
+#' Check MCMC diagnostics and suggest improvements
 #'
 #' @param fit Stan fit object
+#' @param n_obs Number of observations (for backend suggestions)
+#' @param family Model family
+#' @param spatial Spatial specification
+#' @param backend Current backend
 #' @keywords internal
-check_diagnostics <- function(fit) {
+check_diagnostics <- function(fit, n_obs = NULL, family = NULL,
+                               spatial = NULL, backend = NULL) {
   diag <- fit$diagnostic_summary(quiet = TRUE)
+  issues <- list()
 
   # Check divergences
   n_div <- sum(diag$num_divergent)
   if (n_div > 0) {
+    issues$divergences <- n_div
     warning(
       sprintf("%d divergent transitions detected.\n", n_div),
       "Consider increasing adapt_delta or using more informative priors.",
@@ -253,6 +356,7 @@ check_diagnostics <- function(fit) {
 
   # Check low E-BFMI
   if (any(diag$ebfmi < 0.2)) {
+    issues$low_ebfmi <- TRUE
     warning(
       "Low E-BFMI detected. Consider increasing warmup iterations.",
       call. = FALSE
@@ -264,12 +368,83 @@ check_diagnostics <- function(fit) {
     summ <- fit$summary()
     max_rhat <- max(summ$rhat, na.rm = TRUE)
     if (!is.na(max_rhat) && max_rhat > 1.05) {
+      issues$high_rhat <- max_rhat
       warning(
         sprintf("High Rhat (%.3f). Chains may not have converged.", max_rhat),
         call. = FALSE
       )
     }
   }, error = function(e) NULL)
+
+  # Check timing and suggest alternatives if slow
+  tryCatch({
+    time_info <- fit$time()
+    total_time <- sum(time_info$total)
+
+    # If took more than 5 minutes and we have context, suggest alternatives
+    if (total_time > 300 && !is.null(n_obs) && !is.null(family)) {
+      suggest_faster_alternatives(
+        total_time = total_time,
+        n_obs = n_obs,
+        family = family,
+        spatial = spatial,
+        issues = issues
+      )
+    }
+  }, error = function(e) NULL)
+
+  invisible(issues)
+}
+
+#' Suggest faster alternatives after slow fit
+#'
+#' @keywords internal
+suggest_faster_alternatives <- function(total_time, n_obs, family, spatial, issues) {
+  mins <- round(total_time / 60, 1)
+
+  suggestions <- character(0)
+
+  suggestions <- c(suggestions,
+    sprintf("Model took %.1f minutes to fit.", mins)
+  )
+
+  # Specific suggestions based on context
+  if (family$name %in% c("binomial_fixed", "binomial_binomial")) {
+    suggestions <- c(suggestions,
+      "For binomial models, backend = 'pg' (Polya-Gamma) is often 5-10x faster."
+    )
+  }
+
+  if (!is.null(spatial) && n_obs > 5000) {
+    suggestions <- c(suggestions,
+      "For large spatial models, backend = 'laplace' provides fast approximate inference."
+    )
+  }
+
+  if (length(issues) > 0) {
+    suggestions <- c(suggestions,
+      "Sampling issues detected. Consider:",
+      "  - More informative priors (quotr_priors(sigma_U = 0.5))",
+      "  - Increasing adapt_delta (e.g., adapt_delta = 0.95)"
+    )
+  }
+
+  if (n_obs > 10000) {
+    suggestions <- c(suggestions,
+      "For faster exploration, try iter = 1000 first, then increase if needed."
+    )
+  }
+
+  # Print suggestions
+  if (length(suggestions) > 1) {  # More than just the timing message
+    message("\n", cli_rule("Performance suggestions"), "\n")
+    for (s in suggestions) {
+      message("  ", s)
+    }
+    message("\n", cli_rule(), "\n")
+  }
+
+  invisible(NULL)
 }
 
 #' Print method for quotr_fit
