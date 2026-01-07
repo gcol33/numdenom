@@ -167,19 +167,40 @@ loo.quotr_fit <- function(x, ...) {
          "  install.packages('loo')", call. = FALSE)
   }
 
-  # Extract log-likelihood
-  # For joint models, we sum log-lik from both components
-  ll_num <- x$stanfit$draws("log_lik_num", format = "matrix")
-  ll_denom <- x$stanfit$draws("log_lik_denom", format = "matrix")
+  # Try combined log_lik first (all models should have this)
+  ll <- tryCatch(
+    x$stanfit$draws("log_lik", format = "matrix"),
+    error = function(e) NULL
+  )
 
-  if (is.null(ll_num) || is.null(ll_denom)) {
-    stop("Log-likelihood not computed. Re-fit with appropriate Stan model.",
-         call. = FALSE)
+  if (!is.null(ll)) {
+    return(loo::loo(ll, ...))
   }
 
-  ll_total <- ll_num + ll_denom
+  # Fall back to separate components for two-process models
+  ll_num <- tryCatch(
+    x$stanfit$draws("log_lik_num", format = "matrix"),
+    error = function(e) NULL
+  )
+  ll_denom <- tryCatch(
+    x$stanfit$draws("log_lik_denom", format = "matrix"),
+    error = function(e) NULL
+  )
 
-  loo::loo(ll_total, ...)
+  if (is.null(ll_num) && is.null(ll_denom)) {
+    stop("Log-likelihood not found in model output.", call. = FALSE)
+  }
+
+  # Sum components that exist
+  if (!is.null(ll_num) && !is.null(ll_denom)) {
+    ll <- ll_num + ll_denom
+  } else if (!is.null(ll_num)) {
+    ll <- ll_num
+  } else {
+    ll <- ll_denom
+  }
+
+  loo::loo(ll, ...)
 }
 
 #' WAIC computation
@@ -199,15 +220,92 @@ waic.quotr_fit <- function(x, ...) {
          "  install.packages('loo')", call. = FALSE)
   }
 
-  ll_num <- x$stanfit$draws("log_lik_num", format = "matrix")
-  ll_denom <- x$stanfit$draws("log_lik_denom", format = "matrix")
+  # Try combined log_lik first
+  ll <- tryCatch(
+    x$stanfit$draws("log_lik", format = "matrix"),
+    error = function(e) NULL
+  )
 
-  if (is.null(ll_num) || is.null(ll_denom)) {
-    stop("Log-likelihood not computed. Re-fit with appropriate Stan model.",
-         call. = FALSE)
+  if (!is.null(ll)) {
+    return(loo::waic(ll, ...))
   }
 
-  ll_total <- ll_num + ll_denom
+  # Fall back to separate components
+  ll_num <- tryCatch(
+    x$stanfit$draws("log_lik_num", format = "matrix"),
+    error = function(e) NULL
+  )
+  ll_denom <- tryCatch(
+    x$stanfit$draws("log_lik_denom", format = "matrix"),
+    error = function(e) NULL
+  )
 
-  loo::waic(ll_total, ...)
+  if (is.null(ll_num) && is.null(ll_denom)) {
+    stop("Log-likelihood not found in model output.", call. = FALSE)
+  }
+
+  if (!is.null(ll_num) && !is.null(ll_denom)) {
+    ll <- ll_num + ll_denom
+  } else if (!is.null(ll_num)) {
+    ll <- ll_num
+  } else {
+    ll <- ll_denom
+  }
+
+  loo::waic(ll, ...)
+}
+
+#' Compare quotr models
+#'
+#' @description
+#' Compare multiple quotr models using LOO-CV or WAIC.
+#'
+#' @param ... Multiple `quotr_fit` objects to compare
+#' @param criterion Comparison criterion: "loo" (default) or "waic"
+#'
+#' @return A loo_compare object
+#'
+#' @examples
+#' \dontrun{
+#' # Fit models with different structures
+#' fit1 <- quotr(y_num ~ x, y_denom ~ 1, data = df, family = quotr_negbin_negbin())
+#' fit2 <- quotr(y_num ~ x + z, y_denom ~ 1, data = df, family = quotr_negbin_negbin())
+#'
+#' # Compare
+#' quotr_compare(fit1, fit2)
+#' }
+#'
+#' @export
+quotr_compare <- function(..., criterion = c("loo", "waic")) {
+  criterion <- match.arg(criterion)
+
+  if (!requireNamespace("loo", quietly = TRUE)) {
+    stop("Package 'loo' is required. Install with:\n",
+         "  install.packages('loo')", call. = FALSE)
+  }
+
+  models <- list(...)
+
+  if (length(models) < 2) {
+    stop("At least two models required for comparison", call. = FALSE)
+  }
+
+  # Check all are quotr_fit objects
+  if (!all(vapply(models, inherits, logical(1), "quotr_fit"))) {
+    stop("All objects must be quotr_fit models", call. = FALSE)
+  }
+
+  # Compute criterion for each model
+  if (criterion == "loo") {
+    results <- lapply(models, loo.quotr_fit)
+  } else {
+    results <- lapply(models, waic.quotr_fit)
+  }
+
+  # Get model names from call
+  model_names <- as.character(substitute(list(...)))[-1]
+  names(results) <- model_names
+
+  # Compare
+  loo::loo_compare(results)
 }

@@ -183,7 +183,12 @@ generated quantities {
   array[N] int y_num_rep;
   array[N] int y_denom_rep;
 
-  // Observation-level ratios
+  // Log-likelihood for LOO/WAIC
+  vector[N] log_lik_num;
+  vector[N] log_lik_denom;
+  vector[N] log_lik;
+
+  // Observation-level ratios and log-likelihood
   for (n in 1:N) {
     // Ratio of expected values: E[Y_num] / E[Y_denom]
     log_ratio[n] = eta_num[n] - eta_denom[n];
@@ -192,6 +197,11 @@ generated quantities {
     // Posterior predictive
     y_num_rep[n] = neg_binomial_2_log_rng(eta_num[n], phi_num);
     y_denom_rep[n] = neg_binomial_2_log_rng(eta_denom[n], phi_denom);
+
+    // Log-likelihood
+    log_lik_num[n] = neg_binomial_2_log_lpmf(y_num[n] | eta_num[n], phi_num);
+    log_lik_denom[n] = neg_binomial_2_log_lpmf(y_denom[n] | eta_denom[n], phi_denom);
+    log_lik[n] = log_lik_num[n] + log_lik_denom[n];
   }
 
   // Group-level ratio effects

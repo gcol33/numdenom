@@ -19,31 +19,36 @@ make_standata <- function(formula, family, data, spatial = NULL, priors = NULL) 
     priors <- quotr_priors()
   }
 
-  # Basic dimensions
+  # Dispatch to family-specific function
+  if (family$name == "binomial_fixed") {
+    return(make_standata_binomial(formula, family, data, spatial, priors))
+  } else if (family$name == "poisson_gamma") {
+    return(make_standata_poisson_gamma(formula, family, data, spatial, priors))
+  } else {
+    return(make_standata_negbin(formula, family, data, spatial, priors))
+  }
+}
+
+#' Make Stan data for negbin-negbin model
+#' @keywords internal
+make_standata_negbin <- function(formula, family, data, spatial, priors) {
   N <- nrow(data)
 
-  # Fixed effects
   X_num <- formula$numerator$X
   X_denom <- formula$denominator$X
   K_num <- ncol(X_num)
   K_denom <- ncol(X_denom)
 
-  # Responses
   y_num <- formula$numerator$response
   y_denom <- formula$denominator$response
 
-  # Validate responses for family
   validate_response(y_num, family$numerator$distribution, "numerator")
   validate_response(y_denom, family$denominator$distribution, "denominator")
 
-  # Build random effects structure
   re_data <- build_re_structure(formula, data)
-
-  # Build spatial structure
   spatial_data <- build_spatial_structure(spatial, data)
 
-  # Combine into Stan data list
-  stan_data <- list(
+  list(
     N = N,
     K_num = K_num,
     K_denom = K_denom,
@@ -51,31 +56,115 @@ make_standata <- function(formula, family, data, spatial = NULL, priors = NULL) 
     y_denom = as.integer(y_denom),
     X_num = X_num,
     X_denom = X_denom,
-
-    # Random effects
     n_re_groups = re_data$n_groups,
     n_re_total = re_data$n_total,
     re_idx = re_data$idx,
     re_group_size = re_data$group_size,
     re_group_start = re_data$group_start,
     re_shared = re_data$shared,
-
-    # Spatial
     use_spatial = spatial_data$use_spatial,
     n_spatial = spatial_data$n_spatial,
     n_edges = spatial_data$n_edges,
     node1 = spatial_data$node1,
     node2 = spatial_data$node2,
     spatial_idx = spatial_data$spatial_idx,
-
-    # Priors
     prior_sigma_U = priors$sigma_U,
     prior_sigma_alpha = priors$sigma_alpha,
     prior_phi_U = priors$phi_U,
     prior_phi_alpha = priors$phi_alpha
   )
+}
 
-  stan_data
+#' Make Stan data for binomial model (fixed denominator)
+#' @keywords internal
+make_standata_binomial <- function(formula, family, data, spatial, priors) {
+  N <- nrow(data)
+
+  # For binomial, use combined design matrix from numerator
+  X <- formula$numerator$X
+  K <- ncol(X)
+
+  y_num <- formula$numerator$response
+  y_denom <- formula$denominator$response
+
+  validate_response(y_num, "binomial", "numerator")
+  validate_response(y_denom, "binomial", "denominator")
+
+  # Check numerator <= denominator
+ if (any(y_num > y_denom, na.rm = TRUE)) {
+    stop("Numerator (successes) cannot exceed denominator (trials)", call. = FALSE)
+  }
+
+  re_data <- build_re_structure(formula, data)
+  spatial_data <- build_spatial_structure(spatial, data)
+
+  list(
+    N = N,
+    K = K,
+    y_num = as.integer(y_num),
+    y_denom = as.integer(y_denom),
+    X = X,
+    n_re_groups = re_data$n_groups,
+    n_re_total = re_data$n_total,
+    re_idx = re_data$idx,
+    re_group_size = re_data$group_size,
+    re_group_start = re_data$group_start,
+    use_spatial = spatial_data$use_spatial,
+    n_spatial = spatial_data$n_spatial,
+    n_edges = spatial_data$n_edges,
+    node1 = spatial_data$node1,
+    node2 = spatial_data$node2,
+    spatial_idx = spatial_data$spatial_idx,
+    prior_sigma_U = priors$sigma_U,
+    prior_sigma_alpha = priors$sigma_alpha,
+    prior_beta_sd = priors$beta_sd
+  )
+}
+
+#' Make Stan data for Poisson-Gamma model
+#' @keywords internal
+make_standata_poisson_gamma <- function(formula, family, data, spatial, priors) {
+  N <- nrow(data)
+
+  X_num <- formula$numerator$X
+  X_denom <- formula$denominator$X
+  K_num <- ncol(X_num)
+  K_denom <- ncol(X_denom)
+
+  y_num <- formula$numerator$response
+  y_denom <- formula$denominator$response
+
+  validate_response(y_num, "poisson", "numerator")
+  validate_response(y_denom, "gamma", "denominator")
+
+  re_data <- build_re_structure(formula, data)
+  spatial_data <- build_spatial_structure(spatial, data)
+
+  list(
+    N = N,
+    K_num = K_num,
+    K_denom = K_denom,
+    y_num = as.integer(y_num),
+    y_denom = as.numeric(y_denom),  # Gamma needs numeric, not integer
+    X_num = X_num,
+    X_denom = X_denom,
+    n_re_groups = re_data$n_groups,
+    n_re_total = re_data$n_total,
+    re_idx = re_data$idx,
+    re_group_size = re_data$group_size,
+    re_group_start = re_data$group_start,
+    re_shared = re_data$shared,
+    use_spatial = spatial_data$use_spatial,
+    n_spatial = spatial_data$n_spatial,
+    n_edges = spatial_data$n_edges,
+    node1 = spatial_data$node1,
+    node2 = spatial_data$node2,
+    spatial_idx = spatial_data$spatial_idx,
+    prior_sigma_U = priors$sigma_U,
+    prior_sigma_alpha = priors$sigma_alpha,
+    prior_shape_U = priors$phi_U,  # Reuse phi prior for shape
+    prior_shape_alpha = priors$phi_alpha
+  )
 }
 
 #' Validate response variable for distribution
