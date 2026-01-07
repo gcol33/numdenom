@@ -1,0 +1,24 @@
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Compiled Stan models
+inst/stan/*.rds
+src/*.o
+src/*.so
+src/*.dll
+
+# Build artifacts
+*.tar.gz
+*.tgz
+
+# Documentation
+docs/
+man/*.Rd
+
+# IDE
+.vscode/
+*.swp

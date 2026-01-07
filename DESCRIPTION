@@ -1,0 +1,34 @@
+Package: quotr
+Title: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
+Version: 0.1.0
+Authors@R:
+    person("Gilles", "Colling", , "gilles@example.com", role = c("aut", "cre"))
+Description: An opinionated framework for Bayesian hierarchical modelling of
+    ratios, rates, and proportions. Ratios are treated as derived quantities,
+    with all inference performed on the latent processes generating the numerator
+    and denominator. Supports shared random effects, spatial structure (CAR/BYM2),
+    and full uncertainty propagation to ratio posteriors.
+License: MIT + file LICENSE
+Encoding: UTF-
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Depends:
+    R (>= 4.1.0)
+Imports:
+    cmdstanr,
+    instantiate (>= 0.2.0),
+    posterior,
+    bayesplot,
+    loo,
+    Matrix,
+    stats,
+    methods
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+Additional_repositories: https://stan-dev.r-universe.dev
+SystemRequirements: CmdStan (https://mc-stan.org/cmdstanr/)
