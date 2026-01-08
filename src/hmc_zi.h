@@ -1,0 +1,290 @@
+#ifndef QUOTR_HMC_ZI_H
+#define QUOTR_HMC_ZI_H
+
+// Zero-inflation and hurdle model support for quotr HMC
+// Provides log-likelihood functions for ZI-Poisson, ZI-NegBin,
+// and hurdle variants
+
+#include <cmath>
+#include <algorithm>
+
+namespace quotr_zi {
+
+// Enum for ZI model types
+enum class ZIType {
+  NONE,           // No zero-inflation
+  ZI_POISSON,     // Zero-inflated Poisson
+  ZI_NEGBIN,      // Zero-inflated negative binomial
+  HURDLE_POISSON, // Hurdle Poisson (truncated at zero)
+  HURDLE_NEGBIN   // Hurdle negative binomial
+};
+
+// Parse ZI type from string
+inline ZIType parse_zi_type(const std::string& zi_type_str) {
+  if (zi_type_str == "none" || zi_type_str == "") {
+    return ZIType::NONE;
+  } else if (zi_type_str == "zi_poisson") {
+    return ZIType::ZI_POISSON;
+  } else if (zi_type_str == "zi_negbin") {
+    return ZIType::ZI_NEGBIN;
+  } else if (zi_type_str == "hurdle_poisson") {
+    return ZIType::HURDLE_POISSON;
+  } else if (zi_type_str == "hurdle_negbin") {
+    return ZIType::HURDLE_NEGBIN;
+  } else {
+    return ZIType::NONE;
+  }
+}
+
+// Log of 1 + exp(x), numerically stable
+inline double log1pexp(double x) {
+  if (x > 35.0) return x;
+  if (x < -10.0) return std::exp(x);
+  return std::log1p(std::exp(x));
+}
+
+// Logistic sigmoid function
+inline double logistic(double x) {
+  if (x > 0) {
+    return 1.0 / (1.0 + std::exp(-x));
+  } else {
+    double ex = std::exp(x);
+    return ex / (1.0 + ex);
+  }
+}
+
+// Log of logistic sigmoid (log(1/(1+exp(-x))))
+inline double log_logistic(double x) {
+  return -log1pexp(-x);
+}
+
+// Log of 1 - logistic(x) = log(exp(-x)/(1+exp(-x))) = -x - log(1+exp(-x))
+inline double log1m_logistic(double x) {
+  return -log1pexp(x);
+}
+
+// Log-gamma function
+inline double lgamma_fn(double x) {
+  return std::lgamma(x);
+}
+
+// Log factorial
+inline double lfactorial(int n) {
+  return lgamma_fn(n + 1.0);
+}
+
+// ============================================================================
+// Standard log-likelihoods (for reference)
+// ============================================================================
+
+// Poisson log-PMF: y ~ Poisson(mu)
+inline double poisson_lpmf(int y, double mu) {
+  if (mu <= 0) return -1e10;
+  return y * std::log(mu) - mu - lfactorial(y);
+}
+
+// Negative binomial log-PMF: y ~ NegBin(mu, phi)
+// Using NB2 parameterization: Var(Y) = mu + mu^2/phi
+inline double negbin_lpmf(int y, double mu, double phi) {
+  if (mu <= 0 || phi <= 0) return -1e10;
+  double r = phi;  // size parameter
+  double p = phi / (phi + mu);  // success probability
+  return lgamma_fn(y + r) - lgamma_fn(r) - lfactorial(y) +
+         r * std::log(p) + y * std::log(1 - p);
+}
+
+// ============================================================================
+// Zero-inflated likelihoods
+// ============================================================================
+
+// Zero-inflated Poisson log-PMF
+// zi_prob: probability of structural zero (on probability scale)
+// mu: Poisson mean for count process
+inline double zi_poisson_lpmf(int y, double mu, double zi_prob) {
+  if (y == 0) {
+    // P(Y=0) = zi_prob + (1 - zi_prob) * exp(-mu)
+    double log_p0_count = -mu;  // log(P(Y=0|count process))
+    double log_zi = std::log(zi_prob);
+    double log_1m_zi = std::log(1.0 - zi_prob);
+
+    // log(zi_prob + (1-zi_prob)*exp(-mu))
+    // = log(zi_prob * (1 + (1-zi_prob)/zi_prob * exp(-mu)))
+    // Use log-sum-exp trick
+    double a = log_zi;
+    double b = log_1m_zi + log_p0_count;
+    double max_ab = std::max(a, b);
+    return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
+  } else {
+    // P(Y=y) = (1 - zi_prob) * Poisson(y|mu)
+    return std::log(1.0 - zi_prob) + poisson_lpmf(y, mu);
+  }
+}
+
+// Zero-inflated Poisson log-PMF (logit scale for zi)
+// logit_zi: logit of zero-inflation probability
+inline double zi_poisson_lpmf_logit(int y, double mu, double logit_zi) {
+  if (y == 0) {
+    // log(P(Y=0)) = log(sigmoid(logit_zi) + sigmoid(-logit_zi) * exp(-mu))
+    double log_zi = log_logistic(logit_zi);
+    double log_1m_zi = log1m_logistic(logit_zi);
+    double log_p0_count = -mu;
+
+    double a = log_zi;
+    double b = log_1m_zi + log_p0_count;
+    double max_ab = std::max(a, b);
+    return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
+  } else {
+    return log1m_logistic(logit_zi) + poisson_lpmf(y, mu);
+  }
+}
+
+// Zero-inflated negative binomial log-PMF (logit scale for zi)
+inline double zi_negbin_lpmf_logit(int y, double mu, double phi, double logit_zi) {
+  if (y == 0) {
+    // log(P(Y=0)) = log(sigmoid(logit_zi) + sigmoid(-logit_zi) * P_NB(0))
+    double log_zi = log_logistic(logit_zi);
+    double log_1m_zi = log1m_logistic(logit_zi);
+
+    // P_NB(0) = (phi / (phi + mu))^phi
+    double log_p0_count = phi * std::log(phi / (phi + mu));
+
+    double a = log_zi;
+    double b = log_1m_zi + log_p0_count;
+    double max_ab = std::max(a, b);
+    return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
+  } else {
+    return log1m_logistic(logit_zi) + negbin_lpmf(y, mu, phi);
+  }
+}
+
+// ============================================================================
+// Hurdle likelihoods
+// ============================================================================
+
+// Truncated Poisson log-PMF (conditional on y > 0)
+// P(Y=y|Y>0) = Poisson(y|mu) / (1 - exp(-mu))
+inline double truncated_poisson_lpmf(int y, double mu) {
+  if (y <= 0) return -1e10;
+  double log_p_untrunc = poisson_lpmf(y, mu);
+  double log_p_zero = -mu;
+  double log_normalizer = std::log(1.0 - std::exp(log_p_zero));
+  return log_p_untrunc - log_normalizer;
+}
+
+// Truncated negative binomial log-PMF (conditional on y > 0)
+inline double truncated_negbin_lpmf(int y, double mu, double phi) {
+  if (y <= 0) return -1e10;
+  double log_p_untrunc = negbin_lpmf(y, mu, phi);
+  double log_p_zero = phi * std::log(phi / (phi + mu));
+  double log_normalizer = std::log(1.0 - std::exp(log_p_zero));
+  return log_p_untrunc - log_normalizer;
+}
+
+// Hurdle Poisson log-PMF (logit scale for hurdle)
+// logit_theta: logit of P(Y > 0)
+inline double hurdle_poisson_lpmf_logit(int y, double mu, double logit_theta) {
+  if (y == 0) {
+    // P(Y=0) = 1 - theta = sigmoid(-logit_theta)
+    return log1m_logistic(logit_theta);
+  } else {
+    // P(Y=y|Y>0) * theta
+    return log_logistic(logit_theta) + truncated_poisson_lpmf(y, mu);
+  }
+}
+
+// Hurdle negative binomial log-PMF (logit scale for hurdle)
+inline double hurdle_negbin_lpmf_logit(int y, double mu, double phi, double logit_theta) {
+  if (y == 0) {
+    return log1m_logistic(logit_theta);
+  } else {
+    return log_logistic(logit_theta) + truncated_negbin_lpmf(y, mu, phi);
+  }
+}
+
+// ============================================================================
+// Unified interface
+// ============================================================================
+
+// Compute ZI/hurdle log-likelihood for a single observation
+// logit_zi_or_theta: logit-scale parameter for ZI prob or hurdle prob
+// phi: overdispersion (only used for negbin variants)
+inline double zi_log_likelihood(
+    int y, double mu, double phi, double logit_zi_or_theta,
+    ZIType zi_type) {
+
+  switch (zi_type) {
+    case ZIType::ZI_POISSON:
+      return zi_poisson_lpmf_logit(y, mu, logit_zi_or_theta);
+
+    case ZIType::ZI_NEGBIN:
+      return zi_negbin_lpmf_logit(y, mu, phi, logit_zi_or_theta);
+
+    case ZIType::HURDLE_POISSON:
+      return hurdle_poisson_lpmf_logit(y, mu, logit_zi_or_theta);
+
+    case ZIType::HURDLE_NEGBIN:
+      return hurdle_negbin_lpmf_logit(y, mu, phi, logit_zi_or_theta);
+
+    case ZIType::NONE:
+    default:
+      // No ZI, return standard likelihood
+      if (phi > 0) {
+        return negbin_lpmf(y, mu, phi);
+      } else {
+        return poisson_lpmf(y, mu);
+      }
+  }
+}
+
+// ============================================================================
+// Gradients for ZI parameters
+// ============================================================================
+
+// Gradient of ZI-Poisson log-likelihood w.r.t. logit_zi
+inline double zi_poisson_grad_logit_zi(int y, double mu, double logit_zi) {
+  double zi = logistic(logit_zi);
+  double one_m_zi = 1.0 - zi;
+
+  if (y == 0) {
+    // d/d(logit_zi) log(zi + (1-zi)*exp(-mu))
+    // = [zi*(1-zi) - zi*(1-zi)*exp(-mu)] / [zi + (1-zi)*exp(-mu)]
+    // = zi*(1-zi)*(1 - exp(-mu)) / [zi + (1-zi)*exp(-mu)]
+    double exp_neg_mu = std::exp(-mu);
+    double p0 = zi + one_m_zi * exp_neg_mu;
+    return zi * one_m_zi * (1.0 - exp_neg_mu) / p0;
+  } else {
+    // d/d(logit_zi) log(1-zi) = -zi
+    return -zi;
+  }
+}
+
+// Gradient of ZI-NegBin log-likelihood w.r.t. logit_zi
+inline double zi_negbin_grad_logit_zi(int y, double mu, double phi, double logit_zi) {
+  double zi = logistic(logit_zi);
+  double one_m_zi = 1.0 - zi;
+
+  if (y == 0) {
+    double p0_nb = std::pow(phi / (phi + mu), phi);
+    double p0 = zi + one_m_zi * p0_nb;
+    return zi * one_m_zi * (1.0 - p0_nb) / p0;
+  } else {
+    return -zi;
+  }
+}
+
+// Gradient of hurdle model log-likelihood w.r.t. logit_theta
+inline double hurdle_grad_logit_theta(int y, double logit_theta) {
+  double theta = logistic(logit_theta);
+
+  if (y == 0) {
+    // d/d(logit_theta) log(1-theta) = -theta
+    return -theta;
+  } else {
+    // d/d(logit_theta) log(theta) = 1-theta
+    return 1.0 - theta;
+  }
+}
+
+}  // namespace quotr_zi
+
+#endif  // QUOTR_HMC_ZI_H

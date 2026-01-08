@@ -1,569 +1,356 @@
 # quotr Roadmap
 
-## v1.0 (Current)
-- Stan backend via cmdstanr
-- Three families: negbin_negbin, binomial, poisson_gamma
-- Shared random effects (default)
-- Spatial CAR/BYM2
-- LOO/WAIC model comparison
+## Current Status: v0.8.0
+
+### Implemented Features
+- **Three model families:** `quotr_negbin_negbin()`, `quotr_binomial()`, `quotr_poisson_gamma()`
+- **Zero-inflated families:** `quotr_zinegbin()`, `quotr_zipois()`, `quotr_hurdle_negbin()`, `quotr_hurdle_pois()`
+- **Inference backends:**
+  - HMC/NUTS (default) - custom C++ implementation, no external dependencies
+  - Pólya-Gamma Gibbs sampler - fast for binomial models
+  - Laplace approximation - very fast approximate inference
+- **Hierarchical structure:**
+  - Shared random effects (default behavior)
+  - Group-level random intercepts
+- **Spatial models:**
+  - ICAR (Intrinsic CAR)
+  - BYM2 (Besag-York-Mollié 2)
+- **Temporal models:**
+  - RW1 (first-order random walk)
+  - RW2 (second-order random walk)
+  - AR(1) (autoregressive)
+  - Cyclic variants
+- **Zero-inflation:**
+  - Zero-inflated Poisson/NegBin
+  - Hurdle Poisson/NegBin
+  - Separate ZI regression formula
+- **Performance optimizations:**
+  - OpenMP parallelization (likelihood + gradient)
+  - SIMD-friendly loop unrolling
+  - Optimized linear algebra routines
+  - Parallel multi-chain sampling
+- **Model comparison:** LOO-CV, WAIC via `loo` package
+- **Diagnostics:** `pp_check()`, `mcmc_diagnostics()`, `check_diagnostics()`
+- **Inference:** `ratio()`, `ratio_contrast()`, `fitted()`, `predict()`
+- **Benchmarking:** `quotr_benchmark()`, `quotr_benchmark_compare()`, `quotr_threads()`
 
 ---
 
-## v1.1: Pólya-Gamma Backend for Binomial
+## v0.6.0: Temporal Structure
 
 ### Goal
-Fast Gibbs sampler for `quotr_binomial()` using Pólya-Gamma data augmentation.
-Targets 5-10x speedup over Stan for binomial models.
+Add temporal random effects for time-series and panel data.
 
-### Background
-Pólya-Gamma augmentation (Polson et al., 2013) enables efficient Gibbs sampling
-for logistic/binomial models by introducing auxiliary variables that yield
-conjugate normal updates for regression coefficients.
+### Features
 
-### Architecture
-
-```
-quotr(..., family = quotr_binomial(), backend = "pg")
-                                            │
-                                            ▼
-                              ┌─────────────────────────┐
-                              │   pg_sampler.cpp        │
-                              │   (Rcpp implementation) │
-                              └─────────────────────────┘
-                                            │
-                    ┌───────────────────────┼───────────────────────┐
-                    ▼                       ▼                       ▼
-            ┌──────────────┐      ┌──────────────────┐     ┌──────────────┐
-            │ sample_omega │      │ sample_beta      │     │ sample_re    │
-            │ (PG draws)   │      │ (conjugate)      │     │ (conjugate)  │
-            └──────────────┘      └──────────────────┘     └──────────────┘
-```
-
-### Key Components
-
-#### 1. Pólya-Gamma Sampler (`src/pg_sampler.cpp`)
-```cpp
-// Core PG(1, z) sampler using Devroye method for small z
-// and saddle-point approximation for large z
-double rpg1(double z);
-
-// Vectorized version
-NumericVector rpg(int n, NumericVector z);
-```
-
-#### 2. Gibbs Sampler for Binomial Model (`src/pg_binomial.cpp`)
-```cpp
-// One Gibbs iteration
-List pg_binomial_step(
-  IntegerVector y,      // successes
-  IntegerVector n,      // trials
-  NumericMatrix X,      // design matrix
-  NumericVector beta,   // current coefficients
-  NumericVector omega,  // current PG auxiliary vars
-  // ... random effects, spatial
-);
-
-// Full sampler
-List pg_binomial_fit(
-  IntegerVector y,
-  IntegerVector n,
-  NumericMatrix X,
-  List re_structure,
-  List spatial,
-  List priors,
-  int n_iter,
-  int n_warmup,
-  int thin
-);
-```
-
-#### 3. R Interface (`R/backend_pg.R`)
+#### 1. AR(1) Temporal Effects
 ```r
-# Dispatch to PG backend
-quotr_fit_pg <- function(formula_spec, family, data, spatial, priors, ...) {
-
-  # Prepare data
-  stan_data <- make_standata(formula_spec, family, data, spatial, priors)
-
-  # Call C++ sampler
-  samples <- pg_binomial_fit(
-    y = stan_data$y_num,
-    n = stan_data$y_denom,
-    X = stan_data$X,
-    re_structure = list(
-      idx = stan_data$re_idx,
-      n_groups = stan_data$n_re_groups,
-      shared = stan_data$re_shared
-    ),
-    spatial = if (stan_data$use_spatial) list(
-      node1 = stan_data$node1,
-      node2 = stan_data$node2
-    ) else NULL,
-    priors = list(
-      beta_sd = priors$beta_sd,
-      sigma_U = priors$sigma_U,
-      sigma_alpha = priors$sigma_alpha
-    ),
-    n_iter = iter,
-    n_warmup = warmup,
-    thin = thin
-  )
-
-  # Convert to posterior::draws format
-  as_quotr_fit(samples, formula_spec, family, data)
-}
-```
-
-### Algorithm Details
-
-For binomial model: Y_i ~ Binomial(n_i, p_i) with logit(p_i) = η_i
-
-**Augmented model:**
-1. Introduce ω_i ~ PG(n_i, η_i)
-2. Define κ_i = (y_i - n_i/2)
-3. Conditional on ω, the model is Gaussian:
-   - κ_i = ω_i × η_i + ε_i where ε_i ~ N(0, 1/ω_i)
-
-**Gibbs updates:**
-1. Sample ω_i | β, re ~ PG(n_i, η_i)
-2. Sample β | ω, re ~ N(μ_β, Σ_β) [conjugate update]
-3. Sample re | ω, β ~ N(μ_re, Σ_re) [conjugate update]
-4. Sample σ² | re ~ InverseGamma [conjugate]
-
-### Random Effects with PG
-
-Shared random effects:
-```
-η_num[i] = X[i,] β + b[group[i]]
-η_denom[i] = ... (fixed for binomial, denominator is known)
-
-p(b | σ²) = N(0, σ² I)
-p(b | ω, y, β, σ²) = N(μ_b, Σ_b)
-
-Σ_b = (Z'ΩZ + I/σ²)^{-1}
-μ_b = Σ_b Z'κ
-```
-
-### Spatial CAR with PG
-
-For CAR spatial effects φ:
-```
-p(φ | τ²) ∝ exp(-φ'Qφ / 2τ²)
-
-p(φ | ω, y, β, τ²) = N(μ_φ, Σ_φ)
-Σ_φ = (D'ΩD + Q/τ²)^{-1}
-```
-
-Where Q is the CAR precision matrix (sparse).
-
-### Files to Create
-
-```
-src/
-├── pg_rng.cpp           # Pólya-Gamma random number generator
-├── pg_rng.h
-├── pg_binomial.cpp      # Binomial Gibbs sampler
-├── pg_binomial.h
-├── sparse_utils.cpp     # Sparse matrix operations for CAR
-└── RcppExports.cpp
-
-R/
-├── backend_pg.R         # PG backend dispatcher
-├── pg_diagnostics.R     # Convergence diagnostics for Gibbs
-└── zzz.R               # Update to register C++ routines
-```
-
-### Testing Plan
-
-1. **Unit tests for PG sampler**
-   - Compare PG(1, z) samples to known distribution
-   - Test moment matching
-
-2. **Comparison with Stan**
-   - Same model, same data, same priors
-   - Compare posterior means ± 2 MCMC SE
-   - Verify coverage of credible intervals
-
-3. **Performance benchmarks**
-   - N = 1000, 10000, 100000 observations
-   - Measure ESS/second vs Stan
-
-### API Changes
-
-```r
-# New backend argument
 quotr(
-  y | n ~ x + (1 | site),
+
+  count | effort ~ x + temporal_ar1(time, group = site),
   data = df,
-  family = quotr_binomial(),
-  backend = "pg"  # NEW: "stan" (default) or "pg"
+  family = quotr_poisson_gamma()
 )
 ```
 
-### Dependencies
+- Autoregressive structure: `φ[t] = ρ * φ[t-1] + ε[t]`
+- Shared across numerator/denominator (default) or separate
+- Prior on ρ: `ρ ~ Uniform(-1, 1)` or `Beta` transformed
 
-Add to DESCRIPTION:
-```
-LinkingTo: Rcpp, RcppEigen
+#### 2. Random Walk (RW1/RW2)
+```r
+quotr(
+  count | effort ~ x + temporal_rw1(year),
+  data = df,
+  family = quotr_poisson_gamma()
+)
 ```
 
-### Timeline Estimate
-- PG sampler core: 2 days
-- Binomial Gibbs with RE: 3 days
-- CAR spatial integration: 2 days
-- Testing & benchmarks: 2 days
-- Documentation: 1 day
-- **Total: ~2 weeks**
+- RW1: First-order random walk `φ[t] - φ[t-1] ~ N(0, σ²)`
+- RW2: Second-order (smoothing) `φ[t] - 2φ[t-1] + φ[t-2] ~ N(0, σ²)`
+- Intrinsic (improper) or proper versions
+
+#### 3. Seasonal Effects
+```r
+quotr(
+  count | effort ~ x + temporal_seasonal(month, period = 12),
+  data = df,
+  family = quotr_poisson_gamma()
+)
+```
+
+### Implementation
+
+**New files:**
+```
+R/
+├── temporal.R           # temporal_ar1(), temporal_rw1(), temporal_rw2()
+├── temporal_seasonal.R  # temporal_seasonal()
+
+src/
+├── temporal_ar1.cpp     # AR(1) precision matrix and sampling
+├── temporal_rw.cpp      # Random walk precision matrices
+```
+
+**Key algorithms:**
+- AR(1): Tridiagonal precision matrix, efficient Cholesky
+- RW1/RW2: Sparse band matrices, sum-to-zero constraint
+- All backends (HMC, PG, Laplace) need updates
+
+### API Design
+```r
+# AR(1) with estimated autocorrelation
+temporal_ar1(time_var, group = NULL, rho_prior = NULL)
+
+# Random walk
+temporal_rw1(time_var, cyclic = FALSE)
+temporal_rw2(time_var, cyclic = FALSE)
+
+# Seasonal
+temporal_seasonal(time_var, period, type = c("rw1", "ar1"))
+```
 
 ---
 
-## v1.2: Laplace Backend for Large Areal Data
+## v0.7.0: Zero-Inflation
 
 ### Goal
-Fast approximate inference for large datasets (10k-100k+ observations) using
-nested Laplace approximation. Focus on areal models (CAR/BYM2) only,
-no continuous spatial (SPDE).
+Handle excess zeros in count data, common in ecological surveys.
 
-### Why Custom Implementation?
-- No CRAN dependency issues (R-INLA not on CRAN)
-- Tailored for quotr's bivariate structure
-- Lighter weight (no SPDE mesh machinery)
-- Full control over approximation quality
+### Features
 
-### Architecture
-
-```
-quotr(..., backend = "laplace")
-            │
-            ▼
-┌───────────────────────────────────────────────────────┐
-│                   Laplace Engine                       │
-├───────────────────────────────────────────────────────┤
-│  1. Hyperparameter grid/optimization                   │
-│  2. For each θ: Laplace approx for p(x|y,θ)           │
-│  3. Numerical integration over θ                       │
-│  4. Marginal posteriors via nested Laplace            │
-└───────────────────────────────────────────────────────┘
-            │
-            ▼
-┌───────────────────────────────────────────────────────┐
-│              Sparse Linear Algebra                     │
-│  • Cholesky factorization of precision Q              │
-│  • Solve Q x = b via back-substitution                │
-│  • Log-determinant from Cholesky diagonal             │
-└───────────────────────────────────────────────────────┘
-```
-
-### Mathematical Foundation
-
-**Latent Gaussian Model:**
-```
-y | x, θ ~ ∏ p(y_i | η_i, θ)           [Likelihood]
-x | θ ~ N(0, Q(θ)^{-1})                 [Latent field]
-θ ~ p(θ)                                 [Hyperpriors]
-```
-
-For quotr bivariate:
-```
-x = (β_num, β_denom, b_shared, b_num, b_denom, φ_spatial)
-θ = (σ_shared, σ_num, σ_denom, σ_spatial, φ_overdispersion, ...)
-```
-
-**INLA Approximation:**
-
-1. **Laplace for hyperparameters:**
-   ```
-   p̃(θ | y) ∝ p(y, x, θ) / p̃_G(x | θ, y) |_{x=x*(θ)}
-   ```
-   where x*(θ) is the mode of p(x | y, θ)
-
-2. **Nested Laplace for latent field:**
-   ```
-   p̃(x_i | y) = ∫ p̃_G(x_i | θ, y) p̃(θ | y) dθ
-   ```
-
-3. **Numerical integration over θ:**
-   - Grid-based for low-dim θ (≤4)
-   - CCD (Central Composite Design) for higher dim
-
-### Key Components
-
-#### 1. Precision Matrix Builder (`R/inla_precision.R`)
+#### 1. Zero-Inflated Families
 ```r
-# Build full precision matrix Q(θ) for latent field
-build_precision <- function(formula_spec, spatial, theta) {
-  # Block structure:
-  # Q = | Q_beta    0         0      |
-  #     | 0         Q_re      0      |
-  #     | 0         0         Q_sp   |
-
-  n_beta <- ncol(formula_spec$numerator$X) + ncol(formula_spec$denominator$X)
-  n_re <- sum(sapply(formula_spec$shared$random_effects, function(r) r$n_groups))
-  n_sp <- if (!is.null(spatial)) spatial$n_spatial else 0
-
-  # Fixed effects: vague prior
-  Q_beta <- Diagonal(n_beta, 1e-6)
-
-
-  # Random effects: precision = 1/sigma^2
-  Q_re <- build_re_precision(formula_spec, theta)
-
-  # Spatial: CAR or BYM2 precision
-  Q_sp <- if (!is.null(spatial)) {
-    build_spatial_precision(spatial, theta)
-  } else {
-    Matrix(0, 0, 0)
-  }
-
-  bdiag(Q_beta, Q_re, Q_sp)
-}
+quotr(
+  count | effort ~ x + (1 | site),
+  data = df,
+  family = quotr_zinegbin()  # Zero-inflated negative binomial
+)
 ```
 
-#### 2. Laplace Approximation (`src/inla_laplace.cpp`)
-```cpp
-// Find mode x*(θ) via Newton-Raphson
-// Returns: mode, Hessian at mode, log-determinant
-List laplace_mode(
-  NumericVector y_num,
-  NumericVector y_denom,
-  NumericMatrix X_num,
-  NumericMatrix X_denom,
-  S4 Q,                    // Sparse precision matrix
-  NumericVector theta,
-  String family
-);
+**New families:**
+- `quotr_zipois()` - Zero-inflated Poisson (numerator)
+- `quotr_zinegbin()` - Zero-inflated negative binomial
+- `quotr_zinegbin_negbin()` - ZI numerator, regular denominator
 
-// Laplace approximation to p(θ|y)
-double log_posterior_theta(
-  NumericVector theta,
-  NumericVector y_num,
-  NumericVector y_denom,
-  // ... model specification
-);
-```
-
-#### 3. Hyperparameter Integration (`R/inla_integrate.R`)
+#### 2. Hurdle Models
 ```r
-# Grid-based integration for low-dim theta
-inla_grid_integrate <- function(log_post_fn, theta_init, n_points = 20) {
-  # Find mode
-  opt <- optim(theta_init, function(t) -log_post_fn(t),
-               method = "BFGS", hessian = TRUE)
-
-  # Build grid around mode
-  theta_sd <- sqrt(diag(solve(opt$hessian)))
-  grid <- expand.grid(lapply(seq_along(theta_init), function(i) {
-    seq(opt$par[i] - 3*theta_sd[i], opt$par[i] + 3*theta_sd[i],
-        length.out = n_points)
-  }))
-
-  # Evaluate and normalize
-  log_weights <- apply(grid, 1, log_post_fn)
-  weights <- exp(log_weights - max(log_weights))
-  weights <- weights / sum(weights)
-
-  list(grid = grid, weights = weights)
-}
-
-# CCD integration for higher dim
-inla_ccd_integrate <- function(log_post_fn, theta_init) {
-  # Central Composite Design points
-  # ...
-}
+quotr(
+  count | effort ~ x + (1 | site),
+  data = df,
+  family = quotr_hurdle_negbin()
+)
 ```
 
-#### 4. Marginal Posteriors (`R/inla_marginals.R`)
+- Separate processes for zero vs positive
+- More interpretable for "structural" zeros
+
+#### 3. Zero-Inflation Covariates
 ```r
-# Compute marginal posterior for each element of latent field
-inla_marginals <- function(mode, hessian, theta_grid, theta_weights) {
-  n_x <- length(mode)
-  marginals <- vector("list", n_x)
-
-  for (i in seq_len(n_x)) {
-    # For each theta configuration
-    marginal_i <- numeric(0)
-    for (j in seq_along(theta_weights)) {
-      # Gaussian approximation at this theta
-      mu_i <- mode[i]  # Would need to recompute for each theta
-      sd_i <- sqrt(solve(hessian)[i, i])
-
-      # Add to mixture
-      marginal_i <- c(marginal_i,
-                      theta_weights[j] * dnorm(x_grid, mu_i, sd_i))
-    }
-    marginals[[i]] <- marginal_i
-  }
-
-  marginals
-}
+quotr(
+  count | effort ~ x + (1 | site),
+  zi = ~ habitat_type,  # Predictors for P(zero)
+  data = df,
+  family = quotr_zinegbin()
+)
 ```
 
-### Bivariate Extension
+### Implementation
 
-For quotr's joint numerator-denominator model:
-
+**Model structure:**
 ```
-η_num = X_num β_num + Z b_shared + φ_spatial
-η_denom = X_denom β_denom + Z b_shared + φ_spatial
+P(Y = 0) = π + (1 - π) * P(Y = 0 | count process)
+P(Y = y) = (1 - π) * P(Y = y | count process), y > 0
 
-y_num | η_num ~ f_num(...)
-y_denom | η_denom ~ f_denom(...)
+logit(π) = W * γ  # Zero-inflation linear predictor
 ```
 
-Key insight: The shared structure means the precision matrix has off-diagonal
-blocks connecting numerator and denominator latent effects.
-
+**New files:**
 ```
-Q_joint = | Q_num    Q_cross |
-          | Q_cross' Q_denom |
-```
-
-For shared random effects:
-```
-Q_cross[i,j] = -1/σ²_shared if obs i and j share group
-```
-
-### Likelihood Contributions
-
-For different families:
-
-**negbin_negbin:**
-```cpp
-double log_lik_negbin(int y, double eta, double phi) {
-  double mu = exp(eta);
-  return lgamma(y + phi) - lgamma(phi) - lgamma(y + 1) +
-         phi * log(phi / (mu + phi)) + y * log(mu / (mu + phi));
-}
-```
-
-**binomial:**
-```cpp
-double log_lik_binomial(int y, int n, double eta) {
-  double p = 1.0 / (1.0 + exp(-eta));
-  return y * log(p) + (n - y) * log(1 - p) + lchoose(n, y);
-}
-```
-
-**poisson_gamma:**
-```cpp
-// Poisson for numerator
-double log_lik_poisson(int y, double eta) {
-  return y * eta - exp(eta) - lgamma(y + 1);
-}
-
-// Gamma for denominator
-double log_lik_gamma(double y, double eta, double shape) {
-  double rate = shape / exp(eta);
-  return shape * log(rate) - lgamma(shape) + (shape - 1) * log(y) - rate * y;
-}
-```
-
-### Files to Create
-
-```
-src/
-├── inla_laplace.cpp       # Mode finding, Hessian computation
-├── inla_laplace.h
-├── inla_sparse.cpp        # Sparse Cholesky, log-det
-├── inla_sparse.h
-├── inla_likelihood.cpp    # Family-specific likelihoods
-└── inla_likelihood.h
-
 R/
-├── backend_inla.R         # Main INLA dispatcher
-├── inla_precision.R       # Precision matrix construction
-├── inla_integrate.R       # Hyperparameter integration
-├── inla_marginals.R       # Marginal posterior extraction
-└── inla_utils.R           # Helper functions
+├── family_zi.R          # Zero-inflated family definitions
+
+src/
+├── zi_likelihood.cpp    # ZI likelihood contributions
+├── zi_hmc.cpp          # HMC updates for ZI parameters
 ```
 
-### Approximation Quality Controls
+**Challenges:**
+- Identifiability: Need informative priors or constraints
+- Mixing: ZI models can have multimodal posteriors
+- Ratio interpretation: What does ratio mean with ZI?
 
+### API Design
+```r
+# Zero-inflated negative binomial
+quotr_zinegbin(zi_link = "logit")
+
+# With ZI covariates
+quotr(
+  y | n ~ x,
+  zi = ~ z,  # Zero-inflation formula
+  family = quotr_zinegbin()
+)
+
+# Hurdle model
+quotr_hurdle_negbin()
+```
+
+---
+
+## v0.8.0: Performance & Scalability
+
+### Goal
+GPU acceleration and optimizations for large datasets (100k+ observations).
+
+### Features
+
+#### 1. GPU-Accelerated HMC
 ```r
 quotr(
   ...,
-  backend = "inla",
-  inla_control = list(
-    strategy = "gaussian",     # "gaussian", "laplace", "simplified.laplace"
-    int.strategy = "grid",     # "grid", "ccd", "eb" (empirical Bayes)
-    n.grid = 20,               # Grid points per hyperparameter
-    tolerance = 1e-6           # Optimization tolerance
-  )
+  backend = "hmc",
+  control = list(gpu = TRUE)
 )
 ```
 
-### Comparison with R-INLA
+- CUDA/OpenCL for gradient computation
+- Batch likelihood evaluation
+- Target: 10-50x speedup for N > 50k
 
-| Feature | quotr Laplace | R-INLA |
-|---------|---------------|--------|
-| Areal models (CAR/BYM2) | ✓ | ✓ |
-| Matérn/SPDE | ✗ | ✓ |
-| Bivariate joint | ✓ (native) | Requires workarounds |
-| Installation | CRAN-ready | Separate repo |
-| Speed (areal) | Comparable | Comparable |
-| Approximation quality | Good | Excellent |
+#### 2. Sparse Matrix Optimizations
+- Exploit sparsity in spatial precision matrices
+- Sparse Cholesky for Laplace backend
+- Memory-efficient storage for large CAR models
 
-### Testing Plan
-
-1. **Unit tests for components**
-   - Precision matrix structure
-   - Laplace mode finding
-   - Log-determinant computation
-
-2. **Comparison with Stan**
-   - Same model, compare posteriors
-   - Should match within ±0.1 posterior SD
-
-3. **Comparison with R-INLA** (if available)
-   - Standard CAR model
-   - BYM2 model
-
-4. **Scalability benchmarks**
-   - N = 1k, 10k, 50k, 100k
-   - Measure time and memory
-
-### API
-
+#### 3. Parallel Chains
 ```r
 quotr(
-  y | n ~ x + (1 | region),
-  data = large_df,
-  family = quotr_binomial(),
-  spatial = spatial_car(adj),
-  backend = "laplace"        # Fast approximate inference
+  ...,
+  chains = 4,
+  cores = 4,  # Parallel chain execution
+  backend = "hmc"
 )
 ```
 
-### Dependencies
+- Already implemented for HMC spatial
+- Extend to all backends
 
-```
-LinkingTo: Rcpp, RcppEigen
-Imports: Matrix
+#### 4. Variational Inference (Optional)
+```r
+quotr(
+  ...,
+  backend = "vi"  # Mean-field variational
+)
 ```
 
-### Timeline Estimate
-- Precision matrix builder: 2 days
-- Laplace approximation (C++): 4 days
-- Hyperparameter integration: 3 days
-- Marginal posteriors: 2 days
-- Bivariate joint structure: 3 days
-- Testing & validation: 4 days
-- Documentation: 2 days
-- **Total: ~4 weeks**
+- Fast approximate posterior
+- Useful for model selection/screening
+
+### Implementation
+
+**Dependencies:**
+```
+Suggests:
+    torch,      # For GPU via torch
+    gpuR        # Alternative GPU backend
+```
+
+**New files:**
+```
+src/
+├── gpu_likelihood.cu    # CUDA kernels
+├── gpu_gradient.cu
+├── sparse_cholesky.cpp  # Optimized sparse operations
+```
+
+---
+
+## v0.9.0: Extended Families & Polish
+
+### Goal
+Additional model families and API refinements before v1.0.
+
+### Features
+
+#### 1. Additional Families
+- `quotr_beta_binomial()` - Overdispersed proportions
+- `quotr_gamma_gamma()` - Continuous ratio data
+- `quotr_lognormal()` - Log-normal responses
+
+#### 2. Prior Specification Refinements
+```r
+quotr_priors(
+  beta = prior_normal(0, 2.5),
+  sigma = prior_half_cauchy(2.5),
+  phi = prior_gamma(2, 0.1),
+  rho_temporal = prior_beta(2, 2)  # NEW
+)
+```
+
+#### 3. Model Averaging
+```r
+quotr_average(fit1, fit2, fit3, weights = "loo")
+```
+
+#### 4. Comprehensive Documentation
+- Full package vignette
+- Case study vignettes (ecology, epidemiology)
+- Function reference improvements
+
+---
+
+## v1.0.0: Stable Release
+
+### Requirements for v1.0
+1. **All features from v0.6-v0.9 implemented and tested**
+2. **API stability guarantee** - no breaking changes after v1.0
+3. **Comprehensive test coverage** (>90%)
+4. **Full documentation** with vignettes
+5. **CRAN submission ready**
+6. **Performance benchmarks** published
+
+### Release Checklist
+- [ ] All backends working: HMC, PG, Laplace
+- [ ] Temporal: AR(1), RW1, RW2, seasonal
+- [ ] Zero-inflation: ZI-Poisson, ZI-NegBin, hurdle
+- [ ] Spatial: ICAR, BYM2
+- [ ] GPU support (optional dependency)
+- [ ] `fitted()`, `predict()`, `ratio()`, `ratio_contrast()`
+- [ ] `pp_check()`, `loo()`, `waic()`
+- [ ] Vignettes: getting-started, philosophy, temporal, spatial, zero-inflation
+- [ ] pkgdown site
+- [ ] CRAN checks pass
+
+---
+
+## Future (v1.1+)
+
+### Potential Features
+- **Continuous spatial:** Gaussian Process / Matérn / SPDE
+- **Multivariate responses:** >2 linked processes
+- **Missing data:** Multiple imputation integration
+- **Prediction intervals:** For new observations
+- **Bayesian model selection:** Bayes factors, posterior model probabilities
 
 ---
 
 ## Version Summary
 
-| Version | Backend | Best For | Speed |
-|---------|---------|----------|-------|
-| v1.0 | Stan | All families, exact inference | Baseline |
-| v1.1 | Pólya-Gamma | Binomial, N < 50k | 5-10x faster |
-| v1.2 | Laplace | Areal spatial, N > 10k | 10-100x faster |
+| Version | Focus | Key Features | Status |
+|---------|-------|--------------|--------|
+| v0.5.0 | Foundation | Core models, 3 backends, spatial | ✅ Complete |
+| v0.6.0 | Temporal | AR(1), RW1/RW2, cyclic | ✅ Complete |
+| v0.7.0 | Zero-inflation | ZI-Poisson, ZI-NegBin, hurdle | ✅ Complete |
+| v0.8.0 | Performance | SIMD, OpenMP, benchmarking | ✅ Complete |
+| v0.9.0 | Polish | Extra families, priors, docs | Planned |
+| v1.0.0 | Stable | CRAN release | Planned |
 
-## Future (v2.0+)
+## Priority Order
 
-- SPDE/Matérn spatial (would require significant Laplace backend expansion)
-- Temporal AR(1) / random walk
-- Zero-inflation variants
-- GPU acceleration for very large datasets
+For ecological applications (the primary use case), the recommended implementation order is:
+
+1. **v0.6.0 Temporal** - Most ecological data has temporal structure
+2. **v0.7.0 Zero-inflation** - Common in species occurrence/abundance
+3. **v0.8.0 Performance** - Enables analysis of large monitoring datasets
+4. **v0.9.0 Polish** - Refinements based on user feedback

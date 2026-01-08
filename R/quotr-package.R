@@ -1,6 +1,12 @@
 #' @keywords internal
 "_PACKAGE"
 
+#' @useDynLib quotr, .registration = TRUE
+#' @importFrom Rcpp sourceCpp
+#' @importFrom stats as.formula model.frame model.matrix na.pass quantile sd optim
+#' @importFrom utils head
+NULL
+
 #' quotr: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
 #'
 #' @description

@@ -30,7 +30,7 @@ devtools::install()
 # Regenerate documentation (after roxygen2 changes)
 devtools::document()
 
-# Clean and reinstall (if Stan models changed)
+# Clean and reinstall (if C++ code changed)
 devtools::clean_dll()
 devtools::install()
 ```
@@ -57,16 +57,18 @@ build_pkgdown_site()
 devtools::build_vignettes()
 ```
 
-### Stan Model Development
-```r
-# Compile a single Stan model for testing
-cmdstanr::cmdstan_model("inst/stan/quotr_negbin.stan")
-
-# Check Stan syntax
-cmdstanr::cmdstan_model("inst/stan/quotr_negbin.stan", compile = FALSE)
-```
-
 ## Architecture
+
+### Inference Backends
+
+quotr uses **native C++ backends** - no Stan dependency required.
+
+| Backend | Description | Best For |
+|---------|-------------|----------|
+| `"auto"` | Auto-select optimal | Default, recommended |
+| `"hmc"` | Native HMC/NUTS | Full MCMC, all models |
+| `"laplace"` | Laplace approximation | Very large data (N > 50k) |
+| `"pg"` | Pólya-Gamma Gibbs | Binomial (experimental) |
 
 ### Model Families
 
@@ -86,56 +88,18 @@ quotr() ─┬─► quotr_formula()      # Parse numerator/denominator/shared
          │      ├─► check_no_offset()     # Block offset() usage
          │      └─► parse_shared()        # Handle shared structure
          │
-         ├─► make_standata()      # Prepare data for Stan
-         │      ├─► build_re_structure()  # Random effects indexing
-         │      └─► build_spatial_structure()  # CAR/BYM2 adjacency
+         ├─► select_backend()     # Auto-select optimal backend
          │
-         ├─► quotr_stan_model()   # Get compiled Stan model
+         ├─► fit_hmc() / fit_laplace() / fit_pg()   # Backend dispatch
+         │      ├─► prepare_hmc_data()    # Data preparation
+         │      └─► cpp_hmc_spatial()     # C++ HMC sampler
          │
-         └─► cmdstanr::sample()   # MCMC sampling
+         └─► quotr_fit object
                     │
-                    └─► quotr_fit object
-                           │
-                           ├─► ratio()           # Extract ratio posteriors
-                           ├─► ratio_contrast()  # Compare conditions
-                           ├─► pp_check()        # Posterior predictive
-                           └─► loo()/waic()      # Model comparison
-```
-
-### Stan Model Structure
-
-All Stan models follow this pattern:
-
-```stan
-data {
-  // Responses: y_num, y_denom
-  // Design matrices: X_num, X_denom
-  // Random effects: re_idx, re_group_size, re_shared
-  // Spatial: adjacency for CAR/BYM2
-  // Priors: PC prior parameters
-}
-
-parameters {
-  // Fixed effects: beta_num, beta_denom
-  // Shared RE: z_shared, sigma_shared (non-centered)
-  // Separate RE: z_num, z_denom (optional)
-  // Overdispersion: phi_num, phi_denom
-  // Spatial: spatial_raw, sigma_spatial
-}
-
-transformed parameters {
-  // Linear predictors: eta_num, eta_denom
-  // Add shared RE to BOTH predictors (key design choice)
-}
-
-generated quantities {
-  // THE KEY: Ratios computed post hoc
-  ratio = exp(eta_num - eta_denom);
-  log_ratio = eta_num - eta_denom;
-
-  // Log-likelihood for LOO/WAIC
-  // Posterior predictive draws
-}
+                    ├─► ratio()           # Extract ratio posteriors
+                    ├─► ratio_contrast()  # Compare conditions
+                    ├─► pp_check()        # Posterior predictive
+                    └─► loo()/waic()      # Model comparison
 ```
 
 ### Key Design Decisions
@@ -146,7 +110,7 @@ generated quantities {
 
 3. **PC priors**: Penalized complexity priors favor simpler models (smaller variance components). Default: P(sigma > 1) = 0.01.
 
-4. **Ratios in generated quantities**: Never modeled directly. Computed as `exp(eta_num - eta_denom)` with full posterior uncertainty.
+4. **Ratios computed post hoc**: Never modeled directly. Computed as `exp(eta_num - eta_denom)` with full posterior uncertainty.
 
 ## File Organization
 
@@ -155,24 +119,33 @@ R/
 ├── quotr.R              # Main fitting function, print/summary methods
 ├── formula.R            # Formula parsing, offset blocking, shared inference
 ├── family.R             # quotr_negbin_negbin(), quotr_binomial(), quotr_poisson_gamma()
-├── standata.R           # Data preparation for each family
+├── backend_hmc.R        # HMC/NUTS backend
+├── backend_laplace.R    # Laplace approximation backend
+├── backend_pg.R         # Pólya-Gamma Gibbs backend (binomial)
+├── standata.R           # Data preparation for backends
 ├── ratio.R              # ratio(), ratio_contrast() extraction
 ├── spatial.R            # spatial_car(), spatial_bym2()
 ├── priors.R             # quotr_priors(), PC prior helpers
 ├── validate.R           # pp_check(), loo(), waic(), quotr_compare()
 ├── quotr-package.R      # Package documentation
-└── zzz.R                # Model loading helpers
+└── zzz.R                # Package initialization
 
-inst/stan/
-├── quotr_negbin.stan        # NegBin-NegBin two-process model
-├── quotr_binomial.stan      # Binomial with fixed denominator
-├── quotr_poisson_gamma.stan # Poisson-Gamma (CPUE)
-└── functions/
-    └── quotr_functions.stan # Shared Stan functions (future)
+src/
+├── hmc_spatial.cpp      # Main HMC sampler with spatial support
+├── hmc_spatial.h        # HMC data structures
+├── hmc_core.cpp         # Core HMC functions
+├── hmc_simple.cpp       # Simple HMC implementation
+├── laplace_core.cpp     # Laplace approximation
+├── pg_binomial.cpp      # Pólya-Gamma Gibbs sampler
+├── pg_rng.cpp           # Pólya-Gamma random number generation
+└── autodiff.cpp         # Automatic differentiation helpers
 
 tests/testthat/
 ├── test-formula.R       # Formula parsing, offset rejection
 ├── test-family.R        # Family creation and validation
+├── test-backends.R      # Backend functionality tests
+├── test-hmc.R           # HMC sampler tests
+├── test-hmc-spatial.R   # Spatial HMC tests
 └── test-spatial.R       # Spatial structure validation
 
 vignettes/
@@ -204,16 +177,6 @@ quotr(
 )
 ```
 
-**Separate formulas:**
-```r
-quotr(
-  count ~ x + (1 | site),                # Numerator formula
-  formula_denom = effort ~ (1 | site),   # Denominator formula
-  data = df,
-  family = quotr_poisson_gamma()
-)
-```
-
 - `shared = NULL` (default): Infer from matching RE in both formulas
 - `shared = ~ (1 | group)`: Explicit shared random intercepts
 - `shared = ~ 0`: Independence assumption (**triggers warning**)
@@ -221,9 +184,8 @@ quotr(
 ### Random Effects Indexing
 
 - R layer: 1-based indexing
-- Stan layer: 1-based (Stan convention)
+- C++ layer: 0-based internally, 1-based at interface
 - `re_idx[n, g]` gives the group index for observation n in grouping factor g
-- `re_shared[g] = 1` means group g has shared effects, `0` means separate
 
 ### Spatial Structure
 
@@ -240,24 +202,25 @@ quotr(
 - Test offset rejection explicitly
 - Test independence warning with `shared = ~ 0`
 
-## Stan Development
+## C++ Development
 
-When modifying Stan models:
+When modifying C++ code:
 
-1. Check syntax: `cmdstanr::cmdstan_model(file, compile = FALSE)`
-2. Test with small data first (N=50, short chains)
-3. Verify generated quantities produce correct ratios
-4. Ensure log_lik is computed for LOO/WAIC
-5. Check diagnostics (divergences, Rhat, ESS)
+1. Edit source in `src/`
+2. Run `devtools::load_all()` to recompile
+3. Test with small data first (N=50, short chains)
+4. Check for memory issues with valgrind (Linux)
+5. Ensure OpenMP parallelization works correctly
 
 ## Dependencies
 
 **Runtime:**
-- cmdstanr (Stan backend)
-- instantiate (pre-compiled models)
 - posterior (draw manipulation)
-- bayesplot (visualization)
 - loo (model comparison)
+- Rcpp (C++ interface)
+
+**Suggested (optional):**
+- bayesplot (visualization)
 - Matrix (sparse adjacency)
 
 **Development:**
@@ -272,6 +235,7 @@ When modifying Stan models:
 - Three families: negbin_negbin, binomial, poisson_gamma
 - Shared random effects (default)
 - Spatial CAR/BYM2
+- Native HMC/NUTS backend (no Stan)
 - LOO/WAIC model comparison
 
 ### v1.1 (Planned)
@@ -282,4 +246,3 @@ When modifying Stan models:
 ### v2.0 (Future)
 - Spatiotemporal interaction
 - Zero-inflation variants
-- INLA backend option

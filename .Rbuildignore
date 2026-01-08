@@ -8,3 +8,5 @@
 ^docs$
 ^pkgdown$
 ^\.github$
+^CLAUDE\.md$
+^ROADMAP\.md$

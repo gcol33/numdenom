@@ -242,14 +242,15 @@ build_re_structure <- function(formula, data) {
   n_groups <- length(all_re)
 
   if (n_groups == 0) {
-    # No random effects
+    # No random effects - Stan arrays need at least size 1
+    # even when n_re_groups = 0, so we provide dummy values
     return(list(
       n_groups = 0L,
       n_total = 0L,
       idx = matrix(0L, nrow = N, ncol = 1),
-      group_size = integer(0),
-      group_start = integer(0),
-      shared = integer(0)
+      group_size = 0L,       # Dummy size-1 array
+      group_start = 0L,      # Dummy size-1 array
+      shared = 0L            # Dummy size-1 array
     ))
   }
 
