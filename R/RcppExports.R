@@ -2,66 +2,102 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 cpp_nuts_fit <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta = 10.0, sigma_re_scale = 2.5, phi_prior_shape = 1.0, phi_prior_rate = 0.01, n_iter = 2000L, n_warmup = 1000L, max_treedepth = 10L, adapt = TRUE, verbose = TRUE, seed = 0L) {
-    .Call(`_quotr_cpp_nuts_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, max_treedepth, adapt, verbose, seed)
+    .Call(`_ratiod_cpp_nuts_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, max_treedepth, adapt, verbose, seed)
 }
 
 cpp_hmc_basic <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta = 10.0, sigma_re_scale = 2.5, phi_prior_shape = 1.0, phi_prior_rate = 0.01, n_iter = 2000L, n_warmup = 1000L, epsilon = 0.1, L = 10L, adapt = TRUE, verbose = TRUE, seed = 0L) {
-    .Call(`_quotr_cpp_hmc_basic`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, epsilon, L, adapt, verbose, seed)
+    .Call(`_ratiod_cpp_hmc_basic`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, epsilon, L, adapt, verbose, seed)
 }
 
 cpp_hmc_fit <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose) {
-    .Call(`_quotr_cpp_hmc_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
+    .Call(`_ratiod_cpp_hmc_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
 }
 
 cpp_get_max_threads <- function() {
-    .Call(`_quotr_cpp_get_max_threads`)
+    .Call(`_ratiod_cpp_get_max_threads`)
+}
+
+cpp_hmc_fit_gp <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_type_str, coords, nn_idx, nn_dist, nn_order, nn_order_inv, nn, cov_type_str, nu, gp_shared, gp_sigma2_prior_U, gp_sigma2_prior_alpha, gp_phi_prior_lower, gp_phi_prior_upper, nn_idx_local, nn_dist_local, nn_order_local, nn_order_inv_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_order_inv_regional, nn_regional, range_local_lower, range_local_upper, range_regional_lower, range_regional_upper, ms_sigma2_local_prior_U, ms_sigma2_local_prior_alpha, ms_sigma2_regional_prior_U, ms_sigma2_regional_prior_alpha, ms_temporal_type_str, ms_time_index, ms_group_index, ms_n_times, ms_n_groups, trend_type_str, seasonal_period, short_term_type_str, ms_temporal_shared, ms_sigma2_trend_prior_U, ms_sigma2_trend_prior_alpha, ms_sigma2_seasonal_prior_U, ms_sigma2_seasonal_prior_alpha, ms_sigma2_short_prior_U, ms_sigma2_short_prior_alpha, has_rsr, rsr_projection, rsr_n, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose) {
+    .Call(`_ratiod_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_type_str, coords, nn_idx, nn_dist, nn_order, nn_order_inv, nn, cov_type_str, nu, gp_shared, gp_sigma2_prior_U, gp_sigma2_prior_alpha, gp_phi_prior_lower, gp_phi_prior_upper, nn_idx_local, nn_dist_local, nn_order_local, nn_order_inv_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_order_inv_regional, nn_regional, range_local_lower, range_local_upper, range_regional_lower, range_regional_upper, ms_sigma2_local_prior_U, ms_sigma2_local_prior_alpha, ms_sigma2_regional_prior_U, ms_sigma2_regional_prior_alpha, ms_temporal_type_str, ms_time_index, ms_group_index, ms_n_times, ms_n_groups, trend_type_str, seasonal_period, short_term_type_str, ms_temporal_shared, ms_sigma2_trend_prior_U, ms_sigma2_trend_prior_alpha, ms_sigma2_seasonal_prior_U, ms_sigma2_seasonal_prior_alpha, ms_sigma2_short_prior_U, ms_sigma2_short_prior_alpha, has_rsr, rsr_projection, rsr_n, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
 }
 
 cpp_hmc_simple <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, sigma_beta = 10.0, sigma_re_scale = 2.5, phi_prior_shape = 2.0, phi_prior_rate = 0.1, n_iter = 2000L, n_warmup = 1000L, L = 20L, adapt = TRUE, verbose = TRUE, seed = 0L) {
-    .Call(`_quotr_cpp_hmc_simple`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, L, adapt, verbose, seed)
+    .Call(`_ratiod_cpp_hmc_simple`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, L, adapt, verbose, seed)
 }
 
 cpp_laplace_fit <- function(y, n, X, re_idx, n_re_groups, sigma_re, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_quotr_cpp_laplace_fit`, y, n, X, re_idx, n_re_groups, sigma_re, family, phi, max_iter, tol, n_threads)
+    .Call(`_ratiod_cpp_laplace_fit`, y, n, X, re_idx, n_re_groups, sigma_re, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_get_max_threads <- function() {
-    .Call(`_quotr_cpp_laplace_get_max_threads`)
+    .Call(`_ratiod_cpp_laplace_get_max_threads`)
 }
 
 cpp_laplace_fit_spatial <- function(y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_quotr_cpp_laplace_fit_spatial`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, family, phi, max_iter, tol, n_threads)
+    .Call(`_ratiod_cpp_laplace_fit_spatial`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_sample <- function(mode, H, n_samples) {
-    .Call(`_quotr_cpp_laplace_sample`, mode, H, n_samples)
+    .Call(`_ratiod_cpp_laplace_sample`, mode, H, n_samples)
 }
 
 cpp_laplace_fit_bym2 <- function(y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, sigma_spatial, rho, scale_factor, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_quotr_cpp_laplace_fit_bym2`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, sigma_spatial, rho, scale_factor, family, phi, max_iter, tol, n_threads)
+    .Call(`_ratiod_cpp_laplace_fit_bym2`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, sigma_spatial, rho, scale_factor, family, phi, max_iter, tol, n_threads)
+}
+
+cpp_laplace_fit_gp <- function(y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp, phi_gp, cov_type, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
+    .Call(`_ratiod_cpp_laplace_fit_gp`, y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp, phi_gp, cov_type, family, phi, max_iter, tol, n_threads)
+}
+
+cpp_laplace_fit_rsr <- function(y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, rsr_projection, rsr_n, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
+    .Call(`_ratiod_cpp_laplace_fit_rsr`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, rsr_projection, rsr_n, family, phi, max_iter, tol, n_threads)
+}
+
+cpp_laplace_fit_multiscale_gp <- function(y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local, phi_local, sigma2_regional, phi_regional, cov_type, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
+    .Call(`_ratiod_cpp_laplace_fit_multiscale_gp`, y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local, phi_local, sigma2_regional, phi_regional, cov_type, family, phi, max_iter, tol, n_threads)
+}
+
+cpp_laplace_fit_multiscale_temporal <- function(y, n, X, re_idx, n_re_groups, sigma_re, time_idx, n_times, seasonal_period, trend_type, short_type, sigma2_trend, sigma2_seasonal, sigma2_short, rho_short, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
+    .Call(`_ratiod_cpp_laplace_fit_multiscale_temporal`, y, n, X, re_idx, n_re_groups, sigma_re, time_idx, n_times, seasonal_period, trend_type, short_type, sigma2_trend, sigma2_seasonal, sigma2_short, rho_short, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_pg_binomial_gibbs <- function(y, n, X, group, n_groups, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_scale = 2.5, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_quotr_cpp_pg_binomial_gibbs`, y, n, X, group, n_groups, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_scale, store_eta, verbose, n_threads)
+    .Call(`_ratiod_cpp_pg_binomial_gibbs`, y, n, X, group, n_groups, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_scale, store_eta, verbose, n_threads)
 }
 
 cpp_pg_get_max_threads <- function() {
-    .Call(`_quotr_cpp_pg_get_max_threads`)
+    .Call(`_ratiod_cpp_pg_get_max_threads`)
 }
 
 cpp_pg_binomial_gibbs_spatial <- function(y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_tau_shape = 1.0, prior_tau_rate = 0.01, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_quotr_cpp_pg_binomial_gibbs_spatial`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_tau_shape, prior_tau_rate, store_eta, verbose, n_threads)
+    .Call(`_ratiod_cpp_pg_binomial_gibbs_spatial`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_tau_shape, prior_tau_rate, store_eta, verbose, n_threads)
 }
 
 cpp_pg_binomial_gibbs_bym2 <- function(y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, scale_factor, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_spatial_scale = 2.5, prior_rho_alpha = 0.5, prior_rho_beta = 0.5, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_quotr_cpp_pg_binomial_gibbs_bym2`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, scale_factor, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_spatial_scale, prior_rho_alpha, prior_rho_beta, store_eta, verbose, n_threads)
+    .Call(`_ratiod_cpp_pg_binomial_gibbs_bym2`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, scale_factor, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_spatial_scale, prior_rho_alpha, prior_rho_beta, store_eta, verbose, n_threads)
+}
+
+cpp_pg_binomial_gibbs_gp <- function(y, n, X, re_group, n_re_groups, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp_init, phi_gp_init, cov_type, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_gp_U = 1.0, prior_sigma_gp_alpha = 0.01, prior_phi_lower = 0.01, prior_phi_upper = 10.0, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
+    .Call(`_ratiod_cpp_pg_binomial_gibbs_gp`, y, n, X, re_group, n_re_groups, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp_init, phi_gp_init, cov_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_gp_U, prior_sigma_gp_alpha, prior_phi_lower, prior_phi_upper, store_eta, verbose, n_threads)
+}
+
+cpp_pg_binomial_gibbs_temporal <- function(y, n, X, re_group, n_re_groups, time_idx, n_times, seasonal_period, trend_type, short_type, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_trend_scale = 1.0, prior_sigma_seasonal_scale = 1.0, prior_sigma_short_scale = 1.0, rho_short_init = 0.5, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
+    .Call(`_ratiod_cpp_pg_binomial_gibbs_temporal`, y, n, X, re_group, n_re_groups, time_idx, n_times, seasonal_period, trend_type, short_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_trend_scale, prior_sigma_seasonal_scale, prior_sigma_short_scale, rho_short_init, store_eta, verbose, n_threads)
+}
+
+cpp_pg_binomial_gibbs_multiscale_gp <- function(y, n, X, re_group, n_re_groups, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local_init, phi_local_init, sigma2_regional_init, phi_regional_init, cov_type, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_local_U = 1.0, prior_sigma_local_alpha = 0.01, prior_phi_local_lower = 0.01, prior_phi_local_upper = 5.0, prior_sigma_regional_U = 1.0, prior_sigma_regional_alpha = 0.01, prior_phi_regional_lower = 0.1, prior_phi_regional_upper = 20.0, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
+    .Call(`_ratiod_cpp_pg_binomial_gibbs_multiscale_gp`, y, n, X, re_group, n_re_groups, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local_init, phi_local_init, sigma2_regional_init, phi_regional_init, cov_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_local_U, prior_sigma_local_alpha, prior_phi_local_lower, prior_phi_local_upper, prior_sigma_regional_U, prior_sigma_regional_alpha, prior_phi_regional_lower, prior_phi_regional_upper, store_eta, verbose, n_threads)
+}
+
+cpp_pg_binomial_gibbs_rsr <- function(y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, rsr_projection, rsr_n, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_tau_shape = 1.0, prior_tau_rate = 0.01, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
+    .Call(`_ratiod_cpp_pg_binomial_gibbs_rsr`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, rsr_projection, rsr_n, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_tau_shape, prior_tau_rate, store_eta, verbose, n_threads)
 }
 
 cpp_rpg1 <- function(z) {
-    .Call(`_quotr_cpp_rpg1`, z)
+    .Call(`_ratiod_cpp_rpg1`, z)
 }
 
 cpp_rpg <- function(b, z) {
-    .Call(`_quotr_cpp_rpg`, b, z)
+    .Call(`_ratiod_cpp_rpg`, b, z)
 }
 

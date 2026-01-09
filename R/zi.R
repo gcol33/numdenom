@@ -1,7 +1,7 @@
 #' Zero-Inflation and Hurdle Model Specifications
 #'
 #' @description
-#' Functions to specify zero-inflation or hurdle model components for quotr models.
+#' Functions to specify zero-inflation or hurdle model components for ratiod models.
 #' These handle excess zeros in count data where the standard count distribution
 #' (Poisson, negative binomial) doesn't adequately capture the zero proportion.
 #'
@@ -39,7 +39,7 @@ NULL
 #' @param formula Optional formula for the zero-inflation probability.
 #'   If NULL, uses intercept-only model for P(structural zero).
 #'
-#' @return A `quotr_zi` object
+#' @return A `ratiod_zi` object
 #'
 #' @examples
 #' # Intercept-only ZI
@@ -56,7 +56,7 @@ zi_poisson <- function(formula = NULL) {
       formula = formula,
       distribution = "poisson"
     ),
-    class = "quotr_zi"
+    class = "ratiod_zi"
   )
 }
 
@@ -66,7 +66,7 @@ zi_poisson <- function(formula = NULL) {
 #' @param formula Optional formula for the zero-inflation probability.
 #'   If NULL, uses intercept-only model for P(structural zero).
 #'
-#' @return A `quotr_zi` object
+#' @return A `ratiod_zi` object
 #'
 #' @examples
 #' # Intercept-only ZI
@@ -83,7 +83,7 @@ zi_negbin <- function(formula = NULL) {
       formula = formula,
       distribution = "negbin"
     ),
-    class = "quotr_zi"
+    class = "ratiod_zi"
   )
 }
 
@@ -93,7 +93,7 @@ zi_negbin <- function(formula = NULL) {
 #' @param formula Optional formula for the hurdle probability (P(Y > 0)).
 #'   If NULL, uses intercept-only model.
 #'
-#' @return A `quotr_zi` object
+#' @return A `ratiod_zi` object
 #'
 #' @examples
 #' # Intercept-only hurdle
@@ -110,7 +110,7 @@ hurdle_poisson <- function(formula = NULL) {
       formula = formula,
       distribution = "poisson"
     ),
-    class = "quotr_zi"
+    class = "ratiod_zi"
   )
 }
 
@@ -120,7 +120,7 @@ hurdle_poisson <- function(formula = NULL) {
 #' @param formula Optional formula for the hurdle probability (P(Y > 0)).
 #'   If NULL, uses intercept-only model.
 #'
-#' @return A `quotr_zi` object
+#' @return A `ratiod_zi` object
 #'
 #' @examples
 #' # Intercept-only hurdle
@@ -137,19 +137,19 @@ hurdle_negbin <- function(formula = NULL) {
       formula = formula,
       distribution = "negbin"
     ),
-    class = "quotr_zi"
+    class = "ratiod_zi"
   )
 }
 
 
-#' Print method for quotr_zi objects
+#' Print method for ratiod_zi objects
 #'
-#' @param x A quotr_zi object
+#' @param x A ratiod_zi object
 #' @param ... Additional arguments (ignored)
 #'
 #' @return Invisibly returns the input
 #' @export
-print.quotr_zi <- function(x, ...) {
+print.ratiod_zi <- function(x, ...) {
   type_label <- switch(x$type,
     "zi_poisson" = "Zero-Inflated Poisson",
     "zi_negbin" = "Zero-Inflated Negative Binomial",
@@ -158,7 +158,7 @@ print.quotr_zi <- function(x, ...) {
     x$type
   )
 
-  cat("quotr Zero-Inflation Specification\n")
+  cat("ratiod Zero-Inflation Specification\n")
   cat("==================================\n")
   cat("Type:", type_label, "\n")
 
@@ -174,18 +174,18 @@ print.quotr_zi <- function(x, ...) {
 
 #' Validate ZI specification
 #'
-#' @param zi A quotr_zi object or NULL
+#' @param zi A ratiod_zi object or NULL
 #' @param data Data frame for checking formula variables
 #'
-#' @return Validated quotr_zi object or NULL
+#' @return Validated ratiod_zi object or NULL
 #' @keywords internal
 validate_zi <- function(zi, data = NULL) {
   if (is.null(zi)) {
     return(NULL)
   }
 
-  if (!inherits(zi, "quotr_zi")) {
-    stop("zi must be a quotr_zi object (created by zi_poisson(), zi_negbin(), ",
+  if (!inherits(zi, "ratiod_zi")) {
+    stop("zi must be a ratiod_zi object (created by zi_poisson(), zi_negbin(), ",
          "hurdle_poisson(), or hurdle_negbin())", call. = FALSE)
   }
 

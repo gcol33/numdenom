@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-**quotr** is an opinionated R package for Bayesian hierarchical modelling of ratios, rates, and proportions in ecological and related data.
+**ratiod** is an opinionated R package for Bayesian hierarchical modelling of ratios, rates, and proportions in ecological and related data.
 
 ### Core Philosophy (Non-Negotiable)
 
@@ -61,7 +61,7 @@ devtools::build_vignettes()
 
 ### Inference Backends
 
-quotr uses **native C++ backends** - no Stan dependency required.
+ratiod uses **native C++ backends** - no Stan dependency required.
 
 | Backend | Description | Best For |
 |---------|-------------|----------|
@@ -76,14 +76,14 @@ Three distribution families cover common ecological use cases:
 
 | Family | Numerator | Denominator | Use Case |
 |--------|-----------|-------------|----------|
-| `quotr_negbin_negbin()` | NegBin | NegBin | Count/count ratios (relative abundance) |
-| `quotr_binomial()` | Binomial | Fixed trials | Success/trial proportions |
-| `quotr_poisson_gamma()` | Poisson | Gamma | CPUE (count/continuous effort) |
+| `ratiod_negbin_negbin()` | NegBin | NegBin | Count/count ratios (relative abundance) |
+| `ratiod_binomial()` | Binomial | Fixed trials | Success/trial proportions |
+| `ratiod_poisson_gamma()` | Poisson | Gamma | CPUE (count/continuous effort) |
 
 ### Data Flow
 
 ```
-quotr() ─┬─► quotr_formula()      # Parse numerator/denominator/shared
+ratiod() ─┬─► ratiod_formula()      # Parse numerator/denominator/shared
          │      ├─► validate_formula()    # Check syntax
          │      ├─► check_no_offset()     # Block offset() usage
          │      └─► parse_shared()        # Handle shared structure
@@ -94,7 +94,7 @@ quotr() ─┬─► quotr_formula()      # Parse numerator/denominator/shared
          │      ├─► prepare_hmc_data()    # Data preparation
          │      └─► cpp_hmc_spatial()     # C++ HMC sampler
          │
-         └─► quotr_fit object
+         └─► ratiod_fit object
                     │
                     ├─► ratio()           # Extract ratio posteriors
                     ├─► ratio_contrast()  # Compare conditions
@@ -116,18 +116,18 @@ quotr() ─┬─► quotr_formula()      # Parse numerator/denominator/shared
 
 ```
 R/
-├── quotr.R              # Main fitting function, print/summary methods
+├── ratiod.R              # Main fitting function, print/summary methods
 ├── formula.R            # Formula parsing, offset blocking, shared inference
-├── family.R             # quotr_negbin_negbin(), quotr_binomial(), quotr_poisson_gamma()
+├── family.R             # ratiod_negbin_negbin(), ratiod_binomial(), ratiod_poisson_gamma()
 ├── backend_hmc.R        # HMC/NUTS backend
 ├── backend_laplace.R    # Laplace approximation backend
 ├── backend_pg.R         # Pólya-Gamma Gibbs backend (binomial)
 ├── standata.R           # Data preparation for backends
 ├── ratio.R              # ratio(), ratio_contrast() extraction
 ├── spatial.R            # spatial_car(), spatial_bym2()
-├── priors.R             # quotr_priors(), PC prior helpers
-├── validate.R           # pp_check(), loo(), waic(), quotr_compare()
-├── quotr-package.R      # Package documentation
+├── priors.R             # ratiod_priors(), PC prior helpers
+├── validate.R           # pp_check(), loo(), waic(), ratiod_compare()
+├── ratiod-package.R      # Package documentation
 └── zzz.R                # Package initialization
 
 src/
@@ -159,21 +159,21 @@ vignettes/
 
 **Combined syntax (recommended):**
 ```r
-quotr(
+ratiod(
   count | effort ~ x + (1 | site),       # num | denom ~ predictors
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 
 **With process-specific terms:**
 ```r
-quotr(
+ratiod(
   count | effort ~ (1 | site),           # Shared structure
   formula_num = ~ depth + season,         # Numerator-only predictors
   formula_denom = ~ weather,              # Denominator-only predictors
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 

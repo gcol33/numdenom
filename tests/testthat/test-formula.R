@@ -6,12 +6,12 @@ test_that("combined formula syntax works: num | denom ~ x", {
     site = rep(1:10, each = 10)
   )
 
-  f <- quotr_formula(
+  f <- ratiod_formula(
     formula = y_num | y_denom ~ x + (1 | site),
     data = df
   )
 
-  expect_s3_class(f, "quotr_formula")
+  expect_s3_class(f, "ratiod_formula")
   expect_equal(f$numerator$response_var, "y_num")
   expect_equal(f$denominator$response_var, "y_denom")
   expect_equal(ncol(f$numerator$X), 2)  # intercept + x
@@ -29,7 +29,7 @@ test_that("combined formula with additional process-specific terms", {
     site = rep(1:10, each = 10)
   )
 
-  f <- quotr_formula(
+  f <- ratiod_formula(
     formula = y_num | y_denom ~ (1 | site),
     formula_num = ~ x,
     formula_denom = ~ z,
@@ -53,7 +53,7 @@ test_that("separate formula syntax works", {
     site = rep(1:10, each = 10)
   )
 
-  f <- quotr_formula(
+  f <- ratiod_formula(
     formula = y_num ~ x + (1 | site),
     formula_denom = y_denom ~ (1 | site),
     data = df
@@ -72,7 +72,7 @@ test_that("separate formula requires formula_denom", {
   )
 
   expect_error(
-    quotr_formula(
+    ratiod_formula(
       formula = y_num ~ x,
       data = df
     ),
@@ -89,7 +89,7 @@ test_that("offset() is rejected", {
   )
 
   expect_error(
-    quotr_formula(
+    ratiod_formula(
       formula = y_num | y_denom ~ x + offset(log(effort)),
       data = df
     ),
@@ -106,7 +106,7 @@ test_that("shared = ~ 0 triggers warning", {
   )
 
   expect_warning(
-    quotr_formula(
+    ratiod_formula(
       formula = y_num | y_denom ~ x + (1 | site),
       shared = ~ 0,
       data = df
@@ -123,7 +123,7 @@ test_that("random effects are correctly inferred as shared", {
     site = rep(1:10, each = 10)
   )
 
-  f <- quotr_formula(
+  f <- ratiod_formula(
     formula = y_num | y_denom ~ x + (1 | site),
     data = df
   )
@@ -142,7 +142,7 @@ test_that("different RE in each process are handled", {
     observer = rep(1:5, 20)
   )
 
-  f <- quotr_formula(
+  f <- ratiod_formula(
     formula = y_num ~ x + (1 | site) + (1 | observer),
     formula_denom = y_denom ~ (1 | site),
     data = df
@@ -167,7 +167,7 @@ test_that("model matrix is built correctly with factors", {
     cat = factor(rep(c("A", "B"), 50))
   )
 
-  f <- quotr_formula(
+  f <- ratiod_formula(
     formula = y | n ~ x1 + x2 + cat,
     data = df
   )
@@ -185,7 +185,7 @@ test_that("missing variables trigger errors", {
   )
 
   expect_error(
-    quotr_formula(
+    ratiod_formula(
       formula = y_num | missing_var ~ x,
       data = df
     ),

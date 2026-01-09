@@ -17,7 +17,7 @@ test_that("HMC backend produces valid samples", {
   # Run HMC for a short time
   q_init <- rep(0.0, 3)  # 2 beta_num + 1 beta_denom
 
-  fit <- quotr:::cpp_hmc_simple(
+  fit <- ratiod:::cpp_hmc_simple(
     q_init = q_init,
     y_num = as.integer(y),
     y_denom = trials,
@@ -66,7 +66,7 @@ test_that("HMC backend recovers parameters for binomial model", {
   # Run NUTS
   q_init <- rep(0.0, 3)  # 2 for numerator + 1 for denominator
 
-  fit <- quotr:::cpp_nuts_fit(
+  fit <- ratiod:::cpp_nuts_fit(
     q_init = q_init,
     y_num = as.integer(y),
     y_denom = trials,
@@ -116,7 +116,7 @@ test_that("HMC backend works with random effects", {
   n_params <- 2 + 1 + 1 + n_groups
   q_init <- rep(0.0, n_params)
 
-  fit <- quotr:::cpp_nuts_fit(
+  fit <- ratiod:::cpp_nuts_fit(
     q_init = q_init,
     y_num = as.integer(y),
     y_denom = trials,
@@ -171,7 +171,7 @@ test_that("HMC backend works for negbin_negbin model", {
   q_init <- c(rep(0.0, 4), log(5), log(5))  # Initialize phi at 5
 
   # Use cpp_hmc_fit which has working step-size adaptation
-  fit <- quotr:::cpp_hmc_fit(
+  fit <- ratiod:::cpp_hmc_fit(
     q_init = q_init,
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
@@ -248,7 +248,7 @@ test_that("HMC backend works for poisson_gamma model", {
   q_init <- c(rep(0.0, 4), log(3))
 
   # Use cpp_hmc_fit which has working step-size adaptation
-  fit <- quotr:::cpp_hmc_fit(
+  fit <- ratiod:::cpp_hmc_fit(
     q_init = q_init,
     y_num = as.integer(y_num),
     y_denom = as.integer(rep(1, N)),  # placeholder
@@ -309,7 +309,7 @@ test_that("NUTS diagnostics are reasonable", {
 
   q_init <- c(0.0, 0.0)
 
-  fit <- quotr:::cpp_nuts_fit(
+  fit <- ratiod:::cpp_nuts_fit(
     q_init = q_init,
     y_num = as.integer(y),
     y_denom = trials,

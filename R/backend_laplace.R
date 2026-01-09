@@ -26,7 +26,7 @@ NULL
 
 #' Fit model using Laplace approximation
 #'
-#' @param formula A quotr_formula object
+#' @param formula A ratiod_formula object
 #' @param data Data frame
 #' @param family Model family
 #' @param spatial Optional spatial structure
@@ -35,7 +35,7 @@ NULL
 #' @param cores Number of cores for parallel computation
 #' @param verbose Print progress
 #'
-#' @return A quotr_fit object
+#' @return A ratiod_fit object
 #' @keywords internal
 fit_laplace <- function(formula,
                         data,
@@ -147,8 +147,8 @@ fit_laplace <- function(formula,
     n_samples = as.integer(n_samples)
   )
 
-  # Convert to quotr_fit format
-  fit <- convert_laplace_to_quotr_fit(
+  # Convert to ratiod_fit format
+  fit <- convert_laplace_to_ratiod_fit(
     samples = samples,
     result = result,
     formula = formula,
@@ -175,24 +175,98 @@ get_laplace_family <- function(family) {
 
 
 #' Extract RE info for Laplace
+#'
+#' @description
+#' Extracts random effects information for the Laplace backend.
+#' Supports multiple crossed random effects (e.g., `(1|site) + (1|year)`).
+#'
+#' @param formula A ratiod_formula object
+#' @return List with RE structure for Laplace backend
 #' @keywords internal
 extract_re_for_laplace <- function(formula) {
   re_terms <- formula$numerator$random_effects
+  n_obs <- length(formula$numerator$response)
 
   if (is.null(re_terms) || length(re_terms) == 0) {
-    n_obs <- length(formula$numerator$response)
     return(list(
       group_idx = as.numeric(rep(1, n_obs)),
       n_groups = 0L,
-      group_var = NULL
+      group_var = NULL,
+      # Multi-term fields
+      n_re_terms = 0L,
+      re_terms = list(),
+      has_slopes = FALSE
     ))
   }
 
+  n_re_terms <- length(re_terms)
+
+  # Check for unsupported features and warn
+  has_slopes <- FALSE
+  for (term in re_terms) {
+    if (length(term$slope_vars) > 0) {
+      has_slopes <- TRUE
+      warning(
+        "Random slopes not yet fully supported in Laplace backend. Slope terms will be ignored: ",
+        paste(term$slope_vars, collapse = ", "),
+        "\nOnly random intercepts (1 | group) are currently implemented.",
+        call. = FALSE
+      )
+    }
+  }
+
+  if (n_re_terms > 1) {
+    # Multiple RE terms
+    re_terms_processed <- vector("list", n_re_terms)
+    total_groups <- 0L
+
+    for (t in seq_len(n_re_terms)) {
+      term <- re_terms[[t]]
+      re_terms_processed[[t]] <- list(
+        group_var = term$group_var,
+        group_idx = as.numeric(term$group),
+        n_groups = as.integer(term$n_groups),
+        offset = total_groups
+      )
+      total_groups <- total_groups + term$n_groups
+    }
+
+    # Build group index matrix
+    group_idx_matrix <- matrix(0, nrow = n_obs, ncol = n_re_terms)
+    for (t in seq_len(n_re_terms)) {
+      group_idx_matrix[, t] <- as.numeric(re_terms[[t]]$group)
+    }
+
+    return(list(
+      # Legacy fields
+      group_idx = as.numeric(re_terms[[1]]$group),
+      n_groups = as.integer(re_terms[[1]]$n_groups),
+      group_var = re_terms[[1]]$group_var,
+      # Multi-term fields
+      n_re_terms = n_re_terms,
+      re_terms = re_terms_processed,
+      group_idx_matrix = group_idx_matrix,
+      total_groups = total_groups,
+      has_slopes = has_slopes
+    ))
+  }
+
+  # Single RE term
   re_info <- re_terms[[1]]
   return(list(
     group_idx = as.numeric(re_info$group),
     n_groups = as.integer(re_info$n_groups),
-    group_var = re_info$group_var
+    group_var = re_info$group_var,
+    # Multi-term fields
+    n_re_terms = 1L,
+    re_terms = list(list(
+      group_var = re_info$group_var,
+      group_idx = as.numeric(re_info$group),
+      n_groups = as.integer(re_info$n_groups),
+      offset = 0L
+    )),
+    total_groups = as.integer(re_info$n_groups),
+    has_slopes = has_slopes
   ))
 }
 
@@ -355,9 +429,9 @@ compute_hessian_at_mode <- function(y, n_trials, X, re_idx, n_re_groups,
 }
 
 
-#' Convert Laplace results to quotr_fit
+#' Convert Laplace results to ratiod_fit
 #' @keywords internal
-convert_laplace_to_quotr_fit <- function(samples, result, formula, data,
+convert_laplace_to_ratiod_fit <- function(samples, result, formula, data,
                                          family, X, re_info, n_samples) {
 
   p <- ncol(X)
@@ -400,7 +474,7 @@ convert_laplace_to_quotr_fit <- function(samples, result, formula, data,
     )
   )
 
-  class(fit) <- "quotr_fit"
+  class(fit) <- "ratiod_fit"
   return(fit)
 }
 
@@ -415,7 +489,7 @@ can_use_laplace_backend <- function(family) {
 
 #' Fit spatial model using Laplace approximation
 #'
-#' @param formula A quotr_formula object
+#' @param formula A ratiod_formula object
 #' @param data Data frame
 #' @param family Model family
 #' @param family_type String family type for C++
@@ -431,7 +505,7 @@ can_use_laplace_backend <- function(family) {
 #' @param cores Number of cores
 #' @param verbose Print progress
 #'
-#' @return A quotr_fit object
+#' @return A ratiod_fit object
 #' @keywords internal
 fit_laplace_spatial <- function(formula,
                                  data,
@@ -461,8 +535,53 @@ fit_laplace_spatial <- function(formula,
     message(sprintf("  Spatial type: %s", spatial$type %||% "ICAR"))
   }
 
-  # Check if BYM2 model
-  is_bym2 <- !is.null(spatial$type) && tolower(spatial$type) == "bym2"
+  # Check spatial type and dispatch appropriately
+  spatial_type <- spatial$type %||% "car"
+
+  # GP spatial
+  if (spatial_type == "gp" || inherits(spatial, "ratiod_gp")) {
+    return(fit_laplace_gp(
+      formula = formula,
+      data = data,
+      family = family,
+      family_type = family_type,
+      spatial = spatial,
+      y = y,
+      n_trials = n_trials,
+      X = X,
+      re_info = re_info,
+      phi = phi,
+      sigma_re = sigma_re,
+      n_samples = n_samples,
+      cores = cores,
+      verbose = verbose
+    ))
+  }
+
+  # RSR (Restricted Spatial Regression)
+  if (inherits(spatial, "ratiod_rsr")) {
+    return(fit_laplace_rsr(
+      formula = formula,
+      data = data,
+      family = family,
+      family_type = family_type,
+      spatial = spatial,
+      spatial_info = spatial_info,
+      y = y,
+      n_trials = n_trials,
+      X = X,
+      re_info = re_info,
+      phi = phi,
+      sigma_re = sigma_re,
+      tau_spatial = tau_spatial,
+      n_samples = n_samples,
+      cores = cores,
+      verbose = verbose
+    ))
+  }
+
+  # BYM2 model
+  is_bym2 <- tolower(spatial_type) == "bym2"
 
   if (is_bym2) {
     return(fit_laplace_bym2(
@@ -542,8 +661,8 @@ fit_laplace_spatial <- function(formula,
     n_samples = as.integer(n_samples)
   )
 
-  # Convert to quotr_fit
-  fit <- convert_laplace_spatial_to_quotr_fit(
+  # Convert to ratiod_fit
+  fit <- convert_laplace_spatial_to_ratiod_fit(
     samples = samples,
     result = result,
     formula = formula,
@@ -717,9 +836,9 @@ compute_hessian_spatial <- function(y, n_trials, X, re_idx, n_re_groups,
 }
 
 
-#' Convert spatial Laplace results to quotr_fit
+#' Convert spatial Laplace results to ratiod_fit
 #' @keywords internal
-convert_laplace_spatial_to_quotr_fit <- function(samples, result, formula, data,
+convert_laplace_spatial_to_ratiod_fit <- function(samples, result, formula, data,
                                                    family, X, re_info, spatial_info,
                                                    n_samples) {
   p <- ncol(X)
@@ -766,14 +885,14 @@ convert_laplace_spatial_to_quotr_fit <- function(samples, result, formula, data,
     )
   )
 
-  class(fit) <- "quotr_fit"
+  class(fit) <- "ratiod_fit"
   return(fit)
 }
 
 
 #' Fit BYM2 spatial model using Laplace approximation
 #'
-#' @param formula A quotr_formula object
+#' @param formula A ratiod_formula object
 #' @param data Data frame
 #' @param family Model family
 #' @param family_type String family type for C++
@@ -789,7 +908,7 @@ convert_laplace_spatial_to_quotr_fit <- function(samples, result, formula, data,
 #' @param cores Number of cores
 #' @param verbose Print progress
 #'
-#' @return A quotr_fit object
+#' @return A ratiod_fit object
 #' @keywords internal
 fit_laplace_bym2 <- function(formula,
                               data,
@@ -879,8 +998,8 @@ fit_laplace_bym2 <- function(formula,
     n_samples = as.integer(n_samples)
   )
 
-  # Convert to quotr_fit
-  fit <- convert_laplace_bym2_to_quotr_fit(
+  # Convert to ratiod_fit
+  fit <- convert_laplace_bym2_to_ratiod_fit(
     samples = samples,
     result = result,
     formula = formula,
@@ -1033,9 +1152,404 @@ compute_hessian_bym2 <- function(y, n_trials, X, re_idx, n_re_groups,
 }
 
 
-#' Convert BYM2 Laplace results to quotr_fit
+#' Fit GP spatial model using Laplace approximation
+#'
+#' @param formula A ratiod_formula object
+#' @param data Data frame
+#' @param family Model family
+#' @param family_type String family type for C++
+#' @param spatial GP spatial structure specification
+#' @param y Response vector
+#' @param n_trials Trials vector
+#' @param X Design matrix
+#' @param re_info Random effects info
+#' @param phi Overdispersion parameter
+#' @param sigma_re RE standard deviation
+#' @param n_samples Number of posterior samples
+#' @param cores Number of cores
+#' @param verbose Print progress
+#'
+#' @return A ratiod_fit object
 #' @keywords internal
-convert_laplace_bym2_to_quotr_fit <- function(samples, result, formula, data,
+fit_laplace_gp <- function(formula,
+                           data,
+                           family,
+                           family_type,
+                           spatial,
+                           y,
+                           n_trials,
+                           X,
+                           re_info,
+                           phi,
+                           sigma_re,
+                           n_samples,
+                           cores,
+                           verbose) {
+
+  if (verbose) {
+    message("Fitting GP spatial model with Laplace approximation...")
+  }
+
+  # Validate GP specification against data
+  spatial <- validate_gp(spatial, data)
+
+  if (verbose) {
+    message(sprintf("  Observations: %d", spatial$n_obs))
+    message(sprintf("  Neighbors: %d", spatial$nn))
+    message(sprintf("  Covariance: %s", spatial$cov))
+  }
+
+  # Get GP hyperparameters from priors or defaults
+  sigma2_gp <- spatial$sigma2 %||% 1.0
+  phi_gp <- spatial$phi %||% 1.0
+
+  # Covariance type mapping
+  cov_type <- switch(spatial$cov,
+    "exponential" = 0L,
+    "matern" = 1L,
+    "gaussian" = 2L,
+    "spherical" = 3L,
+    0L
+  )
+
+  # Get neighbor info
+  nn_info <- spatial$neighbor_info
+
+  if (verbose) {
+    message("Finding mode of posterior...")
+  }
+
+  result <- cpp_laplace_fit_gp(
+    y = as.integer(y),
+    n = as.integer(n_trials),
+    X = X,
+    re_idx = re_info$group_idx,
+    n_re_groups = re_info$n_groups,
+    sigma_re = sigma_re,
+    coords = spatial$coords_matrix,
+    nn_idx = nn_info$nn_idx,
+    nn_dist = nn_info$nn_dist,
+    nn_order = nn_info$nn_order,
+    n_spatial = spatial$n_spatial,
+    nn = spatial$nn,
+    sigma2_gp = sigma2_gp,
+    phi_gp = phi_gp,
+    cov_type = cov_type,
+    family = family_type,
+    phi = phi,
+    max_iter = 100L,
+    tol = 1e-6,
+    n_threads = as.integer(cores)
+  )
+
+  if (!result$converged) {
+    warning("Laplace approximation did not converge")
+  }
+
+  if (verbose) {
+    message(sprintf("  Converged in %d iterations", result$n_iter))
+    message("Sampling from Laplace approximation...")
+  }
+
+  # Sample from Laplace approximation
+  samples <- cpp_laplace_sample(
+    mode = result$mode,
+    H = result$hessian,
+    n_samples = as.integer(n_samples)
+  )
+
+  # Convert to ratiod_fit
+  fit <- convert_laplace_gp_to_ratiod_fit(
+    samples = samples,
+    result = result,
+    formula = formula,
+    data = data,
+    family = family,
+    X = X,
+    re_info = re_info,
+    spatial = spatial,
+    n_samples = n_samples
+  )
+
+  return(fit)
+}
+
+
+#' Convert GP Laplace results to ratiod_fit
+#' @keywords internal
+convert_laplace_gp_to_ratiod_fit <- function(samples, result, formula, data,
+                                              family, X, re_info, spatial,
+                                              n_samples) {
+  p <- ncol(X)
+  n_re <- re_info$n_groups
+  n_spatial <- spatial$n_spatial
+  spatial_start <- p + n_re
+
+  # Extract fixed effects samples
+  beta_names <- colnames(X)
+  if (is.null(beta_names)) {
+    beta_names <- paste0("beta[", seq_len(p), "]")
+  }
+
+  draws_list <- list()
+  for (j in seq_len(p)) {
+    draws_list[[beta_names[j]]] <- samples[, j]
+  }
+
+  # Add spatial effects (first 10 for summary, rest stored internally)
+  n_show <- min(10, n_spatial)
+  for (s in seq_len(n_show)) {
+    draws_list[[paste0("w_gp[", s, "]")]] <- samples[, spatial_start + s]
+  }
+
+  draws <- do.call(cbind, draws_list)
+  colnames(draws) <- names(draws_list)
+
+  fit <- list(
+    draws = draws,
+    formula = formula,
+    data = data,
+    family = family,
+    backend = "laplace",
+    n_save = n_samples,
+    laplace_result = result,
+    spatial_type = "gp",
+    .internal = list(
+      mode = result$mode,
+      log_marginal = result$log_marginal,
+      X = X,
+      re_info = re_info,
+      spatial = spatial,
+      w_gp = samples[, (spatial_start + 1):(spatial_start + n_spatial), drop = FALSE],
+      samples = samples
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
+  return(fit)
+}
+
+
+#' Fit multiscale temporal model using Laplace approximation
+#'
+#' @param formula A ratiod_formula object
+#' @param data Data frame
+#' @param family Model family
+#' @param family_type String family type for C++
+#' @param temporal Multiscale temporal structure specification
+#' @param y Response vector
+#' @param n_trials Trials vector
+#' @param X Design matrix
+#' @param re_info Random effects info
+#' @param phi Overdispersion parameter
+#' @param sigma_re RE standard deviation
+#' @param n_samples Number of posterior samples
+#' @param cores Number of cores
+#' @param verbose Print progress
+#'
+#' @return A ratiod_fit object
+#' @keywords internal
+fit_laplace_temporal <- function(formula,
+                                  data,
+                                  family,
+                                  family_type,
+                                  temporal,
+                                  y,
+                                  n_trials,
+                                  X,
+                                  re_info,
+                                  phi,
+                                  sigma_re,
+                                  n_samples,
+                                  cores,
+                                  verbose) {
+
+  if (verbose) {
+    message("Fitting multiscale temporal model with Laplace approximation...")
+  }
+
+  # Validate temporal specification
+  temporal <- validate_temporal_multiscale(temporal, data)
+
+  if (verbose) {
+    message(sprintf("  Time points: %d", temporal$n_times))
+    message(sprintf("  Components: %s", paste(temporal$components, collapse = ", ")))
+  }
+
+  # Map temporal types to C++ integers
+  trend_type <- switch(temporal$trend,
+    "none" = 0L,
+    "rw1" = 1L,
+    "rw2" = 2L,
+    0L
+  )
+
+  short_type <- switch(temporal$short_term,
+    "none" = 0L,
+    "ar1" = 1L,
+    "iid" = 2L,
+    0L
+  )
+
+  seasonal_period <- temporal$seasonal %||% 0L
+
+  # Default hyperparameters (could be made configurable)
+  sigma2_trend <- 1.0
+  sigma2_seasonal <- 1.0
+  sigma2_short <- 1.0
+  rho_short <- 0.5
+
+  if (verbose) {
+    message("Finding mode of posterior...")
+  }
+
+  result <- cpp_laplace_fit_multiscale_temporal(
+    y = as.integer(y),
+    n = as.integer(n_trials),
+    X = X,
+    re_idx = re_info$group_idx,
+    n_re_groups = re_info$n_groups,
+    sigma_re = sigma_re,
+    time_idx = temporal$time_index,
+    n_times = temporal$n_times,
+    seasonal_period = as.integer(seasonal_period),
+    trend_type = trend_type,
+    short_type = short_type,
+    sigma2_trend = sigma2_trend,
+    sigma2_seasonal = sigma2_seasonal,
+    sigma2_short = sigma2_short,
+    rho_short = rho_short,
+    family = family_type,
+    phi = phi,
+    max_iter = 100L,
+    tol = 1e-6,
+    n_threads = as.integer(cores)
+  )
+
+  if (!result$converged) {
+    warning("Laplace approximation did not converge")
+  }
+
+  if (verbose) {
+    message(sprintf("  Converged in %d iterations", result$n_iter))
+    message("Sampling from Laplace approximation...")
+  }
+
+  # Sample from Laplace approximation
+  samples <- cpp_laplace_sample(
+    mode = result$mode,
+    H = result$hessian,
+    n_samples = as.integer(n_samples)
+  )
+
+  # Convert to ratiod_fit
+  fit <- convert_laplace_temporal_to_ratiod_fit(
+    samples = samples,
+    result = result,
+    formula = formula,
+    data = data,
+    family = family,
+    X = X,
+    re_info = re_info,
+    temporal = temporal,
+    n_samples = n_samples
+  )
+
+  return(fit)
+}
+
+
+#' Convert temporal Laplace results to ratiod_fit
+#' @keywords internal
+convert_laplace_temporal_to_ratiod_fit <- function(samples, result, formula, data,
+                                                    family, X, re_info, temporal,
+                                                    n_samples) {
+  p <- ncol(X)
+  n_re <- re_info$n_groups
+  n_times <- temporal$n_times
+  seasonal_period <- temporal$seasonal %||% 0
+
+  # Parameter layout:
+  # [0:p-1] = beta
+  # [p:p+n_re-1] = random effects
+  # [p+n_re:...] = temporal components (trend, seasonal, short_term)
+
+  temporal_start <- p + n_re
+
+  # Extract fixed effects samples
+  beta_names <- colnames(X)
+  if (is.null(beta_names)) {
+    beta_names <- paste0("beta[", seq_len(p), "]")
+  }
+
+  draws_list <- list()
+  for (j in seq_len(p)) {
+    draws_list[[beta_names[j]]] <- samples[, j]
+  }
+
+  # Track position for temporal components
+  pos <- temporal_start
+
+  # Extract temporal components
+  temporal_draws <- list()
+
+  if (temporal$trend != "none") {
+    trend_samples <- samples[, (pos + 1):(pos + n_times), drop = FALSE]
+    temporal_draws$trend <- trend_samples
+    for (t in seq_len(min(5, n_times))) {
+      draws_list[[paste0("trend[", t, "]")]] <- trend_samples[, t]
+    }
+    pos <- pos + n_times
+  }
+
+  if (seasonal_period > 0) {
+    seasonal_samples <- samples[, (pos + 1):(pos + seasonal_period), drop = FALSE]
+    temporal_draws$seasonal <- seasonal_samples
+    for (s in seq_len(min(5, seasonal_period))) {
+      draws_list[[paste0("seasonal[", s, "]")]] <- seasonal_samples[, s]
+    }
+    pos <- pos + seasonal_period
+  }
+
+  if (temporal$short_term != "none") {
+    short_samples <- samples[, (pos + 1):(pos + n_times), drop = FALSE]
+    temporal_draws$short_term <- short_samples
+    for (t in seq_len(min(5, n_times))) {
+      draws_list[[paste0("short_term[", t, "]")]] <- short_samples[, t]
+    }
+    pos <- pos + n_times
+  }
+
+  draws <- do.call(cbind, draws_list)
+  colnames(draws) <- names(draws_list)
+
+  fit <- list(
+    draws = draws,
+    formula = formula,
+    data = data,
+    family = family,
+    backend = "laplace",
+    n_save = n_samples,
+    laplace_result = result,
+    temporal = temporal,
+    .internal = list(
+      mode = result$mode,
+      log_marginal = result$log_marginal,
+      X = X,
+      re_info = re_info,
+      temporal_draws = temporal_draws,
+      samples = samples
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
+  return(fit)
+}
+
+
+#' Convert BYM2 Laplace results to ratiod_fit
+#' @keywords internal
+convert_laplace_bym2_to_ratiod_fit <- function(samples, result, formula, data,
                                                 family, X, re_info, spatial_info,
                                                 sigma_spatial, rho, scale_factor,
                                                 n_samples) {
@@ -1100,6 +1614,343 @@ convert_laplace_bym2_to_quotr_fit <- function(samples, result, formula, data,
     )
   )
 
-  class(fit) <- "quotr_fit"
+  class(fit) <- "ratiod_fit"
+  return(fit)
+}
+
+
+#' Fit Laplace model with RSR (Restricted Spatial Regression)
+#'
+#' @description
+#' Laplace approximation with RSR to orthogonalize spatial effects
+#' to covariates, preventing spatial confounding.
+#'
+#' @keywords internal
+fit_laplace_rsr <- function(formula,
+                            data,
+                            family,
+                            family_type,
+                            spatial,
+                            spatial_info,
+                            y,
+                            n_trials,
+                            X,
+                            re_info,
+                            phi,
+                            sigma_re,
+                            tau_spatial,
+                            n_samples,
+                            cores,
+                            verbose) {
+
+  if (verbose) {
+    message("Fitting RSR spatial model with Laplace approximation...")
+  }
+
+  # Validate and compute RSR projection matrix
+  spatial <- validate_rsr(spatial, data, formula)
+
+  if (is.null(spatial$rsr_projection)) {
+    stop("Failed to compute RSR projection matrix", call. = FALSE)
+  }
+
+  rsr_projection <- spatial$rsr_projection
+  rsr_n <- nrow(rsr_projection)
+
+  if (verbose) {
+    message(sprintf("  RSR projection dimension: %d x %d", rsr_n, rsr_n))
+    message(sprintf("  Orthogonal to: %s", paste(spatial$rsr_vars, collapse = ", ")))
+  }
+
+  # Fit with RSR
+  if (verbose) {
+    message("Finding mode of posterior with RSR projection...")
+  }
+
+  result <- cpp_laplace_fit_rsr(
+    y = as.integer(y),
+    n = as.integer(n_trials),
+    X = X,
+    re_idx = re_info$group_idx,
+    n_re_groups = re_info$n_groups,
+    sigma_re = sigma_re,
+    spatial_idx = spatial_info$group_idx,
+    n_spatial_units = spatial_info$n_units,
+    adj_row_ptr = spatial_info$adj_row_ptr,
+    adj_col_idx = spatial_info$adj_col_idx,
+    n_neighbors = spatial_info$n_neighbors,
+    tau_spatial = tau_spatial,
+    rsr_projection = as.vector(t(rsr_projection)),  # Row-major flatten
+    rsr_n = as.integer(rsr_n),
+    family = family_type,
+    phi = phi,
+    n_threads = as.integer(cores)
+  )
+
+  if (!result$converged) {
+    warning("Laplace approximation with RSR did not converge")
+  }
+
+  if (verbose) {
+    message(sprintf("  Converged in %d iterations", result$n_iter))
+    message("Sampling from Laplace approximation...")
+  }
+
+  # Compute Hessian at mode for sampling
+  hess_result <- compute_hessian_rsr(
+    y = y,
+    n_trials = n_trials,
+    X = X,
+    re_idx = re_info$group_idx,
+    n_re_groups = re_info$n_groups,
+    spatial_idx = spatial_info$group_idx,
+    n_spatial_units = spatial_info$n_units,
+    adj_row_ptr = spatial_info$adj_row_ptr,
+    adj_col_idx = spatial_info$adj_col_idx,
+    n_neighbors = spatial_info$n_neighbors,
+    mode = result$mode,
+    family = family_type,
+    phi = phi,
+    sigma_re = sigma_re,
+    tau_spatial = tau_spatial,
+    rsr_projection = rsr_projection
+  )
+
+  # Sample from Laplace approximation
+  samples <- cpp_laplace_sample(
+    mode = result$mode,
+    H = hess_result$H,
+    n_samples = as.integer(n_samples)
+  )
+
+  # Convert to ratiod_fit
+  fit <- convert_laplace_rsr_to_ratiod_fit(
+    samples = samples,
+    result = result,
+    formula = formula,
+    data = data,
+    family = family,
+    X = X,
+    re_info = re_info,
+    spatial_info = spatial_info,
+    rsr_projection = rsr_projection,
+    n_samples = n_samples
+  )
+
+  return(fit)
+}
+
+
+#' Compute Hessian at mode for RSR model
+#' @keywords internal
+compute_hessian_rsr <- function(y, n_trials, X, re_idx, n_re_groups,
+                                spatial_idx, n_spatial_units,
+                                adj_row_ptr, adj_col_idx, n_neighbors,
+                                mode, family, phi, sigma_re, tau_spatial,
+                                rsr_projection) {
+  N <- length(y)
+  p <- ncol(X)
+  n_x <- p + n_re_groups + n_spatial_units
+  spatial_start <- p + n_re_groups
+
+  # Compute projected spatial effects
+  w_proj <- as.vector(rsr_projection %*% mode[(spatial_start + 1):n_x])
+
+  # Compute eta at mode with projected spatial effects
+  eta <- as.numeric(X %*% mode[1:p])
+  if (n_re_groups > 0) {
+    for (i in seq_len(N)) {
+      g <- as.integer(re_idx[i])
+      if (g > 0 && g <= n_re_groups) {
+        eta[i] <- eta[i] + mode[p + g]
+      }
+    }
+  }
+  if (n_spatial_units > 0) {
+    for (i in seq_len(N)) {
+      s <- as.integer(spatial_idx[i])
+      if (s > 0 && s <= n_spatial_units) {
+        eta[i] <- eta[i] + w_proj[s]
+      }
+    }
+  }
+
+  # Build Hessian with RSR transformation
+  H <- matrix(0, n_x, n_x)
+
+  # Compute negative Hessian of log-likelihood at each observation
+  h_diag <- numeric(N)
+  for (i in seq_len(N)) {
+    if (family == "binomial") {
+      p_i <- 1 / (1 + exp(-eta[i]))
+      h_diag[i] <- n_trials[i] * p_i * (1 - p_i)
+    } else if (family == "negbin") {
+      mu_i <- exp(eta[i])
+      h_diag[i] <- (y[i] + phi) * mu_i * phi / (mu_i + phi)^2
+    } else {
+      h_diag[i] <- exp(eta[i])
+    }
+  }
+
+  # Fixed effects block
+  for (j in seq_len(p)) {
+    for (k in seq_len(p)) {
+      H[j, k] <- sum(h_diag * X[, j] * X[, k])
+    }
+  }
+
+  # Random effects
+  if (n_re_groups > 0) {
+    for (i in seq_len(N)) {
+      g <- as.integer(re_idx[i])
+      if (g > 0 && g <= n_re_groups) {
+        H[p + g, p + g] <- H[p + g, p + g] + h_diag[i]
+        for (j in seq_len(p)) {
+          H[j, p + g] <- H[j, p + g] + h_diag[i] * X[i, j]
+          H[p + g, j] <- H[p + g, j] + h_diag[i] * X[i, j]
+        }
+      }
+    }
+  }
+
+  # Spatial effects with RSR transformation
+  # H_w = P' * diag(h_spatial) * P
+  if (n_spatial_units > 0) {
+    # First compute h for each spatial unit
+    h_spatial <- numeric(n_spatial_units)
+    for (i in seq_len(N)) {
+      s <- as.integer(spatial_idx[i])
+      if (s > 0 && s <= n_spatial_units) {
+        h_spatial[s] <- h_spatial[s] + h_diag[i]
+      }
+    }
+
+    # H_w = P' * diag(h_spatial) * P (P is symmetric, so P' = P)
+    H_spatial <- t(rsr_projection) %*% diag(h_spatial) %*% rsr_projection
+    H[(spatial_start + 1):n_x, (spatial_start + 1):n_x] <- H_spatial
+
+    # Cross-terms with fixed effects: through P
+    for (i in seq_len(N)) {
+      s <- as.integer(spatial_idx[i])
+      if (s > 0 && s <= n_spatial_units) {
+        for (j in seq_len(p)) {
+          for (k in seq_len(n_spatial_units)) {
+            P_sk <- rsr_projection[s, k]
+            H[j, spatial_start + k] <- H[j, spatial_start + k] + h_diag[i] * X[i, j] * P_sk
+            H[spatial_start + k, j] <- H[spatial_start + k, j] + h_diag[i] * X[i, j] * P_sk
+          }
+        }
+        # Cross-terms with random effects
+        if (n_re_groups > 0) {
+          g <- as.integer(re_idx[i])
+          if (g > 0 && g <= n_re_groups) {
+            for (k in seq_len(n_spatial_units)) {
+              P_sk <- rsr_projection[s, k]
+              H[p + g, spatial_start + k] <- H[p + g, spatial_start + k] + h_diag[i] * P_sk
+              H[spatial_start + k, p + g] <- H[spatial_start + k, p + g] + h_diag[i] * P_sk
+            }
+          }
+        }
+      }
+    }
+  }
+
+  # Add prior precision
+  tau_re <- 1 / (sigma_re^2 + 1e-10)
+  for (g in seq_len(n_re_groups)) {
+    H[p + g, p + g] <- H[p + g, p + g] + tau_re
+  }
+
+  # ICAR prior on spatial effects
+  if (n_spatial_units > 0) {
+    for (s in seq_len(n_spatial_units)) {
+      H[spatial_start + s, spatial_start + s] <- H[spatial_start + s, spatial_start + s] +
+        tau_spatial * n_neighbors[s]
+
+      for (k in (adj_row_ptr[s] + 1):adj_row_ptr[s + 1]) {
+        if (k <= length(adj_col_idx)) {
+          neighbor <- adj_col_idx[k]
+          H[spatial_start + s, spatial_start + neighbor] <-
+            H[spatial_start + s, spatial_start + neighbor] - tau_spatial
+        }
+      }
+    }
+  }
+
+  # Small regularization for fixed effects
+  for (j in seq_len(p)) {
+    H[j, j] <- H[j, j] + 1e-4
+  }
+
+  return(list(H = H))
+}
+
+
+#' Convert RSR Laplace results to ratiod_fit
+#' @keywords internal
+convert_laplace_rsr_to_ratiod_fit <- function(samples, result, formula, data,
+                                               family, X, re_info, spatial_info,
+                                               rsr_projection, n_samples) {
+  p <- ncol(X)
+  n_re <- re_info$n_groups
+  n_spatial <- spatial_info$n_units
+  spatial_start <- p + n_re
+
+  # Extract fixed effects samples
+  beta_names <- colnames(X)
+  if (is.null(beta_names)) {
+    beta_names <- paste0("beta[", seq_len(p), "]")
+  }
+
+  draws_list <- list()
+  for (j in seq_len(p)) {
+    draws_list[[beta_names[j]]] <- samples[, j]
+  }
+
+  # Compute projected spatial effects for each sample
+  if (n_spatial > 0) {
+    for (s in seq_len(n_spatial)) {
+      # Raw (unprojected) spatial effects
+      draws_list[[paste0("spatial_raw[", s, "]")]] <- samples[, spatial_start + s]
+    }
+
+    # Compute projected spatial effects
+    w_raw <- samples[, (spatial_start + 1):(spatial_start + n_spatial), drop = FALSE]
+    w_proj <- t(rsr_projection %*% t(w_raw))
+
+    for (s in seq_len(n_spatial)) {
+      draws_list[[paste0("spatial[", s, "]")]] <- w_proj[, s]
+    }
+  }
+
+  # Add hyperparameters as point estimates
+  if (n_re > 0) {
+    draws_list[["sigma_re"]] <- rep(1.0, n_samples)
+  }
+
+  draws <- do.call(cbind, draws_list)
+  colnames(draws) <- names(draws_list)
+
+  fit <- list(
+    draws = draws,
+    formula = formula,
+    data = data,
+    family = family,
+    backend = "laplace",
+    spatial_type = "rsr",
+    n_save = n_samples,
+    laplace_result = result,
+    .internal = list(
+      mode = result$mode,
+      log_marginal = result$log_marginal,
+      X = X,
+      re_info = re_info,
+      spatial_info = spatial_info,
+      rsr_projection = rsr_projection,
+      samples = samples
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
   return(fit)
 }

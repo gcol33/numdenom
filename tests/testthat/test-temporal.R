@@ -4,7 +4,7 @@
 test_that("temporal_rw1 creates correct structure", {
   temp <- temporal_rw1("time_var")
 
-  expect_s3_class(temp, "quotr_temporal")
+  expect_s3_class(temp, "ratiod_temporal")
   expect_equal(temp$type, "rw1")
   expect_equal(temp$time_var, "time_var")
   expect_false(temp$cyclic)
@@ -15,7 +15,7 @@ test_that("temporal_rw1 creates correct structure", {
 test_that("temporal_rw1 with cyclic option", {
   temp <- temporal_rw1("month", cyclic = TRUE)
 
-  expect_s3_class(temp, "quotr_temporal")
+  expect_s3_class(temp, "ratiod_temporal")
   expect_equal(temp$type, "rw1")
   expect_true(temp$cyclic)
 })
@@ -24,7 +24,7 @@ test_that("temporal_rw1 with cyclic option", {
 test_that("temporal_rw2 creates correct structure", {
   temp <- temporal_rw2("year")
 
-  expect_s3_class(temp, "quotr_temporal")
+  expect_s3_class(temp, "ratiod_temporal")
   expect_equal(temp$type, "rw2")
   expect_equal(temp$time_var, "year")
   expect_false(temp$cyclic)
@@ -35,7 +35,7 @@ test_that("temporal_rw2 creates correct structure", {
 test_that("temporal_ar1 creates correct structure", {
   temp <- temporal_ar1("time_var")
 
-  expect_s3_class(temp, "quotr_temporal")
+  expect_s3_class(temp, "ratiod_temporal")
   expect_equal(temp$type, "ar1")
   expect_equal(temp$time_var, "time_var")
   expect_true(temp$shared)
@@ -45,7 +45,7 @@ test_that("temporal_ar1 creates correct structure", {
 test_that("temporal with panel group", {
   temp <- temporal_rw1("year", group_var = "site")
 
-  expect_s3_class(temp, "quotr_temporal")
+  expect_s3_class(temp, "ratiod_temporal")
   expect_equal(temp$type, "rw1")
   expect_equal(temp$time_var, "year")
   expect_equal(temp$group_var, "site")
@@ -55,7 +55,7 @@ test_that("temporal with panel group", {
 test_that("temporal shared=FALSE works", {
   temp <- temporal_rw1("time_var", shared = FALSE)
 
-  expect_s3_class(temp, "quotr_temporal")
+  expect_s3_class(temp, "ratiod_temporal")
   expect_false(temp$shared)
 })
 
@@ -123,7 +123,7 @@ test_that("HMC with temporal RW1 runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau_temporal + 8 temporal = 12
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 12),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -208,7 +208,7 @@ test_that("HMC with temporal AR1 runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 1 logit_rho + 10 temporal = 15
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 15),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -285,7 +285,7 @@ test_that("HMC with cyclic RW1 (seasonal) runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 12 temporal = 16
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 16),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -367,7 +367,7 @@ test_that("HMC with panel temporal (group-specific) runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 15 temporal (5*3) = 19
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 19),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -438,7 +438,7 @@ test_that("HMC with temporal runs multiple chains in parallel", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau_temporal + 6 temporal = 10
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 10),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -497,4 +497,483 @@ test_that("HMC with temporal runs multiple chains in parallel", {
   chain1_mean <- colMeans(result$samples[[1]])
   chain2_mean <- colMeans(result$samples[[2]])
   expect_false(all(chain1_mean == chain2_mean))
+})
+
+
+# =============================================================================
+# Tests for temporal_gp() - Gaussian Process temporal structure
+# =============================================================================
+
+test_that("temporal_gp creates correct structure with exponential covariance", {
+  temp <- temporal_gp("timestamp")
+
+  expect_s3_class(temp, "ratiod_temporal_gp")
+  expect_s3_class(temp, "ratiod_temporal")
+  expect_equal(temp$type, "gp")
+  expect_equal(temp$time_var, "timestamp")
+  expect_equal(temp$cov, "exponential")
+  expect_true(temp$shared)
+  expect_true(temp$scale)
+})
+
+
+test_that("temporal_gp creates correct structure with matern covariance", {
+  temp <- temporal_gp("day", cov = "matern", nu = 2.5)
+
+  expect_s3_class(temp, "ratiod_temporal_gp")
+  expect_equal(temp$cov, "matern")
+  expect_equal(temp$nu, 2.5)
+})
+
+
+test_that("temporal_gp creates correct structure with periodic covariance", {
+  temp <- temporal_gp("month", cov = "periodic", period = 12)
+
+  expect_s3_class(temp, "ratiod_temporal_gp")
+  expect_equal(temp$cov, "periodic")
+  expect_equal(temp$period, 12)
+})
+
+
+test_that("temporal_gp validates period for periodic covariance", {
+  expect_error(
+    temporal_gp("month", cov = "periodic"),
+    regexp = "period.*must be.*positive"
+  )
+
+  expect_error(
+    temporal_gp("month", cov = "periodic", period = -5),
+    regexp = "period.*must be.*positive"
+  )
+})
+
+
+test_that("temporal_gp warns for non-shared effects", {
+  expect_warning(
+    temporal_gp("time", shared = FALSE),
+    regexp = "confounded"
+  )
+})
+
+
+test_that("temporal_gp print method works", {
+  temp <- temporal_gp("timestamp", cov = "matern", nu = 1.5)
+  output <- capture.output(print(temp))
+
+  expect_true(any(grepl("Gaussian Process", output, ignore.case = TRUE)))
+  expect_true(any(grepl("matern", output, ignore.case = TRUE)))
+  expect_true(any(grepl("nu", output)))
+})
+
+
+test_that("validate_temporal_gp extracts time values correctly", {
+  df <- data.frame(
+    y = rpois(20, 10),
+    n = rep(10, 20),
+    time = sort(runif(20, 0, 100))  # Irregularly-spaced
+  )
+
+  temp <- temporal_gp("time")
+  validated <- validate_temporal_gp(temp, df)
+
+  expect_equal(validated$n_obs, 20)
+  expect_equal(length(validated$time_values), 20)
+  expect_equal(validated$n_groups, 1)
+  expect_equal(validated$n_temporal_params, 20)
+})
+
+
+test_that("validate_temporal_gp handles date/time variables", {
+  df <- data.frame(
+    y = rpois(10, 10),
+    date = as.Date("2020-01-01") + 0:9
+  )
+
+  temp <- temporal_gp("date")
+  validated <- validate_temporal_gp(temp, df)
+
+  expect_equal(validated$n_obs, 10)
+  expect_true(is.numeric(validated$time_values))
+})
+
+
+test_that("validate_temporal_gp with grouping", {
+  df <- data.frame(
+    y = rpois(30, 10),
+    time = rep(1:10, 3),
+    group = rep(c("A", "B", "C"), each = 10)
+  )
+
+  temp <- temporal_gp("time", group_var = "group")
+  validated <- validate_temporal_gp(temp, df)
+
+  expect_equal(validated$n_groups, 3)
+  # For GP, we have one effect per observation per group
+  # With 30 obs and 3 groups, we get 30 * 3 = 90 temporal params
+  expect_equal(validated$n_temporal_params, 90)
+})
+
+
+# =============================================================================
+# Tests for temporal_tvc() - Temporally-Varying Coefficients
+# =============================================================================
+
+test_that("temporal_tvc creates correct structure with index terms", {
+  tvc <- temporal_tvc("year", terms = 1)
+
+  expect_s3_class(tvc, "ratiod_tvc")
+  expect_s3_class(tvc, "ratiod_temporal")
+  expect_equal(tvc$type, "tvc")
+  expect_equal(tvc$time_var, "year")
+  expect_equal(tvc$structure, "rw1")
+  expect_equal(tvc$terms_spec$type, "index")
+  expect_equal(tvc$terms_spec$indices, 1L)
+  expect_true(tvc$shared)
+})
+
+
+test_that("temporal_tvc creates correct structure with named terms", {
+  tvc <- temporal_tvc("year", terms = c("(Intercept)", "depth"))
+
+  expect_equal(tvc$terms_spec$type, "names")
+  expect_equal(tvc$terms_spec$names, c("(Intercept)", "depth"))
+})
+
+
+test_that("temporal_tvc creates correct structure with formula terms", {
+  tvc <- temporal_tvc("year", terms = ~ 1 + depth + temp)
+
+  expect_equal(tvc$terms_spec$type, "formula")
+  expect_true(inherits(tvc$terms_spec$formula, "formula"))
+})
+
+
+test_that("temporal_tvc supports different structures", {
+  tvc_rw1 <- temporal_tvc("year", terms = 1, structure = "rw1")
+  tvc_rw2 <- temporal_tvc("year", terms = 1, structure = "rw2")
+  tvc_ar1 <- temporal_tvc("year", terms = 1, structure = "ar1")
+  tvc_gp <- temporal_tvc("year", terms = 1, structure = "gp")
+
+  expect_equal(tvc_rw1$structure, "rw1")
+  expect_equal(tvc_rw2$structure, "rw2")
+  expect_equal(tvc_ar1$structure, "ar1")
+  expect_equal(tvc_gp$structure, "gp")
+})
+
+
+test_that("temporal_tvc warns for non-shared effects", {
+  expect_warning(
+    temporal_tvc("year", terms = 1, shared = FALSE),
+    regexp = "confounded"
+  )
+})
+
+
+test_that("temporal_tvc print method works", {
+  tvc <- temporal_tvc("year", terms = c(1, 2), structure = "rw2")
+  output <- capture.output(print(tvc))
+
+  expect_true(any(grepl("temporally-varying", output, ignore.case = TRUE)))
+  expect_true(any(grepl("RW2", output)))
+})
+
+
+test_that("validate_tvc resolves index terms correctly", {
+  df <- data.frame(
+    y = rpois(30, 10),
+    x = rnorm(30),
+    year = rep(2020:2024, each = 6)
+  )
+  X <- model.matrix(~ 1 + x, data = df)
+
+  tvc <- temporal_tvc("year", terms = c(1, 2))  # Intercept and x
+  validated <- validate_tvc(tvc, df, X)
+
+  expect_equal(validated$n_times, 5)
+  expect_equal(validated$n_tvc, 2)
+  expect_equal(validated$tvc_names, c("(Intercept)", "x"))
+  expect_equal(validated$n_temporal_params, 10)  # 5 times * 2 terms
+})
+
+
+test_that("validate_tvc resolves named terms correctly", {
+  df <- data.frame(
+    y = rpois(30, 10),
+    x = rnorm(30),
+    z = rnorm(30),
+    year = rep(2020:2024, each = 6)
+  )
+  X <- model.matrix(~ 1 + x + z, data = df)
+
+  tvc <- temporal_tvc("year", terms = c("x", "z"))
+  validated <- validate_tvc(tvc, df, X)
+
+  expect_equal(validated$n_tvc, 2)
+  expect_equal(validated$tvc_names, c("x", "z"))
+  expect_equal(validated$tvc_indices, c(2, 3))  # Columns 2 and 3 in X
+})
+
+
+test_that("validate_tvc errors on missing terms", {
+  df <- data.frame(
+    y = rpois(30, 10),
+    x = rnorm(30),
+    year = rep(2020:2024, each = 6)
+  )
+  X <- model.matrix(~ 1 + x, data = df)
+
+  tvc <- temporal_tvc("year", terms = c("missing_var"))
+
+  expect_error(
+    validate_tvc(tvc, df, X),
+    regexp = "not found in design matrix"
+  )
+})
+
+
+test_that("validate_tvc with panel groups", {
+  df <- data.frame(
+    y = rpois(60, 10),
+    x = rnorm(60),
+    year = rep(2020:2024, each = 12),
+    site = rep(c("A", "B"), each = 6, times = 5)
+  )
+  X <- model.matrix(~ 1 + x, data = df)
+
+  tvc <- temporal_tvc("year", terms = 1, group_var = "site")
+  validated <- validate_tvc(tvc, df, X)
+
+  expect_equal(validated$n_times, 5)
+  expect_equal(validated$n_groups, 2)
+  expect_equal(validated$n_tvc, 1)
+  expect_equal(validated$n_temporal_params, 10)  # 5 times * 1 term * 2 groups
+})
+
+
+# =============================================================================
+# Tests for temporal_rtr() - Restricted Temporal Regression
+# =============================================================================
+
+test_that("temporal_rtr creates correct structure", {
+  base_temp <- temporal_rw2("year")
+  rtr <- temporal_rtr(base_temp, restrict_to = ~ temperature)
+
+  expect_s3_class(rtr, "ratiod_rtr")
+  expect_s3_class(rtr, "ratiod_temporal")
+  expect_equal(rtr$type, "rw2")  # Preserves base type
+  expect_true(rtr$rtr)
+  expect_true(inherits(rtr$rtr_formula, "formula"))
+})
+
+
+test_that("temporal_rtr works with different base temporal types", {
+  rtr_rw1 <- temporal_rtr(temporal_rw1("year"), restrict_to = ~ x)
+  rtr_gp <- temporal_rtr(temporal_gp("time"), restrict_to = ~ x)
+
+  expect_s3_class(rtr_rw1, "ratiod_rtr")
+  expect_equal(rtr_rw1$type, "rw1")
+
+  expect_s3_class(rtr_gp, "ratiod_rtr")
+  expect_equal(rtr_gp$type, "gp")
+})
+
+
+test_that("temporal_rtr validates inputs", {
+  expect_error(
+    temporal_rtr("not_a_temporal", restrict_to = ~ x),
+    regexp = "temporal specification"
+  )
+
+  expect_error(
+    temporal_rtr(temporal_rw2("year"), restrict_to = "not_a_formula"),
+    regexp = "formula"
+  )
+})
+
+
+test_that("temporal_rtr print method works", {
+  rtr <- temporal_rtr(temporal_rw2("year"), restrict_to = ~ temp + precip)
+  output <- capture.output(print(rtr))
+
+  expect_true(any(grepl("RTR", output)))
+  expect_true(any(grepl("Orthogonal", output)))
+  expect_true(any(grepl("temp", output)))
+})
+
+
+test_that("validate_rtr computes projection matrix", {
+  df <- data.frame(
+    y = rpois(50, 10),
+    year = rep(2020:2024, each = 10),
+    temp = rnorm(50),
+    precip = rnorm(50)
+  )
+
+  rtr <- temporal_rtr(temporal_rw2("year"), restrict_to = ~ temp + precip)
+  validated <- validate_rtr(rtr, df, ~ y ~ temp + precip)
+
+  expect_true(!is.null(validated$rtr_projection))
+  expect_equal(nrow(validated$rtr_projection), 50)
+  expect_equal(ncol(validated$rtr_projection), 50)
+  expect_equal(validated$rtr_vars, c("temp", "precip"))
+})
+
+
+test_that("validate_rtr errors on missing variables", {
+  df <- data.frame(
+    y = rpois(50, 10),
+    year = rep(2020:2024, each = 10),
+    temp = rnorm(50)
+  )
+
+  rtr <- temporal_rtr(temporal_rw2("year"), restrict_to = ~ temp + missing)
+
+  expect_error(
+    validate_rtr(rtr, df, ~ y ~ temp),
+    regexp = "not found in data"
+  )
+})
+
+
+test_that("compute_rtr_projection is orthogonal", {
+  X <- matrix(rnorm(100), 50, 2)
+  P_perp <- compute_rtr_projection(X)
+
+  # P_perp should be symmetric
+  expect_true(all(abs(P_perp - t(P_perp)) < 1e-10))
+
+  # P_perp * X should be approximately zero (orthogonal)
+  result <- P_perp %*% X
+  expect_true(all(abs(result) < 1e-10))
+
+  # P_perp should be idempotent (projection property)
+  P_perp_squared <- P_perp %*% P_perp
+  expect_true(all(abs(P_perp - P_perp_squared) < 1e-10))
+})
+
+
+test_that("apply_rtr_projection works correctly", {
+  X <- matrix(rnorm(100), 50, 2)
+  P_perp <- compute_rtr_projection(X)
+
+  # Random temporal effect
+  f <- rnorm(50)
+
+  # Projected effect
+  f_rtr <- apply_rtr_projection(f, P_perp)
+
+  # f_rtr should be orthogonal to X columns
+  for (j in 1:2) {
+    dot_product <- sum(f_rtr * X[, j])
+    expect_true(abs(dot_product) < 1e-10)
+  }
+})
+
+
+# =============================================================================
+# Tests for tvc() extractor function
+# =============================================================================
+
+test_that("tvc extractor creates ratiod_tvc_posterior object", {
+  # Mock a ratiod_fit object with TVC
+  mock_fit <- structure(
+    list(
+      tvc = structure(
+        list(
+          type = "tvc",
+          n_times = 5,
+          n_tvc = 2,
+          tvc_names = c("(Intercept)", "x"),
+          time_levels = as.character(2020:2024),
+          structure = "rw1"
+        ),
+        class = c("ratiod_tvc", "ratiod_temporal", "list")
+      ),
+      .internal = list(
+        tvc_draws = array(rnorm(400 * 5 * 2), dim = c(400, 5, 2))
+      )
+    ),
+    class = "ratiod_fit"
+  )
+
+  result <- tvc(mock_fit)
+
+  expect_s3_class(result, "ratiod_tvc_posterior")
+  expect_equal(dim(result$draws), c(400, 5, 2))
+  expect_equal(result$n_times, 5)
+  expect_equal(result$n_tvc, 2)
+  expect_equal(result$term_names, c("(Intercept)", "x"))
+})
+
+
+test_that("tvc extractor subsets terms correctly", {
+  mock_fit <- structure(
+    list(
+      tvc = structure(
+        list(
+          type = "tvc",
+          n_times = 5,
+          n_tvc = 3,
+          tvc_names = c("(Intercept)", "x", "z"),
+          time_levels = as.character(2020:2024),
+          structure = "rw1"
+        ),
+        class = c("ratiod_tvc", "ratiod_temporal", "list")
+      ),
+      .internal = list(
+        tvc_draws = array(rnorm(400 * 5 * 3), dim = c(400, 5, 3))
+      )
+    ),
+    class = "ratiod_fit"
+  )
+
+  result <- tvc(mock_fit, terms = "x")
+
+  expect_equal(result$n_tvc, 1)
+  expect_equal(result$term_names, "x")
+  expect_equal(dim(result$draws), c(400, 5, 1))
+})
+
+
+test_that("tvc summary method works", {
+  mock_fit <- structure(
+    list(
+      tvc = structure(
+        list(
+          type = "tvc",
+          n_times = 3,
+          n_tvc = 1,
+          tvc_names = c("(Intercept)"),
+          time_levels = as.character(2020:2022),
+          structure = "rw1"
+        ),
+        class = c("ratiod_tvc", "ratiod_temporal", "list")
+      ),
+      .internal = list(
+        tvc_draws = array(rnorm(100 * 3 * 1), dim = c(100, 3, 1))
+      )
+    ),
+    class = "ratiod_fit"
+  )
+
+  result <- tvc(mock_fit, summary = TRUE)
+
+  expect_s3_class(result, "ratiod_tvc_summary")
+  expect_s3_class(result, "data.frame")
+  expect_equal(nrow(result), 3)  # 3 time points
+  expect_true("mean" %in% names(result))
+  expect_true("sd" %in% names(result))
+})
+
+
+test_that("tvc errors when model has no TVC", {
+  mock_fit <- structure(
+    list(tvc = NULL),
+    class = "ratiod_fit"
+  )
+
+  expect_error(
+    tvc(mock_fit),
+    regexp = "not fitted with temporally-varying coefficients"
+  )
 })

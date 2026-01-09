@@ -1,5 +1,5 @@
 // linalg_fast.h
-// Fast linear algebra operations for quotr HMC
+// Fast linear algebra operations for ratiod HMC
 // Uses cache-friendly algorithms and SIMD-friendly patterns
 
 #ifndef QUOTR_LINALG_FAST_H
@@ -14,7 +14,7 @@
 #include <omp.h>
 #endif
 
-namespace quotr_linalg {
+namespace ratiod_linalg {
 
 // ============================================================================
 // Vector operations (SIMD-friendly)
@@ -289,6 +289,6 @@ inline void softmax_inplace(double* x, int n) {
   }
 }
 
-}  // namespace quotr_linalg
+}  // namespace ratiod_linalg
 
 #endif  // QUOTR_LINALG_FAST_H

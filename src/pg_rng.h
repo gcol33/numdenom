@@ -8,7 +8,7 @@
 #include <Rcpp.h>
 #include <cmath>
 
-namespace quotr {
+namespace ratiod {
 
 // Sample from PG(1, z) using the Devroye method
 // This is the core sampler for Pólya-Gamma augmentation
@@ -52,6 +52,6 @@ inline double cosh_safe(double x) {
   return std::cosh(x);
 }
 
-} // namespace quotr
+} // namespace ratiod
 
 #endif // QUOTR_PG_RNG_H

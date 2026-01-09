@@ -1,5 +1,5 @@
 // laplace_core.h
-// Core Laplace approximation engine for quotr
+// Core Laplace approximation engine for ratiod
 // Implements nested Laplace approximation for latent Gaussian models
 
 #ifndef QUOTR_LAPLACE_CORE_H
@@ -8,7 +8,7 @@
 #include <Rcpp.h>
 #include <vector>
 
-namespace quotr {
+namespace ratiod {
 
 // ---------------------------------------------------------------------
 // Likelihood functions for different families
@@ -138,6 +138,6 @@ Rcpp::NumericMatrix sample_laplace_posterior(
     int n_samples
 );
 
-} // namespace quotr
+} // namespace ratiod
 
 #endif // QUOTR_LAPLACE_CORE_H

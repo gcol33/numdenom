@@ -1,14 +1,14 @@
 #ifndef QUOTR_HMC_ZI_H
 #define QUOTR_HMC_ZI_H
 
-// Zero-inflation and hurdle model support for quotr HMC
+// Zero-inflation and hurdle model support for ratiod HMC
 // Provides log-likelihood functions for ZI-Poisson, ZI-NegBin,
 // and hurdle variants
 
 #include <cmath>
 #include <algorithm>
 
-namespace quotr_zi {
+namespace ratiod_zi {
 
 // Enum for ZI model types
 enum class ZIType {
@@ -285,6 +285,6 @@ inline double hurdle_grad_logit_theta(int y, double logit_theta) {
   }
 }
 
-}  // namespace quotr_zi
+}  // namespace ratiod_zi
 
 #endif  // QUOTR_HMC_ZI_H

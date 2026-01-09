@@ -1,6 +1,6 @@
 // hmc_sampler.cpp
 // Full HMC/NUTS backend with spatial, temporal, and ZI support
-// Provides Stan-free Bayesian inference for all quotr models
+// Provides Stan-free Bayesian inference for all ratiod models
 
 #include "hmc_sampler.h"
 #include "linalg_fast.h"
@@ -16,7 +16,7 @@
 
 using namespace Rcpp;
 
-namespace quotr_hmc {
+namespace ratiod_hmc {
 
 // =====================================================================
 // Parameter layout computation
@@ -36,13 +36,42 @@ ParamLayout compute_param_layout(const ModelData& data) {
   idx += data.p_denom;
   layout.beta_denom_end = idx;
 
-  // Random effects
-  layout.has_re = (data.n_re_groups > 0);
-  if (layout.has_re) {
+  // Random effects (supports multiple crossed RE terms)
+  layout.has_re = (data.n_re_groups > 0 || data.total_re_groups > 0);
+
+  if (data.n_re_terms > 1) {
+    // Multiple RE terms: allocate sigma and RE for each term
+    layout.log_sigma_re_multi.resize(data.n_re_terms);
+    layout.re_start_multi.resize(data.n_re_terms);
+    layout.re_end_multi.resize(data.n_re_terms);
+
+    for (int t = 0; t < data.n_re_terms; t++) {
+      layout.log_sigma_re_multi[t] = idx++;
+    }
+    for (int t = 0; t < data.n_re_terms; t++) {
+      layout.re_start_multi[t] = idx;
+      idx += data.re_n_groups_multi[t];
+      layout.re_end_multi[t] = idx;
+    }
+
+    // Set legacy fields to first term for backwards compatibility
+    layout.log_sigma_re_idx = layout.log_sigma_re_multi[0];
+    layout.re_start = layout.re_start_multi[0];
+    layout.re_end = layout.re_end_multi[0];
+  } else if (layout.has_re) {
+    // Single RE term
     layout.log_sigma_re_idx = idx++;
     layout.re_start = idx;
     idx += data.n_re_groups;
     layout.re_end = idx;
+
+    // Also set multi arrays for consistency
+    layout.log_sigma_re_multi.resize(1);
+    layout.log_sigma_re_multi[0] = layout.log_sigma_re_idx;
+    layout.re_start_multi.resize(1);
+    layout.re_start_multi[0] = layout.re_start;
+    layout.re_end_multi.resize(1);
+    layout.re_end_multi[0] = layout.re_end;
   } else {
     layout.log_sigma_re_idx = -1;
     layout.re_start = layout.re_end = -1;
@@ -133,6 +162,104 @@ ParamLayout compute_param_layout(const ModelData& data) {
   } else {
     layout.beta_zi_start = layout.beta_zi_end = -1;
   }
+
+  // GP spatial parameters
+  layout.is_gp = (data.spatial_type == SpatialType::GP);
+  layout.is_multiscale_gp = (data.spatial_type == SpatialType::MULTISCALE_GP);
+
+  if (layout.is_gp && data.has_gp) {
+    layout.log_sigma2_gp_idx = idx++;
+    layout.log_phi_gp_idx = idx++;
+    layout.gp_w_start = idx;
+    idx += data.gp_data.n_obs;
+    layout.gp_w_end = idx;
+  } else {
+    layout.log_sigma2_gp_idx = -1;
+    layout.log_phi_gp_idx = -1;
+    layout.gp_w_start = layout.gp_w_end = -1;
+  }
+
+  // Multi-scale GP parameters
+  if (layout.is_multiscale_gp && data.has_multiscale_gp) {
+    // Local scale
+    layout.log_sigma2_gp_local_idx = idx++;
+    layout.log_phi_gp_local_idx = idx++;
+    layout.gp_local_start = idx;
+    idx += data.multiscale_gp_data.n_obs;
+    layout.gp_local_end = idx;
+
+    // Regional scale
+    layout.log_sigma2_gp_regional_idx = idx++;
+    layout.log_phi_gp_regional_idx = idx++;
+    layout.gp_regional_start = idx;
+    idx += data.multiscale_gp_data.n_obs;
+    layout.gp_regional_end = idx;
+  } else {
+    layout.log_sigma2_gp_local_idx = -1;
+    layout.log_phi_gp_local_idx = -1;
+    layout.gp_local_start = layout.gp_local_end = -1;
+    layout.log_sigma2_gp_regional_idx = -1;
+    layout.log_phi_gp_regional_idx = -1;
+    layout.gp_regional_start = layout.gp_regional_end = -1;
+  }
+
+  // Multi-scale temporal parameters
+  layout.has_multiscale_temporal = data.has_multiscale_temporal;
+
+  if (layout.has_multiscale_temporal) {
+    // Trend component
+    if (data.multiscale_temporal_data.trend_type != ratiod_temporal::TemporalType::NONE) {
+      layout.log_sigma2_trend_idx = idx++;
+      layout.trend_start = idx;
+      idx += data.multiscale_temporal_data.n_times;
+      layout.trend_end = idx;
+    } else {
+      layout.log_sigma2_trend_idx = -1;
+      layout.trend_start = layout.trend_end = -1;
+    }
+
+    // Seasonal component
+    if (data.multiscale_temporal_data.seasonal_period > 0) {
+      layout.log_sigma2_seasonal_idx = idx++;
+      layout.seasonal_start = idx;
+      idx += data.multiscale_temporal_data.seasonal_period;
+      layout.seasonal_end = idx;
+    } else {
+      layout.log_sigma2_seasonal_idx = -1;
+      layout.seasonal_start = layout.seasonal_end = -1;
+    }
+
+    // Short-term component
+    if (data.multiscale_temporal_data.short_term_type != ratiod_temporal::TemporalType::NONE) {
+      layout.log_sigma2_short_idx = idx++;
+      if (data.multiscale_temporal_data.short_term_type == ratiod_temporal::TemporalType::AR1) {
+        layout.logit_rho_short_idx = idx++;
+      } else {
+        layout.logit_rho_short_idx = -1;
+      }
+      layout.short_term_start = idx;
+      idx += data.multiscale_temporal_data.n_times;
+      layout.short_term_end = idx;
+    } else {
+      layout.log_sigma2_short_idx = -1;
+      layout.logit_rho_short_idx = -1;
+      layout.short_term_start = layout.short_term_end = -1;
+    }
+  } else {
+    layout.log_sigma2_trend_idx = -1;
+    layout.trend_start = layout.trend_end = -1;
+    layout.log_sigma2_seasonal_idx = -1;
+    layout.seasonal_start = layout.seasonal_end = -1;
+    layout.log_sigma2_short_idx = -1;
+    layout.logit_rho_short_idx = -1;
+    layout.short_term_start = layout.short_term_end = -1;
+  }
+
+  // SVC not yet integrated into GP interface
+  layout.has_svc = data.has_svc;
+  layout.log_sigma2_svc_start = layout.log_sigma2_svc_end = -1;
+  layout.log_phi_svc_start = layout.log_phi_svc_end = -1;
+  layout.svc_w_start = layout.svc_w_end = -1;
 
   layout.total_params = idx;
   return layout;
@@ -268,19 +395,34 @@ double compute_log_post(
     log_post -= 0.5 * tau_beta * beta_denom[j] * beta_denom[j];
   }
 
-  // Random effects SD: Half-Cauchy(0, scale)
+  // Random effects priors (supports multiple crossed RE terms)
   if (layout.has_re) {
-    double ratio = sigma_re / data.sigma_re_scale;
-    log_post -= std::log(1.0 + ratio * ratio);
-    log_post += log_sigma_re;  // Jacobian
+    int n_terms = (data.n_re_terms > 0) ? data.n_re_terms : 1;
 
-    // Random effects: N(0, sigma_re^2)
-    double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-    for (int g = 0; g < data.n_re_groups; g++) {
-      log_post -= 0.5 * tau_re * re[g] * re[g];
-      log_post += 0.5 * std::log(tau_re);
+    for (int t = 0; t < n_terms; t++) {
+      // Get sigma_re for this term
+      int log_sigma_idx = (n_terms > 1) ? layout.log_sigma_re_multi[t] : layout.log_sigma_re_idx;
+      double log_sigma = params[log_sigma_idx];
+      double sigma = std::exp(log_sigma);
+
+      // Half-Cauchy(0, scale) prior for sigma_re
+      double ratio = sigma / data.sigma_re_scale;
+      log_post -= std::log(1.0 + ratio * ratio);
+      log_post += log_sigma;  // Jacobian
+
+      // Get RE parameters for this term
+      int re_start = (n_terms > 1) ? layout.re_start_multi[t] : layout.re_start;
+      int n_groups = (n_terms > 1) ? data.re_n_groups_multi[t] : data.n_re_groups;
+
+      // Random effects: N(0, sigma_re^2)
+      double tau_re = 1.0 / (sigma * sigma + 1e-10);
+      for (int g = 0; g < n_groups; g++) {
+        double re_val = params[re_start + g];
+        log_post -= 0.5 * tau_re * re_val * re_val;
+        log_post += 0.5 * std::log(tau_re);
+      }
+      log_post -= 0.5 * n_groups * std::log(2.0 * M_PI);
     }
-    log_post -= 0.5 * data.n_re_groups * std::log(2.0 * M_PI);
   }
 
   // Overdispersion: Gamma prior
@@ -372,23 +514,196 @@ double compute_log_post(
       const double* phi_g = phi_temporal + g * T;
 
       if (data.temporal_type == TemporalType::RW1) {
-        double quad = quotr_temporal::rw1_quadratic_form(phi_g, T, data.temporal_cyclic);
+        double quad = ratiod_temporal::rw1_quadratic_form(phi_g, T, data.temporal_cyclic);
         int rank = data.temporal_cyclic ? T : T - 1;
         log_post += 0.5 * rank * log_tau_temporal - 0.5 * tau_temporal * quad;
         // Soft sum-to-zero constraint
-        log_post += quotr_temporal::sum_to_zero_penalty(phi_g, T, 0.001);
+        log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, 0.001);
 
       } else if (data.temporal_type == TemporalType::RW2) {
-        double quad = quotr_temporal::rw2_quadratic_form(phi_g, T, data.temporal_cyclic);
+        double quad = ratiod_temporal::rw2_quadratic_form(phi_g, T, data.temporal_cyclic);
         int rank = data.temporal_cyclic ? T : T - 2;
         log_post += 0.5 * rank * log_tau_temporal - 0.5 * tau_temporal * quad;
         // Soft sum-to-zero constraint
-        log_post += quotr_temporal::sum_to_zero_penalty(phi_g, T, 0.001);
+        log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, 0.001);
 
       } else if (data.temporal_type == TemporalType::AR1) {
-        log_post += quotr_temporal::ar1_log_density(phi_g, T, rho_ar1, tau_temporal);
+        log_post += ratiod_temporal::ar1_log_density(phi_g, T, rho_ar1, tau_temporal);
       }
     }
+  }
+
+  // GP spatial priors
+  double sigma2_gp = 1.0, phi_gp = 1.0;
+  const double* gp_w = nullptr;
+
+  if (layout.is_gp && data.has_gp) {
+    double log_sigma2_gp = params[layout.log_sigma2_gp_idx];
+    double log_phi_gp = params[layout.log_phi_gp_idx];
+    sigma2_gp = std::exp(log_sigma2_gp);
+    phi_gp = std::exp(log_phi_gp);
+    gp_w = &params[layout.gp_w_start];
+
+    // PC prior on sigma2 (favor smaller variance)
+    log_post += ratiod_gp::log_prior_sigma2_pc(sigma2_gp, data.gp_sigma2_prior_U,
+                                                data.gp_sigma2_prior_alpha);
+    log_post += log_sigma2_gp;  // Jacobian for log transform
+
+    // Uniform prior on phi within bounds
+    log_post += ratiod_gp::log_prior_phi_uniform(phi_gp, data.gp_phi_prior_lower,
+                                                  data.gp_phi_prior_upper);
+    log_post += log_phi_gp;  // Jacobian
+
+    // NNGP prior on spatial effects
+    std::vector<double> w_vec(gp_w, gp_w + data.gp_data.n_obs);
+
+    // Apply RSR projection if enabled
+    if (data.has_rsr && !data.rsr_projection.empty()) {
+      std::vector<double> w_projected(data.rsr_n, 0.0);
+      for (int i = 0; i < data.rsr_n; i++) {
+        for (int j = 0; j < data.rsr_n; j++) {
+          w_projected[i] += data.rsr_projection[i * data.rsr_n + j] * w_vec[j];
+        }
+      }
+      w_vec = w_projected;
+    }
+
+    log_post += ratiod_gp::gp_nngp_log_lik(w_vec, sigma2_gp, phi_gp, data.gp_data);
+  }
+
+  // Multi-scale GP spatial priors
+  double sigma2_local = 1.0, phi_local = 1.0;
+  double sigma2_regional = 1.0, phi_regional = 1.0;
+  const double* gp_local = nullptr;
+  const double* gp_regional = nullptr;
+
+  if (layout.is_multiscale_gp && data.has_multiscale_gp) {
+    // Local scale parameters
+    double log_sigma2_local = params[layout.log_sigma2_gp_local_idx];
+    double log_phi_local = params[layout.log_phi_gp_local_idx];
+    sigma2_local = std::exp(log_sigma2_local);
+    phi_local = std::exp(log_phi_local);
+    gp_local = &params[layout.gp_local_start];
+
+    // Regional scale parameters
+    double log_sigma2_regional = params[layout.log_sigma2_gp_regional_idx];
+    double log_phi_regional = params[layout.log_phi_gp_regional_idx];
+    sigma2_regional = std::exp(log_sigma2_regional);
+    phi_regional = std::exp(log_phi_regional);
+    gp_regional = &params[layout.gp_regional_start];
+
+    // PC priors on variances
+    log_post += ratiod_gp::log_prior_sigma2_pc(sigma2_local, data.ms_sigma2_local_prior_U,
+                                                data.ms_sigma2_local_prior_alpha);
+    log_post += log_sigma2_local;
+
+    log_post += ratiod_gp::log_prior_sigma2_pc(sigma2_regional, data.ms_sigma2_regional_prior_U,
+                                                data.ms_sigma2_regional_prior_alpha);
+    log_post += log_sigma2_regional;
+
+    // Range priors (uniform within bounds)
+    if (phi_local < data.multiscale_gp_data.range_local_lower ||
+        phi_local > data.multiscale_gp_data.range_local_upper) {
+      return -std::numeric_limits<double>::infinity();
+    }
+    log_post += log_phi_local;
+
+    if (phi_regional < data.multiscale_gp_data.range_regional_lower ||
+        phi_regional > data.multiscale_gp_data.range_regional_upper) {
+      return -std::numeric_limits<double>::infinity();
+    }
+    log_post += log_phi_regional;
+
+    // NNGP likelihood for each scale
+    std::vector<double> w_local_vec(gp_local, gp_local + data.multiscale_gp_data.n_obs);
+    std::vector<double> w_regional_vec(gp_regional, gp_regional + data.multiscale_gp_data.n_obs);
+
+    // Apply RSR projection if enabled
+    if (data.has_rsr && !data.rsr_projection.empty()) {
+      std::vector<double> local_proj(data.rsr_n, 0.0);
+      std::vector<double> regional_proj(data.rsr_n, 0.0);
+      for (int i = 0; i < data.rsr_n; i++) {
+        for (int j = 0; j < data.rsr_n; j++) {
+          local_proj[i] += data.rsr_projection[i * data.rsr_n + j] * w_local_vec[j];
+          regional_proj[i] += data.rsr_projection[i * data.rsr_n + j] * w_regional_vec[j];
+        }
+      }
+      w_local_vec = local_proj;
+      w_regional_vec = regional_proj;
+    }
+
+    log_post += ratiod_gp::multiscale_gp_log_lik(w_local_vec, w_regional_vec,
+                                                  sigma2_local, phi_local,
+                                                  sigma2_regional, phi_regional,
+                                                  data.multiscale_gp_data);
+  }
+
+  // Multi-scale temporal priors
+  double sigma2_trend = 1.0, sigma2_seasonal = 1.0, sigma2_short = 1.0;
+  double rho_short = 0.5;
+  const double* trend = nullptr;
+  const double* seasonal = nullptr;
+  const double* short_term = nullptr;
+
+  if (layout.has_multiscale_temporal) {
+    std::vector<double> trend_vec, seasonal_vec, short_term_vec;
+
+    // Trend component
+    if (layout.log_sigma2_trend_idx >= 0) {
+      double log_sigma2_trend = params[layout.log_sigma2_trend_idx];
+      sigma2_trend = std::exp(log_sigma2_trend);
+      trend = &params[layout.trend_start];
+      trend_vec.assign(trend, trend + data.multiscale_temporal_data.n_times);
+
+      // PC prior
+      log_post += ratiod_temporal::log_prior_sigma2_temporal_pc(
+        sigma2_trend, data.ms_sigma2_trend_prior_U, data.ms_sigma2_trend_prior_alpha);
+      log_post += log_sigma2_trend;
+    }
+
+    // Seasonal component
+    if (layout.log_sigma2_seasonal_idx >= 0) {
+      double log_sigma2_seasonal = params[layout.log_sigma2_seasonal_idx];
+      sigma2_seasonal = std::exp(log_sigma2_seasonal);
+      seasonal = &params[layout.seasonal_start];
+      seasonal_vec.assign(seasonal, seasonal + data.multiscale_temporal_data.seasonal_period);
+
+      // PC prior
+      log_post += ratiod_temporal::log_prior_sigma2_temporal_pc(
+        sigma2_seasonal, data.ms_sigma2_seasonal_prior_U, data.ms_sigma2_seasonal_prior_alpha);
+      log_post += log_sigma2_seasonal;
+    }
+
+    // Short-term component
+    if (layout.log_sigma2_short_idx >= 0) {
+      double log_sigma2_short = params[layout.log_sigma2_short_idx];
+      sigma2_short = std::exp(log_sigma2_short);
+      short_term = &params[layout.short_term_start];
+      short_term_vec.assign(short_term, short_term + data.multiscale_temporal_data.n_times);
+
+      // PC prior
+      log_post += ratiod_temporal::log_prior_sigma2_temporal_pc(
+        sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha);
+      log_post += log_sigma2_short;
+
+      // AR1 rho parameter
+      if (layout.logit_rho_short_idx >= 0) {
+        double logit_rho_short = params[layout.logit_rho_short_idx];
+        rho_short = 2.0 / (1.0 + std::exp(-logit_rho_short)) - 1.0;  // Map to (-1, 1)
+
+        // Prior on rho (Beta(2,2) on transformed scale)
+        log_post += ratiod_temporal::log_prior_rho(rho_short, 2.0, 2.0);
+        // Jacobian for logit transform
+        double x = (rho_short + 1.0) / 2.0;
+        log_post += std::log(x) + std::log(1.0 - x);
+      }
+    }
+
+    // Multi-scale temporal log-likelihood
+    log_post += ratiod_temporal::multiscale_temporal_log_lik(
+      trend_vec, seasonal_vec, short_term_vec,
+      sigma2_trend, sigma2_seasonal, sigma2_short, rho_short,
+      data.multiscale_temporal_data);
   }
 
   // ============ LIKELIHOOD (parallelized) ============
@@ -401,18 +716,37 @@ double compute_log_post(
   #endif
   for (int i = 0; i < data.N; i++) {
     // Linear predictor for numerator (using optimized dot product)
-    double eta_num = quotr_linalg::dot_product(
+    double eta_num = ratiod_linalg::dot_product(
         &data.X_num_flat[i * data.p_num], beta_num, data.p_num);
 
     // Linear predictor for denominator (using optimized dot product)
-    double eta_denom = quotr_linalg::dot_product(
+    double eta_denom = ratiod_linalg::dot_product(
         &data.X_denom_flat[i * data.p_denom], beta_denom, data.p_denom);
 
-    // Add random effect (shared between num and denom)
-    if (layout.has_re && data.re_group[i] > 0) {
-      int g = data.re_group[i] - 1;
-      eta_num += re[g];
-      eta_denom += re[g];
+    // Add random effects (shared between num and denom)
+    // Supports multiple crossed RE terms
+    if (layout.has_re) {
+      int n_terms = (data.n_re_terms > 0) ? data.n_re_terms : 1;
+
+      if (n_terms > 1) {
+        // Multiple RE terms
+        for (int t = 0; t < n_terms; t++) {
+          int group_idx = data.re_group_multi[t][i];
+          if (group_idx > 0) {
+            int g = group_idx - 1;
+            double re_val = params[layout.re_start_multi[t] + g];
+            eta_num += re_val;
+            eta_denom += re_val;
+          }
+        }
+      } else {
+        // Single RE term (legacy path)
+        if (data.re_group[i] > 0) {
+          int g = data.re_group[i] - 1;
+          eta_num += re[g];
+          eta_denom += re[g];
+        }
+      }
     }
 
     // Add spatial effect
@@ -454,10 +788,66 @@ double compute_log_post(
       }
     }
 
+    // Add GP spatial effect (observation-level)
+    if (layout.is_gp && data.has_gp && gp_w != nullptr) {
+      double gp_effect = gp_w[i];
+      if (data.gp_data.shared) {
+        eta_num += gp_effect;
+        eta_denom += gp_effect;
+      } else {
+        eta_num += gp_effect;
+      }
+    }
+
+    // Add multi-scale GP spatial effects (observation-level)
+    if (layout.is_multiscale_gp && data.has_multiscale_gp) {
+      double local_effect = gp_local[i];
+      double regional_effect = gp_regional[i];
+      double ms_spatial_effect = local_effect + regional_effect;
+
+      if (data.multiscale_gp_data.shared) {
+        eta_num += ms_spatial_effect;
+        eta_denom += ms_spatial_effect;
+      } else {
+        eta_num += ms_spatial_effect;
+      }
+    }
+
+    // Add multi-scale temporal effect
+    if (layout.has_multiscale_temporal) {
+      double ms_temporal_effect = 0.0;
+      int t_idx = data.multiscale_temporal_data.time_index[i] - 1;  // 0-based
+
+      // Trend component
+      if (trend != nullptr && t_idx >= 0 &&
+          t_idx < static_cast<int>(data.multiscale_temporal_data.n_times)) {
+        ms_temporal_effect += trend[t_idx];
+      }
+
+      // Seasonal component
+      if (seasonal != nullptr && data.multiscale_temporal_data.seasonal_period > 0) {
+        int s_idx = t_idx % data.multiscale_temporal_data.seasonal_period;
+        ms_temporal_effect += seasonal[s_idx];
+      }
+
+      // Short-term component
+      if (short_term != nullptr && t_idx >= 0 &&
+          t_idx < static_cast<int>(data.multiscale_temporal_data.n_times)) {
+        ms_temporal_effect += short_term[t_idx];
+      }
+
+      if (data.multiscale_temporal_data.shared) {
+        eta_num += ms_temporal_effect;
+        eta_denom += ms_temporal_effect;
+      } else {
+        eta_num += ms_temporal_effect;
+      }
+    }
+
     // Compute ZI linear predictor if applicable (using optimized dot product)
     double logit_zi = 0.0;
     if (layout.has_zi) {
-      logit_zi = quotr_linalg::dot_product(
+      logit_zi = ratiod_linalg::dot_product(
           &data.X_zi_flat[i * data.p_zi], beta_zi, data.p_zi);
     }
 
@@ -471,7 +861,7 @@ double compute_log_post(
 
       // Check for zero-inflation on numerator
       if (layout.has_zi) {
-        ll_i = quotr_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
+        ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
                                            logit_zi, data.zi_type);
       } else {
         ll_i = log_lik_negbin(data.y_num[i], mu_num, phi_num);
@@ -485,7 +875,7 @@ double compute_log_post(
 
       // Check for zero-inflation on numerator
       if (layout.has_zi) {
-        ll_i = quotr_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
+        ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
                                            logit_zi, data.zi_type);
       } else {
         ll_i = log_lik_poisson(data.y_num[i], mu_num);
@@ -632,11 +1022,11 @@ double find_reasonable_epsilon(
   }
 
   double log_prob_init = compute_log_post(q, data, layout);
-  double kinetic_init = 0.5 * quotr_linalg::norm_squared(p.data(), n);
+  double kinetic_init = 0.5 * ratiod_linalg::norm_squared(p.data(), n);
   double H_init = -log_prob_init + kinetic_init;
 
   LeapfrogResult lf = leapfrog_step(q, p, epsilon, data, layout);
-  double kinetic_new = 0.5 * quotr_linalg::norm_squared(lf.p.data(), n);
+  double kinetic_new = 0.5 * ratiod_linalg::norm_squared(lf.p.data(), n);
   double H_new = -lf.log_prob + kinetic_new;
 
   double delta_H = H_new - H_init;
@@ -647,7 +1037,7 @@ double find_reasonable_epsilon(
     if (epsilon > 1e3 || epsilon < 1e-6) break;
 
     lf = leapfrog_step(q, p, epsilon, data, layout);
-    kinetic_new = 0.5 * quotr_linalg::norm_squared(lf.p.data(), n);
+    kinetic_new = 0.5 * ratiod_linalg::norm_squared(lf.p.data(), n);
     H_new = -lf.log_prob + kinetic_new;
     delta_H = H_new - H_init;
 
@@ -712,7 +1102,7 @@ HMCResultCpp run_hmc_chain_cpp(
     }
 
     // Current Hamiltonian (using optimized norm computation)
-    double kinetic_current = 0.5 * quotr_linalg::norm_squared(p.data(), n_params);
+    double kinetic_current = 0.5 * ratiod_linalg::norm_squared(p.data(), n_params);
     double H_current = -log_prob_current + kinetic_current;
 
     // Leapfrog integration
@@ -731,7 +1121,7 @@ HMCResultCpp run_hmc_chain_cpp(
     }
 
     double log_prob_prop = compute_log_post(q_prop, data, layout);
-    double kinetic_prop = 0.5 * quotr_linalg::norm_squared(p_prop.data(), n_params);
+    double kinetic_prop = 0.5 * ratiod_linalg::norm_squared(p_prop.data(), n_params);
     double H_prop = -log_prob_prop + kinetic_prop;
 
     // Metropolis accept/reject
@@ -861,7 +1251,7 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   return results;
 }
 
-} // namespace quotr_hmc
+} // namespace ratiod_hmc
 
 // =====================================================================
 // R EXPORTS
@@ -912,7 +1302,7 @@ Rcpp::List cpp_hmc_fit(
     int n_threads,
     bool verbose
 ) {
-  using namespace quotr_hmc;
+  using namespace ratiod_hmc;
 
   // Set up model data
   ModelData data;
@@ -992,7 +1382,7 @@ Rcpp::List cpp_hmc_fit(
   data.tau_temporal_rate = tau_temporal_rate;
 
   // Zero-inflation structure
-  data.zi_type = quotr_zi::parse_zi_type(zi_type_str);
+  data.zi_type = ratiod_zi::parse_zi_type(zi_type_str);
   data.p_zi = X_zi.ncol();
   data.zi_prior_sd = zi_prior_sd;
   data.X_zi_flat.resize(data.N * data.p_zi);
@@ -1078,4 +1468,331 @@ int cpp_get_max_threads() {
   #else
   return 1;
   #endif
+}
+
+// [[Rcpp::export]]
+Rcpp::List cpp_hmc_fit_gp(
+    Rcpp::NumericVector q_init,
+    Rcpp::IntegerVector y_num,
+    Rcpp::IntegerVector y_denom,
+    Rcpp::NumericVector y_denom_cont,
+    Rcpp::NumericMatrix X_num,
+    Rcpp::NumericMatrix X_denom,
+    Rcpp::IntegerVector re_group,
+    int n_re_groups,
+    std::string model_type_str,
+    std::string gp_type_str,
+    Rcpp::NumericVector coords,
+    Rcpp::IntegerVector nn_idx,
+    Rcpp::NumericVector nn_dist,
+    Rcpp::IntegerVector nn_order,
+    Rcpp::IntegerVector nn_order_inv,
+    int nn,
+    std::string cov_type_str,
+    double nu,
+    bool gp_shared,
+    double gp_sigma2_prior_U,
+    double gp_sigma2_prior_alpha,
+    double gp_phi_prior_lower,
+    double gp_phi_prior_upper,
+    Rcpp::IntegerVector nn_idx_local,
+    Rcpp::NumericVector nn_dist_local,
+    Rcpp::IntegerVector nn_order_local,
+    Rcpp::IntegerVector nn_order_inv_local,
+    int nn_local,
+    Rcpp::IntegerVector nn_idx_regional,
+    Rcpp::NumericVector nn_dist_regional,
+    Rcpp::IntegerVector nn_order_regional,
+    Rcpp::IntegerVector nn_order_inv_regional,
+    int nn_regional,
+    double range_local_lower,
+    double range_local_upper,
+    double range_regional_lower,
+    double range_regional_upper,
+    double ms_sigma2_local_prior_U,
+    double ms_sigma2_local_prior_alpha,
+    double ms_sigma2_regional_prior_U,
+    double ms_sigma2_regional_prior_alpha,
+    std::string ms_temporal_type_str,
+    Rcpp::IntegerVector ms_time_index,
+    Rcpp::IntegerVector ms_group_index,
+    int ms_n_times,
+    int ms_n_groups,
+    std::string trend_type_str,
+    int seasonal_period,
+    std::string short_term_type_str,
+    bool ms_temporal_shared,
+    double ms_sigma2_trend_prior_U,
+    double ms_sigma2_trend_prior_alpha,
+    double ms_sigma2_seasonal_prior_U,
+    double ms_sigma2_seasonal_prior_alpha,
+    double ms_sigma2_short_prior_U,
+    double ms_sigma2_short_prior_alpha,
+    bool has_rsr,
+    Rcpp::NumericVector rsr_projection,
+    int rsr_n,
+    double sigma_beta,
+    double sigma_re_scale,
+    double phi_prior_shape,
+    double phi_prior_rate,
+    std::string zi_type_str,
+    Rcpp::NumericMatrix X_zi,
+    double zi_prior_sd,
+    int n_iter,
+    int n_warmup,
+    int L,
+    int n_chains,
+    unsigned int seed,
+    int n_threads,
+    bool verbose
+) {
+  using namespace ratiod_hmc;
+
+  // Set up model data
+  ModelData data;
+
+  // Copy response data
+  data.y_num = std::vector<int>(y_num.begin(), y_num.end());
+  data.y_denom = std::vector<int>(y_denom.begin(), y_denom.end());
+  data.y_denom_cont = std::vector<double>(y_denom_cont.begin(), y_denom_cont.end());
+  data.N = y_num.size();
+
+  // Flatten design matrices
+  data.p_num = X_num.ncol();
+  data.p_denom = X_denom.ncol();
+
+  data.X_num_flat.resize(data.N * data.p_num);
+  for (int i = 0; i < data.N; i++) {
+    for (int j = 0; j < data.p_num; j++) {
+      data.X_num_flat[i * data.p_num + j] = X_num(i, j);
+    }
+  }
+
+  data.X_denom_flat.resize(data.N * data.p_denom);
+  for (int i = 0; i < data.N; i++) {
+    for (int j = 0; j < data.p_denom; j++) {
+      data.X_denom_flat[i * data.p_denom + j] = X_denom(i, j);
+    }
+  }
+
+  // Random effects
+  data.re_group = std::vector<int>(re_group.begin(), re_group.end());
+  data.n_re_groups = n_re_groups;
+
+  // Model type
+  if (model_type_str == "binomial") {
+    data.model_type = ModelType::BINOMIAL;
+  } else if (model_type_str == "negbin_negbin") {
+    data.model_type = ModelType::NEGBIN_NEGBIN;
+  } else {
+    data.model_type = ModelType::POISSON_GAMMA;
+  }
+
+  // Covariance type
+  ratiod_gp::CovType cov_type;
+  if (cov_type_str == "exponential") {
+    cov_type = ratiod_gp::CovType::EXPONENTIAL;
+  } else if (cov_type_str == "matern") {
+    cov_type = ratiod_gp::CovType::MATERN;
+  } else if (cov_type_str == "gaussian") {
+    cov_type = ratiod_gp::CovType::GAUSSIAN;
+  } else {
+    cov_type = ratiod_gp::CovType::SPHERICAL;
+  }
+
+  // GP spatial structure
+  if (gp_type_str == "gp") {
+    data.spatial_type = SpatialType::GP;
+    data.has_gp = true;
+    data.has_multiscale_gp = false;
+
+    data.gp_data.n_obs = data.N;
+    data.gp_data.nn = nn;
+    data.gp_data.coords = std::vector<double>(coords.begin(), coords.end());
+    data.gp_data.nn_idx = std::vector<int>(nn_idx.begin(), nn_idx.end());
+    data.gp_data.nn_dist = std::vector<double>(nn_dist.begin(), nn_dist.end());
+    data.gp_data.nn_order = std::vector<int>(nn_order.begin(), nn_order.end());
+    data.gp_data.nn_order_inv = std::vector<int>(nn_order_inv.begin(), nn_order_inv.end());
+    data.gp_data.cov_type = cov_type;
+    data.gp_data.nu = nu;
+    data.gp_data.shared = gp_shared;
+
+    data.gp_sigma2_prior_U = gp_sigma2_prior_U;
+    data.gp_sigma2_prior_alpha = gp_sigma2_prior_alpha;
+    data.gp_phi_prior_lower = gp_phi_prior_lower;
+    data.gp_phi_prior_upper = gp_phi_prior_upper;
+
+  } else if (gp_type_str == "multiscale_gp") {
+    data.spatial_type = SpatialType::MULTISCALE_GP;
+    data.has_gp = false;
+    data.has_multiscale_gp = true;
+
+    data.multiscale_gp_data.n_obs = data.N;
+    data.multiscale_gp_data.coords = std::vector<double>(coords.begin(), coords.end());
+
+    // Local scale
+    data.multiscale_gp_data.nn_local = nn_local;
+    data.multiscale_gp_data.nn_idx_local = std::vector<int>(nn_idx_local.begin(), nn_idx_local.end());
+    data.multiscale_gp_data.nn_dist_local = std::vector<double>(nn_dist_local.begin(), nn_dist_local.end());
+    data.multiscale_gp_data.nn_order_local = std::vector<int>(nn_order_local.begin(), nn_order_local.end());
+    data.multiscale_gp_data.nn_order_inv_local = std::vector<int>(nn_order_inv_local.begin(), nn_order_inv_local.end());
+
+    // Regional scale
+    data.multiscale_gp_data.nn_regional = nn_regional;
+    data.multiscale_gp_data.nn_idx_regional = std::vector<int>(nn_idx_regional.begin(), nn_idx_regional.end());
+    data.multiscale_gp_data.nn_dist_regional = std::vector<double>(nn_dist_regional.begin(), nn_dist_regional.end());
+    data.multiscale_gp_data.nn_order_regional = std::vector<int>(nn_order_regional.begin(), nn_order_regional.end());
+    data.multiscale_gp_data.nn_order_inv_regional = std::vector<int>(nn_order_inv_regional.begin(), nn_order_inv_regional.end());
+
+    // Range constraints
+    data.multiscale_gp_data.range_local_lower = range_local_lower;
+    data.multiscale_gp_data.range_local_upper = range_local_upper;
+    data.multiscale_gp_data.range_regional_lower = range_regional_lower;
+    data.multiscale_gp_data.range_regional_upper = range_regional_upper;
+
+    data.multiscale_gp_data.cov_type = cov_type;
+    data.multiscale_gp_data.nu = nu;
+    data.multiscale_gp_data.shared = gp_shared;
+
+    data.ms_sigma2_local_prior_U = ms_sigma2_local_prior_U;
+    data.ms_sigma2_local_prior_alpha = ms_sigma2_local_prior_alpha;
+    data.ms_sigma2_regional_prior_U = ms_sigma2_regional_prior_U;
+    data.ms_sigma2_regional_prior_alpha = ms_sigma2_regional_prior_alpha;
+
+  } else {
+    data.spatial_type = SpatialType::NONE;
+    data.has_gp = false;
+    data.has_multiscale_gp = false;
+  }
+
+  // Initialize adjacency for ICAR/BYM2 (not used with GP)
+  data.n_spatial_units = 0;
+  data.bym2_scale_factor = 1.0;
+
+  // Multi-scale temporal structure
+  if (ms_temporal_type_str == "multiscale") {
+    data.has_multiscale_temporal = true;
+
+    data.multiscale_temporal_data.n_times = ms_n_times;
+    data.multiscale_temporal_data.n_groups = ms_n_groups;
+    data.multiscale_temporal_data.n_obs = data.N;
+    data.multiscale_temporal_data.time_index = std::vector<int>(ms_time_index.begin(), ms_time_index.end());
+    data.multiscale_temporal_data.group_index = std::vector<int>(ms_group_index.begin(), ms_group_index.end());
+    data.multiscale_temporal_data.shared = ms_temporal_shared;
+    data.multiscale_temporal_data.seasonal_period = seasonal_period;
+
+    // Parse temporal component types
+    data.multiscale_temporal_data.trend_type = ratiod_temporal::parse_temporal_type(trend_type_str);
+    data.multiscale_temporal_data.short_term_type = ratiod_temporal::parse_temporal_type(short_term_type_str);
+
+    data.ms_sigma2_trend_prior_U = ms_sigma2_trend_prior_U;
+    data.ms_sigma2_trend_prior_alpha = ms_sigma2_trend_prior_alpha;
+    data.ms_sigma2_seasonal_prior_U = ms_sigma2_seasonal_prior_U;
+    data.ms_sigma2_seasonal_prior_alpha = ms_sigma2_seasonal_prior_alpha;
+    data.ms_sigma2_short_prior_U = ms_sigma2_short_prior_U;
+    data.ms_sigma2_short_prior_alpha = ms_sigma2_short_prior_alpha;
+
+  } else {
+    data.has_multiscale_temporal = false;
+    data.multiscale_temporal_data.trend_type = ratiod_temporal::TemporalType::NONE;
+    data.multiscale_temporal_data.short_term_type = ratiod_temporal::TemporalType::NONE;
+    data.multiscale_temporal_data.seasonal_period = 0;
+  }
+
+  // Legacy temporal (not used with multiscale)
+  data.temporal_type = TemporalType::NONE;
+  data.n_times = 0;
+  data.n_temporal_groups = 0;
+  data.n_temporal_params = 0;
+
+  // RSR structure
+  data.has_rsr = has_rsr;
+  if (has_rsr && rsr_projection.size() > 0) {
+    data.rsr_projection = std::vector<double>(rsr_projection.begin(), rsr_projection.end());
+    data.rsr_n = rsr_n;
+  } else {
+    data.rsr_n = 0;
+  }
+
+  // Zero-inflation structure
+  data.zi_type = ratiod_zi::parse_zi_type(zi_type_str);
+  data.p_zi = X_zi.ncol();
+  data.zi_prior_sd = zi_prior_sd;
+  data.X_zi_flat.resize(data.N * data.p_zi);
+  for (int i = 0; i < data.N; i++) {
+    for (int j = 0; j < data.p_zi; j++) {
+      data.X_zi_flat[i * data.p_zi + j] = X_zi(i, j);
+    }
+  }
+
+  // Standard priors
+  data.sigma_beta = sigma_beta;
+  data.sigma_re_scale = sigma_re_scale;
+  data.phi_prior_shape = phi_prior_shape;
+  data.phi_prior_rate = phi_prior_rate;
+  data.tau_spatial_shape = 1.0;
+  data.tau_spatial_rate = 0.01;
+
+  // SVC not used in GP interface
+  data.has_svc = false;
+
+  // Parallelization
+  data.n_threads = n_threads;
+
+  // Initialize parameters
+  std::vector<double> q0(q_init.begin(), q_init.end());
+
+  // Run sampler
+  if (n_chains == 1) {
+    ParamLayout layout = compute_param_layout(data);
+    HMCResult result = run_hmc_chain(
+      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose
+    );
+
+    return Rcpp::List::create(
+      Rcpp::Named("samples") = result.samples,
+      Rcpp::Named("log_prob") = result.log_prob,
+      Rcpp::Named("accept_prob") = result.accept_prob,
+      Rcpp::Named("n_leapfrog") = result.n_leapfrog,
+      Rcpp::Named("divergent") = result.divergent,
+      Rcpp::Named("epsilon") = result.epsilon,
+      Rcpp::Named("n_warmup") = result.n_warmup,
+      Rcpp::Named("n_sample") = result.n_sample,
+      Rcpp::Named("n_chains") = 1
+    );
+  } else {
+    // Multiple chains
+    std::vector<HMCResult> results = run_hmc_parallel_chains(
+      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose
+    );
+
+    // Combine results
+    int n_sample = results[0].n_sample;
+    int n_params = results[0].samples.ncol();
+
+    Rcpp::List samples_list(n_chains);
+    Rcpp::List log_prob_list(n_chains);
+    Rcpp::List accept_prob_list(n_chains);
+    Rcpp::List divergent_list(n_chains);
+    Rcpp::NumericVector epsilon_vec(n_chains);
+
+    for (int c = 0; c < n_chains; c++) {
+      samples_list[c] = results[c].samples;
+      log_prob_list[c] = results[c].log_prob;
+      accept_prob_list[c] = results[c].accept_prob;
+      divergent_list[c] = results[c].divergent;
+      epsilon_vec[c] = results[c].epsilon;
+    }
+
+    return Rcpp::List::create(
+      Rcpp::Named("samples") = samples_list,
+      Rcpp::Named("log_prob") = log_prob_list,
+      Rcpp::Named("accept_prob") = accept_prob_list,
+      Rcpp::Named("divergent") = divergent_list,
+      Rcpp::Named("epsilon") = epsilon_vec,
+      Rcpp::Named("n_warmup") = n_warmup,
+      Rcpp::Named("n_sample") = n_sample,
+      Rcpp::Named("n_chains") = n_chains
+    );
+  }
 }

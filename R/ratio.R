@@ -1,11 +1,15 @@
-#' Extract ratio posteriors from a quotr model
+#' @importFrom stats median
+#' @importFrom grDevices colorRampPalette
+NULL
+
+#' Extract ratio posteriors from a ratiod model
 #'
 #' @description
-#' Compute posterior distributions of ratios from a fitted quotr model.
+#' Compute posterior distributions of ratios from a fitted ratiod model.
 #' Ratios are derived quantities: E\[numerator\] / E\[denominator\], computed
 #' in Stan's generated quantities block with full uncertainty propagation.
 #'
-#' @param object A `quotr_fit` object
+#' @param object A `ratiod_fit` object
 #' @param newdata Optional data frame for prediction. If NULL, uses
 #'   original data.
 #' @param type Scale for ratio: "response" (default), "log", or "logit".
@@ -15,10 +19,32 @@
 #' @param probs Quantiles to compute if `summary = TRUE`.
 #' @param ... Ignored
 #'
-#' @return A `quotr_ratio` object containing posterior draws or summaries.
+#' @return A `ratiod_ratio` object containing posterior draws or summaries.
 #'
 #' @examples
-#' \dontrun{
+#' # Create a simple family
+#' fam <- ratiod_poisson_gamma()
+#'
+#' \donttest{
+#' # Generate synthetic data
+#' set.seed(123)
+#' n <- 50
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 20),
+#'   effort = rgamma(n, shape = 10, rate = 1),
+#'   depth = rnorm(n),
+#'   site = sample(letters[1:5], n, replace = TRUE)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ depth + (1 | site),
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
 #' # Extract all observation-level ratios
 #' r <- ratio(fit)
 #' summary(r)
@@ -37,7 +63,7 @@ ratio <- function(object, newdata = NULL, type = c("response", "log", "logit"),
 }
 
 #' @export
-ratio.quotr_fit <- function(object, newdata = NULL, type = c("response", "log", "logit"),
+ratio.ratiod_fit <- function(object, newdata = NULL, type = c("response", "log", "logit"),
                             by = NULL, summary = FALSE, probs = c(0.025, 0.5, 0.975), ...) {
 
   type <- match.arg(type)
@@ -90,7 +116,7 @@ ratio.quotr_fit <- function(object, newdata = NULL, type = c("response", "log", 
       n_draws = nrow(ratio_draws),
       data = object$data
     ),
-    class = "quotr_ratio"
+    class = "ratiod_ratio"
   )
 
   if (summary) {
@@ -134,14 +160,14 @@ aggregate_by_group <- function(draws, data, by) {
   result
 }
 
-#' Summary method for quotr_ratio
+#' Summary method for ratiod_ratio
 #'
-#' @param object A quotr_ratio object
+#' @param object A ratiod_ratio object
 #' @param probs Quantiles to compute
 #' @param ... Ignored
 #'
 #' @export
-summary.quotr_ratio <- function(object, probs = c(0.025, 0.5, 0.975), ...) {
+summary.ratiod_ratio <- function(object, probs = c(0.025, 0.5, 0.975), ...) {
   draws <- object$draws
 
   # Compute summaries
@@ -169,18 +195,18 @@ summary.quotr_ratio <- function(object, probs = c(0.025, 0.5, 0.975), ...) {
     summaries,
     type = object$type,
     n_draws = object$n_draws,
-    class = c("quotr_ratio_summary", "data.frame")
+    class = c("ratiod_ratio_summary", "data.frame")
   )
 }
 
-#' Print method for quotr_ratio
+#' Print method for ratiod_ratio
 #'
-#' @param x A quotr_ratio object
+#' @param x A ratiod_ratio object
 #' @param ... Ignored
 #'
 #' @export
-print.quotr_ratio <- function(x, ...) {
-  cat("quotr ratio posterior\n")
+print.ratiod_ratio <- function(x, ...) {
+  cat("ratiod ratio posterior\n")
   cat("=====================\n\n")
   cat("Scale:", x$type, "\n")
   cat("Observations:", x$n_obs, "\n")
@@ -193,15 +219,15 @@ print.quotr_ratio <- function(x, ...) {
   invisible(x)
 }
 
-#' Print method for quotr_ratio_summary
+#' Print method for ratiod_ratio_summary
 #'
-#' @param x A quotr_ratio_summary object
+#' @param x A ratiod_ratio_summary object
 #' @param n Number of rows to print
 #' @param ... Passed to print.data.frame
 #'
 #' @export
-print.quotr_ratio_summary <- function(x, n = 10, ...) {
-  cat("quotr ratio summary (", attr(x, "type"), " scale)\n", sep = "")
+print.ratiod_ratio_summary <- function(x, n = 10, ...) {
+  cat("ratiod ratio summary (", attr(x, "type"), " scale)\n", sep = "")
   cat("===========================================\n\n")
 
   if (nrow(x) > n) {
@@ -220,7 +246,7 @@ print.quotr_ratio_summary <- function(x, n = 10, ...) {
 #' Compute posterior distributions of contrasts (differences or ratios)
 #' between conditions for the derived ratio quantity.
 #'
-#' @param object A `quotr_fit` object
+#' @param object A `ratiod_fit` object
 #' @param contrast A formula specifying the contrast, e.g., `~ treatment`
 #' @param type Type of contrast: "difference" (default) or "ratio"
 #' @param ref Reference level for factor contrasts (default: first level)
@@ -229,7 +255,25 @@ print.quotr_ratio_summary <- function(x, n = 10, ...) {
 #' @return A data frame with posterior summaries of contrasts
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
+#' # Generate synthetic data with grouping variable
+#' set.seed(456)
+#' n <- 60
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 25),
+#'   effort = rgamma(n, shape = 12, rate = 1),
+#'   season = sample(c("summer", "winter"), n, replace = TRUE)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ season,
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
 #' # Compare CPUE between seasons
 #' ratio_contrast(fit, ~ season)
 #'
@@ -313,18 +357,18 @@ ratio_contrast <- function(object, contrast, type = c("difference", "ratio"),
     type = type,
     contrast_var = contrast_var,
     ref = ref,
-    class = c("quotr_contrast", "data.frame")
+    class = c("ratiod_contrast", "data.frame")
   )
 }
 
-#' Print method for quotr_contrast
+#' Print method for ratiod_contrast
 #'
-#' @param x A quotr_contrast object
+#' @param x A ratiod_contrast object
 #' @param ... Passed to print.data.frame
 #'
 #' @export
-print.quotr_contrast <- function(x, ...) {
-  cat("quotr ratio contrasts\n")
+print.ratiod_contrast <- function(x, ...) {
+  cat("ratiod ratio contrasts\n")
   cat("=====================\n\n")
   cat("Type:", attr(x, "type"), "\n")
   cat("Variable:", attr(x, "contrast_var"), "\n")
@@ -334,13 +378,13 @@ print.quotr_contrast <- function(x, ...) {
 }
 
 
-#' Extract fitted values from a quotr model
+#' Extract fitted values from a ratiod model
 #'
 #' @description
 #' Compute posterior distributions of fitted values (expected values) for both
-#' the numerator and denominator processes from a fitted quotr model.
+#' the numerator and denominator processes from a fitted ratiod model.
 #'
-#' @param object A `quotr_fit` object
+#' @param object A `ratiod_fit` object
 #' @param component Which component to return: "numerator", "denominator",
 #'   "ratio", or "all" (default).
 #' @param summary Logical; if TRUE, return summary statistics instead of
@@ -352,7 +396,25 @@ print.quotr_contrast <- function(x, ...) {
 #'   If `summary = FALSE`, a list with matrices of posterior draws.
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
+#' # Generate synthetic data
+#' set.seed(789)
+#' n <- 40
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 15),
+#'   effort = rgamma(n, shape = 8, rate = 1),
+#'   depth = rnorm(n)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ depth,
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
 #' # Get fitted value summaries
 #' fitted(fit)
 #'
@@ -363,9 +425,9 @@ print.quotr_contrast <- function(x, ...) {
 #' fitted(fit, summary = FALSE)
 #' }
 #'
-#' @method fitted quotr_fit
+#' @method fitted ratiod_fit
 #' @export
-fitted.quotr_fit <- function(object, component = c("all", "numerator", "denominator", "ratio"),
+fitted.ratiod_fit <- function(object, component = c("all", "numerator", "denominator", "ratio"),
                               summary = TRUE, probs = c(0.025, 0.5, 0.975), ...) {
 
   component <- match.arg(component)
@@ -406,20 +468,20 @@ fitted.quotr_fit <- function(object, component = c("all", "numerator", "denomina
     structure(
       result,
       n_draws = nrow(draws_list[[1]]),
-      class = c("quotr_fitted", "data.frame")
+      class = c("ratiod_fitted", "data.frame")
     )
   } else {
     structure(
       draws_list,
       n_draws = nrow(draws_list[[1]]),
       n_obs = ncol(draws_list[[1]]),
-      class = "quotr_fitted_draws"
+      class = "ratiod_fitted_draws"
     )
   }
 }
 
 
-#' Compute fitted values from quotr_fit
+#' Compute fitted values from ratiod_fit
 #' @keywords internal
 compute_fitted_values <- function(object) {
   backend <- object$backend
@@ -611,12 +673,12 @@ compute_fitted_laplace <- function(object) {
 }
 
 
-#' Predict method for quotr models
+#' Predict method for ratiod models
 #'
 #' @description
-#' Compute posterior predictions for new data from a fitted quotr model.
+#' Compute posterior predictions for new data from a fitted ratiod model.
 #'
-#' @param object A `quotr_fit` object
+#' @param object A `ratiod_fit` object
 #' @param newdata Data frame with new observations. Must contain all
 #'   predictor variables used in the original model.
 #' @param type Type of prediction: "response" for fitted values on
@@ -638,7 +700,26 @@ compute_fitted_laplace <- function(object) {
 #'   If `summary = FALSE`, a matrix of posterior draws (rows = draws, cols = obs).
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
+#' # Generate synthetic data
+#' set.seed(321)
+#' n <- 50
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 18),
+#'   effort = rgamma(n, shape = 9, rate = 1),
+#'   depth = rnorm(n),
+#'   season = sample(c("summer", "winter"), n, replace = TRUE)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ depth + season,
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
 #' # Predict for new data
 #' new_df <- data.frame(depth = c(10, 20, 30), season = "summer")
 #' predict(fit, newdata = new_df)
@@ -650,9 +731,9 @@ compute_fitted_laplace <- function(object) {
 #' predict(fit, newdata = new_df, summary = FALSE)
 #' }
 #'
-#' @method predict quotr_fit
+#' @method predict ratiod_fit
 #' @export
-predict.quotr_fit <- function(object, newdata, type = c("response", "link"),
+predict.ratiod_fit <- function(object, newdata, type = c("response", "link"),
                                component = c("ratio", "numerator", "denominator", "all"),
                                summary = TRUE, probs = c(0.025, 0.5, 0.975),
                                re_formula = NULL, allow_new_levels = FALSE, ...) {
@@ -712,7 +793,7 @@ predict.quotr_fit <- function(object, newdata, type = c("response", "link"),
       result,
       n_draws = nrow(draws_list[[1]]),
       newdata = newdata,
-      class = c("quotr_prediction", "data.frame")
+      class = c("ratiod_prediction", "data.frame")
     )
   } else {
     structure(
@@ -720,7 +801,7 @@ predict.quotr_fit <- function(object, newdata, type = c("response", "link"),
       n_draws = nrow(draws_list[[1]]),
       n_obs = ncol(draws_list[[1]]),
       newdata = newdata,
-      class = "quotr_prediction_draws"
+      class = "ratiod_prediction_draws"
     )
   }
 }
@@ -881,10 +962,15 @@ compute_predictions_hmc <- function(object, pred_data, type) {
 }
 
 
-#' Print method for quotr_fitted
+#' Print method for ratiod_fitted
+#'
+#' @param x A ratiod_fitted object
+#' @param n Number of rows to print
+#' @param ... Additional arguments passed to print.data.frame
+#'
 #' @export
-print.quotr_fitted <- function(x, n = 10, ...) {
-  cat("quotr fitted values\n")
+print.ratiod_fitted <- function(x, n = 10, ...) {
+  cat("ratiod fitted values\n")
   cat("===================\n\n")
   cat("Posterior draws:", attr(x, "n_draws"), "\n\n")
 
@@ -898,10 +984,15 @@ print.quotr_fitted <- function(x, n = 10, ...) {
 }
 
 
-#' Print method for quotr_prediction
+#' Print method for ratiod_prediction
+#'
+#' @param x A ratiod_prediction object
+#' @param n Number of rows to print
+#' @param ... Additional arguments passed to print.data.frame
+#'
 #' @export
-print.quotr_prediction <- function(x, n = 10, ...) {
-  cat("quotr predictions\n")
+print.ratiod_prediction <- function(x, n = 10, ...) {
+  cat("ratiod predictions\n")
   cat("=================\n\n")
   cat("Posterior draws:", attr(x, "n_draws"), "\n")
   cat("New observations:", nrow(attr(x, "newdata")), "\n\n")
@@ -913,4 +1004,414 @@ print.quotr_prediction <- function(x, n = 10, ...) {
     print.data.frame(x, row.names = FALSE, ...)
   }
   invisible(x)
+}
+
+
+# -----------------------------------------------------------------------------
+# tidybayes compatibility
+# -----------------------------------------------------------------------------
+
+#' Convert ratiod_fit to posterior draws format
+#'
+#' @description
+#' Convert a fitted ratiod model to a format compatible with the
+#' posterior and tidybayes packages. Returns draws in a tidy format
+#' suitable for further analysis and visualization.
+#'
+#' @param x A `ratiod_fit` object
+#' @param ... Additional arguments passed to `posterior::as_draws_df`
+#'
+#' @return A `draws_df` object from the posterior package.
+#'
+#' @details
+#' The returned draws object is compatible with:
+#' - **posterior** package functions (`summarise_draws`, `rvar`, etc.)
+#' - **tidybayes** package functions (`spread_draws`, `gather_draws`, etc.)
+#' - **bayesplot** package visualization functions
+#'
+#' For tidybayes integration, use this function to extract draws, then
+#' apply tidybayes functions for posterior analysis.
+#'
+#' @examples
+#' \donttest{
+#' # Generate synthetic data
+#' set.seed(111)
+#' n <- 45
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 22),
+#'   effort = rgamma(n, shape = 11, rate = 1),
+#'   depth = rnorm(n),
+#'   site = sample(letters[1:4], n, replace = TRUE)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ depth + (1 | site),
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
+#' # Convert to draws format
+#' draws <- as_draws(fit)
+#'
+#' # Use with posterior package
+#' if (requireNamespace("posterior", quietly = TRUE)) {
+#'   posterior::summarise_draws(draws)
+#' }
+#' }
+#'
+#' @seealso [posterior::as_draws_df()], [ratio()] for ratio-specific extraction
+#'
+#' @export
+as_draws <- function(x, ...) {
+  UseMethod("as_draws")
+}
+
+
+#' @rdname as_draws
+#' @export
+as_draws.ratiod_fit <- function(x, ...) {
+  if (!requireNamespace("posterior", quietly = TRUE)) {
+    stop("Package 'posterior' is required. Install with:\n",
+         "  install.packages('posterior')", call. = FALSE)
+  }
+
+  draws <- x$draws
+  if (is.null(draws)) {
+    stop("No draws available in the fitted model", call. = FALSE)
+  }
+
+  # Get chain information if available
+  n_chains <- x$chains %||% 1
+  n_total <- nrow(draws)
+  n_per_chain <- n_total / n_chains
+
+  if (n_chains > 1) {
+    # Reconstruct chain structure
+    draws_array <- array(
+      as.matrix(draws),
+      dim = c(n_per_chain, n_chains, ncol(draws)),
+      dimnames = list(
+        iteration = seq_len(n_per_chain),
+        chain = seq_len(n_chains),
+        variable = colnames(draws)
+      )
+    )
+    posterior::as_draws_df(posterior::as_draws_array(draws_array), ...)
+  } else {
+    posterior::as_draws_df(draws, ...)
+  }
+}
+
+
+#' Spread draws into wide format (tidybayes-style)
+#'
+#' @description
+#' Extract posterior draws for specified parameters and spread them into
+#' a wide format data frame. This function provides tidybayes-style syntax
+#' without requiring the tidybayes package.
+#'
+#' @param object A `ratiod_fit` object
+#' @param ... Parameter names to extract (unquoted). Supports patterns like
+#'   `beta_num` or `beta_num[i]` for indexed parameters.
+#' @param regex Logical; if TRUE, treat parameter names as regex patterns.
+#' @param ndraws Number of draws to return. If NULL, returns all.
+#'
+#' @return A data frame with columns `.chain`, `.iteration`, `.draw`, and
+#'   one column per requested parameter.
+#'
+#' @examples
+#' \donttest{
+#' # Generate synthetic data
+#' set.seed(222)
+#' n <- 50
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 20),
+#'   effort = rgamma(n, shape = 10, rate = 1),
+#'   depth = rnorm(n),
+#'   site = sample(letters[1:5], n, replace = TRUE)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ depth + (1 | site),
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
+#' # Extract fixed effects
+#' spread_draws(fit, beta_num, beta_denom)
+#'
+#' # Subsample draws
+#' spread_draws(fit, sigma_re, ndraws = 100)
+#' }
+#'
+#' @export
+spread_draws <- function(object, ..., regex = FALSE, ndraws = NULL) {
+  UseMethod("spread_draws")
+}
+
+
+#' @rdname spread_draws
+#' @export
+spread_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
+
+  # Get all parameter names
+  all_pars <- colnames(object$draws)
+
+  # Parse requested parameters
+  dots <- as.character(substitute(list(...)))[-1]
+
+  if (length(dots) == 0) {
+    # No parameters specified - return all main parameters
+    pars <- select_main_params(all_pars)
+  } else {
+    pars <- character(0)
+    for (pattern in dots) {
+      # Remove backticks and index notation
+      pattern_clean <- gsub("`", "", pattern)
+      pattern_clean <- gsub("\\[.*\\]$", "", pattern_clean)
+
+      if (regex) {
+        matches <- grep(pattern_clean, all_pars, value = TRUE)
+      } else {
+        # Match exact or with indices
+        matches <- grep(paste0("^", pattern_clean, "(\\[|$)"), all_pars, value = TRUE)
+      }
+      pars <- c(pars, matches)
+    }
+    pars <- unique(pars)
+  }
+
+  if (length(pars) == 0) {
+    stop("No parameters matched the specified patterns", call. = FALSE)
+  }
+
+  # Extract draws
+  draws <- object$draws[, pars, drop = FALSE]
+
+  # Add metadata columns
+  n_chains <- object$chains %||% 1
+  n_total <- nrow(draws)
+  n_per_chain <- n_total / n_chains
+
+  result <- data.frame(
+    .chain = rep(seq_len(n_chains), each = n_per_chain),
+    .iteration = rep(seq_len(n_per_chain), times = n_chains),
+    .draw = seq_len(n_total),
+    draws
+  )
+
+  # Subsample if requested
+  if (!is.null(ndraws) && ndraws < n_total) {
+    idx <- sample(n_total, ndraws)
+    result <- result[idx, ]
+    result$.draw <- seq_len(ndraws)
+  }
+
+  class(result) <- c("ratiod_draws", "data.frame")
+  result
+}
+
+
+#' Gather draws into long format (tidybayes-style)
+#'
+#' @description
+#' Extract posterior draws for specified parameters and gather them into
+#' a long format data frame with one row per draw per parameter.
+#'
+#' @param object A `ratiod_fit` object
+#' @param ... Parameter names to extract (unquoted).
+#' @param regex Logical; if TRUE, treat parameter names as regex patterns.
+#' @param ndraws Number of draws to return. If NULL, returns all.
+#'
+#' @return A data frame with columns `.chain`, `.iteration`, `.draw`,
+#'   `.variable`, and `.value`.
+#'
+#' @examples
+#' \donttest{
+#' # Generate synthetic data
+#' set.seed(333)
+#' n <- 55
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 24),
+#'   effort = rgamma(n, shape = 12, rate = 1),
+#'   depth = rnorm(n),
+#'   site = sample(letters[1:4], n, replace = TRUE)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ depth + (1 | site),
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
+#' # Gather all fixed effects
+#' gather_draws(fit, beta_num, beta_denom)
+#'
+#' # Use for plotting
+#' if (requireNamespace("ggplot2", quietly = TRUE)) {
+#'   library(ggplot2)
+#'   gather_draws(fit, beta_num) |>
+#'     ggplot(aes(x = .value)) +
+#'     geom_histogram() +
+#'     facet_wrap(~ .variable)
+#' }
+#' }
+#'
+#' @export
+gather_draws <- function(object, ..., regex = FALSE, ndraws = NULL) {
+  UseMethod("gather_draws")
+}
+
+
+#' @rdname gather_draws
+#' @export
+gather_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
+
+  # Get wide format first
+  wide <- spread_draws(object, ..., regex = regex, ndraws = ndraws)
+
+  # Get parameter columns (exclude metadata)
+  meta_cols <- c(".chain", ".iteration", ".draw")
+  par_cols <- setdiff(names(wide), meta_cols)
+
+  # Reshape to long format
+  long <- reshape(
+    wide,
+    direction = "long",
+    varying = par_cols,
+    v.names = ".value",
+    timevar = ".variable",
+    times = par_cols
+  )
+
+  # Clean up
+  long <- long[, c(".chain", ".iteration", ".draw", ".variable", ".value")]
+  rownames(long) <- NULL
+
+  class(long) <- c("ratiod_draws_long", "data.frame")
+  long
+}
+
+
+#' Point estimates and intervals (tidybayes-style)
+#'
+#' @description
+#' Compute point estimates (median, mean) and credible intervals for
+#' parameters, returning a tidy data frame.
+#'
+#' @param object A `ratiod_fit` object
+#' @param ... Parameter names to summarize (unquoted).
+#' @param .width Width(s) of credible intervals. Default 0.95.
+#' @param .point Point estimate function: "median" (default) or "mean".
+#' @param .interval Interval type: "qi" for quantile interval (default),
+#'   "hdi" for highest density interval.
+#'
+#' @return A data frame with columns for the variable name, point estimate,
+#'   and interval bounds.
+#'
+#' @examples
+#' \donttest{
+#' # Generate synthetic data
+#' set.seed(444)
+#' n <- 40
+#' df <- data.frame(
+#'   count = rpois(n, lambda = 18),
+#'   effort = rgamma(n, shape = 9, rate = 1),
+#'   depth = rnorm(n),
+#'   site = sample(letters[1:3], n, replace = TRUE)
+#' )
+#'
+#' # Fit model
+#' fit <- ratiod(
+#'   count | effort ~ depth + (1 | site),
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   backend = "hmc",
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
+#' # Get point estimates and 95% intervals
+#' point_interval(fit, beta_num, beta_denom)
+#'
+#' # Multiple interval widths
+#' point_interval(fit, beta_num, .width = c(0.5, 0.9, 0.95))
+#' }
+#'
+#' @export
+point_interval <- function(object, ..., .width = 0.95,
+                           .point = c("median", "mean"),
+                           .interval = c("qi", "hdi")) {
+  UseMethod("point_interval")
+}
+
+
+#' @rdname point_interval
+#' @export
+point_interval.ratiod_fit <- function(object, ..., .width = 0.95,
+                                      .point = c("median", "mean"),
+                                      .interval = c("qi", "hdi")) {
+
+  .point <- match.arg(.point)
+  .interval <- match.arg(.interval)
+
+  # Get draws
+  draws_wide <- spread_draws(object, ...)
+  meta_cols <- c(".chain", ".iteration", ".draw")
+  par_cols <- setdiff(names(draws_wide), meta_cols)
+
+  if (length(par_cols) == 0) {
+    stop("No parameters matched", call. = FALSE)
+  }
+
+  # Compute summaries for each parameter and interval width
+  results <- list()
+
+  for (par in par_cols) {
+    x <- draws_wide[[par]]
+
+    for (w in .width) {
+      point_val <- if (.point == "median") median(x) else mean(x)
+
+      if (.interval == "qi") {
+        # Quantile interval
+        alpha <- (1 - w) / 2
+        lower <- quantile(x, alpha)
+        upper <- quantile(x, 1 - alpha)
+      } else {
+        # HDI - simple implementation
+        sorted <- sort(x)
+        n <- length(sorted)
+        ci_n <- ceiling(w * n)
+        widths <- sorted[(ci_n + 1):n] - sorted[1:(n - ci_n)]
+        min_idx <- which.min(widths)
+        lower <- sorted[min_idx]
+        upper <- sorted[min_idx + ci_n]
+      }
+
+      results[[length(results) + 1]] <- data.frame(
+        .variable = par,
+        .value = point_val,
+        .lower = lower,
+        .upper = upper,
+        .width = w,
+        .point = .point,
+        .interval = .interval,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+
+  result <- do.call(rbind, results)
+  rownames(result) <- NULL
+  class(result) <- c("ratiod_point_interval", "data.frame")
+  result
 }

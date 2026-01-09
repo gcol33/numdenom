@@ -8,7 +8,7 @@
 #include <Rcpp.h>
 #include <vector>
 
-namespace quotr {
+namespace ratiod {
 
 // ---------------------------------------------------------------------
 // ICAR (Intrinsic Conditional Autoregressive) prior
@@ -96,6 +96,6 @@ double update_rho_bym2(
     double beta
 );
 
-} // namespace quotr
+} // namespace ratiod
 
 #endif // QUOTR_PG_SPATIAL_H

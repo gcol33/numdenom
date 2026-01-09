@@ -1,6 +1,6 @@
 // hmc_core.h
 // Hamiltonian Monte Carlo with NUTS (No-U-Turn Sampler)
-// Custom implementation for quotr - no Stan dependency
+// Custom implementation for ratiod - no Stan dependency
 
 #ifndef QUOTR_HMC_CORE_H
 #define QUOTR_HMC_CORE_H
@@ -12,14 +12,14 @@
 #include <algorithm>
 #include "autodiff.h"
 
-namespace quotr {
+namespace ratiod {
 
 // Forward declarations
 struct HMCResult;
 struct NUTSResult;
 
 // ---------------------------------------------------------------------
-// Log-probability and gradient computation for quotr models
+// Log-probability and gradient computation for ratiod models
 // ---------------------------------------------------------------------
 
 // Model types
@@ -311,6 +311,6 @@ HMCResult nuts_sample(
     unsigned int seed = 0
 );
 
-} // namespace quotr
+} // namespace ratiod
 
 #endif // QUOTR_HMC_CORE_H

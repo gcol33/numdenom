@@ -9,7 +9,7 @@
 
 using namespace Rcpp;
 
-namespace quotr {
+namespace ratiod {
 
 // Constants
 const double PI = 3.141592653589793;
@@ -238,7 +238,7 @@ NumericVector rpg_vec(IntegerVector b, NumericVector z) {
   return out;
 }
 
-} // namespace quotr
+} // namespace ratiod
 
 // ---------------------------------------------------------------------
 // R exports
@@ -246,10 +246,10 @@ NumericVector rpg_vec(IntegerVector b, NumericVector z) {
 
 // [[Rcpp::export]]
 Rcpp::NumericVector cpp_rpg1(Rcpp::NumericVector z) {
-  return quotr::rpg1_vec(z);
+  return ratiod::rpg1_vec(z);
 }
 
 // [[Rcpp::export]]
 Rcpp::NumericVector cpp_rpg(Rcpp::IntegerVector b, Rcpp::NumericVector z) {
-  return quotr::rpg_vec(b, z);
+  return ratiod::rpg_vec(b, z);
 }

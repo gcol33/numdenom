@@ -1,4 +1,4 @@
-#' Zero-inflated model families for quotr
+#' Zero-inflated model families for ratiod
 #'
 #' @description
 #' Distribution families for handling excess zeros in count data.
@@ -9,7 +9,7 @@
 #' - **Zero-inflated (ZI)**: Mixture of point mass at zero and count distribution
 #' - **Hurdle**: Separate processes for zero vs positive counts
 #'
-#' @name quotr_zi_families
+#' @name ratiod_zi_families
 NULL
 
 
@@ -30,11 +30,11 @@ NULL
 #' @param link_zi Link function for zero-inflation probability (default: "logit")
 #' @param denom_family Denominator distribution: "negbin" (default) or "fixed"
 #'
-#' @return A `quotr_family` object with zero-inflation
+#' @return A `ratiod_family` object with zero-inflation
 #'
 #' @details
 #' The zero-inflation probability can have its own linear predictor via the
-#' `zi` argument in `quotr()`. If not specified, a single intercept is estimated.
+#' `zi` argument in `ratiod()`. If not specified, a single intercept is estimated.
 #'
 #' For ecological data, zero-inflation often represents:
 #' - Structural zeros (species truly absent vs not detected)
@@ -42,20 +42,36 @@ NULL
 #' - False negatives
 #'
 #' @examples
-#' \dontrun{
-#' # Species counts with excess zeros
-#' fit <- quotr(
+#' # Create family object
+#' fam <- ratiod_zinegbin()
+#' print(fam)
+#'
+#' # Simulate zero-inflated count data
+#' set.seed(123)
+#' n <- 60
+#' zi_prob <- 0.3
+#' df <- data.frame(
+#'   count = ifelse(runif(n) < zi_prob, 0, rnbinom(n, size = 3, mu = 8)),
+#'   total = rnbinom(n, size = 5, mu = 50),
+#'   habitat = factor(rep(c("forest", "grassland"), each = n/2)),
+#'   site = factor(rep(1:10, each = n/10))
+#' )
+#'
+#' \donttest{
+#' # Fit model (slow, not run on CRAN)
+#' fit <- ratiod(
 #'   count | total ~ habitat + (1 | site),
-#'   zi = ~ habitat,  # Zero-inflation varies by habitat
+#'   zi = ~ habitat,
 #'   data = df,
-#'   family = quotr_zinegbin()
+#'   family = ratiod_zinegbin(),
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #' }
 #'
-#' @seealso [quotr_hurdle_negbin()] for hurdle model alternative
+#' @seealso [ratiod_hurdle_negbin()] for hurdle model alternative
 #'
 #' @export
-quotr_zinegbin <- function(link_num = "log", link_denom = "log",
+ratiod_zinegbin <- function(link_num = "log", link_denom = "log",
                            link_zi = "logit", denom_family = "negbin") {
 
   validate_link(link_num, c("log"))
@@ -87,7 +103,7 @@ quotr_zinegbin <- function(link_num = "log", link_denom = "log",
         if (denom_family == "negbin") "negative binomial" else "fixed"
       )
     ),
-    class = c("quotr_family_zi", "quotr_family", "list")
+    class = c("ratiod_family_zi", "ratiod_family", "list")
   )
 }
 
@@ -98,32 +114,48 @@ quotr_zinegbin <- function(link_num = "log", link_denom = "log",
 #' Zero-inflated Poisson for the numerator process.
 #' Useful when overdispersion is primarily due to excess zeros.
 #'
-#' @inheritParams quotr_zinegbin
+#' @inheritParams ratiod_zinegbin
 #' @param denom_family Denominator distribution: "gamma" (default), "negbin", or "fixed"
 #'
-#' @return A `quotr_family` object with zero-inflation
+#' @return A `ratiod_family` object with zero-inflation
 #'
 #' @details
-#' Use `quotr_zipois()` when:
+#' Use `ratiod_zipois()` when:
 #' - Excess zeros are the main source of overdispersion
 #' - The non-zero counts follow Poisson (no additional overdispersion)
 #'
-#' Use `quotr_zinegbin()` when:
+#' Use `ratiod_zinegbin()` when:
 #' - Both excess zeros AND overdispersion in positive counts
 #'
 #' @examples
-#' \dontrun{
-#' # CPUE with many zero catches
-#' fit <- quotr(
+#' # Create family object
+#' fam <- ratiod_zipois()
+#' print(fam)
+#'
+#' # Simulate zero-inflated CPUE data
+#' set.seed(123)
+#' n <- 60
+#' zi_prob <- 0.25
+#' df <- data.frame(
+#'   catch = ifelse(runif(n) < zi_prob, 0, rpois(n, lambda = 5)),
+#'   effort = rgamma(n, shape = 4, rate = 1),
+#'   depth = rnorm(n),
+#'   vessel = factor(rep(1:6, each = n/6))
+#' )
+#'
+#' \donttest{
+#' # Fit model (slow, not run on CRAN)
+#' fit <- ratiod(
 #'   catch | effort ~ depth + (1 | vessel),
-#'   zi = ~ 1,  # Constant zero-inflation
-#'   data = trawl_data,
-#'   family = quotr_zipois(denom_family = "gamma")
+#'   zi = ~ 1,
+#'   data = df,
+#'   family = ratiod_zipois(denom_family = "gamma"),
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #' }
 #'
 #' @export
-quotr_zipois <- function(link_num = "log", link_denom = "log",
+ratiod_zipois <- function(link_num = "log", link_denom = "log",
                          link_zi = "logit", denom_family = "gamma") {
 
   validate_link(link_num, c("log"))
@@ -161,7 +193,7 @@ quotr_zipois <- function(link_num = "log", link_denom = "log",
         denom_family
       )
     ),
-    class = c("quotr_family_zi", "quotr_family", "list")
+    class = c("ratiod_family_zi", "ratiod_family", "list")
   )
 }
 
@@ -177,10 +209,10 @@ quotr_zipois <- function(link_num = "log", link_denom = "log",
 #' where \eqn{\theta} is the probability of a positive count and
 #' \eqn{P_{NB}^+} is the truncated-at-zero negative binomial.
 #'
-#' @inheritParams quotr_zinegbin
+#' @inheritParams ratiod_zinegbin
 #' @param link_hurdle Link function for hurdle probability (default: "logit")
 #'
-#' @return A `quotr_family` object with hurdle structure
+#' @return A `ratiod_family` object with hurdle structure
 #'
 #' @details
 #' The hurdle model differs from zero-inflation in interpretation:
@@ -196,18 +228,35 @@ quotr_zipois <- function(link_num = "log", link_denom = "log",
 #' Choose hurdle when zeros represent a distinct biological/sampling state.
 #'
 #' @examples
-#' \dontrun{
-#' # Hurdle model: presence/absence + abundance given presence
-#' fit <- quotr(
+#' # Create family object
+#' fam <- ratiod_hurdle_negbin()
+#' print(fam)
+#'
+#' # Simulate hurdle data (presence/absence + abundance)
+#' set.seed(123)
+#' n <- 60
+#' presence_prob <- 0.7
+#' df <- data.frame(
+#'   count = ifelse(runif(n) > presence_prob, 0,
+#'                  rnbinom(n, size = 3, mu = 10) + 1),
+#'   total = rnbinom(n, size = 5, mu = 50),
+#'   habitat = factor(rep(c("forest", "grassland"), each = n/2)),
+#'   site = factor(rep(1:10, each = n/10))
+#' )
+#'
+#' \donttest{
+#' # Fit model (slow, not run on CRAN)
+#' fit <- ratiod(
 #'   count | total ~ habitat + (1 | site),
-#'   zi = ~ habitat,  # Predictors for presence probability
+#'   zi = ~ habitat,
 #'   data = df,
-#'   family = quotr_hurdle_negbin()
+#'   family = ratiod_hurdle_negbin(),
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #' }
 #'
 #' @export
-quotr_hurdle_negbin <- function(link_num = "log", link_denom = "log",
+ratiod_hurdle_negbin <- function(link_num = "log", link_denom = "log",
                                 link_hurdle = "logit", denom_family = "negbin") {
 
   validate_link(link_num, c("log"))
@@ -239,7 +288,7 @@ quotr_hurdle_negbin <- function(link_num = "log", link_denom = "log",
         if (denom_family == "negbin") "negative binomial" else "fixed"
       )
     ),
-    class = c("quotr_family_zi", "quotr_family", "list")
+    class = c("ratiod_family_zi", "ratiod_family", "list")
   )
 }
 
@@ -249,13 +298,13 @@ quotr_hurdle_negbin <- function(link_num = "log", link_denom = "log",
 #' @description
 #' Hurdle model with truncated Poisson for positive counts.
 #'
-#' @inheritParams quotr_hurdle_negbin
+#' @inheritParams ratiod_hurdle_negbin
 #' @param denom_family Denominator distribution: "gamma" (default), "negbin", or "fixed"
 #'
-#' @return A `quotr_family` object with hurdle structure
+#' @return A `ratiod_family` object with hurdle structure
 #'
 #' @export
-quotr_hurdle_pois <- function(link_num = "log", link_denom = "log",
+ratiod_hurdle_pois <- function(link_num = "log", link_denom = "log",
                               link_hurdle = "logit", denom_family = "gamma") {
 
   validate_link(link_num, c("log"))
@@ -293,14 +342,14 @@ quotr_hurdle_pois <- function(link_num = "log", link_denom = "log",
         denom_family
       )
     ),
-    class = c("quotr_family_zi", "quotr_family", "list")
+    class = c("ratiod_family_zi", "ratiod_family", "list")
   )
 }
 
 
 #' Check if family is zero-inflated
 #'
-#' @param family A quotr_family object
+#' @param family A ratiod_family object
 #' @return Logical
 #' @keywords internal
 is_zi_family <- function(family) {
@@ -310,7 +359,7 @@ is_zi_family <- function(family) {
 
 #' Check if family is hurdle model
 #'
-#' @param family A quotr_family object
+#' @param family A ratiod_family object
 #' @return Logical
 #' @keywords internal
 is_hurdle_family <- function(family) {
@@ -318,15 +367,15 @@ is_hurdle_family <- function(family) {
 }
 
 
-#' Print method for zero-inflated quotr_family
+#' Print method for zero-inflated ratiod_family
 #'
-#' @param x A quotr_family_zi object
+#' @param x A ratiod_family_zi object
 #' @param ... Ignored
 #'
 #' @export
-print.quotr_family_zi <- function(x, ...) {
+print.ratiod_family_zi <- function(x, ...) {
   zi_type <- if (x$zi_type == "hurdle") "Hurdle" else "Zero-inflated"
-  cat("quotr family:", x$name, "\n")
+  cat("ratiod family:", x$name, "\n")
   cat(sprintf("[%s model]\n", zi_type))
   cat(x$description, "\n\n")
 

@@ -60,9 +60,9 @@ This assumes the ratio is the quantity of interest and that effort affects catch
 
 3. **Uncertainty in effort is ignored**: Effort measurements have error. Offset models treat effort as fixed and known.
 
-## The quotr Solution: Joint Modelling
+## The ratiod Solution: Joint Modelling
 
-quotr takes a different approach. Instead of modelling the ratio, we jointly model the two processes that generate it:
+ratiod takes a different approach. Instead of modelling the ratio, we jointly model the two processes that generate it:
 
 $$
 Y_i \sim \text{Distribution}_1(\mu_Y, \phi_Y) \quad \text{(numerator)}
@@ -105,13 +105,13 @@ With shared structure:
 3. The shared effect **cancels in the ratio** (it appears in both $\eta$ and $\xi$)
 4. What remains is the **true ratio signal**, not confounded by site quality
 
-This is why quotr makes shared structure the **default**. Independence is a special case that must be explicitly requested—and triggers a warning.
+This is why ratiod makes shared structure the **default**. Independence is a special case that must be explicitly requested—and triggers a warning.
 
 ## The Three Families
 
-quotr provides three model families for different data types:
+ratiod provides three model families for different data types:
 
-### 1. Two-Process Counts: `quotr_negbin_negbin()`
+### 1. Two-Process Counts: `ratiod_negbin_negbin()`
 
 Both numerator and denominator are overdispersed counts:
 
@@ -123,7 +123,7 @@ $$
 
 This is the family for the "hard case"—what people cannot do correctly with binomial models.
 
-### 2. Trial-Based: `quotr_binomial()`
+### 2. Trial-Based: `ratiod_binomial()`
 
 Successes out of known trials:
 
@@ -135,7 +135,7 @@ $$
 
 Here the denominator is treated as known (though it can be modeled if uncertain).
 
-### 3. Count/Effort: `quotr_poisson_gamma()`
+### 3. Count/Effort: `ratiod_poisson_gamma()`
 
 Count numerator, continuous positive denominator:
 
@@ -181,11 +181,11 @@ There are cases where shared structure is not needed:
 In these cases, use `shared = ~ 0`:
 
 ```r
-fit <- quotr(
+fit <- ratiod(
   numerator = successes ~ treatment,
   denominator = trials ~ 1,
   shared = ~ 0,  # Explicit independence (triggers warning)
-  family = quotr_binomial(),
+  family = ratiod_binomial(),
   data = experiment_data
 )
 ```
@@ -199,9 +199,9 @@ The warning reminds you that this is a strong assumption.
 | Model ratio directly | Heteroscedasticity, ignores denominator uncertainty |
 | Use offset | Assumes proportionality, ignores effort structure |
 | Independent joint model | Spurious ratio effects from shared unmeasured drivers |
-| **quotr (shared structure)** | Correct propagation of uncertainty, shared drivers cancel |
+| **ratiod (shared structure)** | Correct propagation of uncertainty, shared drivers cancel |
 
-quotr enforces the correct approach by design:
+ratiod enforces the correct approach by design:
 
 - **No offsets allowed**
 - **Shared structure by default**

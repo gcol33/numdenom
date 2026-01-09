@@ -11,7 +11,7 @@
 
 using namespace Rcpp;
 
-namespace quotr_hmc_simple {
+namespace ratiod_hmc_simple {
 
 // Model types
 enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA };
@@ -335,7 +335,7 @@ double find_reasonable_epsilon(const std::vector<double>& q, const ModelData& da
   return std::max(1e-4, std::min(epsilon, 0.05));
 }
 
-} // namespace quotr_hmc_simple
+} // namespace ratiod_hmc_simple
 
 // ---------------------------------------------------------------------
 // Simple HMC sampler (fixed trajectory length)
@@ -364,7 +364,7 @@ Rcpp::List cpp_hmc_simple(
     unsigned int seed = 0
 ) {
   // Set up model data
-  quotr_hmc_simple::ModelData data;
+  ratiod_hmc_simple::ModelData data;
   data.y_num = std::vector<int>(y_num.begin(), y_num.end());
   data.y_denom = std::vector<int>(y_denom.begin(), y_denom.end());
   data.y_denom_cont = std::vector<double>(y_denom_cont.begin(), y_denom_cont.end());
@@ -381,11 +381,11 @@ Rcpp::List cpp_hmc_simple(
   data.phi_prior_rate = phi_prior_rate;
 
   if (model_type_str == "binomial") {
-    data.model_type = quotr_hmc_simple::ModelType::BINOMIAL;
+    data.model_type = ratiod_hmc_simple::ModelType::BINOMIAL;
   } else if (model_type_str == "negbin_negbin") {
-    data.model_type = quotr_hmc_simple::ModelType::NEGBIN_NEGBIN;
+    data.model_type = ratiod_hmc_simple::ModelType::NEGBIN_NEGBIN;
   } else {
-    data.model_type = quotr_hmc_simple::ModelType::POISSON_GAMMA;
+    data.model_type = ratiod_hmc_simple::ModelType::POISSON_GAMMA;
   }
 
   int n_params = q_init.size();
@@ -409,11 +409,11 @@ Rcpp::List cpp_hmc_simple(
   std::uniform_real_distribution<double> unif(0.0, 1.0);
 
   std::vector<double> q(q_init.begin(), q_init.end());
-  double log_prob_current = quotr_hmc_simple::compute_log_post(q, data);
+  double log_prob_current = ratiod_hmc_simple::compute_log_post(q, data);
 
   // Find initial step size
-  double epsilon = adapt ? quotr_hmc_simple::find_reasonable_epsilon(q, data, rng) : 0.01;
-  quotr_hmc_simple::DualAveraging da(epsilon);
+  double epsilon = adapt ? ratiod_hmc_simple::find_reasonable_epsilon(q, data, rng) : 0.01;
+  ratiod_hmc_simple::DualAveraging da(epsilon);
 
   int sample_idx = 0;
   int n_accept = 0;
@@ -440,7 +440,7 @@ Rcpp::List cpp_hmc_simple(
     bool divergent = false;
 
     for (int l = 0; l < L; l++) {
-      quotr_hmc_simple::LeapfrogResult lf = quotr_hmc_simple::leapfrog_step(q_prop, p_prop, epsilon, data);
+      ratiod_hmc_simple::LeapfrogResult lf = ratiod_hmc_simple::leapfrog_step(q_prop, p_prop, epsilon, data);
       q_prop = lf.q;
       p_prop = lf.p;
       if (lf.divergent) {
@@ -449,7 +449,7 @@ Rcpp::List cpp_hmc_simple(
       }
     }
 
-    double log_prob_prop = quotr_hmc_simple::compute_log_post(q_prop, data);
+    double log_prob_prop = ratiod_hmc_simple::compute_log_post(q_prop, data);
     double kinetic_prop = 0.0;
     for (int i = 0; i < n_params; i++) {
       kinetic_prop += 0.5 * p_prop[i] * p_prop[i];

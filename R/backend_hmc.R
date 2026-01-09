@@ -1,8 +1,8 @@
-#' HMC/NUTS Backend for quotr Models
+#' HMC/NUTS Backend for ratiod Models
 #'
 #' @description
 #' Custom Hamiltonian Monte Carlo with NUTS (No-U-Turn Sampler) backend.
-#' Provides full MCMC inference for all quotr families without external
+#' Provides full MCMC inference for all ratiod families without external
 #' dependencies like Stan.
 #'
 #' @details
@@ -15,9 +15,9 @@
 #' - Zero-inflation and hurdle models
 #'
 #' **Supported model families:**
-#' - `quotr_binomial()` - Trial-based proportions
-#' - `quotr_negbin_negbin()` - Two-process count ratios
-#' - `quotr_poisson_gamma()` - Count/effort ratios (CPUE)
+#' - `ratiod_binomial()` - Trial-based proportions
+#' - `ratiod_negbin_negbin()` - Two-process count ratios
+#' - `ratiod_poisson_gamma()` - Count/effort ratios (CPUE)
 #'
 #' **Spatial structures:**
 #' - `spatial_car()` - ICAR prior for areal data
@@ -40,14 +40,14 @@
 NULL
 
 
-#' Fit quotr model using HMC/NUTS
+#' Fit ratiod model using HMC/NUTS
 #'
-#' @param formula A quotr_formula object
+#' @param formula A ratiod_formula object
 #' @param data Data frame
 #' @param family Model family
 #' @param spatial Optional spatial structure (spatial_car or spatial_bym2)
 #' @param temporal Optional temporal structure (temporal_rw1, temporal_ar1, etc.)
-#' @param zi Optional zero-inflation specification (quotr_zi object)
+#' @param zi Optional zero-inflation specification (ratiod_zi object)
 #' @param priors Prior specification
 #' @param iter Total number of iterations per chain
 #' @param warmup Number of warmup iterations per chain
@@ -57,7 +57,7 @@ NULL
 #' @param seed Random seed for reproducibility
 #' @param verbose Print progress
 #'
-#' @return A quotr_fit object
+#' @return A ratiod_fit object
 #' @keywords internal
 fit_hmc <- function(formula,
                     data,
@@ -100,7 +100,7 @@ fit_hmc <- function(formula,
   zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N)
 
   # Get prior parameters
-  priors <- priors %||% quotr_priors()
+  priors <- priors %||% ratiod_priors()
   sigma_beta <- priors$sigma_beta %||% 10.0
   sigma_re_scale <- priors$sigma_re_scale %||% 2.5
   phi_shape <- priors$phi_shape %||% 2.0
@@ -193,8 +193,8 @@ fit_hmc <- function(formula,
     verbose = verbose
   )
 
-  # Convert to quotr_fit
-  fit <- convert_hmc_to_quotr_fit_full(
+  # Convert to ratiod_fit
+  fit <- convert_hmc_to_ratiod_fit_full(
     fit_raw = fit_raw,
     hmc_data = hmc_data,
     spatial_info = spatial_info,
@@ -266,9 +266,16 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
     y_denom_cont = y_denom_cont,
     X_num = X_num,
     X_denom = X_denom,
+    # Legacy single-term RE fields (for backwards compatibility)
     re_group = re_info$group_idx,
     n_re_groups = re_info$n_groups,
     re_var = re_info$group_var,
+    # New multi-term RE fields
+    n_re_terms = re_info$n_re_terms,
+    re_terms = re_info$re_terms,
+    re_group_matrix = re_info$group_idx_matrix,
+    total_re_groups = re_info$total_groups %||% re_info$n_groups,
+    has_slopes = re_info$has_slopes %||% FALSE,
     N = length(y_num),
     p_num = ncol(X_num),
     p_denom = ncol(X_denom)
@@ -277,24 +284,105 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
 
 
 #' Extract RE info for HMC
+#'
+#' @description
+#' Extracts random effects information for the HMC backend.
+#' Supports multiple crossed random effects (e.g., `(1|site) + (1|year)`).
+#'
+#' @param formula A ratiod_formula object
+#' @return List with RE structure for HMC backend
 #' @keywords internal
 extract_re_for_hmc <- function(formula) {
   re_terms <- formula$numerator$random_effects
+  n_obs <- length(formula$numerator$response)
 
   if (is.null(re_terms) || length(re_terms) == 0) {
-    n_obs <- length(formula$numerator$response)
     return(list(
+      # Legacy single-term fields (for backwards compatibility)
       group_idx = rep(0L, n_obs),
       n_groups = 0L,
-      group_var = NULL
+      group_var = NULL,
+      # New multi-term fields
+      n_re_terms = 0L,
+      re_terms = list(),
+      has_slopes = FALSE
     ))
   }
 
+  n_re_terms <- length(re_terms)
+
+  # Check for unsupported features and warn
+  has_slopes <- FALSE
+  for (term in re_terms) {
+    if (length(term$slope_vars) > 0) {
+      has_slopes <- TRUE
+      warning(
+        "Random slopes not yet fully supported. Slope terms will be ignored: ",
+        paste(term$slope_vars, collapse = ", "),
+        "\nOnly random intercepts (1 | group) are currently implemented.",
+        call. = FALSE
+      )
+    }
+  }
+
+  if (n_re_terms > 1) {
+    # Multiple RE terms - use full multi-term structure
+    re_terms_processed <- vector("list", n_re_terms)
+    total_groups <- 0L
+
+    for (t in seq_len(n_re_terms)) {
+      term <- re_terms[[t]]
+      re_terms_processed[[t]] <- list(
+        group_var = term$group_var,
+        group_idx = as.integer(term$group),
+        n_groups = as.integer(term$n_groups),
+        has_intercept = term$has_intercept,
+        slope_vars = term$slope_vars,
+        offset = total_groups  # Offset in flattened RE parameter vector
+      )
+      total_groups <- total_groups + term$n_groups
+    }
+
+    # Build group index matrix: [n_obs, n_re_terms]
+    # Each column contains the group index for that RE term
+    group_idx_matrix <- matrix(0L, nrow = n_obs, ncol = n_re_terms)
+    for (t in seq_len(n_re_terms)) {
+      group_idx_matrix[, t] <- as.integer(re_terms[[t]]$group)
+    }
+
+    return(list(
+      # Legacy single-term fields (use first term for backwards compatibility)
+      group_idx = as.integer(re_terms[[1]]$group),
+      n_groups = as.integer(re_terms[[1]]$n_groups),
+      group_var = re_terms[[1]]$group_var,
+      # New multi-term fields
+      n_re_terms = n_re_terms,
+      re_terms = re_terms_processed,
+      group_idx_matrix = group_idx_matrix,
+      total_groups = total_groups,
+      has_slopes = has_slopes
+    ))
+  }
+
+  # Single RE term - use simpler structure
   re_info <- re_terms[[1]]
   list(
+    # Legacy single-term fields
     group_idx = as.integer(re_info$group),
     n_groups = as.integer(re_info$n_groups),
-    group_var = re_info$group_var
+    group_var = re_info$group_var,
+    # New multi-term fields (single term)
+    n_re_terms = 1L,
+    re_terms = list(list(
+      group_var = re_info$group_var,
+      group_idx = as.integer(re_info$group),
+      n_groups = as.integer(re_info$n_groups),
+      has_intercept = re_info$has_intercept,
+      slope_vars = re_info$slope_vars,
+      offset = 0L
+    )),
+    total_groups = as.integer(re_info$n_groups),
+    has_slopes = has_slopes
   )
 }
 
@@ -315,10 +403,10 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
   }
 
   # Extract spatial type
-  spatial_type <- if (inherits(spatial, "quotr_spatial_bym2")) {
+  spatial_type <- if (inherits(spatial, "ratiod_spatial_bym2")) {
     "bym2"
-  } else if (inherits(spatial, "quotr_spatial_car") ||
-             inherits(spatial, "quotr_spatial_icar")) {
+  } else if (inherits(spatial, "ratiod_spatial_car") ||
+             inherits(spatial, "ratiod_spatial_icar")) {
     "icar"
   } else {
     stop("Unknown spatial structure type")
@@ -409,9 +497,9 @@ initialize_hmc_params_spatial <- function(hmc_data, model_type, spatial_info) {
 }
 
 
-#' Convert HMC output to quotr_fit (with spatial support)
+#' Convert HMC output to ratiod_fit (with spatial support)
 #' @keywords internal
-convert_hmc_to_quotr_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
+convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
                                               formula, data, family,
                                               model_type, iter, warmup, chains) {
   # Handle multi-chain case
@@ -476,7 +564,7 @@ convert_hmc_to_quotr_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
     )
   )
 
-  class(fit) <- "quotr_fit"
+  class(fit) <- "ratiod_fit"
   return(fit)
 }
 
@@ -668,7 +756,7 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
     ))
   }
 
-  # Temporal has already been validated by quotr()
+  # Temporal has already been validated by ratiod()
   list(
     type = temporal$type,
     time_index = temporal$time_index,
@@ -750,7 +838,7 @@ prepare_zi_for_hmc <- function(zi, data, N) {
     ))
   }
 
-  # ZI is a quotr_zi object with formula and type
+  # ZI is a ratiod_zi object with formula and type
   zi_type <- zi$type  # "zi_poisson", "zi_negbin", "hurdle_poisson", "hurdle_negbin"
 
   # Build design matrix from ZI formula
@@ -817,9 +905,9 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 }
 
 
-#' Convert HMC output to quotr_fit (full feature support)
+#' Convert HMC output to ratiod_fit (full feature support)
 #' @keywords internal
-convert_hmc_to_quotr_fit_full <- function(fit_raw, hmc_data, spatial_info,
+convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
                                            temporal_info, zi_info,
                                            formula, data, family,
                                            model_type, iter, warmup, chains) {
@@ -887,7 +975,7 @@ convert_hmc_to_quotr_fit_full <- function(fit_raw, hmc_data, spatial_info,
     )
   )
 
-  class(fit) <- "quotr_fit"
+  class(fit) <- "ratiod_fit"
   return(fit)
 }
 
@@ -1127,4 +1215,185 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
 
   colnames(ratio_draws) <- paste0("ratio[", seq_len(N), "]")
   ratio_draws
+}
+
+
+# =============================================================================
+# GP Spatial Support (v0.9.4+)
+# =============================================================================
+
+#' Check if spatial specification is GP-based
+#' @keywords internal
+is_gp_spatial <- function(spatial) {
+  if (is.null(spatial)) return(FALSE)
+  inherits(spatial, "ratiod_gp") ||
+    inherits(spatial, "ratiod_multiscale")
+}
+
+#' Check if temporal specification is multiscale
+#' @keywords internal
+is_multiscale_temporal <- function(temporal) {
+  if (is.null(temporal)) return(FALSE)
+  inherits(temporal, "ratiod_temporal_multiscale")
+}
+
+#' Prepare GP spatial structure for HMC
+#'
+#' Computes nearest neighbor structure for NNGP approximation.
+#'
+#' @param gp A ratiod_gp or ratiod_multiscale spatial specification
+#' @param data Data frame with coordinate columns
+#' @param N Number of observations
+#' @return List of GP parameters for cpp_hmc_fit_gp
+#' @keywords internal
+prepare_gp_for_hmc <- function(gp, data, N) {
+  if (is.null(gp)) {
+    return(list(
+      gp_type = "none",
+      coords = numeric(0),
+      nn_idx = integer(0),
+      nn_dist = numeric(0),
+      nn_order = integer(0),
+      nn_order_inv = integer(0),
+      nn = 0L,
+      cov_type = "exponential",
+      nu = 1.5,
+      shared = TRUE
+    ))
+  }
+
+  # Validate GP specification
+  validated <- validate_gp(gp, data)
+
+  # Extract coordinates
+  coords_mat <- validated$coords
+  coords_flat <- as.vector(t(coords_mat))  # Row-major flatten
+
+  if (inherits(gp, "ratiod_multiscale")) {
+    # Multi-scale GP
+    list(
+      gp_type = "multiscale_gp",
+      coords = coords_flat,
+      # Single-scale params (not used for multiscale)
+      nn_idx = integer(0),
+      nn_dist = numeric(0),
+      nn_order = integer(0),
+      nn_order_inv = integer(0),
+      nn = 0L,
+      # Local scale
+      nn_idx_local = as.integer(as.vector(t(validated$neighbors_local))),
+      nn_dist_local = as.vector(t(validated$distances_local)),
+      nn_order_local = as.integer(validated$order_local),
+      nn_order_inv_local = as.integer(validated$order_inv_local),
+      nn_local = as.integer(gp$nn_local),
+      # Regional scale
+      nn_idx_regional = as.integer(as.vector(t(validated$neighbors_regional))),
+      nn_dist_regional = as.vector(t(validated$distances_regional)),
+      nn_order_regional = as.integer(validated$order_regional),
+      nn_order_inv_regional = as.integer(validated$order_inv_regional),
+      nn_regional = as.integer(gp$nn_regional),
+      # Range constraints
+      range_local_lower = gp$range_local[1],
+      range_local_upper = gp$range_local[2],
+      range_regional_lower = gp$range_regional[1],
+      range_regional_upper = gp$range_regional[2],
+      # Common params
+      cov_type = gp$cov,
+      nu = gp$nu,
+      shared = gp$shared
+    )
+  } else {
+    # Single-scale GP
+    list(
+      gp_type = "gp",
+      coords = coords_flat,
+      nn_idx = as.integer(as.vector(t(validated$neighbors))),
+      nn_dist = as.vector(t(validated$distances)),
+      nn_order = as.integer(validated$order),
+      nn_order_inv = as.integer(validated$order_inv),
+      nn = as.integer(gp$nn),
+      # Multi-scale params (not used for single-scale)
+      nn_idx_local = integer(0),
+      nn_dist_local = numeric(0),
+      nn_order_local = integer(0),
+      nn_order_inv_local = integer(0),
+      nn_local = 0L,
+      nn_idx_regional = integer(0),
+      nn_dist_regional = numeric(0),
+      nn_order_regional = integer(0),
+      nn_order_inv_regional = integer(0),
+      nn_regional = 0L,
+      range_local_lower = 0,
+      range_local_upper = 1,
+      range_regional_lower = 1,
+      range_regional_upper = 10,
+      # Common params
+      cov_type = gp$cov,
+      nu = gp$nu,
+      shared = gp$shared
+    )
+  }
+}
+
+#' Prepare multiscale temporal structure for HMC
+#' @keywords internal
+prepare_multiscale_temporal_for_hmc <- function(temporal, data, N) {
+  if (is.null(temporal) || !inherits(temporal, "ratiod_temporal_multiscale")) {
+    return(list(
+      ms_temporal_type = "none",
+      ms_time_index = integer(N),
+      ms_group_index = integer(N),
+      ms_n_times = 0L,
+      ms_n_groups = 1L,
+      trend_type = "none",
+      seasonal_period = 0L,
+      short_term_type = "none",
+      shared = TRUE
+    ))
+  }
+
+  # Validate temporal specification
+  validated <- validate_temporal_multiscale(temporal, data)
+
+  list(
+    ms_temporal_type = "multiscale",
+    ms_time_index = as.integer(validated$time_index),
+    ms_group_index = as.integer(validated$group_index),
+    ms_n_times = as.integer(validated$n_times),
+    ms_n_groups = as.integer(validated$n_groups),
+    trend_type = temporal$trend,
+    seasonal_period = as.integer(temporal$seasonal %||% 0L),
+    short_term_type = temporal$short_term,
+    shared = temporal$shared
+  )
+}
+
+#' Prepare RSR structure for HMC
+#' @keywords internal
+prepare_rsr_for_hmc <- function(spatial, data) {
+  if (is.null(spatial) || !isTRUE(spatial$rsr)) {
+    return(list(
+      has_rsr = FALSE,
+      rsr_projection = numeric(0),
+      rsr_n = 0L
+    ))
+  }
+
+  # Validate RSR and compute projection
+  validated <- validate_rsr(spatial, data)
+
+  if (is.null(validated$rsr_projection)) {
+    return(list(
+      has_rsr = FALSE,
+      rsr_projection = numeric(0),
+      rsr_n = 0L
+    ))
+  }
+
+  n <- nrow(validated$rsr_projection)
+  list(
+    has_rsr = TRUE,
+    rsr_projection = as.vector(validated$rsr_projection),  # Row-major flatten
+    rsr_n = as.integer(n)
+  )
 }

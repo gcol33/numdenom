@@ -6,12 +6,12 @@ test_that("PG sampler produces valid PG(1, z) samples", {
   set.seed(123)
 
   # Test PG(1, 0) - should have mean ~0.25
-  x <- quotr:::cpp_rpg1(rep(0, 5000))
+  x <- ratiod:::cpp_rpg1(rep(0, 5000))
   expect_true(all(x > 0))
   expect_equal(mean(x), 0.25, tolerance = 0.02)
 
   # Test PG(1, 2) - should have mean ~0.19
-  x <- quotr:::cpp_rpg1(rep(2, 5000))
+  x <- ratiod:::cpp_rpg1(rep(2, 5000))
   mean_theory <- tanh(1) / 4  # tanh(z/2) / (2z)
 
   expect_equal(mean(x), mean_theory, tolerance = 0.02)
@@ -25,7 +25,7 @@ test_that("PG sampler works for PG(b, z)", {
   # PG(5, 1) should be sum of 5 PG(1, 1)
   b <- rep(5L, 1000)
   z <- rep(1, 1000)
-  x <- quotr:::cpp_rpg(b, z)
+  x <- ratiod:::cpp_rpg(b, z)
 
   expect_true(all(x > 0))
   # Mean should be approximately 5 * PG(1, 1) mean
@@ -56,7 +56,7 @@ test_that("PG Gibbs sampler recovers parameters", {
   y <- rbinom(N, trials, plogis(eta))
 
   # Fit
-  fit <- quotr:::cpp_pg_binomial_gibbs(
+  fit <- ratiod:::cpp_pg_binomial_gibbs(
     y = as.integer(y),
     n = trials,
     X = X,
@@ -94,7 +94,7 @@ test_that("Laplace backend finds correct mode", {
   y <- rbinom(N, trials, plogis(eta))
 
   # Fit with Laplace (no RE)
-  result <- quotr:::cpp_laplace_fit(
+  result <- ratiod:::cpp_laplace_fit(
     y = as.integer(y),
     n = as.integer(trials),
     X = X,
@@ -133,7 +133,7 @@ test_that("Laplace backend works with random effects", {
   y <- rbinom(N, trials, plogis(eta))
 
   # Fit
-  result <- quotr:::cpp_laplace_fit(
+  result <- ratiod:::cpp_laplace_fit(
     y = as.integer(y),
     n = as.integer(trials),
     X = X,
@@ -156,13 +156,13 @@ test_that("Laplace backend works with random effects", {
 })
 
 test_that("can_use_pg_backend correctly identifies binomial family", {
-  expect_true(quotr:::can_use_pg_backend(quotr_binomial()))
-  expect_false(quotr:::can_use_pg_backend(quotr_negbin_negbin()))
-  expect_false(quotr:::can_use_pg_backend(quotr_poisson_gamma()))
+  expect_true(ratiod:::can_use_pg_backend(ratiod_binomial()))
+  expect_false(ratiod:::can_use_pg_backend(ratiod_negbin_negbin()))
+  expect_false(ratiod:::can_use_pg_backend(ratiod_poisson_gamma()))
 })
 
 test_that("can_use_laplace_backend accepts all families", {
-  expect_true(quotr:::can_use_laplace_backend(quotr_binomial()))
-  expect_true(quotr:::can_use_laplace_backend(quotr_negbin_negbin()))
-  expect_true(quotr:::can_use_laplace_backend(quotr_poisson_gamma()))
+  expect_true(ratiod:::can_use_laplace_backend(ratiod_binomial()))
+  expect_true(ratiod:::can_use_laplace_backend(ratiod_negbin_negbin()))
+  expect_true(ratiod:::can_use_laplace_backend(ratiod_poisson_gamma()))
 })

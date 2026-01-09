@@ -8,13 +8,13 @@
 #include <vector>
 #include <cmath>
 
-namespace quotr_temporal {
+namespace ratiod_temporal {
 
 // =====================================================================
 // Temporal structure types
 // =====================================================================
 
-enum class TemporalType { NONE, RW1, RW2, AR1 };
+enum class TemporalType { NONE, RW1, RW2, AR1, IID };
 
 // Temporal data container
 struct TemporalData {
@@ -177,6 +177,6 @@ inline double sum_to_zero_penalty(const double* phi, int T, double lambda = 0.00
   return -0.5 * lambda * sum * sum;
 }
 
-} // namespace quotr_temporal
+} // namespace ratiod_temporal
 
 #endif // QUOTR_HMC_TEMPORAL_H

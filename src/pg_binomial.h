@@ -1,6 +1,6 @@
 // pg_binomial.h
 // Pólya-Gamma Gibbs sampler for binomial models with random effects
-// For the quotr package: hierarchical ratio inference
+// For the ratiod package: hierarchical ratio inference
 
 #ifndef QUOTR_PG_BINOMIAL_H
 #define QUOTR_PG_BINOMIAL_H
@@ -8,7 +8,7 @@
 #include <Rcpp.h>
 #include <vector>
 
-namespace quotr {
+namespace ratiod {
 
 // ---------------------------------------------------------------------
 // Core Gibbs sampler for binomial models
@@ -133,6 +133,6 @@ double update_sigma_re(
     double scale
 );
 
-} // namespace quotr
+} // namespace ratiod
 
 #endif // QUOTR_PG_BINOMIAL_H

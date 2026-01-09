@@ -1,5 +1,5 @@
 // autodiff.h
-// Reverse-mode automatic differentiation for quotr
+// Reverse-mode automatic differentiation for ratiod
 // Lightweight implementation inspired by modern AD libraries
 
 #ifndef QUOTR_AUTODIFF_H
@@ -11,7 +11,7 @@
 #include <memory>
 #include <functional>
 
-namespace quotr {
+namespace ratiod {
 namespace ad {
 
 // Forward declarations
@@ -492,6 +492,6 @@ inline std::vector<double> get_adjoints(const std::vector<Var>& vars) {
 }
 
 } // namespace ad
-} // namespace quotr
+} // namespace ratiod
 
 #endif // QUOTR_AUTODIFF_H

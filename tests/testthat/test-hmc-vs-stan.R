@@ -7,7 +7,7 @@
 # - Ratio posteriors match
 # - Diagnostics (divergences, Rhat) acceptable
 
-# Skip all tests - Stan backend has been removed from quotr
+# Skip all tests - Stan backend has been removed from ratiod
 # These tests were used to validate HMC against Stan during migration.
 # Now that Stan is fully removed, these validation tests are historical.
 skip_if_no_cmdstanr <- function() {
@@ -84,10 +84,10 @@ test_that("HMC matches Stan for binomial family", {
 
   # Fit with Stan
   message("Fitting binomial model with Stan...")
-  fit_stan <- quotr(
+  fit_stan <- ratiod(
     successes | trials ~ x,
     data = df,
-    family = quotr_binomial(),
+    family = ratiod_binomial(),
     backend = "cmdstanr",
     chains = 2,
     iter = 1500,
@@ -97,10 +97,10 @@ test_that("HMC matches Stan for binomial family", {
 
   # Fit with HMC
   message("Fitting binomial model with HMC...")
-  fit_hmc <- quotr(
+  fit_hmc <- ratiod(
     successes | trials ~ x,
     data = df,
-    family = quotr_binomial(),
+    family = ratiod_binomial(),
     backend = "hmc",
     chains = 2,
     iter = 1500,
@@ -178,10 +178,10 @@ test_that("HMC matches Stan for binomial with random effects", {
 
   # Fit with Stan
   message("Fitting binomial + RE model with Stan...")
-  fit_stan <- quotr(
+  fit_stan <- ratiod(
     successes | trials ~ x + (1 | group),
     data = df,
-    family = quotr_binomial(),
+    family = ratiod_binomial(),
     backend = "cmdstanr",
     chains = 2,
     iter = 1500,
@@ -191,10 +191,10 @@ test_that("HMC matches Stan for binomial with random effects", {
 
   # Fit with HMC
   message("Fitting binomial + RE model with HMC...")
-  fit_hmc <- quotr(
+  fit_hmc <- ratiod(
     successes | trials ~ x + (1 | group),
     data = df,
-    family = quotr_binomial(),
+    family = ratiod_binomial(),
     backend = "hmc",
     chains = 2,
     iter = 1500,
@@ -264,10 +264,10 @@ test_that("HMC matches Stan for negbin_negbin family", {
 
   # Fit with Stan
   message("Fitting negbin_negbin model with Stan...")
-  fit_stan <- quotr(
+  fit_stan <- ratiod(
     y_num | y_denom ~ x,
     data = df,
-    family = quotr_negbin_negbin(),
+    family = ratiod_negbin_negbin(),
     backend = "cmdstanr",
     chains = 2,
     iter = 1500,
@@ -277,10 +277,10 @@ test_that("HMC matches Stan for negbin_negbin family", {
 
   # Fit with HMC
   message("Fitting negbin_negbin model with HMC...")
-  fit_hmc <- quotr(
+  fit_hmc <- ratiod(
     y_num | y_denom ~ x,
     data = df,
-    family = quotr_negbin_negbin(),
+    family = ratiod_negbin_negbin(),
     backend = "hmc",
     chains = 2,
     iter = 1500,
@@ -391,10 +391,10 @@ test_that("HMC matches Stan for poisson_gamma family", {
 
   # Fit with Stan
   message("Fitting poisson_gamma model with Stan...")
-  fit_stan <- quotr(
+  fit_stan <- ratiod(
     counts | effort ~ x,
     data = df,
-    family = quotr_poisson_gamma(),
+    family = ratiod_poisson_gamma(),
     backend = "cmdstanr",
     chains = 2,
     iter = 1500,
@@ -404,10 +404,10 @@ test_that("HMC matches Stan for poisson_gamma family", {
 
   # Fit with HMC
   message("Fitting poisson_gamma model with HMC...")
-  fit_hmc <- quotr(
+  fit_hmc <- ratiod(
     counts | effort ~ x,
     data = df,
-    family = quotr_poisson_gamma(),
+    family = ratiod_poisson_gamma(),
     backend = "hmc",
     chains = 2,
     iter = 1500,
@@ -491,10 +491,10 @@ test_that("HMC matches Stan for binomial with ICAR spatial", {
 
   # Fit with Stan
   message("Fitting binomial + ICAR spatial with Stan...")
-  fit_stan <- quotr(
+  fit_stan <- ratiod(
     successes | trials ~ x,
     data = df,
-    family = quotr_binomial(),
+    family = ratiod_binomial(),
     spatial = spatial_spec,
     backend = "cmdstanr",
     chains = 2,
@@ -505,10 +505,10 @@ test_that("HMC matches Stan for binomial with ICAR spatial", {
 
   # Fit with HMC
   message("Fitting binomial + ICAR spatial with HMC...")
-  fit_hmc <- quotr(
+  fit_hmc <- ratiod(
     successes | trials ~ x,
     data = df,
-    family = quotr_binomial(),
+    family = ratiod_binomial(),
     spatial = spatial_spec,
     backend = "hmc",
     chains = 2,
@@ -564,10 +564,10 @@ test_that("HMC recovers known parameters from simulation", {
   df <- data.frame(successes = successes, trials = trials, x = x)
 
   # Fit with HMC only (faster test)
-  fit <- quotr(
+  fit <- ratiod(
     successes | trials ~ x,
     data = df,
-    family = quotr_binomial(),
+    family = ratiod_binomial(),
     backend = "hmc",
     chains = 2,
     iter = 2000,

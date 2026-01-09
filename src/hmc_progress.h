@@ -11,7 +11,7 @@
 #include <sstream>
 #include <iomanip>
 
-namespace quotr_progress {
+namespace ratiod_progress {
 
 // Progress reporter for HMC sampling
 // Thread-safe when used from a single chain
@@ -217,6 +217,6 @@ public:
   }
 };
 
-}  // namespace quotr_progress
+}  // namespace ratiod_progress
 
 #endif  // QUOTR_HMC_PROGRESS_H

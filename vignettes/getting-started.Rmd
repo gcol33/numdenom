@@ -1,10 +1,10 @@
 ---
-title: "Getting Started with quotr"
+title: "Getting Started with ratiod"
 author: "Gilles Colling"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Getting Started with quotr}
+  %\VignetteIndexEntry{Getting Started with ratiod}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -21,7 +21,7 @@ knitr::opts_chunk$set(
 
 ## Installation
 
-quotr requires CmdStan for Bayesian inference. Install in order:
+ratiod requires CmdStan for Bayesian inference. Install in order:
 
 ```{r install, eval = FALSE}
 # 1. Install cmdstanr (Stan interface)
@@ -30,15 +30,15 @@ install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOpt
 # 2. Install CmdStan (one-time setup)
 cmdstanr::install_cmdstan()
 
-# 3. Install quotr
+# 3. Install ratiod
 # install.packages("pak")
-pak::pak("gcol33/quotr")
+pak::pak("gcol33/ratiod")
 ```
 
 Verify installation:
 
 ```{r verify, eval = FALSE}
-library(quotr)
+library(ratiod)
 cmdstanr::cmdstan_version()
 ```
 
@@ -49,7 +49,7 @@ cmdstanr::cmdstan_version()
 Catch per unit effort with site-level variation:
 
 ```{r cpue-example}
-library(quotr)
+library(ratiod)
 
 # Simulated trawl data
 set.seed(123)
@@ -65,10 +65,10 @@ trawl_data <- data.frame(
 )
 
 # Fit joint model using combined formula syntax
-fit <- quotr(
+fit <- ratiod(
   catch | effort ~ depth + season + (1 | site),
   data = trawl_data,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 
 # View results
@@ -93,45 +93,45 @@ ratio_contrast(fit, ~ season)
 
 ## The Three Families
 
-### Count/Count Ratios: `quotr_negbin_negbin()`
+### Count/Count Ratios: `ratiod_negbin_negbin()`
 
 When both numerator and denominator are counts:
 
 ```{r negbin-example}
 # Relative abundance: species count / total count
-fit_abundance <- quotr(
+fit_abundance <- ratiod(
   species_count | total_count ~ habitat + (1 | plot),
   data = survey_data,
-  family = quotr_negbin_negbin()
+  family = ratiod_negbin_negbin()
 )
 ```
 
-### Trial-Based Proportions: `quotr_binomial()`
+### Trial-Based Proportions: `ratiod_binomial()`
 
 When numerator is successes out of denominator trials:
 
 ```{r binomial-example}
 # Detection probability: detections / availability
-fit_detection <- quotr(
+fit_detection <- ratiod(
   detections | available ~ effort + (1 | site),
   data = camera_data,
-  family = quotr_binomial()
+  family = ratiod_binomial()
 )
 
 # Extract detection probabilities
 probs <- ratio(fit_detection)
 ```
 
-### Count/Effort Ratios: `quotr_poisson_gamma()`
+### Count/Effort Ratios: `ratiod_poisson_gamma()`
 
 When denominator is continuous effort:
 
 ```{r poisson-gamma-example}
 # CPUE: catch count / fishing hours
-fit_cpue <- quotr(
+fit_cpue <- ratiod(
   catch | hours ~ depth + season + (1 | vessel),
   data = fishing_data,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 
@@ -142,10 +142,10 @@ fit_cpue <- quotr(
 Use `num | denom ~ predictors` when both processes share the same predictors:
 
 ```{r combined-formula}
-fit <- quotr(
+fit <- ratiod(
   catch | effort ~ depth + season + (1 | site),
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 
@@ -154,12 +154,12 @@ fit <- quotr(
 Add process-specific terms with `formula_num` and `formula_denom`:
 
 ```{r different-predictors}
-fit <- quotr(
+fit <- ratiod(
   catch | effort ~ (1 | site),           # Shared structure
   formula_num = ~ depth + season,         # Numerator-specific
   formula_denom = ~ weather,              # Denominator-specific
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 
@@ -168,11 +168,11 @@ fit <- quotr(
 For complete control, provide `formula_denom` with a full formula:
 
 ```{r separate-formulas}
-fit <- quotr(
+fit <- ratiod(
   catch ~ depth + season + (1 | site),
   formula_denom = effort ~ weather + (1 | site),
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 
@@ -180,14 +180,14 @@ fit <- quotr(
 
 ### Default: Inferred from Matching Random Effects
 
-When the same grouping variable appears in both formulas, quotr shares the random effect by default:
+When the same grouping variable appears in both formulas, ratiod shares the random effect by default:
 
 ```{r shared-default}
 # site effect shared between catch and effort
-fit <- quotr(
+fit <- ratiod(
   catch | effort ~ x + (1 | site),
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 # Equivalent to: shared = ~ (1 | site)
 ```
@@ -195,11 +195,11 @@ fit <- quotr(
 ### Explicit Shared Structure
 
 ```{r shared-explicit}
-fit <- quotr(
+fit <- ratiod(
   catch | effort ~ x + (1 | site) + (1 | observer),
   shared = ~ (1 | site),  # Only site is shared
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 
@@ -208,11 +208,11 @@ fit <- quotr(
 Request independent random effects:
 
 ```{r shared-independent}
-fit <- quotr(
+fit <- ratiod(
   successes | trials ~ treatment + (1 | block),
   shared = ~ 0,  # Triggers warning about independence assumption
   data = experiment_data,
-  family = quotr_binomial()
+  family = ratiod_binomial()
 )
 ```
 
@@ -226,22 +226,22 @@ adj <- matrix(0, n_sites, n_sites)
 # ... fill in neighbor relationships ...
 
 # Fit with spatial structure
-fit_spatial <- quotr(
+fit_spatial <- ratiod(
   count | effort ~ x + (1 | site),
   spatial = spatial_car(adj, level = "group", group_var = "site"),
   data = df,
-  family = quotr_poisson_gamma()
+  family = ratiod_poisson_gamma()
 )
 ```
 
 ### BYM2 Model (Interpretable Spatial Fraction)
 
 ```{r spatial-bym2}
-fit_bym2 <- quotr(
+fit_bym2 <- ratiod(
   cases | population ~ age + (1 | region),
   spatial = spatial_bym2(adj, level = "group", group_var = "region"),
   data = epi_data,
-  family = quotr_binomial()
+  family = ratiod_binomial()
 )
 ```
 
@@ -265,11 +265,11 @@ pp_check(fit, type = "intervals")
 
 ```{r model-comparison}
 # Compare nested models
-fit1 <- quotr(y | n ~ x, ...)
-fit2 <- quotr(y | n ~ x + z, ...)
+fit1 <- ratiod(y | n ~ x, ...)
+fit2 <- ratiod(y | n ~ x + z, ...)
 
 # LOO comparison
-quotr_compare(fit1, fit2)
+ratiod_compare(fit1, fit2)
 
 # Or compute LOO/WAIC individually
 loo(fit1)
@@ -280,29 +280,29 @@ waic(fit1)
 
 ### Default PC Priors
 
-quotr uses penalized complexity priors that favor simpler models:
+ratiod uses penalized complexity priors that favor simpler models:
 
 ```{r priors-default}
 # Default: P(sigma > 1) = 0.01
-fit <- quotr(..., priors = quotr_priors())
+fit <- ratiod(..., priors = ratiod_priors())
 ```
 
 ### Custom Priors
 
 ```{r priors-custom}
 # More informative: expect smaller random effects
-fit <- quotr(
+fit <- ratiod(
   ...,
-  priors = quotr_priors(
+  priors = ratiod_priors(
     sigma_U = 0.5,      # P(sigma > 0.5) = 0.01
     sigma_alpha = 0.01
   )
 )
 
 # Less informative: allow larger effects
-fit <- quotr(
+fit <- ratiod(
   ...,
-  priors = quotr_priors(
+  priors = ratiod_priors(
     sigma_U = 2.0,
     sigma_alpha = 0.05  # P(sigma > 2) = 0.05
   )
@@ -315,20 +315,20 @@ fit <- quotr(
 
 | Function | Purpose |
 |----------|---------|
-| `quotr()` | Fit a quotr model |
+| `ratiod()` | Fit a ratiod model |
 | `ratio()` | Extract ratio posteriors |
 | `ratio_contrast()` | Compare ratios between groups |
 | `pp_check()` | Posterior predictive checks |
 | `loo()`, `waic()` | Model comparison criteria |
-| `quotr_compare()` | Compare multiple models |
+| `ratiod_compare()` | Compare multiple models |
 
 ### Families
 
 | Family | Numerator | Denominator |
 |--------|-----------|-------------|
-| `quotr_negbin_negbin()` | Overdispersed counts | Overdispersed counts |
-| `quotr_binomial()` | Successes | Trials (fixed) |
-| `quotr_poisson_gamma()` | Counts | Continuous effort |
+| `ratiod_negbin_negbin()` | Overdispersed counts | Overdispersed counts |
+| `ratiod_binomial()` | Successes | Trials (fixed) |
+| `ratiod_poisson_gamma()` | Counts | Continuous effort |
 
 ### Spatial Functions
 
@@ -340,6 +340,6 @@ fit <- quotr(
 ## See Also
 
 - `vignette("philosophy")` - Why ratios are not data
-- `?quotr` - Main function documentation
-- `?quotr_priors` - Prior specification
+- `?ratiod` - Main function documentation
+- `?ratiod_priors` - Prior specification
 - `?spatial_car` - Spatial structure

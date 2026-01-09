@@ -1,4 +1,4 @@
-url: https://gillescolling.com/quotr
+url: https://gillescolling.com/ratiod
 
 template:
   bootstrap: 5
@@ -11,7 +11,7 @@ figures:
   bg: "#F5F6F8"
 
 home:
-  title: "quotr: Bayesian Hierarchical Models for Ratios"
+  title: "ratiod: Bayesian Hierarchical Models for Ratios"
   description: >
     Joint modelling of numerator and denominator processes with shared latent
     structure. Ratios computed post hoc with full uncertainty propagation.
@@ -37,21 +37,21 @@ navbar:
           href: articles/philosophy.html
     github:
       icon: fab fa-github
-      href: https://github.com/gcol33/quotr
+      href: https://github.com/gcol33/ratiod
       aria-label: GitHub
 
 reference:
   - title: "Model Fitting"
-    desc: "Main function for fitting quotr models"
+    desc: "Main function for fitting ratiod models"
     contents:
-      - quotr
+      - ratiod
 
   - title: "Model Families"
     desc: "Distribution families for numerator/denominator processes"
     contents:
-      - quotr_negbin_negbin
-      - quotr_binomial
-      - quotr_poisson_gamma
+      - ratiod_negbin_negbin
+      - ratiod_binomial
+      - ratiod_poisson_gamma
 
   - title: "Ratio Inference"
     desc: "Extract and compare ratio posteriors"
@@ -68,15 +68,15 @@ reference:
   - title: "Priors"
     desc: "Prior specification helpers"
     contents:
-      - quotr_priors
+      - ratiod_priors
 
   - title: "Model Checking"
     desc: "Posterior predictive checks and model comparison"
     contents:
       - pp_check
-      - loo.quotr_fit
-      - waic.quotr_fit
-      - quotr_compare
+      - loo.ratiod_fit
+      - waic.ratiod_fit
+      - ratiod_compare
 
 articles:
   - title: "Getting Started"

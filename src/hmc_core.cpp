@@ -1,5 +1,5 @@
 // hmc_core.cpp
-// Implementation of HMC/NUTS sampler for quotr
+// Implementation of HMC/NUTS sampler for ratiod
 
 #include "hmc_core.h"
 #include <Rcpp.h>
@@ -10,7 +10,7 @@
 
 using namespace Rcpp;
 
-namespace quotr {
+namespace ratiod {
 
 // ---------------------------------------------------------------------
 // Log-probability computation
@@ -793,7 +793,7 @@ HMCResult hmc_sample(
   return result;
 }
 
-} // namespace quotr
+} // namespace ratiod
 
 // ---------------------------------------------------------------------
 // R exports
@@ -822,7 +822,7 @@ Rcpp::List cpp_nuts_fit(
     unsigned int seed = 0
 ) {
   // Set up model data
-  quotr::ModelData data;
+  ratiod::ModelData data;
   data.y_num = std::vector<int>(y_num.begin(), y_num.end());
   data.y_denom = std::vector<int>(y_denom.begin(), y_denom.end());
   data.y_denom_cont = std::vector<double>(y_denom_cont.begin(), y_denom_cont.end());
@@ -840,11 +840,11 @@ Rcpp::List cpp_nuts_fit(
 
   // Parse model type
   if (model_type == "binomial") {
-    data.model_type = quotr::ModelType::BINOMIAL;
+    data.model_type = ratiod::ModelType::BINOMIAL;
   } else if (model_type == "negbin_negbin") {
-    data.model_type = quotr::ModelType::NEGBIN_NEGBIN;
+    data.model_type = ratiod::ModelType::NEGBIN_NEGBIN;
   } else if (model_type == "poisson_gamma") {
-    data.model_type = quotr::ModelType::POISSON_GAMMA;
+    data.model_type = ratiod::ModelType::POISSON_GAMMA;
   } else {
     Rcpp::stop("Unknown model type: " + model_type);
   }
@@ -853,7 +853,7 @@ Rcpp::List cpp_nuts_fit(
   std::vector<double> q0(q_init.begin(), q_init.end());
 
   // Run NUTS
-  quotr::HMCResult result = quotr::nuts_sample(
+  ratiod::HMCResult result = ratiod::nuts_sample(
     q0, data, n_iter, n_warmup, max_treedepth, adapt, verbose, seed
   );
 
@@ -893,7 +893,7 @@ Rcpp::List cpp_hmc_basic(
     unsigned int seed = 0
 ) {
   // Set up model data
-  quotr::ModelData data;
+  ratiod::ModelData data;
   data.y_num = std::vector<int>(y_num.begin(), y_num.end());
   data.y_denom = std::vector<int>(y_denom.begin(), y_denom.end());
   data.y_denom_cont = std::vector<double>(y_denom_cont.begin(), y_denom_cont.end());
@@ -911,11 +911,11 @@ Rcpp::List cpp_hmc_basic(
 
   // Parse model type
   if (model_type == "binomial") {
-    data.model_type = quotr::ModelType::BINOMIAL;
+    data.model_type = ratiod::ModelType::BINOMIAL;
   } else if (model_type == "negbin_negbin") {
-    data.model_type = quotr::ModelType::NEGBIN_NEGBIN;
+    data.model_type = ratiod::ModelType::NEGBIN_NEGBIN;
   } else if (model_type == "poisson_gamma") {
-    data.model_type = quotr::ModelType::POISSON_GAMMA;
+    data.model_type = ratiod::ModelType::POISSON_GAMMA;
   } else {
     Rcpp::stop("Unknown model type: " + model_type);
   }
@@ -924,7 +924,7 @@ Rcpp::List cpp_hmc_basic(
   std::vector<double> q0(q_init.begin(), q_init.end());
 
   // Run HMC
-  quotr::HMCResult result = quotr::hmc_sample(
+  ratiod::HMCResult result = ratiod::hmc_sample(
     q0, data, n_iter, n_warmup, epsilon, L, adapt, verbose, seed
   );
 

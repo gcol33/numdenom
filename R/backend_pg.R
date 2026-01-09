@@ -1,12 +1,12 @@
-#' Pólya-Gamma Backend for Binomial Models
+#' Polya-Gamma Backend for Binomial Models
 #'
 #' @description
-#' Fast Gibbs sampling for binomial models using Pólya-Gamma data augmentation.
-#' This backend provides efficient inference for `quotr_binomial()` family models
+#' Fast Gibbs sampling for binomial models using Polya-Gamma data augmentation.
+#' This backend provides efficient inference for `ratiod_binomial()` family models
 #' with random effects and spatial structure (ICAR or BYM2).
 #'
 #' @details
-#' The Pólya-Gamma method (Polson, Scott & Windle, 2013) enables efficient
+#' The Polya-Gamma method (Polson, Scott & Windle, 2013) enables efficient
 #' Gibbs sampling for binomial regression by introducing auxiliary variables
 #' that make the full conditionals Gaussian.
 #'
@@ -24,7 +24,7 @@
 #'
 #' @references
 #' Polson, N.G., Scott, J.G., and Windle, J. (2013).
-#' "Bayesian Inference for Logistic Models Using Pólya-Gamma Latent Variables."
+#' "Bayesian Inference for Logistic Models Using Polya-Gamma Latent Variables."
 #' Journal of the American Statistical Association, 108(504), 1339-1349.
 #'
 #' @name pg_backend
@@ -32,11 +32,11 @@
 NULL
 
 
-#' Fit binomial model using Pólya-Gamma Gibbs sampling
+#' Fit binomial model using Polya-Gamma Gibbs sampling
 #'
-#' @param formula A quotr_formula object
+#' @param formula A ratiod_formula object
 #' @param data Data frame
-#' @param family Must be quotr_binomial()
+#' @param family Must be ratiod_binomial()
 #' @param spatial Optional spatial structure from spatial_car() or spatial_bym2()
 #' @param iter Total iterations per chain
 #' @param warmup Warmup iterations per chain
@@ -50,12 +50,13 @@ NULL
 #' @param prior_tau_rate Gamma rate for spatial precision (default 0.01)
 #' @param verbose Print progress
 #'
-#' @return A quotr_fit object
+#' @return A ratiod_fit object
 #' @keywords internal
 fit_pg_binomial <- function(formula,
                             data,
                             family,
                             spatial = NULL,
+                            temporal = NULL,
                             iter = 2000,
                             warmup = floor(iter / 2),
                             chains = 4,
@@ -87,7 +88,7 @@ fit_pg_binomial <- function(formula,
          "Use formula: successes | trials ~ predictors")
   }
 
-  # Use the design matrix already built by quotr_formula
+  # Use the design matrix already built by ratiod_formula
   X <- formula$numerator$X
 
   # Extract random effects structure
@@ -95,6 +96,62 @@ fit_pg_binomial <- function(formula,
 
   # Check for spatial structure
   has_spatial <- !is.null(spatial)
+
+  # Dispatch to GP if spatial is GP type
+  if (has_spatial && (spatial$type == "gp" || inherits(spatial, "ratiod_gp"))) {
+    return(fit_pg_binomial_gp(
+      formula = formula,
+      data = data,
+      family = family,
+      spatial = spatial,
+      iter = iter,
+      warmup = warmup,
+      chains = chains,
+      thin = thin,
+      cores = cores,
+      seed = seed,
+      verbose = verbose
+    ))
+  }
+
+  # Dispatch to RSR if spatial is RSR type
+  if (has_spatial && inherits(spatial, "ratiod_rsr")) {
+    return(fit_pg_binomial_rsr(
+      formula = formula,
+      data = data,
+      family = family,
+      spatial = spatial,
+      iter = iter,
+      warmup = warmup,
+      chains = chains,
+      thin = thin,
+      cores = cores,
+      seed = seed,
+      prior_beta_sd = prior_beta_sd,
+      prior_sigma_scale = prior_sigma_scale,
+      prior_tau_shape = prior_tau_shape,
+      prior_tau_rate = prior_tau_rate,
+      verbose = verbose
+    ))
+  }
+
+  # Check for temporal structure and dispatch to multiscale temporal if applicable
+  has_temporal <- !is.null(temporal)
+  if (has_temporal && inherits(temporal, "ratiod_temporal_multiscale")) {
+    return(fit_pg_binomial_temporal(
+      formula = formula,
+      data = data,
+      family = family,
+      temporal = temporal,
+      iter = iter,
+      warmup = warmup,
+      chains = chains,
+      thin = thin,
+      cores = cores,
+      seed = seed,
+      verbose = verbose
+    ))
+  }
 
   # Prepare arguments
   n_iter <- as.integer(iter)
@@ -214,8 +271,8 @@ fit_pg_binomial <- function(formula,
     }
   }
 
-  # Convert to quotr_fit format with multi-chain support
-  fit <- convert_pg_to_quotr_fit(
+  # Convert to ratiod_fit format with multi-chain support
+  fit <- convert_pg_to_ratiod_fit(
     fit_raw = chain_results,
     formula = formula,
     data = data,
@@ -235,27 +292,86 @@ fit_pg_binomial <- function(formula,
 
 #' Extract random effects information from data
 #'
+#' @description
+#' Extracts random effects information for the PG backend.
+#' Supports multiple crossed random effects (e.g., `(1|site) + (1|year)`).
+#'
 #' @keywords internal
 extract_re_from_data <- function(formula, data) {
   # Check if there are random effects in the formula
-  # quotr_formula stores RE in $numerator$random_effects
+  # ratiod_formula stores RE in $numerator$random_effects
   re_terms <- formula$numerator$random_effects
+  n_obs <- nrow(data)
 
   if (is.null(re_terms) || length(re_terms) == 0) {
     return(list(
-      group_idx = as.integer(rep(1L, nrow(data))),
+      group_idx = as.integer(rep(1L, n_obs)),
       n_groups = 0L,
       group_var = NULL,
-      group_levels = NULL
+      group_levels = NULL,
+      # Multi-term fields
+      n_re_terms = 0L,
+      re_terms = list(),
+      has_slopes = FALSE
     ))
   }
 
-  # Get the first RE grouping variable
-  # For now, support single random intercept
+  n_re_terms <- length(re_terms)
+
+  # Check for unsupported features and warn
+  has_slopes <- FALSE
+  for (term in re_terms) {
+    if (length(term$slope_vars) > 0) {
+      has_slopes <- TRUE
+      warning(
+        "Random slopes not yet fully supported in PG backend. Slope terms will be ignored: ",
+        paste(term$slope_vars, collapse = ", "),
+        "\nOnly random intercepts (1 | group) are currently implemented.",
+        call. = FALSE
+      )
+    }
+  }
+
+  if (n_re_terms > 1) {
+    # Multiple RE terms
+    re_terms_processed <- vector("list", n_re_terms)
+    total_groups <- 0L
+
+    for (t in seq_len(n_re_terms)) {
+      term <- re_terms[[t]]
+      re_terms_processed[[t]] <- list(
+        group_var = term$group_var,
+        group_idx = as.integer(term$group),
+        n_groups = as.integer(term$n_groups),
+        offset = total_groups
+      )
+      total_groups <- total_groups + term$n_groups
+    }
+
+    # Build group index matrix
+    group_idx_matrix <- matrix(0L, nrow = n_obs, ncol = n_re_terms)
+    for (t in seq_len(n_re_terms)) {
+      group_idx_matrix[, t] <- as.integer(re_terms[[t]]$group)
+    }
+
+    return(list(
+      # Legacy fields (for backwards compatibility)
+      group_idx = as.integer(re_terms[[1]]$group),
+      n_groups = as.integer(re_terms[[1]]$n_groups),
+      group_var = re_terms[[1]]$group_var,
+      group_levels = NULL,
+      # Multi-term fields
+      n_re_terms = n_re_terms,
+      re_terms = re_terms_processed,
+      group_idx_matrix = group_idx_matrix,
+      total_groups = total_groups,
+      has_slopes = has_slopes
+    ))
+  }
+
+  # Single RE term
   re_info <- re_terms[[1]]
   re_var <- re_info$group_var
-
-  # The group indices are already computed in quotr_formula
   group_idx <- as.integer(re_info$group)
   n_groups <- re_info$n_groups
 
@@ -263,7 +379,17 @@ extract_re_from_data <- function(formula, data) {
     group_idx = group_idx,
     n_groups = n_groups,
     group_var = re_var,
-    group_levels = NULL  # Not stored but not needed for PG
+    group_levels = NULL,
+    # Multi-term fields
+    n_re_terms = 1L,
+    re_terms = list(list(
+      group_var = re_var,
+      group_idx = group_idx,
+      n_groups = as.integer(n_groups),
+      offset = 0L
+    )),
+    total_groups = as.integer(n_groups),
+    has_slopes = has_slopes
   ))
 }
 
@@ -313,12 +439,12 @@ prepare_spatial_for_pg <- function(spatial, data, formula) {
 }
 
 
-#' Convert PG fit to quotr_fit object
+#' Convert PG fit to ratiod_fit object
 #'
 #' @param fit_raw List of chain results (each element is a single chain's output)
 #' @param chains Number of chains
 #' @keywords internal
-convert_pg_to_quotr_fit <- function(fit_raw, formula, data, family,
+convert_pg_to_ratiod_fit <- function(fit_raw, formula, data, family,
                                     spatial, X, re_info, iter, warmup, thin,
                                     chains = 1) {
 
@@ -419,7 +545,7 @@ convert_pg_to_quotr_fit <- function(fit_raw, formula, data, family,
     do.call(rbind, lapply(fit_raw, `[[`, "spatial"))
   } else NULL
 
-  # Create quotr_fit object
+  # Create ratiod_fit object
   fit <- list(
     draws = draws_array,
     formula = formula,
@@ -452,18 +578,743 @@ convert_pg_to_quotr_fit <- function(fit_raw, formula, data, family,
     )
   )
 
-  class(fit) <- "quotr_fit"
+  class(fit) <- "ratiod_fit"
   return(fit)
 }
 
 
 #' Check if PG backend is appropriate
 #'
-#' @param family A quotr family object
+#' @param family A ratiod family object
 #' @return Logical indicating if PG backend can be used
 #' @keywords internal
 can_use_pg_backend <- function(family) {
   # Check if this is a binomial family
   # The family structure uses $numerator$distribution
   isTRUE(family$numerator$distribution == "binomial")
+}
+
+
+#' Fit binomial model with GP spatial using Polya-Gamma Gibbs sampling
+#'
+#' @param formula A ratiod_formula object
+#' @param data Data frame
+#' @param family Must be ratiod_binomial()
+#' @param spatial GP spatial structure from spatial_gp()
+#' @param iter Total iterations per chain
+#' @param warmup Warmup iterations per chain
+#' @param chains Number of chains to run
+#' @param thin Thinning interval
+#' @param cores Number of cores for within-chain parallelism
+#' @param seed Random seed for reproducibility
+#' @param verbose Print progress
+#'
+#' @return A ratiod_fit object
+#' @keywords internal
+fit_pg_binomial_gp <- function(formula,
+                                data,
+                                family,
+                                spatial,
+                                iter = 2000,
+                                warmup = floor(iter / 2),
+                                chains = 4,
+                                thin = 1,
+                                cores = NULL,
+                                seed = NULL,
+                                verbose = TRUE) {
+
+  # Set cores for within-chain parallelism
+  if (is.null(cores)) {
+    cores <- cpp_pg_get_max_threads()
+  }
+
+  # Set base seed for reproducibility
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
+  # Extract response
+  y <- formula$numerator$response
+  trials <- formula$denominator$response
+
+  if (is.null(trials)) {
+    stop("Binomial models require trials (denominator).")
+  }
+
+  # Design matrix
+  X <- formula$numerator$X
+
+  # Random effects
+  re_info <- extract_re_from_data(formula, data)
+
+  # Validate GP specification
+  spatial <- validate_gp(spatial, data)
+
+  if (verbose) {
+    message("Fitting GP spatial model with Polya-Gamma Gibbs sampling...")
+    message(sprintf("  Observations: %d", spatial$n_obs))
+    message(sprintf("  Neighbors: %d", spatial$nn))
+    message(sprintf("  Covariance: %s", spatial$cov))
+  }
+
+  # Covariance type mapping
+  cov_type <- switch(spatial$cov,
+    "exponential" = 0L,
+    "matern" = 1L,
+    "gaussian" = 2L,
+    "spherical" = 3L,
+    0L
+  )
+
+  # Get neighbor info
+  nn_info <- spatial$neighbor_info
+
+  # Initial hyperparameters
+  sigma2_gp_init <- spatial$sigma2 %||% 1.0
+  phi_gp_init <- spatial$phi %||% 1.0
+
+  # Prepare arguments
+  n_iter <- as.integer(iter)
+  n_warmup <- as.integer(warmup)
+
+  # Run chains
+  chain_results <- vector("list", chains)
+
+  for (chain in seq_len(chains)) {
+    if (verbose && chains > 1) {
+      cat(sprintf("\n=== Chain %d/%d ===\n", chain, chains))
+    }
+
+    if (!is.null(seed)) {
+      set.seed(seed + chain - 1)
+    }
+
+    chain_results[[chain]] <- cpp_pg_binomial_gibbs_gp(
+      y = as.integer(y),
+      n = as.integer(trials),
+      X = X,
+      re_group = re_info$group_idx,
+      n_re_groups = re_info$n_groups,
+      coords = spatial$coords_matrix,
+      nn_idx = nn_info$nn_idx,
+      nn_dist = nn_info$nn_dist,
+      nn_order = nn_info$nn_order,
+      n_spatial = spatial$n_spatial,
+      nn = spatial$nn,
+      sigma2_gp_init = sigma2_gp_init,
+      phi_gp_init = phi_gp_init,
+      cov_type = cov_type,
+      n_iter = n_iter,
+      n_warmup = n_warmup,
+      thin = as.integer(thin),
+      store_eta = TRUE,
+      verbose = verbose,
+      n_threads = as.integer(cores)
+    )
+  }
+
+  # Convert to ratiod_fit format
+  fit <- convert_pg_gp_to_ratiod_fit(
+    fit_raw = chain_results,
+    formula = formula,
+    data = data,
+    family = family,
+    spatial = spatial,
+    X = X,
+    re_info = re_info,
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = chains
+  )
+
+  return(fit)
+}
+
+
+#' Convert PG GP fit to ratiod_fit object
+#' @keywords internal
+convert_pg_gp_to_ratiod_fit <- function(fit_raw, formula, data, family,
+                                         spatial, X, re_info, iter, warmup, thin,
+                                         chains = 1) {
+
+  n_chains <- length(fit_raw)
+  n_save_per_chain <- nrow(fit_raw[[1]]$beta)
+  n_save_total <- n_save_per_chain * n_chains
+
+  # Create draws in format compatible with posterior package
+  beta_names <- colnames(X)
+  if (is.null(beta_names)) {
+    beta_names <- paste0("beta[", seq_len(ncol(X)), "]")
+  }
+
+  # Count parameters
+  n_params <- ncol(fit_raw[[1]]$beta) + 2  # beta + sigma2_gp + phi_gp
+  if (re_info$n_groups > 0) n_params <- n_params + 1  # sigma_re
+
+  # Create 3D array for draws: [iteration, chain, variable]
+  draws_array <- array(NA_real_,
+                       dim = c(n_save_per_chain, n_chains, n_params))
+
+  # Build parameter names
+  param_names <- c(beta_names, "sigma2_gp", "phi_gp")
+  if (re_info$n_groups > 0) {
+    param_names <- c(param_names, "sigma_re")
+  }
+
+  dimnames(draws_array) <- list(
+    iteration = seq_len(n_save_per_chain),
+    chain = seq_len(n_chains),
+    variable = param_names
+  )
+
+  # Fill in the draws from each chain
+  for (c in seq_len(n_chains)) {
+    chain_fit <- fit_raw[[c]]
+    col_idx <- 1
+
+    # Fixed effects
+    for (j in seq_len(ncol(chain_fit$beta))) {
+      draws_array[, c, col_idx] <- chain_fit$beta[, j]
+      col_idx <- col_idx + 1
+    }
+
+    # GP hyperparameters
+    draws_array[, c, col_idx] <- chain_fit$sigma2_gp
+    col_idx <- col_idx + 1
+    draws_array[, c, col_idx] <- chain_fit$phi_gp
+    col_idx <- col_idx + 1
+
+    # Random effects SD
+    if (re_info$n_groups > 0) {
+      draws_array[, c, col_idx] <- chain_fit$sigma_re
+      col_idx <- col_idx + 1
+    }
+  }
+
+  # Combine internal components
+  combined_beta <- do.call(rbind, lapply(fit_raw, `[[`, "beta"))
+  combined_re <- do.call(rbind, lapply(fit_raw, `[[`, "re"))
+  combined_eta <- do.call(rbind, lapply(fit_raw, `[[`, "eta"))
+  combined_w_gp <- do.call(rbind, lapply(fit_raw, `[[`, "w_gp"))
+
+  fit <- list(
+    draws = draws_array,
+    formula = formula,
+    data = data,
+    family = family,
+    spatial = spatial,
+    spatial_type = "gp",
+    backend = "pg",
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = n_chains,
+    n_save = n_save_total,
+    n_save_per_chain = n_save_per_chain,
+    .internal = list(
+      eta = combined_eta,
+      beta = combined_beta,
+      re = combined_re,
+      w_gp = combined_w_gp,
+      X = X,
+      re_info = re_info,
+      chain_results = fit_raw
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
+  return(fit)
+}
+
+
+#' Fit binomial model with multiscale temporal using Polya-Gamma Gibbs sampling
+#'
+#' @param formula A ratiod_formula object
+#' @param data Data frame
+#' @param family Must be ratiod_binomial()
+#' @param temporal Multiscale temporal structure from temporal_multiscale()
+#' @param iter Total iterations per chain
+#' @param warmup Warmup iterations per chain
+#' @param chains Number of chains to run
+#' @param thin Thinning interval
+#' @param cores Number of cores for within-chain parallelism
+#' @param seed Random seed for reproducibility
+#' @param verbose Print progress
+#'
+#' @return A ratiod_fit object
+#' @keywords internal
+fit_pg_binomial_temporal <- function(formula,
+                                      data,
+                                      family,
+                                      temporal,
+                                      iter = 2000,
+                                      warmup = floor(iter / 2),
+                                      chains = 4,
+                                      thin = 1,
+                                      cores = NULL,
+                                      seed = NULL,
+                                      verbose = TRUE) {
+
+  # Set cores for within-chain parallelism
+  if (is.null(cores)) {
+    cores <- cpp_pg_get_max_threads()
+  }
+
+  # Set base seed for reproducibility
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
+  # Extract response
+  y <- formula$numerator$response
+  trials <- formula$denominator$response
+
+  if (is.null(trials)) {
+    stop("Binomial models require trials (denominator).")
+  }
+
+  # Design matrix
+  X <- formula$numerator$X
+
+  # Random effects
+  re_info <- extract_re_from_data(formula, data)
+
+  # Validate temporal specification
+  temporal <- validate_temporal_multiscale(temporal, data)
+
+  if (verbose) {
+    message("Fitting multiscale temporal model with Polya-Gamma Gibbs sampling...")
+    message(sprintf("  Time points: %d", temporal$n_times))
+    message(sprintf("  Components: %s", paste(temporal$components, collapse = ", ")))
+  }
+
+  # Map temporal types to C++ integers
+  trend_type <- switch(temporal$trend,
+    "none" = 0L,
+    "rw1" = 1L,
+    "rw2" = 2L,
+    0L
+  )
+
+  short_type <- switch(temporal$short_term,
+    "none" = 0L,
+    "ar1" = 1L,
+    "iid" = 2L,
+    0L
+  )
+
+  seasonal_period <- temporal$seasonal %||% 0L
+
+  # Prepare arguments
+  n_iter <- as.integer(iter)
+  n_warmup <- as.integer(warmup)
+
+  # Run chains
+  chain_results <- vector("list", chains)
+
+  for (chain in seq_len(chains)) {
+    if (verbose && chains > 1) {
+      cat(sprintf("\n=== Chain %d/%d ===\n", chain, chains))
+    }
+
+    if (!is.null(seed)) {
+      set.seed(seed + chain - 1)
+    }
+
+    chain_results[[chain]] <- cpp_pg_binomial_gibbs_temporal(
+      y = as.integer(y),
+      n = as.integer(trials),
+      X = X,
+      re_group = re_info$group_idx,
+      n_re_groups = re_info$n_groups,
+      time_idx = temporal$time_index,
+      n_times = temporal$n_times,
+      seasonal_period = as.integer(seasonal_period),
+      trend_type = trend_type,
+      short_type = short_type,
+      n_iter = n_iter,
+      n_warmup = n_warmup,
+      thin = as.integer(thin),
+      store_eta = TRUE,
+      verbose = verbose,
+      n_threads = as.integer(cores)
+    )
+  }
+
+  # Convert to ratiod_fit format
+  fit <- convert_pg_temporal_to_ratiod_fit(
+    fit_raw = chain_results,
+    formula = formula,
+    data = data,
+    family = family,
+    temporal = temporal,
+    X = X,
+    re_info = re_info,
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = chains
+  )
+
+  return(fit)
+}
+
+
+#' Convert PG temporal fit to ratiod_fit object
+#' @keywords internal
+convert_pg_temporal_to_ratiod_fit <- function(fit_raw, formula, data, family,
+                                               temporal, X, re_info, iter, warmup, thin,
+                                               chains = 1) {
+
+  n_chains <- length(fit_raw)
+  n_save_per_chain <- nrow(fit_raw[[1]]$beta)
+  n_save_total <- n_save_per_chain * n_chains
+
+  # Create draws in format compatible with posterior package
+  beta_names <- colnames(X)
+  if (is.null(beta_names)) {
+    beta_names <- paste0("beta[", seq_len(ncol(X)), "]")
+  }
+
+  # Count hyperparameters
+  n_hyper <- 0
+  hyper_names <- character(0)
+
+  if (temporal$trend != "none") {
+    n_hyper <- n_hyper + 1
+    hyper_names <- c(hyper_names, "sigma2_trend")
+  }
+  if (!is.null(temporal$seasonal) && temporal$seasonal > 0) {
+    n_hyper <- n_hyper + 1
+    hyper_names <- c(hyper_names, "sigma2_seasonal")
+  }
+  if (temporal$short_term != "none") {
+    n_hyper <- n_hyper + 1
+    hyper_names <- c(hyper_names, "sigma2_short")
+    if (temporal$short_term == "ar1") {
+      n_hyper <- n_hyper + 1
+      hyper_names <- c(hyper_names, "rho_short")
+    }
+  }
+
+  n_params <- ncol(fit_raw[[1]]$beta) + n_hyper
+  if (re_info$n_groups > 0) n_params <- n_params + 1
+
+  # Create 3D array for draws
+  draws_array <- array(NA_real_,
+                       dim = c(n_save_per_chain, n_chains, n_params))
+
+  # Build parameter names
+  param_names <- c(beta_names, hyper_names)
+  if (re_info$n_groups > 0) {
+    param_names <- c(param_names, "sigma_re")
+  }
+
+  dimnames(draws_array) <- list(
+    iteration = seq_len(n_save_per_chain),
+    chain = seq_len(n_chains),
+    variable = param_names
+  )
+
+  # Fill in the draws from each chain
+  for (c in seq_len(n_chains)) {
+    chain_fit <- fit_raw[[c]]
+    col_idx <- 1
+
+    # Fixed effects
+    for (j in seq_len(ncol(chain_fit$beta))) {
+      draws_array[, c, col_idx] <- chain_fit$beta[, j]
+      col_idx <- col_idx + 1
+    }
+
+    # Temporal hyperparameters
+    if (temporal$trend != "none" && !is.null(chain_fit$sigma2_trend)) {
+      draws_array[, c, col_idx] <- chain_fit$sigma2_trend
+      col_idx <- col_idx + 1
+    }
+    if (!is.null(temporal$seasonal) && temporal$seasonal > 0 && !is.null(chain_fit$sigma2_seasonal)) {
+      draws_array[, c, col_idx] <- chain_fit$sigma2_seasonal
+      col_idx <- col_idx + 1
+    }
+    if (temporal$short_term != "none" && !is.null(chain_fit$sigma2_short)) {
+      draws_array[, c, col_idx] <- chain_fit$sigma2_short
+      col_idx <- col_idx + 1
+      if (temporal$short_term == "ar1" && !is.null(chain_fit$rho_short)) {
+        draws_array[, c, col_idx] <- chain_fit$rho_short
+        col_idx <- col_idx + 1
+      }
+    }
+
+    # Random effects SD
+    if (re_info$n_groups > 0) {
+      draws_array[, c, col_idx] <- chain_fit$sigma_re
+      col_idx <- col_idx + 1
+    }
+  }
+
+  # Combine internal components
+  combined_beta <- do.call(rbind, lapply(fit_raw, `[[`, "beta"))
+  combined_re <- do.call(rbind, lapply(fit_raw, `[[`, "re"))
+  combined_eta <- do.call(rbind, lapply(fit_raw, `[[`, "eta"))
+
+  # Extract temporal draws
+  temporal_draws <- list()
+  if (!is.null(fit_raw[[1]]$trend)) {
+    temporal_draws$trend <- do.call(rbind, lapply(fit_raw, `[[`, "trend"))
+  }
+  if (!is.null(fit_raw[[1]]$seasonal)) {
+    temporal_draws$seasonal <- do.call(rbind, lapply(fit_raw, `[[`, "seasonal"))
+  }
+  if (!is.null(fit_raw[[1]]$short_term)) {
+    temporal_draws$short_term <- do.call(rbind, lapply(fit_raw, `[[`, "short_term"))
+  }
+
+  fit <- list(
+    draws = draws_array,
+    formula = formula,
+    data = data,
+    family = family,
+    temporal = temporal,
+    backend = "pg",
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = n_chains,
+    n_save = n_save_total,
+    n_save_per_chain = n_save_per_chain,
+    .internal = list(
+      eta = combined_eta,
+      beta = combined_beta,
+      re = combined_re,
+      temporal_draws = temporal_draws,
+      X = X,
+      re_info = re_info,
+      chain_results = fit_raw
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
+  return(fit)
+}
+
+
+#' Fit PG binomial with RSR (Restricted Spatial Regression)
+#'
+#' @description
+#' Polya-Gamma Gibbs sampling with RSR to orthogonalize spatial effects
+#' to covariates, preventing spatial confounding.
+#'
+#' @keywords internal
+fit_pg_binomial_rsr <- function(formula,
+                                 data,
+                                 family,
+                                 spatial,
+                                 iter = 2000,
+                                 warmup = floor(iter / 2),
+                                 chains = 4,
+                                 thin = 1,
+                                 cores = NULL,
+                                 seed = NULL,
+                                 prior_beta_sd = 10,
+                                 prior_sigma_scale = 2.5,
+                                 prior_tau_shape = 1,
+                                 prior_tau_rate = 0.01,
+                                 verbose = TRUE) {
+
+  if (verbose) {
+    message("Fitting RSR spatial model with Polya-Gamma Gibbs sampling...")
+  }
+
+  # Set cores
+  if (is.null(cores)) {
+    cores <- cpp_pg_get_max_threads()
+  }
+
+  # Extract response and design matrix
+  y <- formula$numerator$response
+  trials <- formula$denominator$response
+  X <- formula$numerator$X
+
+  # Extract RE info
+  re_info <- extract_re_from_data(formula, data)
+
+  # Prepare spatial info
+  spatial_info <- prepare_spatial_for_pg(spatial, data, formula)
+
+  # Validate and compute RSR projection matrix
+  spatial <- validate_rsr(spatial, data, formula)
+
+  if (is.null(spatial$rsr_projection)) {
+    stop("Failed to compute RSR projection matrix", call. = FALSE)
+  }
+
+  rsr_projection <- spatial$rsr_projection
+  rsr_n <- nrow(rsr_projection)
+
+  if (verbose) {
+    message(sprintf("  RSR projection dimension: %d x %d", rsr_n, rsr_n))
+    message(sprintf("  Orthogonal to: %s", paste(spatial$rsr_vars, collapse = ", ")))
+  }
+
+  # Prepare adjacency list format
+  adj_list <- lapply(seq_len(spatial_info$n_units), function(s) {
+    start_idx <- spatial_info$adj_row_ptr[s] + 1
+    end_idx <- spatial_info$adj_row_ptr[s + 1]
+    if (end_idx >= start_idx) {
+      spatial_info$adj_col_idx[start_idx:end_idx]
+    } else {
+      integer(0)
+    }
+  })
+
+  n_iter <- as.integer(iter)
+  n_warmup <- as.integer(warmup)
+
+  # Run chains
+  chain_results <- vector("list", chains)
+
+  for (chain in seq_len(chains)) {
+    if (verbose && chains > 1) {
+      cat(sprintf("\n=== Chain %d/%d ===\n", chain, chains))
+    }
+
+    if (!is.null(seed)) {
+      set.seed(seed + chain - 1)
+    }
+
+    chain_results[[chain]] <- cpp_pg_binomial_gibbs_rsr(
+      y = as.integer(y),
+      n = as.integer(trials),
+      X = X,
+      re_group = re_info$group_idx,
+      n_re_groups = re_info$n_groups,
+      spatial_group = spatial_info$group_idx,
+      n_spatial_units = spatial_info$n_units,
+      adj_list = adj_list,
+      n_neighbors = spatial_info$n_neighbors,
+      rsr_projection = as.vector(t(rsr_projection)),  # Row-major flatten
+      rsr_n = as.integer(rsr_n),
+      n_iter = n_iter,
+      n_warmup = n_warmup,
+      thin = as.integer(thin),
+      prior_beta_sd = prior_beta_sd,
+      prior_sigma_re_scale = prior_sigma_scale,
+      prior_tau_shape = prior_tau_shape,
+      prior_tau_rate = prior_tau_rate,
+      store_eta = TRUE,
+      verbose = verbose,
+      n_threads = as.integer(cores)
+    )
+  }
+
+  # Convert to ratiod_fit
+  fit <- convert_pg_rsr_to_ratiod_fit(
+    chain_results = chain_results,
+    formula = formula,
+    data = data,
+    family = family,
+    X = X,
+    re_info = re_info,
+    spatial_info = spatial_info,
+    rsr_projection = rsr_projection,
+    chains = chains,
+    iter = iter,
+    warmup = warmup,
+    thin = thin
+  )
+
+  return(fit)
+}
+
+
+#' Convert PG RSR results to ratiod_fit
+#' @keywords internal
+convert_pg_rsr_to_ratiod_fit <- function(chain_results, formula, data, family,
+                                          X, re_info, spatial_info,
+                                          rsr_projection, chains, iter, warmup, thin) {
+  n_chains <- length(chain_results)
+  p <- ncol(X)
+  n_re <- re_info$n_groups
+  n_spatial <- spatial_info$n_units
+  n_save_per_chain <- nrow(chain_results[[1]]$beta)
+  n_save_total <- n_save_per_chain * n_chains
+
+  # Parameter names
+  beta_names <- colnames(X)
+  if (is.null(beta_names)) {
+    beta_names <- paste0("beta[", seq_len(p), "]")
+  }
+
+  param_names <- beta_names
+  if (n_re > 0) {
+    param_names <- c(param_names, "sigma_re")
+  }
+  if (n_spatial > 0) {
+    param_names <- c(param_names, "tau_spatial")
+  }
+
+  # Create 3D array: [iterations, chains, parameters]
+  n_params <- length(param_names)
+  draws_array <- array(dim = c(n_save_per_chain, n_chains, n_params),
+                       dimnames = list(NULL, paste0("chain:", seq_len(n_chains)), param_names))
+
+  for (c in seq_len(n_chains)) {
+    chain_fit <- chain_results[[c]]
+
+    col_idx <- 1
+    # Fixed effects
+    for (j in seq_len(p)) {
+      draws_array[, c, col_idx] <- chain_fit$beta[, j]
+      col_idx <- col_idx + 1
+    }
+    # Sigma_re
+    if (n_re > 0) {
+      draws_array[, c, col_idx] <- chain_fit$sigma_re
+      col_idx <- col_idx + 1
+    }
+    # Tau (convert to SD for consistency)
+    if (n_spatial > 0) {
+      draws_array[, c, col_idx] <- chain_fit$tau
+      col_idx <- col_idx + 1
+    }
+  }
+
+  # Combine spatial draws
+  combined_spatial <- do.call(rbind, lapply(chain_results, `[[`, "spatial"))
+  combined_spatial_raw <- do.call(rbind, lapply(chain_results, `[[`, "spatial_raw"))
+  combined_beta <- do.call(rbind, lapply(chain_results, `[[`, "beta"))
+  combined_re <- do.call(rbind, lapply(chain_results, `[[`, "re"))
+  combined_eta <- do.call(rbind, lapply(chain_results, `[[`, "eta"))
+
+  fit <- list(
+    draws = draws_array,
+    formula = formula,
+    data = data,
+    family = family,
+    spatial = spatial_info,
+    spatial_type = "rsr",
+    backend = "pg",
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = n_chains,
+    n_save = n_save_total,
+    n_save_per_chain = n_save_per_chain,
+    .internal = list(
+      beta = combined_beta,
+      re = combined_re,
+      eta = combined_eta,
+      spatial = combined_spatial,
+      spatial_raw = combined_spatial_raw,
+      rsr_projection = rsr_projection,
+      X = X,
+      re_info = re_info,
+      spatial_info = spatial_info,
+      chain_results = chain_results
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
+  return(fit)
 }

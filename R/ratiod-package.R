@@ -1,13 +1,15 @@
 #' @keywords internal
 "_PACKAGE"
 
-#' @useDynLib quotr, .registration = TRUE
+#' @useDynLib ratiod, .registration = TRUE
 #' @importFrom Rcpp sourceCpp
-#' @importFrom stats as.formula model.frame model.matrix na.pass quantile sd optim
+#' @importFrom stats as.formula model.frame model.matrix na.pass quantile sd optim fitted predict rnorm rnbinom var ar cor pnorm qnorm reshape
 #' @importFrom utils head
+#' @importFrom grDevices adjustcolor
+#' @importFrom graphics abline lines polygon
 NULL
 
-#' quotr: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
+#' ratiod: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
 #'
 #' @description
 #' An opinionated framework for Bayesian hierarchical modelling of ratios,
@@ -22,9 +24,9 @@ NULL
 #'
 #' @section Model families:
 #' \describe{
-#'   \item{quotr_binomial()}{Trial-based ratios (successes/trials)}
-#'   \item{quotr_negbin_negbin()}{Two-process ratios (count/count)}
-#'   \item{quotr_poisson_gamma()}{Count/effort ratios (e.g., CPUE)}
+#'   \item{ratiod_binomial()}{Trial-based ratios (successes/trials)}
+#'   \item{ratiod_negbin_negbin()}{Two-process ratios (count/count)}
+#'   \item{ratiod_poisson_gamma()}{Count/effort ratios (e.g., CPUE)}
 #' }
 #'
 #' @section Key features:
@@ -35,9 +37,9 @@ NULL
 #'   \item Explicit rejection of offset-based approaches
 #' }
 #'
-#' @name quotr-package
-#' @aliases quotr-package
+#' @name ratiod-package
+#' @aliases ratiod-package
 NULL
 
 # Suppress R CMD check notes about global variables
-utils::globalVariables(c(".", "value", "variable"))
+utils::globalVariables(c(".", "value", "variable", ".data"))

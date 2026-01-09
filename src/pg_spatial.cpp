@@ -9,7 +9,7 @@
 
 using namespace Rcpp;
 
-namespace quotr {
+namespace ratiod {
 
 // ---------------------------------------------------------------------
 // ICAR (Intrinsic Conditional Autoregressive) prior
@@ -351,4 +351,4 @@ double update_rho_bym2(
   return rho_vals[n_grid - 1];
 }
 
-} // namespace quotr
+} // namespace ratiod

@@ -10,3 +10,10 @@
 ^\.github$
 ^CLAUDE\.md$
 ^ROADMAP\.md$
+^MIGRATION\.md$
+^PLAN_REMOVE_STAN\.md$
+^TODO_DIAGNOSTICS\.md$
+^PLAN_DIAGNOSTICS_092\.md$
+^PLAN_BACKEND_PARITY\.md$
+^\.claude$
+^cran-comments\.md$

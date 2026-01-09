@@ -5,6 +5,6 @@
 # Learn more about testing at https://r-pkgs.org/testing-basics.html
 
 library(testthat)
-library(quotr)
+library(ratiod)
 
-test_check("quotr")
+test_check("ratiod")

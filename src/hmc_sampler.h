@@ -11,23 +11,30 @@
 #include <random>
 #include "hmc_temporal.h"
 #include "hmc_zi.h"
+#include "hmc_svc.h"
+#include "hmc_gp.h"
+#include "hmc_temporal_multiscale.h"
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-namespace quotr_hmc {
+namespace ratiod_hmc {
 
-using quotr_temporal::TemporalType;
-using quotr_temporal::TemporalData;
-using quotr_zi::ZIType;
+using ratiod_temporal::TemporalType;
+using ratiod_temporal::TemporalData;
+using ratiod_zi::ZIType;
+using ratiod_gp::GPData;
+using ratiod_gp::MultiscaleGPData;
+using ratiod_gp::CovType;
+using ratiod_temporal::MultiscaleTemporalData;
 
 // =====================================================================
 // Model configuration
 // =====================================================================
 
 enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA };
-enum class SpatialType { NONE, ICAR, BYM2 };
+enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP };
 
 // Model data container with spatial support
 struct ModelData {
@@ -41,9 +48,16 @@ struct ModelData {
   std::vector<double> X_denom_flat;
   int p_num, p_denom;
 
-  // Random effects
-  std::vector<int> re_group;  // 1-based group index (0 = no RE)
-  int n_re_groups;
+  // Random effects (supports multiple crossed RE terms)
+  std::vector<int> re_group;  // 1-based group index (0 = no RE) - legacy single term
+  int n_re_groups;            // Number of groups for first RE term
+
+  // Multi-term RE structure
+  int n_re_terms;                              // Number of RE terms (0 if none)
+  std::vector<std::vector<int>> re_group_multi; // [term][obs] -> group index (1-based)
+  std::vector<int> re_n_groups_multi;          // Groups per term
+  std::vector<int> re_offsets;                 // Offset in flattened RE parameter vector per term
+  int total_re_groups;                         // Sum of all groups across terms
 
   // Spatial structure
   SpatialType spatial_type;
@@ -71,6 +85,44 @@ struct ModelData {
   std::vector<double> X_zi_flat;        // Design matrix for ZI probability (flat)
   int p_zi;                             // Number of ZI predictors
   double zi_prior_sd;                   // Prior SD for ZI coefficients
+
+  // SVC (Spatially-Varying Coefficients) structure
+  ratiod_svc::SVCData svc_data;
+  bool has_svc;
+  double svc_sigma2_prior_scale;        // Half-Cauchy scale for sigma2
+  double svc_phi_prior_lower;           // Uniform prior lower bound for phi
+  double svc_phi_prior_upper;           // Uniform prior upper bound for phi
+
+  // GP spatial structure (single-scale)
+  GPData gp_data;
+  bool has_gp;
+  double gp_sigma2_prior_U;             // PC prior: P(sigma > U) = alpha
+  double gp_sigma2_prior_alpha;
+  double gp_phi_prior_lower;            // Uniform prior bounds for range
+  double gp_phi_prior_upper;
+
+  // Multi-scale GP spatial structure
+  MultiscaleGPData multiscale_gp_data;
+  bool has_multiscale_gp;
+  double ms_sigma2_local_prior_U;
+  double ms_sigma2_local_prior_alpha;
+  double ms_sigma2_regional_prior_U;
+  double ms_sigma2_regional_prior_alpha;
+
+  // Multi-scale temporal structure
+  MultiscaleTemporalData multiscale_temporal_data;
+  bool has_multiscale_temporal;
+  double ms_sigma2_trend_prior_U;
+  double ms_sigma2_trend_prior_alpha;
+  double ms_sigma2_seasonal_prior_U;
+  double ms_sigma2_seasonal_prior_alpha;
+  double ms_sigma2_short_prior_U;
+  double ms_sigma2_short_prior_alpha;
+
+  // RSR (Restricted Spatial Regression) structure
+  bool has_rsr;
+  std::vector<double> rsr_projection;   // P_perp matrix (n x n, flattened)
+  int rsr_n;                            // Dimension of projection matrix
 
   // Dimensions
   int N;
@@ -101,8 +153,13 @@ struct ModelData {
 struct ParamLayout {
   int beta_num_start, beta_num_end;
   int beta_denom_start, beta_denom_end;
-  int log_sigma_re_idx;
-  int re_start, re_end;
+  int log_sigma_re_idx;       // Legacy: index for single RE term
+  int re_start, re_end;       // Legacy: bounds for single RE term
+
+  // Multi-term RE layout
+  std::vector<int> log_sigma_re_multi;  // Index of log_sigma_re for each term
+  std::vector<int> re_start_multi;      // Start index for each RE term
+  std::vector<int> re_end_multi;        // End index for each RE term
   int log_phi_num_idx;
   int log_phi_denom_idx;
   int log_tau_spatial_idx;
@@ -120,6 +177,33 @@ struct ParamLayout {
   // Zero-inflation parameters
   int beta_zi_start, beta_zi_end;       // ZI regression coefficients
 
+  // SVC parameters
+  int log_sigma2_svc_start, log_sigma2_svc_end;  // Log spatial variance per SVC term
+  int log_phi_svc_start, log_phi_svc_end;        // Log range parameter per SVC term
+  int svc_w_start, svc_w_end;                    // SVC values (n_obs x n_svc)
+
+  // GP spatial parameters
+  int log_sigma2_gp_idx;                // Log spatial variance
+  int log_phi_gp_idx;                   // Log range parameter
+  int gp_w_start, gp_w_end;             // GP spatial effects (n_obs)
+
+  // Multi-scale GP parameters
+  int log_sigma2_gp_local_idx;          // Log variance for local scale
+  int log_phi_gp_local_idx;             // Log range for local scale
+  int log_sigma2_gp_regional_idx;       // Log variance for regional scale
+  int log_phi_gp_regional_idx;          // Log range for regional scale
+  int gp_local_start, gp_local_end;     // Local GP effects
+  int gp_regional_start, gp_regional_end; // Regional GP effects
+
+  // Multi-scale temporal parameters
+  int log_sigma2_trend_idx;             // Log variance for trend
+  int log_sigma2_seasonal_idx;          // Log variance for seasonal
+  int log_sigma2_short_idx;             // Log variance for short-term
+  int logit_rho_short_idx;              // AR1 autocorrelation for short-term
+  int trend_start, trend_end;           // Trend effects (n_times)
+  int seasonal_start, seasonal_end;     // Seasonal effects (period)
+  int short_term_start, short_term_end; // Short-term effects (n_times)
+
   int total_params;
 
   bool has_re;
@@ -127,9 +211,13 @@ struct ParamLayout {
   bool has_phi_denom;
   bool has_spatial;
   bool is_bym2;
+  bool is_gp;
+  bool is_multiscale_gp;
   bool has_temporal;
   bool is_ar1;
+  bool has_multiscale_temporal;
   bool has_zi;
+  bool has_svc;
 };
 
 ParamLayout compute_param_layout(const ModelData& data);
@@ -301,6 +389,6 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     bool verbose
 );
 
-} // namespace quotr_hmc
+} // namespace ratiod_hmc
 
 #endif // QUOTR_HMC_SAMPLER_H

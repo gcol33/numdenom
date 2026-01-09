@@ -1,18 +1,18 @@
-#' Parse and validate quotr formulas
+#' Parse and validate ratiod formulas
 #'
 #' @description
-#' Internal functions for parsing quotr formulas into a structured
+#' Internal functions for parsing ratiod formulas into a structured
 #' specification for Stan model building.
 #'
-#' quotr supports a combined formula syntax:
+#' ratiod supports a combined formula syntax:
 #' - `num | denom ~ x + (1|group)` for shared predictors
 #' - Separate `formula_num` and `formula_denom` for different predictors
 #'
-#' @name quotr_formula
+#' @name ratiod_formula
 #' @keywords internal
 NULL
 
-#' Parse a quotr formula
+#' Parse a ratiod formula
 #'
 #' @description
 #' Parses the main formula and optional process-specific formulas into
@@ -30,9 +30,9 @@ NULL
 #'   `~ 0` = independence (triggers warning).
 #' @param data Data frame containing all variables.
 #'
-#' @return A `quotr_formula` object
+#' @return A `ratiod_formula` object
 #' @keywords internal
-quotr_formula <- function(formula,
+ratiod_formula <- function(formula,
                           formula_num = NULL,
                           formula_denom = NULL,
                           shared = NULL,
@@ -104,7 +104,7 @@ quotr_formula <- function(formula,
       shared = shared_parsed,
       original_formula = formula
     ),
-    class = "quotr_formula"
+    class = "ratiod_formula"
   )
 }
 
@@ -269,7 +269,7 @@ parse_formula_components <- function(f, data) {
 #' Check formula does not contain offset()
 #'
 #' @description
-#' The quotr philosophy explicitly forbids offset terms. Offsets encode
+#' The ratiod philosophy explicitly forbids offset terms. Offsets encode
 #' the assumption that the ratio is the quantity of interest, which is
 #' exactly the modelling approach this package rejects.
 #'
@@ -283,7 +283,7 @@ check_no_offset <- function(f, name) {
   if (grepl("\\boffset\\s*\\(", f_text, ignore.case = TRUE)) {
     stop(
       sprintf("offset() is not allowed in the %s formula.\n\n", name),
-      "quotr does not model ratios directly. Instead, it jointly models the\n",
+      "ratiod does not model ratios directly. Instead, it jointly models the\n",
       "numerator and denominator processes with shared latent structure.\n",
       "Offsets encode the assumption that the ratio is the quantity of interest,\n",
       "which is exactly the modelling approach this package rejects.\n\n",
@@ -364,9 +364,16 @@ remove_random_effects <- function(f) {
   re_pattern <- "\\([^|]+\\|[^)]+\\)"
   rhs_clean <- gsub(re_pattern, "", rhs_text, perl = TRUE)
 
-  # Clean up leftover + signs
-  rhs_clean <- gsub("\\+\\s*\\+", "+", rhs_clean)
-  rhs_clean <- gsub("^\\s*\\+\\s*|\\s*\\+\\s*$", "", rhs_clean)
+  # Clean up leftover + signs (repeat until no more consecutive +)
+  repeat {
+    new_clean <- gsub("\\+\\s*\\+", "+", rhs_clean)
+    if (new_clean == rhs_clean) break
+    rhs_clean <- new_clean
+  }
+
+  # Remove leading/trailing + and whitespace
+  rhs_clean <- gsub("^\\s*\\+\\s*", "", rhs_clean)
+  rhs_clean <- gsub("\\s*\\+\\s*$", "", rhs_clean)
   rhs_clean <- trimws(rhs_clean)
 
   if (rhs_clean == "" || rhs_clean == "1") {
@@ -484,14 +491,14 @@ warn_independence <- function() {
   )
 }
 
-#' Print method for quotr_formula
+#' Print method for ratiod_formula
 #'
-#' @param x A quotr_formula object
+#' @param x A ratiod_formula object
 #' @param ... Ignored
 #' @export
 #' @keywords internal
-print.quotr_formula <- function(x, ...) {
-  cat("quotr formula specification\n")
+print.ratiod_formula <- function(x, ...) {
+  cat("ratiod formula specification\n")
   cat("===========================\n\n")
 
   cat("Numerator:", x$numerator$response_var, "\n")

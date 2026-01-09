@@ -1,4 +1,4 @@
-#' Fit a quotr model
+#' Fit a ratiod model
 #'
 #' @description
 #' Fit a Bayesian hierarchical model for ratios, rates, or proportions.
@@ -9,46 +9,43 @@
 #' from the posterior of the joint model. The ratio is never modelled directly.
 #'
 #' @param formula Model formula specifying the response and predictors.
-#'   Two syntax options:
-#'   - **Combined** (recommended): `num | denom ~ predictors + (1|group)`
-#'     Both processes share the same predictors and random effects.
-#'   - **Separate**: `num ~ predictors` with `formula_denom` argument.
+#'   Two syntax options: **Combined** (recommended) `num | denom ~ predictors + (1|group)`
+#'   where both processes share the same predictors and random effects;
+#'   **Separate** `num ~ predictors` with the `formula_denom` argument.
 #' @param data Data frame containing all variables.
-#' @param family A quotr family object specifying the distributions.
-#'   Options:
-#'   - [quotr_negbin_negbin()]: Both count processes (default)
-#'   - [quotr_binomial()]: Successes/trials
-#'   - [quotr_poisson_gamma()]: Count/continuous effort (CPUE)
+#' @param family A ratiod family object specifying the distributions:
+#'   [ratiod_negbin_negbin()] for both count processes (default),
+#'   [ratiod_binomial()] for successes/trials,
+#'   [ratiod_poisson_gamma()] for count/continuous effort (CPUE).
 #' @param formula_num Optional one-sided formula for additional numerator
 #'   predictors: `~ extra_terms`. Added to the main formula.
 #' @param formula_denom Optional formula for denominator. Required if main
 #'   formula has single response. Can be `denom ~ predictors`.
-#' @param shared Formula specifying shared random effects structure.
-#'   - `NULL` (default): Infer from matching random effects in both processes.
-#'   - `~ (1 | group)`: Explicit shared structure.
-#'   - `~ 0`: Independence assumption (triggers warning).
+#' @param shared Formula specifying shared random effects structure:
+#'   `NULL` (default) infers from matching random effects in both processes;
+#'   `~ (1 | group)` for explicit shared structure;
+#'   `~ 0` for independence assumption (triggers warning).
 #' @param spatial Optional spatial structure specification.
 #'   See [spatial_car()], [spatial_bym2()].
 #' @param temporal Optional temporal structure specification.
 #'   See [temporal_rw1()], [temporal_rw2()], [temporal_ar1()].
 #' @param zi Optional zero-inflation specification.
 #'   See [zi_poisson()], [zi_negbin()], [hurdle_poisson()], [hurdle_negbin()].
-#' @param priors Prior specification. See [quotr_priors()].
+#' @param priors Prior specification. See [ratiod_priors()].
 #' @param chains Number of MCMC chains (default 4).
 #' @param iter Total iterations per chain (default 2000).
 #' @param warmup Warmup iterations per chain (default `iter/2`).
 #' @param thin Thinning interval (default 1).
 #' @param cores Number of cores for parallel chains (default: chains).
 #' @param seed Random seed for reproducibility.
-#' @param backend Inference backend:
-#'   - `"auto"` (default): Automatically selects optimal backend
-#'   - `"hmc"`: Full MCMC via native HMC/NUTS sampler
-#'   - `"pg"`: Pólya-Gamma Gibbs sampling (binomial only, experimental)
-#'   - `"laplace"`: Laplace approximation (fastest, approximate inference)
+#' @param backend Inference backend: `"auto"` (default) automatically selects
+#'   optimal backend; `"hmc"` full MCMC via native HMC/NUTS sampler;
+#'   `"pg"` Polya-Gamma Gibbs sampling (binomial only, experimental);
+#'   `"laplace"` Laplace approximation (fastest, approximate inference).
 #' @param refresh Progress update frequency (default: iter/10).
 #' @param ... Additional arguments passed to the sampler.
 #'
-#' @return A `quotr_fit` object containing:
+#' @return A `ratiod_fit` object containing:
 #' \describe{
 #'   \item{draws}{Posterior draws matrix}
 #'   \item{formula}{Parsed formula specification}
@@ -59,21 +56,33 @@
 #' }
 #'
 #' @examples
-#' \dontrun{
+#' # Quick example: create model object (no fitting)
+#' set.seed(123)
+#' df <- data.frame(
+#'   catch = rpois(50, 10),
+#'   effort = rgamma(50, 2, 0.5),
+#'   depth = rnorm(50),
+#'   season = factor(sample(c("spring", "summer"), 50, replace = TRUE)),
+#'   site = factor(sample(1:5, 50, replace = TRUE))
+#' )
+#'
+#' \donttest{
 #' # CPUE example with combined formula
-#' fit <- quotr(
+#' fit <- ratiod(
 #'   catch | effort ~ depth + season + (1 | site),
-#'   data = trawl_data,
-#'   family = quotr_poisson_gamma()
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #'
 #' # Different predictors for each process
-#' fit <- quotr(
+#' fit2 <- ratiod(
 #'   catch | effort ~ (1 | site),
 #'   formula_num = ~ depth + season,
-#'   formula_denom = ~ weather,
-#'   data = trawl_data,
-#'   family = quotr_poisson_gamma()
+#'   formula_denom = ~ season,
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #'
 #' # Extract ratio posteriors
@@ -91,9 +100,9 @@
 #' - [loo::loo()] and [loo::waic()] for model comparison
 #'
 #' @export
-quotr <- function(formula,
+ratiod <- function(formula,
                   data,
-                  family = quotr_negbin_negbin(),
+                  family = ratiod_negbin_negbin(),
                   formula_num = NULL,
                   formula_denom = NULL,
                   shared = NULL,
@@ -115,9 +124,9 @@ quotr <- function(formula,
 
   # Validate temporal specification
   if (!is.null(temporal)) {
-    if (!inherits(temporal, "quotr_temporal")) {
+    if (!inherits(temporal, "ratiod_temporal")) {
       stop(
-        "`temporal` must be a quotr_temporal object.\n",
+        "`temporal` must be a ratiod_temporal object.\n",
         "Options: temporal_rw1(), temporal_rw2(), temporal_ar1()",
         call. = FALSE
       )
@@ -145,7 +154,7 @@ quotr <- function(formula,
   if (backend == "pg") {
     if (!can_use_pg_backend(family)) {
       stop(
-        "PG backend only supports quotr_binomial() family.\n",
+        "PG backend only supports ratiod_binomial() family.\n",
         "For other families, use backend = 'hmc'.",
         call. = FALSE
       )
@@ -163,10 +172,10 @@ quotr <- function(formula,
   if (!is.data.frame(data)) {
     stop("`data` must be a data frame", call. = FALSE)
   }
-  if (!inherits(family, "quotr_family")) {
+  if (!inherits(family, "ratiod_family")) {
     stop(
-      "`family` must be a quotr_family object.\n",
-      "Options: quotr_negbin_negbin(), quotr_binomial(), quotr_poisson_gamma()",
+      "`family` must be a ratiod_family object.\n",
+      "Options: ratiod_negbin_negbin(), ratiod_binomial(), ratiod_poisson_gamma()",
       call. = FALSE
     )
   }
@@ -181,7 +190,7 @@ quotr <- function(formula,
   )
 
   # Parse formula
-  formula_spec <- quotr_formula(
+  formula_spec <- ratiod_formula(
     formula = formula,
     formula_num = formula_num,
     formula_denom = formula_denom,
@@ -191,14 +200,14 @@ quotr <- function(formula,
 
   # Set default priors
   if (is.null(priors)) {
-    priors <- quotr_priors()
+    priors <- ratiod_priors()
   }
 
   # -------------------------------------------------------------------------
   # Dispatch to PG backend for binomial models
   # -------------------------------------------------------------------------
   if (backend == "pg") {
-    message("Fitting quotr model with Polya-Gamma backend...")
+    message("Fitting ratiod model with Polya-Gamma backend...")
     message(sprintf("  Family: %s", family$name))
     message(sprintf("  Observations: %d", nrow(data)))
     message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
@@ -227,7 +236,7 @@ quotr <- function(formula,
   # Dispatch to Laplace backend for fast approximate inference
   # -------------------------------------------------------------------------
   if (backend == "laplace") {
-    message("Fitting quotr model with Laplace approximation...")
+    message("Fitting ratiod model with Laplace approximation...")
     message(sprintf("  Family: %s", family$name))
     message(sprintf("  Observations: %d", nrow(data)))
     message(sprintf("  Posterior samples: %d", iter - warmup))
@@ -251,7 +260,7 @@ quotr <- function(formula,
   # Dispatch to HMC/NUTS backend for full MCMC without Stan
   # -------------------------------------------------------------------------
   if (backend == "hmc") {
-    message("Fitting quotr model with HMC/NUTS backend...")
+    message("Fitting ratiod model with HMC/NUTS backend...")
     message(sprintf("  Family: %s", family$name))
     message(sprintf("  Observations: %d", nrow(data)))
     message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
@@ -291,7 +300,7 @@ quotr <- function(formula,
 #' Suggest alternative backends based on data characteristics
 #'
 #' @param n_obs Number of observations
-#' @param family quotr family object
+#' @param family ratiod family object
 #' @param spatial Spatial specification (or NULL)
 #' @param temporal Temporal specification (or NULL)
 #' @param current_backend Currently selected backend
@@ -363,7 +372,7 @@ cli_rule <- function(title = NULL) {
 #' Automatically chooses the best backend for a given model based on
 #' the family, data size, and presence of spatial/temporal effects.
 #'
-#' @param family quotr family object
+#' @param family ratiod family object
 #' @param n_obs Number of observations
 #' @param has_spatial Whether spatial effects are specified
 #' @param has_temporal Whether temporal effects are specified
@@ -402,13 +411,13 @@ select_backend <- function(family, n_obs, has_spatial = FALSE, has_temporal = FA
 }
 
 
-#' Print method for quotr_fit
+#' Print method for ratiod_fit
 #'
-#' @param x A quotr_fit object
+#' @param x A ratiod_fit object
 #' @param ... Ignored
 #' @export
-print.quotr_fit <- function(x, ...) {
-  cat("quotr model fit\n")
+print.ratiod_fit <- function(x, ...) {
+  cat("ratiod model fit\n")
   cat("===============\n\n")
 
   cat("Family:", x$family$name, "\n")
@@ -441,19 +450,19 @@ print.quotr_fit <- function(x, ...) {
   invisible(x)
 }
 
-#' Summary method for quotr_fit
+#' Summary method for ratiod_fit
 #'
 #' @description
 #' Provides a summary of the fitted model including parameter estimates,
 #' credible intervals, and MCMC diagnostics. Works with all backends
 #' (HMC, PG, Laplace).
 #'
-#' @param object A quotr_fit object
+#' @param object A ratiod_fit object
 #' @param prob Probability mass for credible intervals (default 0.95)
 #' @param ... Ignored
 #' @export
-summary.quotr_fit <- function(object, prob = 0.95, ...) {
-  cat("quotr model summary\n")
+summary.ratiod_fit <- function(object, prob = 0.95, ...) {
+  cat("ratiod model summary\n")
   cat("===================\n\n")
 
   backend <- object$backend %||% "unknown"
@@ -634,24 +643,24 @@ print_diagnostics_summary <- function(object) {
   }
 }
 
-#' Extract posterior draws from quotr_fit
+#' Extract posterior draws from ratiod_fit
 #'
-#' @param x A quotr_fit object
+#' @param x A ratiod_fit object
 #' @param ... Passed to posterior::as_draws_df
 #' @return A draws_df object
 #' @export
-as.data.frame.quotr_fit <- function(x, ...) {
+as.data.frame.ratiod_fit <- function(x, ...) {
   posterior::as_draws_df(x$fit$draws(...))
 }
 
 
-#' Plot method for quotr_fit
+#' Plot method for ratiod_fit
 #'
 #' @description
-#' Creates diagnostic plots for quotr model fits including trace plots
+#' Creates diagnostic plots for ratiod model fits including trace plots
 #' and optional density plots. Works with all backends (HMC, PG, Laplace).
 #'
-#' @param x A quotr_fit object
+#' @param x A ratiod_fit object
 #' @param pars Character vector of parameter names to plot. If NULL (default),
 #'   plots main parameters (fixed effects, variance components).
 #' @param type Type of plot: "trace" (default), "dens" (density), or "both".
@@ -661,14 +670,28 @@ as.data.frame.quotr_fit <- function(x, ...) {
 #' @return Invisibly returns the plot object (base graphics or ggplot2).
 #'
 #' @examples
-#' \dontrun{
-#' fit <- quotr(count | effort ~ depth + (1|site), data = df)
+#' # Create simple dataset
+#' set.seed(456)
+#' df <- data.frame(
+#'   count = rpois(40, 8),
+#'   effort = rgamma(40, 2, 0.5),
+#'   depth = rnorm(40),
+#'   site = factor(sample(1:4, 40, replace = TRUE))
+#' )
+#'
+#' \donttest{
+#' fit <- ratiod(
+#'   count | effort ~ depth + (1|site),
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   iter = 200, warmup = 100, chains = 1
+#' )
 #' plot(fit)
 #' plot(fit, pars = "beta_num", type = "both")
 #' }
 #'
 #' @export
-plot.quotr_fit <- function(x, pars = NULL, type = c("trace", "dens", "both"),
+plot.ratiod_fit <- function(x, pars = NULL, type = c("trace", "dens", "both"),
                            n_col = NULL, ...) {
   type <- match.arg(type)
 
@@ -709,7 +732,7 @@ plot.quotr_fit <- function(x, pars = NULL, type = c("trace", "dens", "both"),
 #'
 #' Converts draws to a 3D array with dimensions iterations x chains x parameters.
 #'
-#' @param fit A quotr_fit object
+#' @param fit A ratiod_fit object
 #' @return A list with draws array and number of chains
 #' @keywords internal
 get_draws_array <- function(fit) {
@@ -884,18 +907,18 @@ plot_with_base <- function(draws_array, type, n_chains, n_col = NULL) {
     }
   }
 
-  backend_label <- "quotr MCMC diagnostics"
+  backend_label <- "ratiod MCMC diagnostics"
   graphics::mtext(backend_label, outer = TRUE, cex = 1.1)
 }
 
 
-#' Compute MCMC diagnostics (Rhat, ESS) for quotr_fit
+#' Compute MCMC diagnostics (Rhat, ESS) for ratiod_fit
 #'
 #' @description
 #' Computes split-Rhat and effective sample size (ESS) for all parameters
 #' using the posterior package. Works with all backends.
 #'
-#' @param fit A quotr_fit object
+#' @param fit A ratiod_fit object
 #' @param pars Character vector of parameter names (default: all).
 #'
 #' @return A data frame with columns: parameter, rhat, ess_bulk, ess_tail.
@@ -907,8 +930,8 @@ plot_with_base <- function(draws_array, type, n_chains, n_col = NULL) {
 #'
 #' @export
 mcmc_diagnostics <- function(fit, pars = NULL) {
-  if (!inherits(fit, "quotr_fit")) {
-    stop("fit must be a quotr_fit object", call. = FALSE)
+  if (!inherits(fit, "ratiod_fit")) {
+    stop("fit must be a ratiod_fit object", call. = FALSE)
   }
 
   # Get draws in array format
@@ -946,7 +969,7 @@ mcmc_diagnostics <- function(fit, pars = NULL) {
     result <- compute_diagnostics_basic(draws_array)
   }
 
-  class(result) <- c("quotr_diagnostics", "data.frame")
+  class(result) <- c("ratiod_diagnostics", "data.frame")
   return(result)
 }
 
@@ -1049,9 +1072,13 @@ compute_ess_basic <- function(x) {
 }
 
 
-#' Print method for quotr_diagnostics
+#' Print method for ratiod_diagnostics
+#'
+#' @param x A ratiod_diagnostics object
+#' @param ... Ignored
+#'
 #' @export
-print.quotr_diagnostics <- function(x, ...) {
+print.ratiod_diagnostics <- function(x, ...) {
   cat("MCMC Diagnostics\n")
   cat("================\n\n")
 
@@ -1085,7 +1112,7 @@ print.quotr_diagnostics <- function(x, ...) {
 #' Checks MCMC diagnostics (Rhat, ESS, divergences) and prints actionable
 #' warnings with suggestions for fixing issues.
 #'
-#' @param fit A quotr_fit object
+#' @param fit A ratiod_fit object
 #' @param quiet Logical; if TRUE, suppress output and just return status.
 #'
 #' @return Invisibly returns a list with diagnostic status:
@@ -1098,8 +1125,8 @@ print.quotr_diagnostics <- function(x, ...) {
 #'
 #' @export
 check_diagnostics <- function(fit, quiet = FALSE) {
-  if (!inherits(fit, "quotr_fit")) {
-    stop("fit must be a quotr_fit object", call. = FALSE)
+  if (!inherits(fit, "ratiod_fit")) {
+    stop("fit must be a ratiod_fit object", call. = FALSE)
   }
 
   backend <- fit$backend %||% "unknown"
@@ -1197,12 +1224,12 @@ check_diagnostics <- function(fit, quiet = FALSE) {
 
 #' Get number of divergent transitions
 #'
-#' @param fit A quotr_fit object
+#' @param fit A ratiod_fit object
 #' @return Integer count of divergent transitions
 #' @export
 n_divergent <- function(fit) {
-  if (!inherits(fit, "quotr_fit")) {
-    stop("fit must be a quotr_fit object", call. = FALSE)
+  if (!inherits(fit, "ratiod_fit")) {
+    stop("fit must be a ratiod_fit object", call. = FALSE)
   }
 
   if (fit$backend == "hmc") {

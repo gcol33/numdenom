@@ -1,11 +1,11 @@
 #' Prepare data for Stan model
 #'
 #' @description
-#' Convert a quotr_formula object and family specification into the
+#' Convert a ratiod_formula object and family specification into the
 #' data list required by the Stan model.
 #'
-#' @param formula A quotr_formula object
-#' @param family A quotr_family object
+#' @param formula A ratiod_formula object
+#' @param family A ratiod_family object
 #' @param data Original data frame
 #' @param spatial Optional spatial specification
 #' @param priors Prior specification
@@ -16,7 +16,7 @@ make_standata <- function(formula, family, data, spatial = NULL, priors = NULL) 
 
   # Use default priors if not specified
   if (is.null(priors)) {
-    priors <- quotr_priors()
+    priors <- ratiod_priors()
   }
 
   # Dispatch to family-specific function
@@ -198,7 +198,7 @@ validate_response <- function(y, dist, name) {
 
 #' Build random effects data structure for Stan
 #'
-#' @param formula quotr_formula object
+#' @param formula ratiod_formula object
 #' @param data Data frame
 #'
 #' @return List with RE indexing for Stan

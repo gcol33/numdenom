@@ -17,12 +17,12 @@ test_that("HMC backend runs for binomial model", {
     x = x
   )
 
-  # This would require the full quotr interface
+  # This would require the full ratiod interface
 
   # For now, test the C++ directly
   X <- cbind(1, x)
 
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 3),  # 2 beta_num + 1 beta_denom
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -96,7 +96,7 @@ test_that("HMC backend runs for negbin model", {
 
   X <- cbind(1, x)
 
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 6),  # 2 + 2 fixed + 2 log_phi
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
@@ -165,7 +165,7 @@ test_that("HMC backend runs with random effects", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_sigma_re + 10 RE = 14
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 14),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -266,7 +266,7 @@ test_that("HMC backend runs with ICAR spatial effects", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 16 spatial = 20
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 20),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -334,7 +334,7 @@ test_that("HMC backend runs multiple chains in parallel", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom = 3
-  result <- quotr:::cpp_hmc_fit(
+  result <- ratiod:::cpp_hmc_fit(
     q_init = rep(0, 3),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -390,7 +390,7 @@ test_that("HMC backend runs multiple chains in parallel", {
 
 
 test_that("cpp_get_max_threads returns positive integer", {
-  n_threads <- quotr:::cpp_get_max_threads()
+  n_threads <- ratiod:::cpp_get_max_threads()
   expect_true(is.numeric(n_threads))
   expect_true(n_threads >= 1)
 })

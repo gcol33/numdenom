@@ -1,10 +1,10 @@
-#' Benchmark quotr performance
+#' Benchmark ratiod performance
 #'
 #' @description
-#' Utilities for benchmarking quotr model fitting performance across
+#' Utilities for benchmarking ratiod model fitting performance across
 #' different dataset sizes and configurations.
 #'
-#' @name quotr_benchmark
+#' @name ratiod_benchmark
 NULL
 
 
@@ -16,7 +16,7 @@ NULL
 #' @param N Number of observations
 #' @param p Number of predictors
 #' @param n_groups Number of random effect groups (0 for none)
-#' @param family Model family (default: quotr_negbin_negbin())
+#' @param family Model family (default: ratiod_negbin_negbin())
 #' @param n_iter Total iterations
 #' @param n_warmup Warmup iterations
 #' @param n_chains Number of chains
@@ -26,21 +26,18 @@ NULL
 #' @return A list with timing and diagnostic information
 #'
 #' @examples
-#' \dontrun{
-#' # Quick benchmark
-#' bench <- quotr_benchmark(N = 100, p = 3, n_iter = 500)
+#' \donttest{
+#' # Quick benchmark (slow, not run on CRAN)
+#' bench <- ratiod_benchmark(N = 100, p = 3, n_iter = 200, n_warmup = 100)
 #' print(bench)
-#'
-#' # Larger benchmark with random effects
-#' bench <- quotr_benchmark(N = 1000, p = 5, n_groups = 20, n_iter = 1000)
 #' }
 #'
 #' @export
-quotr_benchmark <- function(
+ratiod_benchmark <- function(
     N = 500,
     p = 3,
     n_groups = 0,
-    family = quotr_negbin_negbin(),
+    family = ratiod_negbin_negbin(),
     n_iter = 1000,
     n_warmup = 500,
     n_chains = 1,
@@ -105,7 +102,7 @@ quotr_benchmark <- function(
   # Time the fit
   start_time <- Sys.time()
 
-  fit <- quotr(
+  fit <- ratiod(
     formula,
     data = df,
     family = family,
@@ -158,19 +155,19 @@ quotr_benchmark <- function(
     )
   )
 
-  class(result) <- c("quotr_benchmark", "list")
+  class(result) <- c("ratiod_benchmark", "list")
   result
 }
 
 
 #' Print benchmark results
 #'
-#' @param x A quotr_benchmark object
+#' @param x A ratiod_benchmark object
 #' @param ... Ignored
 #'
 #' @export
-print.quotr_benchmark <- function(x, ...) {
-  cat("quotr Benchmark Results\n")
+print.ratiod_benchmark <- function(x, ...) {
+  cat("ratiod Benchmark Results\n")
   cat("=======================\n\n")
 
   cat("Configuration:\n")
@@ -210,18 +207,18 @@ print.quotr_benchmark <- function(x, ...) {
 #' @return A data frame with benchmark results
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
+#' # Compare benchmarks (slow, not run on CRAN)
 #' configs <- list(
-#'   list(N = 100, p = 3, n_groups = 0),
-#'   list(N = 500, p = 3, n_groups = 0),
-#'   list(N = 1000, p = 3, n_groups = 0)
+#'   list(N = 50, p = 2, n_groups = 0),
+#'   list(N = 100, p = 2, n_groups = 0)
 #' )
-#' comparison <- quotr_benchmark_compare(configs, n_iter = 500)
+#' comparison <- ratiod_benchmark_compare(configs, n_iter = 200, n_warmup = 100)
 #' print(comparison)
 #' }
 #'
 #' @export
-quotr_benchmark_compare <- function(
+ratiod_benchmark_compare <- function(
     configs,
     n_iter = 500,
     n_warmup = 250,
@@ -229,7 +226,7 @@ quotr_benchmark_compare <- function(
 ) {
 
   results <- lapply(configs, function(cfg) {
-    bench <- quotr_benchmark(
+    bench <- ratiod_benchmark(
       N = cfg$N,
       p = cfg$p,
       n_groups = cfg$n_groups %||% 0,
@@ -263,9 +260,9 @@ quotr_benchmark_compare <- function(
 #' @return Integer number of threads
 #'
 #' @examples
-#' quotr_threads()
+#' ratiod_threads()
 #'
 #' @export
-quotr_threads <- function() {
+ratiod_threads <- function() {
   cpp_get_max_threads()
 }

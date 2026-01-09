@@ -1,15 +1,17 @@
-Package: quotr
+Package: ratiod
 Title: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
-Version: 0.8.0
+Version: 0.9.5
 Authors@R:
-    person("Gilles", "Colling", , "gilles@example.com", role = c("aut", "cre"))
+    person("Gilles", "Colling", email = "gilles.colling051@gmail.com", role = c("aut", "cre", "cph"),
+           comment = c(ORCID = "0000-0003-3070-6066"))
 Description: An opinionated framework for Bayesian hierarchical modelling of
     ratios, rates, and proportions. Ratios are treated as derived quantities,
     with all inference performed on the latent processes generating the numerator
-    and denominator. Supports shared random effects, spatial structure (CAR/BYM2),
+    and denominator. Supports shared random effects, spatial structure ('CAR'/'BYM2'),
     and full uncertainty propagation to ratio posteriors. Provides multiple
-    inference backends including custom HMC/NUTS (default), Laplace approximation,
-    and optional Stan integration.
+    inference backends including custom 'HMC'/'NUTS' (default), 'Laplace' approximation,
+    and 'Polya-Gamma' Gibbs sampling.
+Language: en-US
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
@@ -28,6 +30,8 @@ Suggests:
     bayesplot,
     patchwork,
     ggplot2,
+    stars,
+    sf,
     Matrix,
     testthat (>= 3.0.0),
     knitr,
