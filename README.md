@@ -44,6 +44,14 @@ ratio_contrast(fit, "habitat")
 - **Native HMC/NUTS backend** - no external dependencies
 - **Model comparison**: LOO and WAIC
 
+## Documentation
+
+- [Quick Start](https://gillescolling.com/ratiod/articles/getting-started.html) - Installation and basic usage
+- [Why Ratios Are Not Data](https://gillescolling.com/ratiod/articles/philosophy.html) - Statistical motivation
+- [Complete Workflows](https://gillescolling.com/ratiod/articles/workflows.html) - Real-world analysis examples
+- [Spatial and Temporal Models](https://gillescolling.com/ratiod/articles/spatial-temporal.html) - CAR, BYM2, AR(1), random walk
+- [Random Effects](https://gillescolling.com/ratiod/articles/random-effects.html) - Random slopes, nested/crossed RE
+
 ## License
 
 MIT
