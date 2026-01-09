@@ -11,8 +11,7 @@ All inference is performed on the latent processes generating the numerator and 
 ## Installation
 
 ```r
-# Install from GitHub
-remotes::install_github("gcol33/ratiod")
+pak::pak("gcol33/ratiod")
 ```
 
 ## Quick Start
