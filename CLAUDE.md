@@ -237,12 +237,14 @@ When modifying C++ code:
 - Spatial CAR/BYM2
 - Native HMC/NUTS backend (no Stan)
 - LOO/WAIC model comparison
+- Random slopes (correlated/uncorrelated)
+- Nested and crossed random effects
+- Temporal AR(1) / random walk
 
 ### v1.1 (Planned)
 - Latent factors for unmeasured confounders
 - GP/Matérn spatial (continuous)
-- Temporal AR(1) / random walk
 
-### v2.0 (Future)
+### v1.2 (Planned)
 - Spatiotemporal interaction
 - Zero-inflation variants
