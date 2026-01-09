@@ -5,7 +5,7 @@
 .Ruserdata
 *.Rproj
 
-# Compiled Stan models
+# Compiled code
 inst/stan/*.rds
 src/*.o
 src/*.so
@@ -14,11 +14,21 @@ src/*.dll
 # Build artifacts
 *.tar.gz
 *.tgz
+*.Rcheck/
+..Rcheck/
 
 # Documentation
 docs/
-man/*.Rd
 
 # IDE
 .vscode/
 *.swp
+
+# Development files (not for public repo)
+PLAN_*.md
+TODO_*.md
+ROADMAP.md
+MIGRATION.md
+cran-comments.md
+test_script.R
+.claude/
