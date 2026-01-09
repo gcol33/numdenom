@@ -147,7 +147,7 @@ $$
 
 ## Full Uncertainty Propagation
 
-Because ratios are computed in Stan's `generated quantities` block, every posterior draw of the ratio reflects uncertainty in:
+Because ratios are computed from the full posterior, every draw reflects uncertainty in:
 
 - Fixed effect estimates
 - Random effect realizations

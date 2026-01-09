@@ -31,10 +31,17 @@ navbar:
     articles:
       text: Articles
       menu:
-        - text: "Getting Started"
+        - text: "Quick Start"
           href: articles/getting-started.html
         - text: "Why Ratios Are Not Data"
           href: articles/philosophy.html
+        - text: "---"
+        - text: "Complete Workflows"
+          href: articles/workflows.html
+        - text: "Spatial and Temporal Models"
+          href: articles/spatial-temporal.html
+        - text: "Random Effects"
+          href: articles/random-effects.html
     github:
       icon: fab fa-github
       href: https://github.com/gcol33/ratiod
@@ -45,6 +52,8 @@ reference:
     desc: "Main function for fitting ratiod models"
     contents:
       - ratiod
+      - ratiod_average
+      - ratiod_compare
 
   - title: "Model Families"
     desc: "Distribution families for numerator/denominator processes"
@@ -52,6 +61,18 @@ reference:
       - ratiod_negbin_negbin
       - ratiod_binomial
       - ratiod_poisson_gamma
+      - ratiod_beta_binomial
+      - ratiod_gamma_gamma
+      - ratiod_lognormal
+      - ratiod_hurdle_negbin
+      - ratiod_hurdle_pois
+      - ratiod_zinegbin
+      - ratiod_zipois
+      - hurdle_negbin
+      - hurdle_poisson
+      - zi_negbin
+      - zi_poisson
+      - zi_specification
 
   - title: "Ratio Inference"
     desc: "Extract and compare ratio posteriors"
@@ -64,11 +85,39 @@ reference:
     contents:
       - spatial_car
       - spatial_bym2
+      - spatial_gp
+      - spatial_rsr
+      - spatial_svc
+      - spatial_multiscale
+      - svc
+
+  - title: "Temporal Structure"
+    desc: "Temporal random effect specifications"
+    contents:
+      - temporal_rw1
+      - temporal_rw2
+      - temporal_ar1
+      - temporal_gp
+      - temporal_rtr
+      - temporal_tvc
+      - temporal_multiscale
+      - temporal
+      - tvc
 
   - title: "Priors"
     desc: "Prior specification helpers"
     contents:
       - ratiod_priors
+      - ratiod_priors_legacy
+      - priors_default
+      - prior_normal
+      - prior_half_normal
+      - prior_half_cauchy
+      - prior_exponential
+      - prior_gamma
+      - prior_beta
+      - prior_pc
+      - prior_predict
 
   - title: "Model Checking"
     desc: "Posterior predictive checks and model comparison"
@@ -76,18 +125,71 @@ reference:
       - pp_check
       - loo.ratiod_fit
       - waic.ratiod_fit
-      - ratiod_compare
+      - check_diagnostics
+      - diagnostic_summary
+      - mcmc_diagnostics
+      - geweke_test
+      - n_divergent
+
+  - title: "Plotting"
+    desc: "Visualization functions"
+    contents:
+      - starts_with("plot_")
+      - starts_with("plot.")
+
+  - title: "Posterior Draws"
+    desc: "Extract and manipulate posterior samples"
+    contents:
+      - as_draws
+      - gather_draws
+      - spread_draws
+      - point_interval
+
+  - title: "Simulation"
+    desc: "Data simulation for testing"
+    contents:
+      - sim_ratiod
+      - sim_ratiod_sbc
+
+  - title: "Benchmarking"
+    desc: "Performance comparison"
+    contents:
+      - ratiod_benchmark
+      - ratiod_benchmark_compare
+      - ratiod_threads
+
+  - title: "Methods"
+    desc: "S3 methods for ratiod objects"
+    contents:
+      - starts_with("print.")
+      - starts_with("summary.")
+      - starts_with("fitted.")
+      - starts_with("predict.")
+      - starts_with("weights.")
+      - as.data.frame.ratiod_fit
+
+  - title: "Documentation"
+    desc: "Package documentation pages"
+    contents:
+      - ratiod_families
+      - ratiod_spatial
+      - ratiod_temporal
+      - ratiod_validate
+      - ratiod_zi_families
 
 articles:
   - title: "Getting Started"
     navbar: ~
     contents:
       - getting-started
+      - philosophy
 
-  - title: "Theory"
+  - title: "Tutorials"
     navbar: ~
     contents:
-      - philosophy
+      - workflows
+      - spatial-temporal
+      - random-effects
 
 footer:
   structure:

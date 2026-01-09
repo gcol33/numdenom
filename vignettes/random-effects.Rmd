@@ -1,0 +1,307 @@
+---
+title: "Random Effects"
+author: "Gilles Colling"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Random Effects}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  eval = FALSE
+)
+```
+
+## Overview
+
+This vignette covers random effects in ratiod, including random intercepts, random slopes, crossed effects, and nested effects. ratiod uses lme4-style formula syntax with extensions for correlated vs. uncorrelated slopes.
+
+# Random Intercepts
+
+## Single Grouping Factor
+
+```{r}
+# Random intercept for site
+fit <- ratiod(
+  count | effort ~ depth + (1 | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+This estimates a site-specific intercept $b_{\text{site}[i]}$ for each observation $i$:
+
+$$
+\log(\mu_i) = \beta_0 + \beta_1 \cdot \text{depth}_i + b_{\text{site}[i]}
+$$
+
+where $b_j \sim \text{Normal}(0, \sigma_{\text{site}}^2)$.
+
+## Multiple (Crossed) Grouping Factors
+
+When observations are classified by multiple independent grouping factors:
+
+```{r}
+# Crossed random effects: site and year
+fit <- ratiod(
+  count | effort ~ depth + (1 | site) + (1 | year),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+This estimates:
+- $b^{\text{site}}_j \sim \text{Normal}(0, \sigma_{\text{site}}^2)$
+- $b^{\text{year}}_k \sim \text{Normal}(0, \sigma_{\text{year}}^2)$
+
+The linear predictor becomes:
+
+$$
+\log(\mu_i) = \beta_0 + \beta_1 \cdot \text{depth}_i + b^{\text{site}}_{\text{site}[i]} + b^{\text{year}}_{\text{year}[i]}
+$$
+
+# Nested Random Effects
+
+When groups are hierarchically nested (plots within sites):
+
+```{r}
+# Nested: plots within sites
+fit <- ratiod(
+  count | effort ~ depth + (1 | site/plot),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+This expands to:
+
+```{r}
+# Equivalent explicit form
+fit <- ratiod(
+  count | effort ~ depth + (1 | site) + (1 | site:plot),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+The `site:plot` interaction creates unique identifiers for each plot-within-site combination.
+
+### Deep Nesting
+
+For deeper hierarchies:
+
+```{r}
+# region/site/plot expands to:
+# (1 | region) + (1 | region:site) + (1 | region:site:plot)
+fit <- ratiod(
+  count | effort ~ x + (1 | region/site/plot),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+# Random Slopes
+
+Random slopes allow the effect of a predictor to vary by group.
+
+## Correlated Intercept and Slope
+
+Use single `|` for correlated random effects:
+
+```{r}
+# Intercept and depth effect vary by site, with correlation
+fit <- ratiod(
+  count | effort ~ depth + (1 + depth | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+This estimates:
+
+$$
+\begin{pmatrix} b_{0j} \\ b_{1j} \end{pmatrix} \sim \text{MVN}\left(\begin{pmatrix} 0 \\ 0 \end{pmatrix}, \begin{pmatrix} \sigma_0^2 & \rho\sigma_0\sigma_1 \\ \rho\sigma_0\sigma_1 & \sigma_1^2 \end{pmatrix}\right)
+$$
+
+The correlation $\rho$ captures whether sites with higher intercepts also tend to have steeper slopes.
+
+## Uncorrelated Intercept and Slope
+
+Use double `||` for independent random effects:
+
+```{r}
+# Intercept and depth effect vary by site, independently
+fit <- ratiod(
+  count | effort ~ depth + (1 + depth || site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+This is computationally simpler and appropriate when you don't expect correlation between intercepts and slopes.
+
+## Multiple Slopes
+
+```{r}
+# Multiple correlated slopes
+fit <- ratiod(
+  count | effort ~ depth + temp + (1 + depth + temp | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+
+# Multiple uncorrelated slopes
+fit <- ratiod(
+  count | effort ~ depth + temp + (1 + depth + temp || site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+# Formula Expansion
+
+ratiod supports lme4-style formula expansion for random slopes.
+
+## Interactions
+
+```{r}
+# x*z expands to x + z + x:z
+fit <- ratiod(
+  count | effort ~ x*z + (1 + x*z | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+# Random slopes for x, z, and their interaction
+```
+
+## Polynomials
+
+```{r}
+# Quadratic random slope
+fit <- ratiod(
+  count | effort ~ x + I(x^2) + (1 + x + I(x^2) | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+
+# Or using poly()
+fit <- ratiod(
+  count | effort ~ poly(x, 2) + (1 + poly(x, 2) | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+## Parameter Naming
+
+ratiod cleans parameter names for readability:
+
+| Formula Term | Parameter Name |
+|--------------|----------------|
+| `x:z` | `x_z` |
+| `I(x^2)` | `x_pow2` |
+| `poly(x, 2)1` | `x_poly1` |
+| `poly(x, 2)2` | `x_poly2` |
+| `log(x)` | `log_x` |
+| `scale(x)` | `x_scaled` |
+
+# Shared Random Effects
+
+By default, ratiod shares random effects between numerator and denominator when the same grouping factor appears in both. This is the core of the ratiod philosophy (see `vignette("philosophy")`).
+
+## Default: Shared Structure
+
+```{r}
+# Site effect shared between catch and effort processes
+fit <- ratiod(
+  catch | effort ~ depth + (1 | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+The site effect enters both linear predictors identically:
+
+$$
+\log(\mu_{\text{catch}}) = \beta_0 + \beta_1 \cdot \text{depth} + \mathbf{b_{\text{site}}}
+$$
+$$
+\log(\mu_{\text{effort}}) = \alpha_0 + \mathbf{b_{\text{site}}}
+$$
+
+Shared effects cancel in the ratio, removing spurious variation from common unmeasured drivers.
+
+## Explicit Shared Structure
+
+```{r}
+# Only site is shared, observer is process-specific
+fit <- ratiod(
+  catch | effort ~ (1 | site) + (1 | observer),
+  shared = ~ (1 | site),
+  data = df,
+  family = ratiod_poisson_gamma()
+)
+```
+
+## Independent Structure (Use with Caution)
+
+```{r}
+# Request independence (triggers warning)
+fit <- ratiod(
+  successes | trials ~ treatment + (1 | block),
+  shared = ~ 0,
+  data = df,
+  family = ratiod_binomial()
+)
+```
+
+# Extracting Random Effects
+
+```{r}
+# Posterior summaries for random effects
+re <- extract_ranef(fit)
+
+# By term
+re$site       # Site-level effects
+re$site_plot  # Nested plot effects
+
+# For random slopes
+re$site$intercept  # Intercept component
+re$site$depth      # Slope component
+```
+
+# Prior Specification
+
+## Default PC Priors
+
+ratiod uses penalized complexity (PC) priors that favor simpler models:
+
+```{r}
+# Default: P(sigma > 1) = 0.01
+fit <- ratiod(..., priors = ratiod_priors())
+```
+
+## Custom Priors
+
+```{r}
+# Expect smaller random effects
+fit <- ratiod(
+  ...,
+  priors = ratiod_priors(
+    sigma_re_scale = 0.5  # Prior scale for RE standard deviations
+  )
+)
+```
+
+## See Also
+
+- `vignette("getting-started")` - Basic usage
+- `vignette("philosophy")` - Why shared structure matters
+- `vignette("spatial-temporal")` - Spatial and temporal extensions

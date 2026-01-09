@@ -1,0 +1,275 @@
+title: "Complete Workflows"
+author: "Gilles Colling"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Complete Workflows}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  eval = FALSE
+)
+```
+
+## Overview
+
+This vignette demonstrates complete analysis workflows using ratiod. Each example shows data preparation, model fitting, diagnostics, and inference. See `vignette("getting-started")` for basic usage and `vignette("philosophy")` for statistical motivation.
+
+
+# Workflow 1: Fisheries CPUE
+
+**Goal**: Estimate standardized catch per unit effort (CPUE) while accounting for varying effort and site effects.
+
+**Challenge**: Effort varies systematically across sites and seasons. Sites with more effort appear to have more precise CPUE, but this precision is illusory if effort correlates with catch conditions.
+
+**Strategy**: Joint model with shared site effects.
+
+### Data
+
+```{r}
+library(ratiod)
+
+# Simulated fisheries data
+set.seed(42)
+n_sites <- 15
+n_seasons <- 4
+n_obs <- n_sites * n_seasons * 3
+
+fisheries <- data.frame(
+  site = factor(rep(1:n_sites, each = n_seasons * 3)),
+  season = factor(rep(rep(c("spring", "summer", "fall", "winter"), each = 3), n_sites)),
+  depth = rnorm(n_obs, 50, 20),
+  catch = rpois(n_obs, lambda = 20),
+  effort_hours = rgamma(n_obs, shape = 4, rate = 0.5)
+)
+
+head(fisheries)
+```
+
+### Model Fitting
+
+```{r}
+fit_cpue <- ratiod(
+  catch | effort_hours ~ depth + season + (1 | site),
+  data = fisheries,
+  family = ratiod_poisson_gamma(),
+  iter = 2000,
+  warmup = 1000,
+  chains = 4
+)
+
+summary(fit_cpue)
+```
+
+### Diagnostics
+
+```{r}
+# Check convergence
+plot(fit_cpue, type = "trace")
+
+# Posterior predictive checks
+pp_check(fit_cpue, type = "dens_overlay", component = "numerator")
+pp_check(fit_cpue, type = "dens_overlay", component = "denominator")
+```
+
+### Inference
+
+```{r}
+# Site-level CPUE estimates
+cpue_by_site <- ratio(fit_cpue, by = "site")
+summary(cpue_by_site)
+
+# Seasonal contrasts
+ratio_contrast(fit_cpue, ~ season)
+
+# Effect of depth
+ratio_contrast(fit_cpue, ~ depth, at = list(depth = c(30, 50, 70)))
+```
+
+
+# Workflow 2: Relative Abundance
+
+**Goal**: Estimate the proportion of a target species relative to total catch across habitats.
+
+**Challenge**: Both target count and total count are overdispersed. Using binomial models would underestimate uncertainty.
+
+**Strategy**: Negative binomial for both counts with shared observer effects.
+
+### Data
+
+```{r}
+set.seed(123)
+n_plots <- 30
+n_visits <- 4
+
+abundance <- data.frame(
+  plot = factor(rep(1:n_plots, each = n_visits)),
+  habitat = factor(rep(sample(c("forest", "grassland", "wetland"), n_plots, replace = TRUE), each = n_visits)),
+  observer = factor(sample(1:5, n_plots * n_visits, replace = TRUE)),
+  target_count = rnbinom(n_plots * n_visits, size = 3, mu = 15),
+  total_count = rnbinom(n_plots * n_visits, size = 5, mu = 50)
+)
+
+# Ensure target <= total
+abundance$target_count <- pmin(abundance$target_count, abundance$total_count)
+```
+
+### Model
+
+```{r}
+fit_abundance <- ratiod(
+  target_count | total_count ~ habitat + (1 | plot) + (1 | observer),
+  data = abundance,
+  family = ratiod_negbin_negbin(),
+  iter = 2000,
+  chains = 4
+)
+
+summary(fit_abundance)
+```
+
+### Results
+
+```{r}
+# Habitat effects on relative abundance
+ratio_contrast(fit_abundance, ~ habitat)
+
+# Plot-level estimates
+abundance_by_plot <- ratio(fit_abundance, by = "plot")
+```
+
+
+# Workflow 3: Detection Probability
+
+**Goal**: Estimate detection probability from camera trap data with spatial structure.
+
+**Challenge**: Detection varies by site characteristics and has spatial autocorrelation.
+
+**Strategy**: Binomial model with spatial random effects.
+
+### Data
+
+```{r}
+set.seed(456)
+n_cameras <- 40
+
+# Camera locations on a grid
+coords <- expand.grid(x = 1:8, y = 1:5)
+coords <- coords[1:n_cameras, ]
+
+# Create adjacency matrix (queen contiguity)
+adj <- matrix(0, n_cameras, n_cameras)
+for (i in 1:n_cameras) {
+  for (j in 1:n_cameras) {
+    if (i != j) {
+      dist <- sqrt((coords$x[i] - coords$x[j])^2 + (coords$y[i] - coords$y[j])^2)
+      if (dist <= sqrt(2) + 0.01) adj[i, j] <- 1
+    }
+  }
+}
+
+camera_data <- data.frame(
+  camera = factor(1:n_cameras),
+  vegetation = rnorm(n_cameras),
+  nights_active = sample(20:30, n_cameras, replace = TRUE),
+  detections = rbinom(n_cameras, size = 25, prob = 0.3)
+)
+camera_data$detections <- pmin(camera_data$detections, camera_data$nights_active)
+```
+
+### Spatial Model
+
+```{r}
+fit_detection <- ratiod(
+  detections | nights_active ~ vegetation + (1 | camera),
+  spatial = spatial_car(adj, level = "group", group_var = "camera"),
+  data = camera_data,
+  family = ratiod_binomial(),
+  iter = 2000,
+  chains = 4
+)
+
+summary(fit_detection)
+```
+
+### Spatial Predictions
+
+```{r}
+# Camera-level detection probabilities
+detection_probs <- ratio(fit_detection, by = "camera")
+summary(detection_probs)
+
+# Visualize spatial pattern
+camera_data$detection_prob <- detection_probs$mean
+# plot with sf/ggplot2...
+```
+
+
+# Workflow 4: Temporal Trends
+
+**Goal**: Estimate annual trends in population indices while accounting for temporal autocorrelation.
+
+**Strategy**: Random walk prior on year effects.
+
+### Data
+
+```{r}
+set.seed(789)
+n_years <- 15
+n_sites <- 10
+
+trend_data <- expand.grid(
+  year = 1:n_years,
+  site = factor(1:n_sites)
+)
+trend_data$count <- rpois(nrow(trend_data), lambda = 20)
+trend_data$effort <- rgamma(nrow(trend_data), shape = 5, rate = 1)
+```
+
+### Model with Temporal Structure
+
+```{r}
+fit_trend <- ratiod(
+  count | effort ~ (1 | site),
+  temporal = temporal_rw(time_var = "year", order = 1),
+  data = trend_data,
+  family = ratiod_poisson_gamma(),
+  iter = 2000,
+  chains = 4
+)
+
+summary(fit_trend)
+```
+
+### Extract Trend
+
+```{r}
+# Year-level index
+trend_by_year <- ratio(fit_trend, by = "year")
+summary(trend_by_year)
+
+# Plot trend with uncertainty
+# ggplot code...
+```
+
+
+## Summary
+
+| Workflow | Family | Key Feature |
+|----------|--------|-------------|
+| Fisheries CPUE | `poisson_gamma` | Shared site effects |
+| Relative Abundance | `negbin_negbin` | Overdispersed counts |
+| Detection Probability | `binomial` | Spatial CAR |
+| Temporal Trends | `poisson_gamma` | Random walk |
+
+## See Also
+
+- `vignette("getting-started")` - Basic usage
+- `vignette("philosophy")` - Statistical motivation
+- `vignette("spatial-temporal")` - Spatial and temporal details

@@ -1,10 +1,10 @@
 ---
-title: "Getting Started with ratiod"
+title: "Quick Start"
 author: "Gilles Colling"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Getting Started with ratiod}
+  %\VignetteIndexEntry{Quick Start}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -21,34 +21,35 @@ knitr::opts_chunk$set(
 
 ## Installation
 
-ratiod requires CmdStan for Bayesian inference. Install in order:
-
-```{r install, eval = FALSE}
-# 1. Install cmdstanr (Stan interface)
-install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))
-
-# 2. Install CmdStan (one-time setup)
-cmdstanr::install_cmdstan()
-
-# 3. Install ratiod
-# install.packages("pak")
+```{r, eval = FALSE}
 pak::pak("gcol33/ratiod")
 ```
 
-Verify installation:
-
-```{r verify, eval = FALSE}
+```{r, eval = FALSE}
 library(ratiod)
-cmdstanr::cmdstan_version()
 ```
 
-## Basic Usage
+## What ratiod Does
 
-### Example: CPUE Analysis
+ratiod fits Bayesian hierarchical models for ratios, rates, and proportions. Instead of modelling ratios directly (which is statistically problematic), ratiod jointly models the numerator and denominator processes, then derives ratios with full uncertainty propagation.
+
+See `vignette("philosophy")` for the statistical motivation.
+
+## The Three Families
+
+ratiod provides three model families for common ratio types:
+
+| Family | Numerator | Denominator | Use Case |
+|--------|-----------|-------------|----------|
+| `ratiod_negbin_negbin()` | Counts | Counts | Relative abundance, species ratios |
+| `ratiod_binomial()` | Successes | Trials | Detection rates, survival |
+| `ratiod_poisson_gamma()` | Counts | Continuous | CPUE, catch per effort |
+
+## Basic Example: CPUE Analysis
 
 Catch per unit effort with site-level variation:
 
-```{r cpue-example}
+```{r}
 library(ratiod)
 
 # Simulated trawl data
@@ -64,7 +65,7 @@ trawl_data <- data.frame(
   effort = rgamma(n_obs, shape = 5, rate = 1)
 )
 
-# Fit joint model using combined formula syntax
+# Fit model
 fit <- ratiod(
   catch | effort ~ depth + season + (1 | site),
   data = trawl_data,
@@ -72,76 +73,27 @@ fit <- ratiod(
 )
 
 # View results
-print(fit)
 summary(fit)
 ```
 
 ### Extract CPUE Posteriors
 
-```{r cpue-extract}
+```{r}
 # Observation-level CPUE
 cpue <- ratio(fit)
 summary(cpue)
 
-# Site-level CPUE (averaged within site)
-cpue_site <- ratio(fit, by = "site")
-summary(cpue_site)
-
 # Compare CPUE between seasons
 ratio_contrast(fit, ~ season)
-```
-
-## The Three Families
-
-### Count/Count Ratios: `ratiod_negbin_negbin()`
-
-When both numerator and denominator are counts:
-
-```{r negbin-example}
-# Relative abundance: species count / total count
-fit_abundance <- ratiod(
-  species_count | total_count ~ habitat + (1 | plot),
-  data = survey_data,
-  family = ratiod_negbin_negbin()
-)
-```
-
-### Trial-Based Proportions: `ratiod_binomial()`
-
-When numerator is successes out of denominator trials:
-
-```{r binomial-example}
-# Detection probability: detections / availability
-fit_detection <- ratiod(
-  detections | available ~ effort + (1 | site),
-  data = camera_data,
-  family = ratiod_binomial()
-)
-
-# Extract detection probabilities
-probs <- ratio(fit_detection)
-```
-
-### Count/Effort Ratios: `ratiod_poisson_gamma()`
-
-When denominator is continuous effort:
-
-```{r poisson-gamma-example}
-# CPUE: catch count / fishing hours
-fit_cpue <- ratiod(
-  catch | hours ~ depth + season + (1 | vessel),
-  data = fishing_data,
-  family = ratiod_poisson_gamma()
-)
 ```
 
 ## Formula Syntax
 
 ### Combined Formula (Recommended)
 
-Use `num | denom ~ predictors` when both processes share the same predictors:
+Use `num | denom ~ predictors` when both processes share predictors:
 
-```{r combined-formula}
+```{r}
 fit <- ratiod(
   catch | effort ~ depth + season + (1 | site),
   data = df,
@@ -149,197 +101,75 @@ fit <- ratiod(
 )
 ```
 
-### Different Predictors per Process
+### Process-Specific Predictors
 
-Add process-specific terms with `formula_num` and `formula_denom`:
-
-```{r different-predictors}
+Add terms that affect only numerator or denominator:
+```{r}
 fit <- ratiod(
   catch | effort ~ (1 | site),           # Shared structure
-  formula_num = ~ depth + season,         # Numerator-specific
-  formula_denom = ~ weather,              # Denominator-specific
+  formula_num = ~ depth + season,         # Catch-specific
+
+  formula_denom = ~ weather,              # Effort-specific
   data = df,
   family = ratiod_poisson_gamma()
 )
 ```
 
-### Separate Formulas
+## Random Effects
 
-For complete control, provide `formula_denom` with a full formula:
+### Random Intercepts
 
-```{r separate-formulas}
-fit <- ratiod(
-  catch ~ depth + season + (1 | site),
-  formula_denom = effort ~ weather + (1 | site),
-  data = df,
-  family = ratiod_poisson_gamma()
-)
+```{r}
+# Single grouping factor
+fit <- ratiod(y | n ~ x + (1 | site), ...)
+
+# Multiple (crossed) grouping factors
+fit <- ratiod(y | n ~ x + (1 | site) + (1 | year), ...)
+
+# Nested grouping factors
+fit <- ratiod(y | n ~ x + (1 | site/plot), ...)
 ```
 
-## Shared Structure
+### Random Slopes
 
-### Default: Inferred from Matching Random Effects
+```{r}
+# Correlated intercept and slope
+fit <- ratiod(y | n ~ x + (1 + x | site), ...)
 
-When the same grouping variable appears in both formulas, ratiod shares the random effect by default:
-
-```{r shared-default}
-# site effect shared between catch and effort
-fit <- ratiod(
-  catch | effort ~ x + (1 | site),
-  data = df,
-  family = ratiod_poisson_gamma()
-)
-# Equivalent to: shared = ~ (1 | site)
-```
-
-### Explicit Shared Structure
-
-```{r shared-explicit}
-fit <- ratiod(
-  catch | effort ~ x + (1 | site) + (1 | observer),
-  shared = ~ (1 | site),  # Only site is shared
-  data = df,
-  family = ratiod_poisson_gamma()
-)
-```
-
-### Independence (Use With Caution)
-
-Request independent random effects:
-
-```{r shared-independent}
-fit <- ratiod(
-  successes | trials ~ treatment + (1 | block),
-  shared = ~ 0,  # Triggers warning about independence assumption
-  data = experiment_data,
-  family = ratiod_binomial()
-)
-```
-
-## Spatial Structure
-
-### CAR Model (Areal Data)
-
-```{r spatial-car}
-# Create adjacency matrix for sites
-adj <- matrix(0, n_sites, n_sites)
-# ... fill in neighbor relationships ...
-
-# Fit with spatial structure
-fit_spatial <- ratiod(
-  count | effort ~ x + (1 | site),
-  spatial = spatial_car(adj, level = "group", group_var = "site"),
-  data = df,
-  family = ratiod_poisson_gamma()
-)
-```
-
-### BYM2 Model (Interpretable Spatial Fraction)
-
-```{r spatial-bym2}
-fit_bym2 <- ratiod(
-  cases | population ~ age + (1 | region),
-  spatial = spatial_bym2(adj, level = "group", group_var = "region"),
-  data = epi_data,
-  family = ratiod_binomial()
-)
+# Uncorrelated (independent) intercept and slope
+fit <- ratiod(y | n ~ x + (1 + x || site), ...)
 ```
 
 ## Model Checking
 
-### Posterior Predictive Checks
+```{r}
+# Posterior predictive checks
+pp_check(fit, type = "dens_overlay")
 
-```{r pp-check}
-# Density overlay
-pp_check(fit, type = "dens_overlay", component = "numerator")
-pp_check(fit, type = "dens_overlay", component = "denominator")
+# Model comparison
+loo(fit)
+waic(fit)
 
-# Both components side by side
-pp_check(fit, type = "dens_overlay", component = "both")
-
-# Predictive intervals
-pp_check(fit, type = "intervals")
-```
-
-### Model Comparison
-
-```{r model-comparison}
-# Compare nested models
+# Compare models
 fit1 <- ratiod(y | n ~ x, ...)
 fit2 <- ratiod(y | n ~ x + z, ...)
-
-# LOO comparison
 ratiod_compare(fit1, fit2)
-
-# Or compute LOO/WAIC individually
-loo(fit1)
-waic(fit1)
-```
-
-## Priors
-
-### Default PC Priors
-
-ratiod uses penalized complexity priors that favor simpler models:
-
-```{r priors-default}
-# Default: P(sigma > 1) = 0.01
-fit <- ratiod(..., priors = ratiod_priors())
-```
-
-### Custom Priors
-
-```{r priors-custom}
-# More informative: expect smaller random effects
-fit <- ratiod(
-  ...,
-  priors = ratiod_priors(
-    sigma_U = 0.5,      # P(sigma > 0.5) = 0.01
-    sigma_alpha = 0.01
-  )
-)
-
-# Less informative: allow larger effects
-fit <- ratiod(
-  ...,
-  priors = ratiod_priors(
-    sigma_U = 2.0,
-    sigma_alpha = 0.05  # P(sigma > 2) = 0.05
-  )
-)
 ```
 
 ## Quick Reference
 
-### Main Functions
-
 | Function | Purpose |
 |----------|---------|
-| `ratiod()` | Fit a ratiod model |
+| `ratiod()` | Fit model |
 | `ratio()` | Extract ratio posteriors |
 | `ratio_contrast()` | Compare ratios between groups |
 | `pp_check()` | Posterior predictive checks |
-| `loo()`, `waic()` | Model comparison criteria |
+| `loo()`, `waic()` | Model comparison |
 | `ratiod_compare()` | Compare multiple models |
-
-### Families
-
-| Family | Numerator | Denominator |
-|--------|-----------|-------------|
-| `ratiod_negbin_negbin()` | Overdispersed counts | Overdispersed counts |
-| `ratiod_binomial()` | Successes | Trials (fixed) |
-| `ratiod_poisson_gamma()` | Counts | Continuous effort |
-
-### Spatial Functions
-
-| Function | Type | Use Case |
-|----------|------|----------|
-| `spatial_car()` | ICAR | Simple areal smoothing |
-| `spatial_bym2()` | BYM2 | Interpretable spatial fraction |
 
 ## See Also
 
 - `vignette("philosophy")` - Why ratios are not data
-- `?ratiod` - Main function documentation
-- `?ratiod_priors` - Prior specification
-- `?spatial_car` - Spatial structure
+- `vignette("workflows")` - Complete analysis examples
+- `vignette("spatial-temporal")` - Spatial and temporal models
+- `vignette("random-effects")` - Advanced random effects
