@@ -70,8 +70,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_hmc_fit
-Rcpp::List cpp_hmc_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type_str, std::string spatial_type_str, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double bym2_scale_factor, std::string temporal_type_str, Rcpp::IntegerVector temporal_time_idx, Rcpp::IntegerVector temporal_group_idx, int n_times, int n_temporal_groups, int n_temporal_params, bool temporal_cyclic, bool temporal_shared, double tau_temporal_shape, double tau_temporal_rate, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, double tau_spatial_shape, double tau_spatial_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
-RcppExport SEXP _ratiod_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP spatial_type_strSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP bym2_scale_factorSEXP, SEXP temporal_type_strSEXP, SEXP temporal_time_idxSEXP, SEXP temporal_group_idxSEXP, SEXP n_timesSEXP, SEXP n_temporal_groupsSEXP, SEXP n_temporal_paramsSEXP, SEXP temporal_cyclicSEXP, SEXP temporal_sharedSEXP, SEXP tau_temporal_shapeSEXP, SEXP tau_temporal_rateSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP tau_spatial_shapeSEXP, SEXP tau_spatial_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
+Rcpp::List cpp_hmc_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, int n_re_terms, Rcpp::IntegerMatrix re_group_matrix, Rcpp::IntegerVector re_n_groups_vec, bool has_re_slopes, bool has_re_correlated_slopes, Rcpp::IntegerVector re_n_coefs_vec, Rcpp::LogicalVector re_correlated_vec, Rcpp::IntegerVector re_n_chol_vec, Rcpp::List slope_matrices_list, std::string model_type_str, std::string spatial_type_str, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double bym2_scale_factor, std::string temporal_type_str, Rcpp::IntegerVector temporal_time_idx, Rcpp::IntegerVector temporal_group_idx, int n_times, int n_temporal_groups, int n_temporal_params, bool temporal_cyclic, bool temporal_shared, double tau_temporal_shape, double tau_temporal_rate, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, double tau_spatial_shape, double tau_spatial_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
+RcppExport SEXP _ratiod_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP n_re_termsSEXP, SEXP re_group_matrixSEXP, SEXP re_n_groups_vecSEXP, SEXP has_re_slopesSEXP, SEXP has_re_correlated_slopesSEXP, SEXP re_n_coefs_vecSEXP, SEXP re_correlated_vecSEXP, SEXP re_n_chol_vecSEXP, SEXP slope_matrices_listSEXP, SEXP model_type_strSEXP, SEXP spatial_type_strSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP bym2_scale_factorSEXP, SEXP temporal_type_strSEXP, SEXP temporal_time_idxSEXP, SEXP temporal_group_idxSEXP, SEXP n_timesSEXP, SEXP n_temporal_groupsSEXP, SEXP n_temporal_paramsSEXP, SEXP temporal_cyclicSEXP, SEXP temporal_sharedSEXP, SEXP tau_temporal_shapeSEXP, SEXP tau_temporal_rateSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP tau_spatial_shapeSEXP, SEXP tau_spatial_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -83,6 +83,15 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_denom(X_denomSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_group(re_groupSEXP);
     Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_re_terms(n_re_termsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerMatrix >::type re_group_matrix(re_group_matrixSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_n_groups_vec(re_n_groups_vecSEXP);
+    Rcpp::traits::input_parameter< bool >::type has_re_slopes(has_re_slopesSEXP);
+    Rcpp::traits::input_parameter< bool >::type has_re_correlated_slopes(has_re_correlated_slopesSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_n_coefs_vec(re_n_coefs_vecSEXP);
+    Rcpp::traits::input_parameter< Rcpp::LogicalVector >::type re_correlated_vec(re_correlated_vecSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_n_chol_vec(re_n_chol_vecSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type slope_matrices_list(slope_matrices_listSEXP);
     Rcpp::traits::input_parameter< std::string >::type model_type_str(model_type_strSEXP);
     Rcpp::traits::input_parameter< std::string >::type spatial_type_str(spatial_type_strSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type spatial_group(spatial_groupSEXP);
@@ -117,7 +126,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
     Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
+    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, n_re_terms, re_group_matrix, re_n_groups_vec, has_re_slopes, has_re_correlated_slopes, re_n_coefs_vec, re_correlated_vec, re_n_chol_vec, slope_matrices_list, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -733,7 +742,7 @@ END_RCPP
 static const R_CallMethodDef CallEntries[] = {
     {"_ratiod_cpp_nuts_fit", (DL_FUNC) &_ratiod_cpp_nuts_fit, 19},
     {"_ratiod_cpp_hmc_basic", (DL_FUNC) &_ratiod_cpp_hmc_basic, 20},
-    {"_ratiod_cpp_hmc_fit", (DL_FUNC) &_ratiod_cpp_hmc_fit, 42},
+    {"_ratiod_cpp_hmc_fit", (DL_FUNC) &_ratiod_cpp_hmc_fit, 51},
     {"_ratiod_cpp_get_max_threads", (DL_FUNC) &_ratiod_cpp_get_max_threads, 0},
     {"_ratiod_cpp_hmc_fit_gp", (DL_FUNC) &_ratiod_cpp_hmc_fit_gp, 73},
     {"_ratiod_cpp_hmc_simple", (DL_FUNC) &_ratiod_cpp_hmc_simple, 19},

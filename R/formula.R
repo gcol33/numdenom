@@ -293,62 +293,470 @@ check_no_offset <- function(f, name) {
   }
 }
 
+#' Extract RE terms with balanced parenthesis matching
+#'
+#' @description
+#' Extracts random effect terms from formula text, properly handling nested
+#' parentheses in expressions like `(1 + I(x^2) | group)` or `(1 + poly(x, 2) | group)`.
+#'
+#' @param rhs_text Right-hand side of formula as text
+#' @return Character vector of RE terms (with outer parentheses)
+#' @keywords internal
+extract_re_terms_balanced <- function(rhs_text) {
+  re_terms <- character(0)
+
+  # Find all potential RE starts: opening paren followed eventually by |
+  i <- 1
+  n <- nchar(rhs_text)
+
+  while (i <= n) {
+    # Look for opening parenthesis
+    if (substr(rhs_text, i, i) == "(") {
+      # Track parenthesis depth
+      depth <- 1
+      j <- i + 1
+      has_bar <- FALSE
+      bar_at_depth_1 <- FALSE
+
+      while (j <= n && depth > 0) {
+        char <- substr(rhs_text, j, j)
+        if (char == "(") {
+          depth <- depth + 1
+        } else if (char == ")") {
+          depth <- depth - 1
+        } else if (char == "|" && depth == 1) {
+          # Found | at depth 1 - this is a valid RE term
+          has_bar <- TRUE
+          bar_at_depth_1 <- TRUE
+        }
+        j <- j + 1
+      }
+
+      # If we found a | at depth 1 and balanced parens, this is an RE term
+      if (bar_at_depth_1 && depth == 0) {
+        re_term <- substr(rhs_text, i, j - 1)
+        re_terms <- c(re_terms, re_term)
+        i <- j  # Continue after this term
+        next
+      }
+    }
+    i <- i + 1
+  }
+
+  re_terms
+}
+
+#' Split RE specification on | or || respecting parentheses
+#'
+#' @description
+#' Splits an RE inner specification (without outer parens) on the `|` or `||` bar,
+#' properly handling nested parentheses. Finds the rightmost `|` or `||` at depth 0.
+#'
+#' @param re_inner RE specification without outer parentheses (e.g., "1 + poly(x, 2) | group")
+#' @return List with `parts` (character vector of LHS and RHS) and `is_uncorrelated` (logical)
+#' @keywords internal
+split_re_on_bar <- function(re_inner) {
+  n <- nchar(re_inner)
+  depth <- 0
+  bar_pos <- NULL
+  is_double_bar <- FALSE
+
+  # Scan from left to find the | or || at depth 0
+  i <- 1
+  while (i <= n) {
+    char <- substr(re_inner, i, i)
+    if (char == "(") {
+      depth <- depth + 1
+    } else if (char == ")") {
+      depth <- depth - 1
+    } else if (char == "|" && depth == 0) {
+      # Check if it's ||
+      next_char <- if (i < n) substr(re_inner, i + 1, i + 1) else ""
+      if (next_char == "|") {
+        bar_pos <- i
+        is_double_bar <- TRUE
+        i <- i + 1  # Skip the second |
+      } else {
+        bar_pos <- i
+        is_double_bar <- FALSE
+      }
+    }
+    i <- i + 1
+  }
+
+  if (is.null(bar_pos)) {
+    return(list(parts = c(re_inner), is_uncorrelated = FALSE))
+  }
+
+  # Split at bar position
+  if (is_double_bar) {
+    lhs <- substr(re_inner, 1, bar_pos - 1)
+    rhs <- substr(re_inner, bar_pos + 2, n)
+  } else {
+    lhs <- substr(re_inner, 1, bar_pos - 1)
+    rhs <- substr(re_inner, bar_pos + 1, n)
+  }
+
+  list(parts = c(lhs, rhs), is_uncorrelated = is_double_bar)
+}
+
+
+#' Split RE left-hand side into terms respecting parentheses
+#'
+#' @description
+#' Splits a formula LHS on `+` signs that are not inside parentheses.
+#' E.g., `1 + poly(x, 2) + I(x^2)` splits to `c("1", "poly(x, 2)", "I(x^2)")`
+#'
+#' @param lhs_text LHS of RE specification (e.g., "1 + x + poly(x, 2)")
+#' @return Character vector of terms
+#' @keywords internal
+split_re_lhs_terms <- function(lhs_text) {
+  terms <- character(0)
+  current <- ""
+  depth <- 0
+
+  for (i in seq_len(nchar(lhs_text))) {
+    char <- substr(lhs_text, i, i)
+    if (char == "(") {
+      depth <- depth + 1
+      current <- paste0(current, char)
+    } else if (char == ")") {
+      depth <- depth - 1
+      current <- paste0(current, char)
+    } else if (char == "+" && depth == 0) {
+      # Split here
+      if (nchar(trimws(current)) > 0) {
+        terms <- c(terms, trimws(current))
+      }
+      current <- ""
+    } else {
+      current <- paste0(current, char)
+    }
+  }
+
+  # Don't forget the last term
+  if (nchar(trimws(current)) > 0) {
+    terms <- c(terms, trimws(current))
+  }
+
+  terms
+}
+
 #' Extract random effect specifications from formula text
+#'
+#' @description
+#' Parses random effect terms from formula text, supporting:
+#' - Random intercepts: `(1 | group)`
+#' - Correlated random slopes: `(1 + x | group)` - estimates intercept-slope correlation
+#' - Uncorrelated random slopes: `(1 + x || group)` - no correlation estimated
+#' - Nested groups: `(1 | a/b)` expands to `(1|a) + (1|a:b)`
+#' - Interactions: `(1 + x*z | group)` expands `x*z` to `x + z + x:z`
+#' - Polynomials: `(1 + poly(x,2) | group)` creates columns for each poly term
+#' - Inline transforms: `(1 + I(x^2) | group)` evaluates the transformation
+#'
+#' The `||` syntax is equivalent to `(1 | group) + (0 + x | group)` but more concise.
 #'
 #' @param rhs_text Right-hand side of formula as text
 #' @param data Data frame
-#' @return List of random effect specifications
+#' @return List of random effect specifications, each containing:
+#'   - `group_var`: Name of grouping variable
+#'   - `group`: Integer vector of group indices (1-based)
+#'   - `n_groups`: Number of unique groups
+#'   - `has_intercept`: Whether term includes random intercept
+#'   - `slope_vars`: Character vector of slope variable names (NULL if none)
+#'   - `slope_vars_raw`: Original slope terms before expansion (for reference)
+#'   - `slope_vars_clean`: Cleaned slope names for parameter output
+#'
+#'   - `slope_matrix`: Matrix of slope values (n_obs x n_slopes) if slopes present
+#'   - `correlated`: Whether slopes are correlated with intercept (TRUE for `|`, FALSE for `||`)
+#'   - `original`: Original formula text
 #' @keywords internal
 extract_random_effects <- function(rhs_text, data) {
-  # Match patterns like (1 | group) or (x | group) or (1 + x | group)
-  re_pattern <- "\\(([^|]+)\\|([^)]+)\\)"
-  matches <- gregexpr(re_pattern, rhs_text, perl = TRUE)
+  # Extract RE terms using balanced parenthesis matching
+  # This handles nested parens like (1 + I(x^2) | group)
+  re_texts <- extract_re_terms_balanced(rhs_text)
 
-  if (matches[[1]][1] == -1) {
+  if (length(re_texts) == 0) {
     return(list())
   }
-
-  re_texts <- regmatches(rhs_text, matches)[[1]]
   random_effects <- list()
+  re_idx <- 1
 
   for (i in seq_along(re_texts)) {
     re_text <- re_texts[i]
     # Remove outer parentheses
     re_inner <- gsub("^\\(|\\)$", "", re_text)
-    parts <- strsplit(re_inner, "\\|")[[1]]
 
-    lhs <- trimws(parts[1])
-    group_var <- trimws(parts[2])
+    # Detect correlated vs uncorrelated syntax and split on | or ||
+    # Must handle nested parentheses - find the last | or || at depth 0
+    split_result <- split_re_on_bar(re_inner)
+    is_uncorrelated <- split_result$is_uncorrelated
+    parts <- split_result$parts
 
-    if (!group_var %in% names(data)) {
-      stop(sprintf("Grouping variable '%s' not found in data", group_var),
+    if (length(parts) < 2) {
+      stop(sprintf("Invalid random effect specification: '%s'", re_text),
            call. = FALSE)
     }
 
-    # Determine if intercept only or slopes
-    has_intercept <- grepl("^1$|^1\\s*\\+|\\+\\s*1", lhs) || lhs == "1"
-    slope_vars <- NULL
+    lhs <- trimws(parts[1])
+    group_spec <- trimws(parts[2])
 
-    if (lhs != "1") {
-      slope_terms <- gsub("\\b1\\b", "", lhs)
-      slope_terms <- gsub("^\\s*\\+\\s*|\\s*\\+\\s*$", "", slope_terms)
-      if (nchar(trimws(slope_terms)) > 0) {
-        slope_vars <- trimws(strsplit(slope_terms, "\\+")[[1]])
-        slope_vars <- slope_vars[slope_vars != ""]
-      }
+    # Parse LHS terms using balanced parenthesis splitting
+    lhs_terms <- split_re_lhs_terms(lhs)
+
+    # Determine if intercept is present (explicit "1" or implied by empty/intercept-only)
+    has_intercept <- "1" %in% lhs_terms || length(lhs_terms) == 0
+
+    # Extract slope terms (everything that isn't "1")
+    slope_terms <- lhs_terms[lhs_terms != "1"]
+
+    slope_vars_raw <- NULL
+    slope_vars <- NULL
+    slope_vars_clean <- NULL
+    slope_matrix <- NULL
+
+    if (length(slope_terms) > 0) {
+      # Store raw slope terms (before expansion) - join with + for formula syntax
+      slope_vars_raw <- paste(slope_terms, collapse = " + ")
+
+      # Use expand_re_slopes() to handle interactions, polynomials, etc.
+      # Pass individual slope terms (not joined) so base variables can be extracted
+      expanded <- expand_re_slopes(slope_terms, data, include_intercept = FALSE)
+
+      slope_vars <- expanded$slope_vars
+      slope_vars_clean <- clean_slope_names(slope_vars)
+      slope_matrix <- expanded$slope_matrix
+
+      # Note: validation is done inside expand_re_slopes via model.matrix()
+      # which will throw an error if variables don't exist
     }
 
-    random_effects[[i]] <- list(
-      group_var = group_var,
-      group = as.integer(as.factor(data[[group_var]])),
-      n_groups = length(unique(data[[group_var]])),
-      has_intercept = has_intercept,
-      slope_vars = slope_vars,
-      original = re_text
-    )
+    # Check for nested syntax: (1 | a/b) expands to (1|a) + (1|a:b)
+    if (grepl("/", group_spec)) {
+      nested_vars <- trimws(strsplit(group_spec, "/")[[1]])
+
+      # Validate all variables exist
+      for (v in nested_vars) {
+        if (!v %in% names(data)) {
+          stop(sprintf("Grouping variable '%s' not found in data", v),
+               call. = FALSE)
+        }
+      }
+
+      # Create terms: first is the outer grouping, then nested interactions
+      cumulative <- nested_vars[1]
+      for (j in seq_along(nested_vars)) {
+        if (j == 1) {
+          group_var <- nested_vars[1]
+        } else {
+          cumulative <- paste(cumulative, nested_vars[j], sep = ":")
+          group_var <- cumulative
+        }
+
+        # Create the grouping factor for this term
+        if (j == 1) {
+          group_factor <- as.factor(data[[nested_vars[1]]])
+        } else {
+          # Create interaction factor
+          group_factor <- interaction(data[nested_vars[1:j]], drop = TRUE)
+        }
+
+        random_effects[[re_idx]] <- list(
+          group_var = group_var,
+          group = as.integer(group_factor),
+          n_groups = length(unique(group_factor)),
+          has_intercept = has_intercept,
+          slope_vars = slope_vars,
+          slope_vars_raw = slope_vars_raw,
+          slope_vars_clean = slope_vars_clean,
+          slope_matrix = slope_matrix,
+          correlated = !is_uncorrelated,  # || means uncorrelated
+          original = re_text,
+          nested_level = j,
+          nested_vars = nested_vars[1:j]
+        )
+        re_idx <- re_idx + 1
+      }
+    } else {
+      # Simple single grouping variable
+      if (!group_spec %in% names(data)) {
+        stop(sprintf("Grouping variable '%s' not found in data", group_spec),
+             call. = FALSE)
+      }
+
+      random_effects[[re_idx]] <- list(
+        group_var = group_spec,
+        group = as.integer(as.factor(data[[group_spec]])),
+        n_groups = length(unique(data[[group_spec]])),
+        has_intercept = has_intercept,
+        slope_vars = slope_vars,
+        slope_vars_raw = slope_vars_raw,
+        slope_vars_clean = slope_vars_clean,
+        slope_matrix = slope_matrix,
+        correlated = !is_uncorrelated,  # || means uncorrelated
+        original = re_text
+      )
+      re_idx <- re_idx + 1
+    }
   }
 
   random_effects
+}
+
+#' Extract base variable name from transformation
+#'
+#' @description
+#' Extracts the base variable name from transformations like `poly(x, 2)` or `ns(x, 3)`.
+#' Returns the variable name as-is if no transformation is detected.
+#'
+#' @param var_spec Variable specification (possibly with transformation)
+#' @return Base variable name, or NULL if cannot be determined
+#' @keywords internal
+extract_base_variable <- function(var_spec) {
+  # Check for function calls like poly(x, 2), ns(x, 3), scale(x), etc.
+  if (grepl("^[a-zA-Z_][a-zA-Z0-9_]*\\s*\\(", var_spec)) {
+    # Extract first argument
+    match <- regmatches(var_spec, regexec("\\(\\s*([^,)]+)", var_spec))
+    if (length(match[[1]]) >= 2) {
+      return(trimws(match[[1]][2]))
+    }
+    return(NULL)
+  }
+  # Return as-is for simple variables
+  return(var_spec)
+}
+
+#' Expand random effect slopes using formula semantics
+#'
+#' @description
+#' Expands slope terms in random effects using R's formula machinery to handle:
+#' - Interactions: `x*z` expands to `x + z + x:z`
+#' - Polynomials: `poly(x, 2)` creates 2 columns (poly.1, poly.2)
+#' - Inline transforms: `I(x^2)` evaluates the transformation
+#' - Standard variables: `x` remains as-is
+#'
+#' Uses `model.matrix()` internally for proper formula expansion, ensuring
+#' consistency with lme4/glmmTMB behavior.
+#'
+#' @param slope_terms Character vector of slope terms (may include interactions, etc.)
+#' @param data Data frame containing the variables
+#' @param include_intercept Logical; should intercept be included in expansion?
+#' @return List with:
+#'   - `slope_vars`: Character vector of expanded slope variable names
+#'   - `slope_matrix`: Numeric matrix of slope values (n_obs x n_slopes)
+#'   - `base_vars`: Character vector of base variable names (for validation)
+#' @keywords internal
+expand_re_slopes <- function(slope_terms, data, include_intercept = FALSE) {
+  if (is.null(slope_terms) || length(slope_terms) == 0 ||
+      (length(slope_terms) == 1 && nchar(trimws(slope_terms)) == 0)) {
+    return(list(
+      slope_vars = character(0),
+      slope_matrix = matrix(nrow = nrow(data), ncol = 0),
+      base_vars = character(0)
+    ))
+  }
+
+  # Ensure slope_terms is a character vector
+  if (!is.character(slope_terms)) {
+    slope_terms <- as.character(slope_terms)
+  }
+
+  # Build a formula from the slope terms
+  # Combine all terms with +
+  combined_terms <- paste(slope_terms, collapse = " + ")
+
+  # Create the formula
+  if (include_intercept) {
+    slope_formula <- as.formula(paste("~ 1 +", combined_terms))
+  } else {
+    # Use -1 or 0 to exclude intercept from model.matrix
+    slope_formula <- as.formula(paste("~ 0 +", combined_terms))
+  }
+
+  # Use model.matrix to expand - this handles:
+  # - x*z -> x + z + x:z
+  # - poly(x, 2) -> poly.1, poly.2
+  # - I(x^2) -> I(x^2)
+  # - Factors -> dummy variables
+  tryCatch({
+    slope_matrix <- model.matrix(slope_formula, data = data)
+
+    # Get column names (these are the expanded slope variable names)
+    slope_vars <- colnames(slope_matrix)
+
+    # Remove intercept column if present (shouldn't be with ~ 0, but be safe)
+    if ("(Intercept)" %in% slope_vars) {
+      intercept_idx <- which(slope_vars == "(Intercept)")
+      slope_vars <- slope_vars[-intercept_idx]
+      slope_matrix <- slope_matrix[, -intercept_idx, drop = FALSE]
+    }
+
+    # Extract base variables for reference (model.matrix already validates)
+    base_vars <- unique(unlist(lapply(slope_terms, extract_base_variable)))
+    base_vars <- base_vars[!is.na(base_vars) & !is.null(base_vars)]
+
+    list(
+      slope_vars = slope_vars,
+      slope_matrix = slope_matrix,
+      base_vars = base_vars
+    )
+  }, error = function(e) {
+    stop(sprintf(
+      "Failed to expand random slope terms '%s': %s",
+      combined_terms, e$message
+    ), call. = FALSE)
+  })
+}
+
+#' Clean up slope variable names for output
+#'
+#' @description
+#' Converts model.matrix column names to cleaner versions for parameter naming.
+#' E.g., "I(x^2)" becomes "x_sq", "x:z" becomes "x_z", etc.
+#'
+#' @param slope_vars Character vector of slope variable names
+#' @return Character vector of cleaned names
+#' @keywords internal
+clean_slope_names <- function(slope_vars) {
+  cleaned <- slope_vars
+
+  # Handle I() wrapper - extract content
+  cleaned <- gsub("^I\\((.+)\\)$", "\\1", cleaned)
+
+  # Handle power notation: x^2 -> x_pow2
+
+  cleaned <- gsub("\\^(\\d+)", "_pow\\1", cleaned)
+
+  # Handle interactions: x:z -> x_z
+  cleaned <- gsub(":", "_", cleaned)
+
+  # Handle poly() columns: poly(x, 2)1 -> x_poly1
+  # model.matrix names them like "poly(x, 2)1", "poly(x, 2)2"
+  cleaned <- gsub("poly\\(([^,]+),\\s*\\d+\\)(\\d+)", "\\1_poly\\2", cleaned)
+
+  # Handle ns() columns similarly
+  cleaned <- gsub("ns\\(([^,]+),\\s*\\d+\\)(\\d+)", "\\1_ns\\2", cleaned)
+
+  # Handle scale() - just extract variable name
+  cleaned <- gsub("scale\\(([^)]+)\\)", "\\1_scaled", cleaned)
+
+  # Handle log() - extract variable name
+  cleaned <- gsub("log\\(([^)]+)\\)", "log_\\1", cleaned)
+
+  # Handle sqrt()
+  cleaned <- gsub("sqrt\\(([^)]+)\\)", "sqrt_\\1", cleaned)
+
+  # Replace any remaining special characters with underscore
+
+  cleaned <- gsub("[^a-zA-Z0-9_]", "_", cleaned)
+
+  # Remove consecutive underscores
+  cleaned <- gsub("_+", "_", cleaned)
+
+  # Remove leading/trailing underscores
+  cleaned <- gsub("^_|_$", "", cleaned)
+
+  cleaned
 }
 
 #' Remove random effects from formula to get fixed effects only
@@ -360,8 +768,8 @@ remove_random_effects <- function(f) {
   rhs_text <- deparse(f[[3]], width.cutoff = 500)
   rhs_text <- paste(rhs_text, collapse = " ")
 
-  # Remove random effect terms
-  re_pattern <- "\\([^|]+\\|[^)]+\\)"
+  # Remove random effect terms (handles both | and || syntax)
+  re_pattern <- "\\([^|]+\\|\\|?[^)]+\\)"
   rhs_clean <- gsub(re_pattern, "", rhs_text, perl = TRUE)
 
   # Clean up leftover + signs (repeat until no more consecutive +)

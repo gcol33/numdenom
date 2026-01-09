@@ -36,14 +36,76 @@ ParamLayout compute_param_layout(const ModelData& data) {
   idx += data.p_denom;
   layout.beta_denom_end = idx;
 
-  // Random effects (supports multiple crossed RE terms)
+  // Random effects (supports multiple crossed RE terms with slopes)
   layout.has_re = (data.n_re_groups > 0 || data.total_re_groups > 0);
+  layout.has_re_slopes = data.has_re_slopes;
+  layout.has_re_correlated_slopes = data.has_re_correlated_slopes;
 
-  if (data.n_re_terms > 1) {
-    // Multiple RE terms: allocate sigma and RE for each term
+  if (data.has_re_slopes && data.n_re_terms > 0) {
+    // Random slopes case: need sigma per coefficient type + Cholesky params + RE effects
+    int n_terms = data.n_re_terms;
+
+    layout.log_sigma_re_multi.resize(n_terms);
+    layout.log_sigma_re_slopes.resize(n_terms);
+    layout.re_start_multi.resize(n_terms);
+    layout.re_end_multi.resize(n_terms);
+    layout.re_n_coefs_multi.resize(n_terms);
+    layout.re_correlated_multi.resize(n_terms);
+    layout.chol_re_start_multi.resize(n_terms);
+    layout.chol_re_end_multi.resize(n_terms);
+
+    // First pass: allocate sigma parameters for each term
+    for (int t = 0; t < n_terms; t++) {
+      int n_coefs = data.re_n_coefs[t];
+      layout.re_n_coefs_multi[t] = n_coefs;
+      layout.re_correlated_multi[t] = data.re_correlated[t];
+
+      // Allocate log_sigma for each coefficient type (intercept, slopes)
+      layout.log_sigma_re_slopes[t].resize(n_coefs);
+      for (int c = 0; c < n_coefs; c++) {
+        layout.log_sigma_re_slopes[t][c] = idx++;
+      }
+      // Legacy: point to first sigma for backwards compat
+      layout.log_sigma_re_multi[t] = layout.log_sigma_re_slopes[t][0];
+    }
+
+    // Second pass: allocate Cholesky parameters for correlated terms
+    for (int t = 0; t < n_terms; t++) {
+      int n_chol = data.re_n_chol[t];  // k*(k-1)/2 for correlated, 0 otherwise
+      if (n_chol > 0) {
+        layout.chol_re_start_multi[t] = idx;
+        idx += n_chol;
+        layout.chol_re_end_multi[t] = idx;
+      } else {
+        layout.chol_re_start_multi[t] = -1;
+        layout.chol_re_end_multi[t] = -1;
+      }
+    }
+
+    // Third pass: allocate RE effects for each term
+    for (int t = 0; t < n_terms; t++) {
+      int n_groups = data.re_n_groups_multi[t];
+      int n_coefs = data.re_n_coefs[t];
+
+      layout.re_start_multi[t] = idx;
+      idx += n_groups * n_coefs;  // Each group has n_coefs parameters
+      layout.re_end_multi[t] = idx;
+    }
+
+    // Legacy fields: point to first term
+    layout.log_sigma_re_idx = layout.log_sigma_re_multi[0];
+    layout.re_start = layout.re_start_multi[0];
+    layout.re_end = layout.re_end_multi[0];
+
+  } else if (data.n_re_terms > 1) {
+    // Multiple RE terms (intercept only): allocate sigma and RE for each term
     layout.log_sigma_re_multi.resize(data.n_re_terms);
     layout.re_start_multi.resize(data.n_re_terms);
     layout.re_end_multi.resize(data.n_re_terms);
+    layout.re_n_coefs_multi.resize(data.n_re_terms, 1);  // All intercept-only
+    layout.re_correlated_multi.resize(data.n_re_terms, false);
+    layout.chol_re_start_multi.resize(data.n_re_terms, -1);
+    layout.chol_re_end_multi.resize(data.n_re_terms, -1);
 
     for (int t = 0; t < data.n_re_terms; t++) {
       layout.log_sigma_re_multi[t] = idx++;
@@ -59,7 +121,7 @@ ParamLayout compute_param_layout(const ModelData& data) {
     layout.re_start = layout.re_start_multi[0];
     layout.re_end = layout.re_end_multi[0];
   } else if (layout.has_re) {
-    // Single RE term
+    // Single RE term (intercept only)
     layout.log_sigma_re_idx = idx++;
     layout.re_start = idx;
     idx += data.n_re_groups;
@@ -72,6 +134,10 @@ ParamLayout compute_param_layout(const ModelData& data) {
     layout.re_start_multi[0] = layout.re_start;
     layout.re_end_multi.resize(1);
     layout.re_end_multi[0] = layout.re_end;
+    layout.re_n_coefs_multi.resize(1, 1);
+    layout.re_correlated_multi.resize(1, false);
+    layout.chol_re_start_multi.resize(1, -1);
+    layout.chol_re_end_multi.resize(1, -1);
   } else {
     layout.log_sigma_re_idx = -1;
     layout.re_start = layout.re_end = -1;
@@ -395,33 +461,148 @@ double compute_log_post(
     log_post -= 0.5 * tau_beta * beta_denom[j] * beta_denom[j];
   }
 
-  // Random effects priors (supports multiple crossed RE terms)
+  // Random effects priors (supports multiple crossed RE terms with slopes)
   if (layout.has_re) {
     int n_terms = (data.n_re_terms > 0) ? data.n_re_terms : 1;
 
     for (int t = 0; t < n_terms; t++) {
-      // Get sigma_re for this term
-      int log_sigma_idx = (n_terms > 1) ? layout.log_sigma_re_multi[t] : layout.log_sigma_re_idx;
-      double log_sigma = params[log_sigma_idx];
-      double sigma = std::exp(log_sigma);
+      int n_groups = (n_terms > 1 || data.n_re_terms > 0) ? data.re_n_groups_multi[t] : data.n_re_groups;
+      int n_coefs = layout.has_re_slopes ? layout.re_n_coefs_multi[t] : 1;
+      bool is_correlated = layout.has_re_slopes && layout.re_correlated_multi[t];
 
-      // Half-Cauchy(0, scale) prior for sigma_re
-      double ratio = sigma / data.sigma_re_scale;
-      log_post -= std::log(1.0 + ratio * ratio);
-      log_post += log_sigma;  // Jacobian
+      // Extract sigma parameters for this term
+      std::vector<double> sigmas(n_coefs);
+      for (int c = 0; c < n_coefs; c++) {
+        int log_sigma_idx;
+        if (layout.has_re_slopes) {
+          log_sigma_idx = layout.log_sigma_re_slopes[t][c];
+        } else if (n_terms > 1) {
+          log_sigma_idx = layout.log_sigma_re_multi[t];
+        } else {
+          log_sigma_idx = layout.log_sigma_re_idx;
+        }
+        double log_sigma = params[log_sigma_idx];
+        sigmas[c] = std::exp(log_sigma);
+
+        // Half-Cauchy(0, scale) prior for each sigma
+        double ratio = sigmas[c] / data.sigma_re_scale;
+        log_post -= std::log(1.0 + ratio * ratio);
+        log_post += log_sigma;  // Jacobian
+      }
+
+      // For correlated slopes: LKJ prior on correlation matrix via Cholesky
+      // Parameterization: Sigma = diag(sigma) * L * L' * diag(sigma)
+      // where L is lower-triangular with unit diagonal
+      std::vector<double> L_flat;  // Lower triangular Cholesky factor (full, including diagonal)
+      if (is_correlated && n_coefs > 1) {
+        int chol_start = layout.chol_re_start_multi[t];
+        int n_chol = n_coefs * (n_coefs - 1) / 2;
+
+        // Build L matrix: diagonal = 1, off-diagonal from params
+        // We use a spherical parameterization for numerical stability
+        // L[i,i] = sqrt(1 - sum(L[i,j]^2 for j<i)) for i>0, L[0,0] = 1
+        L_flat.resize(n_coefs * n_coefs, 0.0);
+
+        int chol_idx = 0;
+        for (int i = 0; i < n_coefs; i++) {
+          double row_sum_sq = 0.0;
+          for (int j = 0; j < i; j++) {
+            // Off-diagonal elements: unconstrained parameters
+            double l_ij = params[chol_start + chol_idx];
+            // Transform to ensure positive definiteness: use tanh to bound
+            // Actually, for LKJ we use a different parameterization
+            // Use partial correlations / spherical coordinates
+            L_flat[i * n_coefs + j] = l_ij;
+            row_sum_sq += l_ij * l_ij;
+            chol_idx++;
+          }
+          // Diagonal: ensure positive definiteness
+          // L[i,i] = sqrt(1 - sum_{j<i} L[i,j]^2), but need to handle numerically
+          double diag_sq = 1.0 - row_sum_sq;
+          if (diag_sq < 1e-10) {
+            // Invalid: correlation matrix not positive definite
+            return -std::numeric_limits<double>::infinity();
+          }
+          L_flat[i * n_coefs + i] = std::sqrt(diag_sq);
+        }
+
+        // LKJ(eta) prior: p(L) propto det(L*L')^(eta-1)
+        // For eta=1 (uniform): log_prior = 0
+        // For eta=2 (weakly informative): log_prior = sum_k (n_coefs - k) * log(L[k,k])
+        double eta = 2.0;  // LKJ concentration parameter (2 = weakly informative)
+        for (int k = 0; k < n_coefs; k++) {
+          double L_kk = L_flat[k * n_coefs + k];
+          log_post += (eta - 1.0 + (n_coefs - k - 1) / 2.0) * 2.0 * std::log(L_kk);
+        }
+
+        // Jacobian for the transformation from Cholesky to correlation
+        for (int k = 1; k < n_coefs; k++) {
+          double L_kk = L_flat[k * n_coefs + k];
+          log_post += (n_coefs - k) * std::log(L_kk);
+        }
+      }
 
       // Get RE parameters for this term
-      int re_start = (n_terms > 1) ? layout.re_start_multi[t] : layout.re_start;
-      int n_groups = (n_terms > 1) ? data.re_n_groups_multi[t] : data.n_re_groups;
+      int re_start = (n_terms > 1 || layout.has_re_slopes) ? layout.re_start_multi[t] : layout.re_start;
 
-      // Random effects: N(0, sigma_re^2)
-      double tau_re = 1.0 / (sigma * sigma + 1e-10);
-      for (int g = 0; g < n_groups; g++) {
-        double re_val = params[re_start + g];
-        log_post -= 0.5 * tau_re * re_val * re_val;
-        log_post += 0.5 * std::log(tau_re);
+      // Random effects prior: depends on correlation structure
+      if (is_correlated && n_coefs > 1) {
+        // Multivariate normal with covariance Sigma = diag(sigma) * L * L' * diag(sigma)
+        // For efficiency, we work with standardized RE: z = diag(1/sigma) * L^{-1} * re
+        // and put N(0, I) prior on z
+
+        for (int g = 0; g < n_groups; g++) {
+          // Extract RE vector for this group
+          std::vector<double> re_g(n_coefs);
+          for (int c = 0; c < n_coefs; c++) {
+            re_g[c] = params[re_start + g * n_coefs + c];
+          }
+
+          // Compute z = L^{-1} * diag(1/sigma) * re using forward substitution
+          std::vector<double> scaled_re(n_coefs);
+          for (int c = 0; c < n_coefs; c++) {
+            scaled_re[c] = re_g[c] / sigmas[c];
+          }
+
+          std::vector<double> z(n_coefs);
+          for (int i = 0; i < n_coefs; i++) {
+            double sum = scaled_re[i];
+            for (int j = 0; j < i; j++) {
+              sum -= L_flat[i * n_coefs + j] * z[j];
+            }
+            z[i] = sum / L_flat[i * n_coefs + i];
+          }
+
+          // N(0, I) prior on z
+          for (int c = 0; c < n_coefs; c++) {
+            log_post -= 0.5 * z[c] * z[c];
+          }
+        }
+
+        // Log-determinant contribution: |Sigma|^{-n_groups/2}
+        // |Sigma| = prod(sigma_c^2) * |L|^2 = prod(sigma_c^2) * prod(L_kk)^2
+        double log_det = 0.0;
+        for (int c = 0; c < n_coefs; c++) {
+          log_det += 2.0 * std::log(sigmas[c]);
+        }
+        for (int k = 0; k < n_coefs; k++) {
+          log_det += 2.0 * std::log(L_flat[k * n_coefs + k]);
+        }
+        log_post -= 0.5 * n_groups * log_det;
+        log_post -= 0.5 * n_groups * n_coefs * std::log(2.0 * M_PI);
+
+      } else {
+        // Uncorrelated case: independent N(0, sigma_c^2) for each coefficient type
+        for (int g = 0; g < n_groups; g++) {
+          for (int c = 0; c < n_coefs; c++) {
+            double re_val = params[re_start + g * n_coefs + c];
+            double tau_re = 1.0 / (sigmas[c] * sigmas[c] + 1e-10);
+            log_post -= 0.5 * tau_re * re_val * re_val;
+            log_post += 0.5 * std::log(tau_re);
+          }
+        }
+        log_post -= 0.5 * n_groups * n_coefs * std::log(2.0 * M_PI);
       }
-      log_post -= 0.5 * n_groups * std::log(2.0 * M_PI);
     }
   }
 
@@ -724,12 +905,39 @@ double compute_log_post(
         &data.X_denom_flat[i * data.p_denom], beta_denom, data.p_denom);
 
     // Add random effects (shared between num and denom)
-    // Supports multiple crossed RE terms
+    // Supports multiple crossed RE terms with slopes
     if (layout.has_re) {
       int n_terms = (data.n_re_terms > 0) ? data.n_re_terms : 1;
 
-      if (n_terms > 1) {
-        // Multiple RE terms
+      if (layout.has_re_slopes) {
+        // Random slopes case
+        for (int t = 0; t < n_terms; t++) {
+          int group_idx = data.re_group_multi[t][i];
+          if (group_idx > 0) {
+            int g = group_idx - 1;
+            int n_coefs = layout.re_n_coefs_multi[t];
+            int re_base = layout.re_start_multi[t] + g * n_coefs;
+
+            // Intercept contribution (coefficient 0)
+            double re_contrib = params[re_base];
+
+            // Slope contributions (coefficients 1, 2, ...)
+            int n_slopes = n_coefs - 1;  // Assuming intercept is always first
+            if (n_slopes > 0 && !data.re_slope_matrices[t].empty()) {
+              for (int s = 0; s < n_slopes; s++) {
+                // Slope design matrix is stored as [N x n_slopes] flattened row-major
+                double x_slope = data.re_slope_matrices[t][i * n_slopes + s];
+                double re_slope = params[re_base + 1 + s];
+                re_contrib += re_slope * x_slope;
+              }
+            }
+
+            eta_num += re_contrib;
+            eta_denom += re_contrib;
+          }
+        }
+      } else if (n_terms > 1) {
+        // Multiple RE terms (intercept only)
         for (int t = 0; t < n_terms; t++) {
           int group_idx = data.re_group_multi[t][i];
           if (group_idx > 0) {
@@ -1267,6 +1475,15 @@ Rcpp::List cpp_hmc_fit(
     Rcpp::NumericMatrix X_denom,
     Rcpp::IntegerVector re_group,
     int n_re_groups,
+    int n_re_terms,
+    Rcpp::IntegerMatrix re_group_matrix,
+    Rcpp::IntegerVector re_n_groups_vec,
+    bool has_re_slopes,
+    bool has_re_correlated_slopes,
+    Rcpp::IntegerVector re_n_coefs_vec,
+    Rcpp::LogicalVector re_correlated_vec,
+    Rcpp::IntegerVector re_n_chol_vec,
+    Rcpp::List slope_matrices_list,
     std::string model_type_str,
     std::string spatial_type_str,
     Rcpp::IntegerVector spatial_group,
@@ -1334,6 +1551,77 @@ Rcpp::List cpp_hmc_fit(
   // Random effects
   data.re_group = std::vector<int>(re_group.begin(), re_group.end());
   data.n_re_groups = n_re_groups;
+  data.n_re_terms = n_re_terms;
+
+  // Random slopes flags
+  data.has_re_slopes = has_re_slopes;
+  data.has_re_correlated_slopes = has_re_correlated_slopes;
+
+  if (n_re_terms > 0) {
+    // Multi-term RE structure (with or without slopes)
+    data.re_group_multi.resize(n_re_terms);
+    data.re_n_groups_multi.resize(n_re_terms);
+    data.re_offsets.resize(n_re_terms);
+    data.re_n_coefs.resize(n_re_terms);
+    data.re_correlated.resize(n_re_terms);
+    data.re_n_chol.resize(n_re_terms);
+    data.re_n_slopes.resize(n_re_terms);
+    data.re_slope_matrices.resize(n_re_terms);
+
+    int offset = 0;
+    int total_re_params = 0;
+    int total_sigma_params = 0;
+    int total_chol_params = 0;
+
+    for (int t = 0; t < n_re_terms; t++) {
+      data.re_n_groups_multi[t] = re_n_groups_vec[t];
+      data.re_offsets[t] = offset;
+
+      // Slopes metadata
+      int n_coefs = has_re_slopes ? re_n_coefs_vec[t] : 1;
+      data.re_n_coefs[t] = n_coefs;
+      data.re_correlated[t] = has_re_slopes ? (re_correlated_vec[t] != 0) : false;
+      data.re_n_chol[t] = has_re_slopes ? re_n_chol_vec[t] : 0;
+      data.re_n_slopes[t] = n_coefs - 1;  // Number of slopes (excluding intercept)
+
+      // Process slope matrix for this term
+      if (has_re_slopes && data.re_n_slopes[t] > 0 && slope_matrices_list.size() > t) {
+        SEXP mat_sexp = slope_matrices_list[t];
+        if (!Rf_isNull(mat_sexp)) {
+          Rcpp::NumericMatrix slope_mat(mat_sexp);
+          int n_rows = slope_mat.nrow();
+          int n_cols = slope_mat.ncol();
+          data.re_slope_matrices[t].resize(n_rows * n_cols);
+          for (int i = 0; i < n_rows; i++) {
+            for (int j = 0; j < n_cols; j++) {
+              data.re_slope_matrices[t][i * n_cols + j] = slope_mat(i, j);
+            }
+          }
+        }
+      }
+
+      offset += re_n_groups_vec[t];
+      total_re_params += re_n_groups_vec[t] * n_coefs;
+      total_sigma_params += n_coefs;
+      total_chol_params += data.re_n_chol[t];
+
+      // Extract column t from re_group_matrix
+      data.re_group_multi[t].resize(data.N);
+      for (int i = 0; i < data.N; i++) {
+        data.re_group_multi[t][i] = re_group_matrix(i, t);
+      }
+    }
+    data.total_re_groups = offset;
+    data.total_re_params = total_re_params;
+    data.total_sigma_params = total_sigma_params;
+    data.total_chol_params = total_chol_params;
+  } else {
+    // No RE terms
+    data.total_re_groups = n_re_groups;
+    data.total_re_params = n_re_groups;
+    data.total_sigma_params = (n_re_groups > 0) ? 1 : 0;
+    data.total_chol_params = 0;
+  }
 
   // Model type
   if (model_type_str == "binomial") {
@@ -1402,6 +1690,13 @@ Rcpp::List cpp_hmc_fit(
 
   // Parallelization
   data.n_threads = n_threads;
+
+  // Initialize feature flags that are not used in cpp_hmc_fit (only in cpp_hmc_fit_gp)
+  data.has_gp = false;
+  data.has_multiscale_gp = false;
+  data.has_multiscale_temporal = false;
+  data.has_rsr = false;
+  data.has_svc = false;
 
   // Initialize parameters
   std::vector<double> q0(q_init.begin(), q_init.end());
@@ -1575,9 +1870,13 @@ Rcpp::List cpp_hmc_fit_gp(
     }
   }
 
-  // Random effects
+  // Random effects (single-term legacy path)
   data.re_group = std::vector<int>(re_group.begin(), re_group.end());
   data.n_re_groups = n_re_groups;
+
+  // Initialize multi-term RE fields to indicate single-term mode
+  data.n_re_terms = 0;  // 0 means use legacy single-term path
+  data.total_re_groups = n_re_groups;
 
   // Model type
   if (model_type_str == "binomial") {

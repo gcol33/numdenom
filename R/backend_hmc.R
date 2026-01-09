@@ -90,6 +90,14 @@ fit_hmc <- function(formula,
   # Extract data
   hmc_data <- prepare_hmc_data(formula, data, family, model_type)
 
+  # Random slopes are now supported - log info if present
+  if (isTRUE(hmc_data$has_slopes) && verbose) {
+    n_slope_terms <- sum(sapply(hmc_data$re_terms, function(t) length(t$slope_vars) > 0))
+    n_corr <- sum(sapply(hmc_data$re_terms, function(t) isTRUE(t$correlated) && length(t$slope_vars) > 0))
+    message("  Random slopes: ", n_slope_terms, " term(s) (",
+            n_corr, " correlated, ", n_slope_terms - n_corr, " uncorrelated)")
+  }
+
   # Prepare spatial structure
   spatial_info <- prepare_spatial_for_hmc(spatial, data, hmc_data$N)
 
@@ -142,6 +150,37 @@ fit_hmc <- function(formula,
   tau_temporal_shape <- priors$tau_temporal_shape %||% 1.0
   tau_temporal_rate <- priors$tau_temporal_rate %||% 0.01
 
+  # Prepare multi-term RE data
+  n_re_terms <- hmc_data$n_re_terms %||% 0L
+  if (n_re_terms > 1 && !is.null(hmc_data$re_group_matrix)) {
+    re_group_matrix <- hmc_data$re_group_matrix
+    re_n_groups_vec <- sapply(hmc_data$re_terms, function(x) x$n_groups)
+  } else if (n_re_terms == 1 && !is.null(hmc_data$re_terms)) {
+    # Single RE term: create matrix from first term
+    re_group_matrix <- matrix(hmc_data$re_terms[[1]]$group_idx, ncol = 1L)
+    re_n_groups_vec <- as.integer(hmc_data$re_terms[[1]]$n_groups)
+  } else {
+    # No RE: create dummy matrix
+    re_group_matrix <- matrix(0L, nrow = hmc_data$N, ncol = 1L)
+    re_n_groups_vec <- as.integer(hmc_data$n_re_groups)
+  }
+
+  # Prepare slope-related parameters
+  has_re_slopes <- isTRUE(hmc_data$has_slopes)
+  has_re_correlated_slopes <- isTRUE(hmc_data$has_correlated_slopes)
+
+  if (has_re_slopes && n_re_terms > 0) {
+    re_n_coefs_vec <- sapply(hmc_data$re_terms, function(x) x$n_coefs)
+    re_correlated_vec <- sapply(hmc_data$re_terms, function(x) isTRUE(x$correlated))
+    re_n_chol_vec <- sapply(hmc_data$re_terms, function(x) x$n_chol %||% 0L)
+    slope_matrices_list <- hmc_data$slope_matrices
+  } else {
+    re_n_coefs_vec <- rep(1L, max(1L, n_re_terms))
+    re_correlated_vec <- rep(FALSE, max(1L, n_re_terms))
+    re_n_chol_vec <- rep(0L, max(1L, n_re_terms))
+    slope_matrices_list <- list()
+  }
+
   # Run sampler
   fit_raw <- cpp_hmc_fit(
     q_init = q_init,
@@ -151,7 +190,17 @@ fit_hmc <- function(formula,
     X_num = hmc_data$X_num,
     X_denom = hmc_data$X_denom,
     re_group = as.integer(hmc_data$re_group),
-    n_re_groups = hmc_data$n_re_groups,
+    n_re_groups = as.integer(hmc_data$n_re_groups),
+    n_re_terms = as.integer(n_re_terms),
+    re_group_matrix = as.matrix(re_group_matrix),
+    re_n_groups_vec = as.integer(re_n_groups_vec),
+    # Random slopes
+    has_re_slopes = has_re_slopes,
+    has_re_correlated_slopes = has_re_correlated_slopes,
+    re_n_coefs_vec = as.integer(re_n_coefs_vec),
+    re_correlated_vec = as.logical(re_correlated_vec),
+    re_n_chol_vec = as.integer(re_n_chol_vec),
+    slope_matrices_list = slope_matrices_list,
     model_type_str = model_type,
     # Spatial
     spatial_type_str = spatial_info$type,
@@ -260,6 +309,39 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
     y_denom <- y_denom_int
   }
 
+  # Build slope design matrices for random effects with slopes
+  # These are pre-computed during formula parsing with proper expansion
+  slope_matrices <- NULL
+  if (re_info$has_slopes && re_info$n_re_terms > 0) {
+    slope_matrices <- vector("list", re_info$n_re_terms)
+    for (t in seq_len(re_info$n_re_terms)) {
+      term <- re_info$re_terms[[t]]
+      if (length(term$slope_vars) > 0) {
+        # Use the pre-computed slope_matrix from formula parsing
+        # This handles interactions (x*z), polynomials (poly(x,2)), etc.
+        raw_re <- formula$numerator$random_effects[[t]]
+        if (!is.null(raw_re$slope_matrix)) {
+          slope_matrices[[t]] <- raw_re$slope_matrix
+        } else {
+          # Fallback: build design matrix manually (for backwards compatibility)
+          slope_mat <- matrix(0, nrow = length(y_num), ncol = length(term$slope_vars))
+          for (s in seq_along(term$slope_vars)) {
+            var_spec <- term$slope_vars[s]
+            if (!var_spec %in% names(data)) {
+              stop(sprintf("Slope variable '%s' not found in data", var_spec),
+                   call. = FALSE)
+            }
+            slope_mat[, s] <- as.numeric(data[[var_spec]])
+          }
+          colnames(slope_mat) <- term$slope_vars
+          slope_matrices[[t]] <- slope_mat
+        }
+      } else {
+        slope_matrices[[t]] <- NULL
+      }
+    }
+  }
+
   list(
     y_num = y_num,
     y_denom = y_denom,
@@ -275,7 +357,12 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
     re_terms = re_info$re_terms,
     re_group_matrix = re_info$group_idx_matrix,
     total_re_groups = re_info$total_groups %||% re_info$n_groups,
+    total_re_params = re_info$total_re_params %||% re_info$total_groups,
+    total_sigma_params = re_info$total_sigma_params %||% re_info$n_re_terms,
+    total_chol_params = re_info$total_chol_params %||% 0L,
     has_slopes = re_info$has_slopes %||% FALSE,
+    has_correlated_slopes = re_info$has_correlated_slopes %||% FALSE,
+    slope_matrices = slope_matrices,
     N = length(y_num),
     p_num = ncol(X_num),
     p_denom = ncol(X_denom)
@@ -287,7 +374,14 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
 #'
 #' @description
 #' Extracts random effects information for the HMC backend.
-#' Supports multiple crossed random effects (e.g., `(1|site) + (1|year)`).
+#' Supports:
+#' - Multiple crossed random effects: `(1|site) + (1|year)`
+#' - Correlated random slopes: `(1 + x | group)` - estimates intercept-slope correlation
+#' - Uncorrelated random slopes: `(1 + x || group)` - no correlation estimated
+#'
+#' For correlated slopes, the covariance matrix is parameterized via Cholesky decomposition:
+#' `Sigma = diag(sigma) * L * L' * diag(sigma)` where L is lower-triangular with unit diagonal
+#' (LKJ correlation prior).
 #'
 #' @param formula A ratiod_formula object
 #' @return List with RE structure for HMC backend
@@ -305,84 +399,102 @@ extract_re_for_hmc <- function(formula) {
       # New multi-term fields
       n_re_terms = 0L,
       re_terms = list(),
-      has_slopes = FALSE
+      has_slopes = FALSE,
+      has_correlated_slopes = FALSE,
+      total_re_params = 0L,
+      total_sigma_params = 0L,
+      total_chol_params = 0L
     ))
   }
 
   n_re_terms <- length(re_terms)
 
-  # Check for unsupported features and warn
+  # Check for slopes and correlation structure
   has_slopes <- FALSE
+  has_correlated_slopes <- FALSE
   for (term in re_terms) {
     if (length(term$slope_vars) > 0) {
       has_slopes <- TRUE
-      warning(
-        "Random slopes not yet fully supported. Slope terms will be ignored: ",
-        paste(term$slope_vars, collapse = ", "),
-        "\nOnly random intercepts (1 | group) are currently implemented.",
-        call. = FALSE
-      )
+      if (isTRUE(term$correlated)) {
+        has_correlated_slopes <- TRUE
+      }
     }
   }
 
-  if (n_re_terms > 1) {
-    # Multiple RE terms - use full multi-term structure
-    re_terms_processed <- vector("list", n_re_terms)
-    total_groups <- 0L
+  # Process RE terms with full slope support
+  re_terms_processed <- vector("list", n_re_terms)
+  total_groups <- 0L
+  total_re_params <- 0L  # Total RE parameters including slopes
+  total_sigma_params <- 0L  # Total variance parameters (one per coefficient type)
+  total_chol_params <- 0L  # Total Cholesky lower-triangular parameters (for correlations)
 
-    for (t in seq_len(n_re_terms)) {
-      term <- re_terms[[t]]
-      re_terms_processed[[t]] <- list(
-        group_var = term$group_var,
-        group_idx = as.integer(term$group),
-        n_groups = as.integer(term$n_groups),
-        has_intercept = term$has_intercept,
-        slope_vars = term$slope_vars,
-        offset = total_groups  # Offset in flattened RE parameter vector
-      )
-      total_groups <- total_groups + term$n_groups
+  for (t in seq_len(n_re_terms)) {
+    term <- re_terms[[t]]
+    n_groups_t <- as.integer(term$n_groups)
+
+    # Number of RE coefficients per group: intercept + slopes (expanded)
+    # Use the expanded slope_vars which handles interactions (x*z -> x, z, x:z)
+    n_slopes <- if (!is.null(term$slope_vars)) length(term$slope_vars) else 0L
+    n_coefs <- (if (isTRUE(term$has_intercept)) 1L else 0L) + n_slopes
+
+    # Total parameters for this term: n_groups * n_coefs
+    n_params_t <- n_groups_t * n_coefs
+
+    # Number of Cholesky parameters for correlated slopes
+    # For a k×k correlation matrix, we need k*(k-1)/2 off-diagonal elements
+    # (diagonal is implicitly 1 for correlation matrix parameterization)
+    n_chol_t <- if (n_coefs > 1 && isTRUE(term$correlated)) {
+      as.integer(n_coefs * (n_coefs - 1) / 2)
+    } else {
+      0L
     }
 
-    # Build group index matrix: [n_obs, n_re_terms]
-    # Each column contains the group index for that RE term
-    group_idx_matrix <- matrix(0L, nrow = n_obs, ncol = n_re_terms)
-    for (t in seq_len(n_re_terms)) {
-      group_idx_matrix[, t] <- as.integer(re_terms[[t]]$group)
-    }
+    # Number of sigma parameters for this term
+    n_sigma_t <- n_coefs
 
-    return(list(
-      # Legacy single-term fields (use first term for backwards compatibility)
-      group_idx = as.integer(re_terms[[1]]$group),
-      n_groups = as.integer(re_terms[[1]]$n_groups),
-      group_var = re_terms[[1]]$group_var,
-      # New multi-term fields
-      n_re_terms = n_re_terms,
-      re_terms = re_terms_processed,
-      group_idx_matrix = group_idx_matrix,
-      total_groups = total_groups,
-      has_slopes = has_slopes
-    ))
+    re_terms_processed[[t]] <- list(
+      group_var = term$group_var,
+      group_idx = as.integer(term$group),
+      n_groups = n_groups_t,
+      has_intercept = isTRUE(term$has_intercept),
+      slope_vars = term$slope_vars,  # Expanded slope names from model.matrix
+      slope_vars_clean = term$slope_vars_clean,  # Cleaned names for parameter output
+      correlated = isTRUE(term$correlated),
+      n_coefs = n_coefs,  # Coefficients per group (1 for intercept-only, more for slopes)
+      n_sigma = n_sigma_t,  # Number of sigma parameters
+      n_chol = n_chol_t,  # Number of Cholesky parameters (0 if uncorrelated)
+      re_offset = total_re_params,  # Offset in flattened RE parameter vector
+      sigma_offset = total_sigma_params,  # Offset for variance parameters
+      chol_offset = total_chol_params  # Offset for Cholesky parameters
+    )
+
+    total_groups <- total_groups + n_groups_t
+    total_re_params <- total_re_params + n_params_t
+    total_sigma_params <- total_sigma_params + n_sigma_t
+    total_chol_params <- total_chol_params + n_chol_t
   }
 
-  # Single RE term - use simpler structure
-  re_info <- re_terms[[1]]
+  # Build group index matrix: [n_obs, n_re_terms]
+  group_idx_matrix <- matrix(0L, nrow = n_obs, ncol = n_re_terms)
+  for (t in seq_len(n_re_terms)) {
+    group_idx_matrix[, t] <- as.integer(re_terms[[t]]$group)
+  }
+
   list(
-    # Legacy single-term fields
-    group_idx = as.integer(re_info$group),
-    n_groups = as.integer(re_info$n_groups),
-    group_var = re_info$group_var,
-    # New multi-term fields (single term)
-    n_re_terms = 1L,
-    re_terms = list(list(
-      group_var = re_info$group_var,
-      group_idx = as.integer(re_info$group),
-      n_groups = as.integer(re_info$n_groups),
-      has_intercept = re_info$has_intercept,
-      slope_vars = re_info$slope_vars,
-      offset = 0L
-    )),
-    total_groups = as.integer(re_info$n_groups),
-    has_slopes = has_slopes
+    # Legacy single-term fields (use first term for backwards compatibility)
+    group_idx = as.integer(re_terms[[1]]$group),
+    n_groups = as.integer(re_terms[[1]]$n_groups),
+    group_var = re_terms[[1]]$group_var,
+    # New multi-term fields
+    n_re_terms = n_re_terms,
+    re_terms = re_terms_processed,
+    group_idx_matrix = group_idx_matrix,
+    total_groups = total_groups,
+    total_re_params = total_re_params,  # Total RE effects (intercepts + slopes)
+    total_sigma_params = total_sigma_params,  # Total variance parameters
+    total_chol_params = total_chol_params,  # Total Cholesky correlation parameters
+    has_slopes = has_slopes,
+    has_correlated_slopes = has_correlated_slopes
   )
 }
 
@@ -866,9 +978,26 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
                                         temporal_info, zi_info) {
   n_params <- hmc_data$p_num + hmc_data$p_denom
 
-  # Random effects
-  if (hmc_data$n_re_groups > 0) {
-    n_params <- n_params + 1 + hmc_data$n_re_groups
+  # Random effects (supports multi-term RE with slopes and correlations)
+  n_re_terms <- hmc_data$n_re_terms %||% 0L
+  has_slopes <- hmc_data$has_slopes %||% FALSE
+  has_correlated_slopes <- hmc_data$has_correlated_slopes %||% FALSE
+
+  if (n_re_terms > 0) {
+    if (has_slopes) {
+      # With slopes: total_sigma_params (log scale) + total_chol_params (if correlated) + total_re_params RE effects
+      n_params <- n_params + hmc_data$total_sigma_params + hmc_data$total_re_params
+      if (has_correlated_slopes) {
+        # Add Cholesky parameters for correlated slopes
+        n_params <- n_params + hmc_data$total_chol_params
+      }
+    } else if (n_re_terms > 1) {
+      # Multiple RE terms (intercept only): n_re_terms sigma + total_re_groups RE
+      n_params <- n_params + n_re_terms + hmc_data$total_re_groups
+    } else if (hmc_data$n_re_groups > 0) {
+      # Single RE term (intercept only): 1 sigma + n_re_groups RE params
+      n_params <- n_params + 1 + hmc_data$n_re_groups
+    }
   }
 
   # Overdispersion
@@ -946,8 +1075,25 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
   n_divergent <- sum(all_divergent)
   avg_accept <- mean(all_accept)
 
+  # Create samples list (one matrix per chain) for compatibility
+  # Each matrix has named columns for parameters
+  if (chains > 1) {
+    samples_list <- lapply(seq_len(chains), function(c) {
+      chain_samples <- fit_raw$samples[[c]]
+      chain_draws <- build_draws_list_full(
+        chain_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type
+      )
+      chain_mat <- do.call(cbind, chain_draws)
+      colnames(chain_mat) <- names(chain_draws)
+      chain_mat
+    })
+  } else {
+    samples_list <- list(draws)
+  }
+
   fit <- list(
     draws = draws,
+    samples = samples_list,
     ratio_draws = ratio_draws,
     formula = formula,
     data = data,
@@ -1001,8 +1147,96 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
     idx <- idx + 1
   }
 
-  # Random effects
-  if (hmc_data$n_re_groups > 0) {
+  # Random effects (supports multi-term RE with slopes)
+  n_re_terms <- hmc_data$n_re_terms %||% 0L
+  has_slopes <- hmc_data$has_slopes %||% FALSE
+  has_correlated_slopes <- hmc_data$has_correlated_slopes %||% FALSE
+
+  if (n_re_terms > 0 && has_slopes) {
+    # With random slopes: each term has n_coefs sigma parameters and n_groups * n_coefs RE params
+    # Layout: [sigmas for all terms] [chol params for correlated terms] [RE for all terms]
+
+    # First extract all sigma parameters
+    for (t in seq_len(n_re_terms)) {
+      term <- hmc_data$re_terms[[t]]
+      n_coefs <- term$n_coefs
+      # Use cleaned slope names for output if available
+      slope_names <- term$slope_vars_clean %||% term$slope_vars
+
+      if (n_coefs == 1) {
+        draws_list[[paste0("sigma_re[", t, "]")]] <- exp(samples[, idx])
+        idx <- idx + 1
+      } else {
+        # Multiple sigmas: intercept + slopes
+        coef_idx <- 1
+        if (isTRUE(term$has_intercept)) {
+          draws_list[[paste0("sigma_re[", t, ",intercept]")]] <- exp(samples[, idx])
+          idx <- idx + 1
+          coef_idx <- coef_idx + 1
+        }
+        for (s in seq_along(slope_names)) {
+          draws_list[[paste0("sigma_re[", t, ",", slope_names[s], "]")]] <- exp(samples[, idx])
+          idx <- idx + 1
+        }
+      }
+    }
+
+    # Extract Cholesky parameters for correlated terms
+    for (t in seq_len(n_re_terms)) {
+      term <- hmc_data$re_terms[[t]]
+      n_chol <- term$n_chol %||% 0L
+      if (n_chol > 0 && isTRUE(term$correlated)) {
+        # Store raw Cholesky parameters (off-diagonal elements)
+        for (c in seq_len(n_chol)) {
+          draws_list[[paste0("L_chol[", t, ",", c, "]")]] <- samples[, idx]
+          idx <- idx + 1
+        }
+      }
+    }
+
+    # Then extract all RE effects
+    for (t in seq_len(n_re_terms)) {
+      term <- hmc_data$re_terms[[t]]
+      n_groups_t <- term$n_groups
+      n_coefs <- term$n_coefs
+      # Use cleaned slope names for output if available
+      slope_names <- term$slope_vars_clean %||% term$slope_vars
+
+      for (g in seq_len(n_groups_t)) {
+        if (n_coefs == 1) {
+          draws_list[[paste0("re[", t, ",", g, "]")]] <- samples[, idx]
+          idx <- idx + 1
+        } else {
+          # Multiple coefficients per group
+          coef_idx <- 1
+          if (isTRUE(term$has_intercept)) {
+            draws_list[[paste0("re[", t, ",", g, ",intercept]")]] <- samples[, idx]
+            idx <- idx + 1
+            coef_idx <- coef_idx + 1
+          }
+          for (s in seq_along(slope_names)) {
+            draws_list[[paste0("re[", t, ",", g, ",", slope_names[s], "]")]] <- samples[, idx]
+            idx <- idx + 1
+          }
+        }
+      }
+    }
+  } else if (n_re_terms > 1) {
+    # Multiple RE terms (intercept only): extract sigma_re for each term
+    for (t in seq_len(n_re_terms)) {
+      draws_list[[paste0("sigma_re[", t, "]")]] <- exp(samples[, idx])
+      idx <- idx + 1
+    }
+    # Extract RE effects for each term
+    for (t in seq_len(n_re_terms)) {
+      n_groups_t <- hmc_data$re_terms[[t]]$n_groups
+      for (g in seq_len(n_groups_t)) {
+        draws_list[[paste0("re[", t, ",", g, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+    }
+  } else if (hmc_data$n_re_groups > 0) {
+    # Single RE term (intercept only)
     draws_list[["sigma_re"]] <- exp(samples[, idx])
     idx <- idx + 1
     for (g in seq_len(hmc_data$n_re_groups)) {
@@ -1098,9 +1332,74 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
 
   idx <- hmc_data$p_num + hmc_data$p_denom + 1
 
-  # Random effects
+  # Random effects (supports multi-term RE with slopes)
   re <- NULL
-  if (hmc_data$n_re_groups > 0) {
+  re_multi <- NULL
+  re_slopes_multi <- NULL
+  n_re_terms <- hmc_data$n_re_terms %||% 0L
+  has_slopes <- hmc_data$has_slopes %||% FALSE
+  has_correlated_slopes <- hmc_data$has_correlated_slopes %||% FALSE
+
+  if (n_re_terms > 0 && has_slopes) {
+    # With random slopes - need to skip sigma, cholesky, then extract RE
+
+    # Skip all sigma_re parameters (one per coefficient type per term)
+    for (t in seq_len(n_re_terms)) {
+      n_coefs <- hmc_data$re_terms[[t]]$n_coefs
+      idx <- idx + n_coefs
+    }
+
+    # Skip Cholesky parameters for correlated terms
+    if (has_correlated_slopes) {
+      for (t in seq_len(n_re_terms)) {
+        n_chol <- hmc_data$re_terms[[t]]$n_chol %||% 0L
+        idx <- idx + n_chol
+      }
+    }
+
+    # Extract RE for all terms (including slopes)
+    re_multi <- list()
+    re_slopes_multi <- list()
+
+    for (t in seq_len(n_re_terms)) {
+      term <- hmc_data$re_terms[[t]]
+      n_groups_t <- term$n_groups
+      n_coefs <- term$n_coefs
+
+      # For each term: extract [intercept, slope1, slope2, ...] for each group
+      # Total params = n_groups * n_coefs
+      n_params_t <- n_groups_t * n_coefs
+      re_params <- samples[, idx:(idx + n_params_t - 1), drop = FALSE]
+      idx <- idx + n_params_t
+
+      # Reshape to [samples, groups, coefs]
+      # Store intercepts separately for backward compatibility
+      re_multi[[t]] <- matrix(0, nrow = n_samples, ncol = n_groups_t)
+      if (n_coefs > 1) {
+        re_slopes_multi[[t]] <- array(0, dim = c(n_samples, n_groups_t, n_coefs - 1))
+      }
+
+      for (g in seq_len(n_groups_t)) {
+        base_col <- (g - 1) * n_coefs + 1
+        re_multi[[t]][, g] <- re_params[, base_col]  # Intercept
+        if (n_coefs > 1) {
+          for (s in seq_len(n_coefs - 1)) {
+            re_slopes_multi[[t]][, g, s] <- re_params[, base_col + s]
+          }
+        }
+      }
+    }
+  } else if (n_re_terms > 1) {
+    # Multiple RE terms (intercept only): skip sigma_re for each term
+    idx <- idx + n_re_terms
+    # Extract RE for all terms
+    re_multi <- list()
+    for (t in seq_len(n_re_terms)) {
+      n_groups_t <- hmc_data$re_terms[[t]]$n_groups
+      re_multi[[t]] <- samples[, idx:(idx + n_groups_t - 1), drop = FALSE]
+      idx <- idx + n_groups_t
+    }
+  } else if (hmc_data$n_re_groups > 0) {
     idx <- idx + 1  # Skip log_sigma_re
     re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
     idx <- idx + hmc_data$n_re_groups
@@ -1163,8 +1462,36 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
     eta_num <- as.numeric(hmc_data$X_num %*% beta_num[s, ])
     eta_denom <- as.numeric(hmc_data$X_denom %*% beta_denom[s, ])
 
-    # Add RE
-    if (!is.null(re)) {
+    # Add RE (supports multi-term with slopes)
+    if (!is.null(re_multi)) {
+      # Multi-term RE (possibly with slopes)
+      for (i in seq_len(N)) {
+        for (t in seq_along(re_multi)) {
+          g <- hmc_data$re_group_matrix[i, t]
+          if (g > 0) {
+            # Add intercept contribution
+            re_contrib <- re_multi[[t]][s, g]
+
+            # Add slope contributions if present
+            if (!is.null(re_slopes_multi) && !is.null(re_slopes_multi[[t]])) {
+              term <- hmc_data$re_terms[[t]]
+              n_slopes <- length(term$slope_vars)
+              if (n_slopes > 0 && !is.null(hmc_data$slope_matrices[[t]])) {
+                for (slope_idx in seq_len(n_slopes)) {
+                  x_slope <- hmc_data$slope_matrices[[t]][i, slope_idx]
+                  re_slope <- re_slopes_multi[[t]][s, g, slope_idx]
+                  re_contrib <- re_contrib + re_slope * x_slope
+                }
+              }
+            }
+
+            eta_num[i] <- eta_num[i] + re_contrib
+            eta_denom[i] <- eta_denom[i] + re_contrib
+          }
+        }
+      }
+    } else if (!is.null(re)) {
+      # Single-term RE (no slopes)
       for (i in seq_len(N)) {
         g <- hmc_data$re_group[i]
         if (g > 0) {

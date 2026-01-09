@@ -43,9 +43,9 @@ test_that("extract_re_for_hmc handles multiple RE terms", {
   expect_equal(nrow(re_info$group_idx_matrix), 100)
   expect_equal(ncol(re_info$group_idx_matrix), 2)
 
-  # Check offsets
-  expect_equal(re_info$re_terms[[1]]$offset, 0)
-  expect_equal(re_info$re_terms[[2]]$offset, 10)
+  # Check offsets (field renamed to re_offset for slopes support)
+  expect_equal(re_info$re_terms[[1]]$re_offset, 0)
+  expect_equal(re_info$re_terms[[2]]$re_offset, 10)
 })
 
 
@@ -101,7 +101,7 @@ test_that("single RE term still works with new structure", {
 })
 
 
-test_that("random slopes trigger warning", {
+test_that("random slopes are detected in RE structure", {
   df <- data.frame(
     y = rpois(100, 10),
     n = rpois(100, 20),
@@ -110,12 +110,48 @@ test_that("random slopes trigger warning", {
   )
 
   f <- ratiod_formula(y | n ~ x + (1 + x | site), data = df)
+  re_info <- ratiod:::extract_re_for_hmc(f)
 
-  # Should warn about unsupported slopes
-  expect_warning(
-    ratiod:::extract_re_for_hmc(f),
-    regexp = "Random slopes not yet fully supported"
+  # Should detect slopes
+  expect_true(re_info$has_slopes)
+  expect_equal(re_info$n_re_terms, 1)
+  expect_equal(re_info$re_terms[[1]]$n_coefs, 2)  # intercept + x slope
+  expect_equal(re_info$re_terms[[1]]$slope_vars, "x")
+  # Total params: 10 groups * 2 coefs = 20 RE effects
+  expect_equal(re_info$total_re_params, 20)
+  # Sigma params: 2 (one for intercept, one for x slope)
+  expect_equal(re_info$total_sigma_params, 2)
+})
+
+
+test_that("random slopes work in HMC backend", {
+  skip_on_cran()
+
+  df <- data.frame(
+    y = rpois(100, 10),
+    n = rpois(100, 20) + 10,
+    x = rnorm(100),
+    site = factor(rep(1:10, each = 10))
   )
+
+  # Random slopes should now work
+  fit <- ratiod(
+    y | n ~ x + (1 + x | site),
+    data = df,
+    family = ratiod_binomial(),
+    backend = "hmc",
+    iter = 200,
+    warmup = 100,
+    chains = 1
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+
+  # Check parameter names
+  draws <- as.data.frame(fit$draws)
+  params <- names(draws)
+  expect_true(any(grepl("sigma_re\\[1,intercept\\]", params)))
+  expect_true(any(grepl("sigma_re\\[1,x\\]", params)))
 })
 
 
@@ -135,10 +171,10 @@ test_that("three crossed RE terms work", {
   expect_equal(re_info$n_re_terms, 3)
   expect_equal(re_info$total_groups, 19)  # 10 + 5 + 4
 
-  # Check offsets
-  expect_equal(re_info$re_terms[[1]]$offset, 0)
-  expect_equal(re_info$re_terms[[2]]$offset, 10)
-  expect_equal(re_info$re_terms[[3]]$offset, 15)
+  # Check offsets (field renamed to re_offset for slopes support)
+  expect_equal(re_info$re_terms[[1]]$re_offset, 0)
+  expect_equal(re_info$re_terms[[2]]$re_offset, 10)
+  expect_equal(re_info$re_terms[[3]]$re_offset, 15)
 })
 
 
@@ -175,4 +211,83 @@ test_that("prepare_hmc_data includes multi-term RE info", {
   expect_equal(hmc_data$n_re_terms, 2)
   expect_equal(hmc_data$total_re_groups, 15)
   expect_equal(length(hmc_data$re_terms), 2)
+})
+
+
+# Integration tests - actual model fitting
+
+test_that("HMC fits model with crossed RE terms", {
+  skip_on_cran()
+
+  set.seed(12345)
+  df <- data.frame(
+    y = rpois(100, 10),
+    n = rpois(100, 20) + 10,
+    x = rnorm(100),
+    site = factor(rep(1:10, each = 10)),
+    year = factor(rep(1:5, 20))
+  )
+
+  # Should run without error
+  fit <- ratiod(
+    y | n ~ x + (1 | site) + (1 | year),
+    data = df,
+    family = ratiod_binomial(),
+    backend = "hmc",
+    iter = 200,
+    warmup = 100,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+  expect_true("samples" %in% names(fit))
+
+  # Should have RE parameters for both terms
+  param_names <- colnames(fit$samples[[1]])
+
+  # Count sigma_re parameters (should be 2)
+  sigma_re_params <- grep("^sigma_re", param_names, value = TRUE)
+  expect_equal(length(sigma_re_params), 2)
+
+  # Should have RE effects for all 15 groups (10 sites + 5 years)
+  re_params <- grep("^re\\[", param_names, value = TRUE)
+  expect_equal(length(re_params), 15)
+})
+
+
+test_that("HMC with three crossed RE terms runs", {
+  skip_on_cran()
+
+  set.seed(54321)
+  df <- data.frame(
+    y = rpois(200, 10),
+    n = rpois(200, 20) + 10,
+    x = rnorm(200),
+    site = factor(rep(1:10, 20)),
+    year = factor(rep(1:5, each = 40)),
+    observer = factor(rep(1:4, 50))
+  )
+
+  fit <- ratiod(
+    y | n ~ x + (1 | site) + (1 | year) + (1 | observer),
+    data = df,
+    family = ratiod_binomial(),
+    backend = "hmc",
+    iter = 200,
+    warmup = 100,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+
+  # Should have 3 sigma_re parameters
+  param_names <- colnames(fit$samples[[1]])
+  sigma_re_params <- grep("^sigma_re", param_names, value = TRUE)
+  expect_equal(length(sigma_re_params), 3)
+
+  # Should have 19 RE effects (10 + 5 + 4)
+  re_params <- grep("^re\\[", param_names, value = TRUE)
+  expect_equal(length(re_params), 19)
 })

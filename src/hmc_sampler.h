@@ -48,7 +48,7 @@ struct ModelData {
   std::vector<double> X_denom_flat;
   int p_num, p_denom;
 
-  // Random effects (supports multiple crossed RE terms)
+  // Random effects (supports multiple crossed RE terms with slopes)
   std::vector<int> re_group;  // 1-based group index (0 = no RE) - legacy single term
   int n_re_groups;            // Number of groups for first RE term
 
@@ -58,6 +58,18 @@ struct ModelData {
   std::vector<int> re_n_groups_multi;          // Groups per term
   std::vector<int> re_offsets;                 // Offset in flattened RE parameter vector per term
   int total_re_groups;                         // Sum of all groups across terms
+
+  // Random slopes support
+  bool has_re_slopes;                          // Whether any RE term has slopes
+  bool has_re_correlated_slopes;               // Whether any RE term has correlated slopes
+  std::vector<int> re_n_coefs;                 // Coefficients per group per term (1 = intercept only)
+  std::vector<std::vector<double>> re_slope_matrices; // [term] -> flattened [N x n_slopes] slope design matrix
+  std::vector<int> re_n_slopes;                // Number of slope variables per term
+  std::vector<bool> re_correlated;             // Whether each term has correlated slopes
+  std::vector<int> re_n_chol;                  // Cholesky parameters per term (k*(k-1)/2 for correlated, 0 otherwise)
+  int total_re_params;                         // Total RE parameters (groups * coefs)
+  int total_sigma_params;                      // Total variance parameters (sum of n_coefs)
+  int total_chol_params;                       // Total Cholesky correlation parameters
 
   // Spatial structure
   SpatialType spatial_type;
@@ -156,10 +168,26 @@ struct ParamLayout {
   int log_sigma_re_idx;       // Legacy: index for single RE term
   int re_start, re_end;       // Legacy: bounds for single RE term
 
-  // Multi-term RE layout
+  // Multi-term RE layout (supports intercept-only terms)
   std::vector<int> log_sigma_re_multi;  // Index of log_sigma_re for each term
   std::vector<int> re_start_multi;      // Start index for each RE term
   std::vector<int> re_end_multi;        // End index for each RE term
+
+  // Random slopes layout (when has_re_slopes is true)
+  bool has_re_slopes;
+  bool has_re_correlated_slopes;
+  // For each term: number of coefficients (1 = intercept only, >1 = with slopes)
+  std::vector<int> re_n_coefs_multi;
+  // For each term: whether correlated (for | syntax) vs uncorrelated (for || syntax)
+  std::vector<bool> re_correlated_multi;
+  // For slopes: log_sigma_re_slopes[term] = [idx_intercept, idx_slope1, idx_slope2, ...]
+  std::vector<std::vector<int>> log_sigma_re_slopes;
+  // For correlated slopes: Cholesky lower-triangular parameters (off-diagonal only)
+  // chol_re_multi[term] = [L_21, L_31, L_32, ...] (column-major lower triangle)
+  std::vector<int> chol_re_start_multi;  // Start index for Cholesky params for each term
+  std::vector<int> chol_re_end_multi;    // End index for Cholesky params for each term
+  // re_coefs[term][group] = [re_intercept, re_slope1, re_slope2, ...]
+  // We track start/end per term, and n_coefs per term to decode within
   int log_phi_num_idx;
   int log_phi_denom_idx;
   int log_tau_spatial_idx;
