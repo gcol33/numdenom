@@ -327,6 +327,23 @@ ParamLayout compute_param_layout(const ModelData& data) {
   layout.log_phi_svc_start = layout.log_phi_svc_end = -1;
   layout.svc_w_start = layout.svc_w_end = -1;
 
+  // Latent factors for unmeasured confounders
+  layout.has_latent = data.has_latent;
+  if (layout.has_latent && data.latent_n_factors > 0) {
+    // Log sigma for each factor
+    layout.log_sigma_latent_start = idx;
+    idx += data.latent_n_factors;
+    layout.log_sigma_latent_end = idx;
+
+    // Factor scores (N x K)
+    layout.latent_factor_start = idx;
+    idx += data.N * data.latent_n_factors;
+    layout.latent_factor_end = idx;
+  } else {
+    layout.log_sigma_latent_start = layout.log_sigma_latent_end = -1;
+    layout.latent_factor_start = layout.latent_factor_end = -1;
+  }
+
   layout.total_params = idx;
   return layout;
 }
@@ -887,6 +904,50 @@ double compute_log_post(
       data.multiscale_temporal_data);
   }
 
+  // Latent factor priors
+  std::vector<double> latent_sigma;
+  std::vector<double> latent_factors_vec;
+  if (layout.has_latent && data.latent_n_factors > 0) {
+    int K = data.latent_n_factors;
+    int N = data.N;
+
+    // Extract log_sigma parameters
+    std::vector<double> log_sigma_latent(K);
+    for (int k = 0; k < K; k++) {
+      log_sigma_latent[k] = params[layout.log_sigma_latent_start + k];
+    }
+
+    // Extract sigma (exponentiated)
+    latent_sigma.resize(K);
+    for (int k = 0; k < K; k++) {
+      latent_sigma[k] = std::exp(log_sigma_latent[k]);
+    }
+
+    // Extract factor scores (N x K, row-major)
+    int n_factor_params = N * K;
+    latent_factors_vec.resize(n_factor_params);
+    for (int j = 0; j < n_factor_params; j++) {
+      latent_factors_vec[j] = params[layout.latent_factor_start + j];
+    }
+
+    // Apply constraint (sum-to-zero or first-zero)
+    if (data.latent_constraint == 0) {  // sum_to_zero
+      ratiod_latent::apply_sum_to_zero(latent_factors_vec, N, K);
+    } else {  // first_zero
+      ratiod_latent::apply_first_zero(latent_factors_vec, N, K);
+    }
+
+    // PC prior on sigma (exponential prior with Jacobian)
+    log_post += ratiod_latent::latent_sigma_log_prior(log_sigma_latent,
+                                                       data.latent_sigma_prior_rate);
+
+    // Standard normal prior on factor scores
+    ratiod_latent::LatentConstraint constraint =
+      (data.latent_constraint == 0) ? ratiod_latent::LatentConstraint::SUM_TO_ZERO
+                                    : ratiod_latent::LatentConstraint::FIRST_ZERO;
+    log_post += ratiod_latent::latent_factor_log_prior(latent_factors_vec, N, K, constraint);
+  }
+
   // ============ LIKELIHOOD (parallelized) ============
 
   double log_lik = 0.0;
@@ -1049,6 +1110,21 @@ double compute_log_post(
         eta_denom += ms_temporal_effect;
       } else {
         eta_num += ms_temporal_effect;
+      }
+    }
+
+    // Add latent factor effect
+    if (layout.has_latent && data.latent_n_factors > 0 && !latent_factors_vec.empty()) {
+      int K = data.latent_n_factors;
+      double latent_effect = 0.0;
+      for (int k = 0; k < K; k++) {
+        latent_effect += latent_factors_vec[i * K + k] * latent_sigma[k];
+      }
+      if (data.latent_shared) {
+        eta_num += latent_effect;
+        eta_denom += latent_effect;
+      } else {
+        eta_num += latent_effect;
       }
     }
 
@@ -1511,6 +1587,12 @@ Rcpp::List cpp_hmc_fit(
     std::string zi_type_str,
     Rcpp::NumericMatrix X_zi,
     double zi_prior_sd,
+    bool has_latent,
+    int latent_n_factors,
+    bool latent_shared,
+    bool latent_scale,
+    int latent_constraint,
+    double latent_sigma_prior_rate,
     int n_iter,
     int n_warmup,
     int L,
@@ -1697,6 +1779,14 @@ Rcpp::List cpp_hmc_fit(
   data.has_multiscale_temporal = false;
   data.has_rsr = false;
   data.has_svc = false;
+
+  // Latent factors
+  data.has_latent = has_latent;
+  data.latent_n_factors = latent_n_factors;
+  data.latent_shared = latent_shared;
+  data.latent_scale = latent_scale;
+  data.latent_constraint = latent_constraint;
+  data.latent_sigma_prior_rate = latent_sigma_prior_rate;
 
   // Initialize parameters
   std::vector<double> q0(q_init.begin(), q_init.end());

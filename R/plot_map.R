@@ -54,7 +54,7 @@
 #' # plot_map requires a fitted spatial ratiod model
 #' # See spatial_car() examples for fitting spatial models
 #'
-#' \donttest{
+#' \dontrun{
 #' # Fit spatial model (slow, not run on CRAN)
 #' set.seed(123)
 #' n_sites <- 20

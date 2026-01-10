@@ -14,6 +14,7 @@
 #include "hmc_svc.h"
 #include "hmc_gp.h"
 #include "hmc_temporal_multiscale.h"
+#include "hmc_latent.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -136,6 +137,14 @@ struct ModelData {
   std::vector<double> rsr_projection;   // P_perp matrix (n x n, flattened)
   int rsr_n;                            // Dimension of projection matrix
 
+  // Latent factors for unmeasured confounders
+  bool has_latent;
+  int latent_n_factors;                 // Number of latent factors (K)
+  bool latent_shared;                   // Whether factors enter both num and denom
+  bool latent_scale;                    // Whether to standardize factors
+  int latent_constraint;                // 0 = sum_to_zero, 1 = first_zero
+  double latent_sigma_prior_rate;       // Exponential rate for PC prior on sigma
+
   // Dimensions
   int N;
 
@@ -232,6 +241,10 @@ struct ParamLayout {
   int seasonal_start, seasonal_end;     // Seasonal effects (period)
   int short_term_start, short_term_end; // Short-term effects (n_times)
 
+  // Latent factor parameters
+  int log_sigma_latent_start, log_sigma_latent_end;  // Log sigma per factor
+  int latent_factor_start, latent_factor_end;        // Factor scores (N x K)
+
   int total_params;
 
   bool has_re;
@@ -246,6 +259,7 @@ struct ParamLayout {
   bool has_multiscale_temporal;
   bool has_zi;
   bool has_svc;
+  bool has_latent;
 };
 
 ParamLayout compute_param_layout(const ModelData& data);

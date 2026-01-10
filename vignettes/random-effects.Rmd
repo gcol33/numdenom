@@ -300,6 +300,74 @@ fit <- ratiod(
 )
 ```
 
+# Latent Factors for Unmeasured Confounders
+
+When you suspect unmeasured confounders are driving both numerator and denominator but don't have a natural grouping structure, latent factors provide an alternative to random effects.
+
+## Single Latent Factor
+
+```{r}
+# Capture shared unmeasured variation
+fit <- ratiod(
+  count | effort ~ depth + (1 | site),
+  data = df,
+  family = ratiod_poisson_gamma(),
+  latent = latent_factor(n_factors = 1)
+)
+```
+
+Latent factors are observation-level random effects that enter both linear predictors:
+
+$$
+\log(\mu_{\text{count}}) = \beta_0 + \beta_1 \cdot \text{depth} + b_{\text{site}} + f_i \cdot \sigma_f
+$$
+$$
+\log(\mu_{\text{effort}}) = \alpha_0 + b_{\text{site}} + f_i \cdot \sigma_f
+$$
+
+where $f_i \sim \text{Normal}(0, 1)$ with sum-to-zero constraint.
+
+## Multiple Latent Factors
+
+```{r}
+# Multiple independent unmeasured confounders
+fit <- ratiod(
+  count | effort ~ depth,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  latent = latent_factor(n_factors = 2)
+)
+```
+
+## Latent Factors vs Random Effects
+
+| Feature | Random Effects | Latent Factors |
+|---------|---------------|----------------|
+| Grouping | Required (site, year, etc.) | None needed |
+| Level | Group-level | Observation-level |
+| Use case | Known grouping structure | Residual confounding |
+| Dimensionality | 1 per group | K factors × N observations |
+
+Use latent factors when:
+- You suspect unmeasured confounders but don't know the grouping structure
+- Residual variation after random effects is still correlated
+- You want to capture observation-level shared structure
+
+## Prior Specification
+
+```{r}
+# Stronger regularization on latent factors
+fit <- ratiod(
+  count | effort ~ depth,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  latent = latent_factor(
+    n_factors = 1,
+    prior = prior_pc(U = 0.5, alpha = 0.01)  # P(sigma > 0.5) = 0.01
+  )
+)
+```
+
 ## See Also
 
 - `vignette("getting-started")` - Basic usage

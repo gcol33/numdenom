@@ -65,6 +65,7 @@ fit_hmc <- function(formula,
                     spatial = NULL,
                     temporal = NULL,
                     zi = NULL,
+                    latent = NULL,
                     priors = NULL,
                     iter = 2000,
                     warmup = floor(iter / 2),
@@ -107,6 +108,9 @@ fit_hmc <- function(formula,
   # Prepare zero-inflation structure
   zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N)
 
+  # Prepare latent factor structure
+  latent_info <- prepare_latent_for_hmc(latent, hmc_data$N)
+
   # Get prior parameters
   priors <- priors %||% ratiod_priors()
   sigma_beta <- priors$sigma_beta %||% 10.0
@@ -119,7 +123,7 @@ fit_hmc <- function(formula,
 
   # Initialize parameters
   q_init <- initialize_hmc_params_full(
-    hmc_data, model_type, spatial_info, temporal_info, zi_info
+    hmc_data, model_type, spatial_info, temporal_info, zi_info, latent_info
   )
 
   if (verbose) {
@@ -138,6 +142,9 @@ fit_hmc <- function(formula,
     if (zi_info$type != "none") {
       message("  Zero-inflation: ", zi_info$type, " (",
               zi_info$p_zi, " predictors)")
+    }
+    if (latent_info$type != "none") {
+      message("  Latent factors: ", latent_info$n_factors, " factor(s)")
     }
   }
 
@@ -232,6 +239,13 @@ fit_hmc <- function(formula,
     zi_type_str = zi_info$type,
     X_zi = zi_info$X_zi,
     zi_prior_sd = priors$zi_prior_sd %||% 10.0,
+    # Latent factors
+    has_latent = latent_info$type != "none",
+    latent_n_factors = as.integer(latent_info$n_factors),
+    latent_shared = latent_info$shared,
+    latent_scale = latent_info$scale %||% TRUE,
+    latent_constraint = as.integer(ifelse(latent_info$constraint == "sum_to_zero", 0L, 1L)),
+    latent_sigma_prior_rate = latent_info$sigma_prior_rate,
     # Sampler
     n_iter = as.integer(iter),
     n_warmup = as.integer(warmup),
@@ -249,6 +263,7 @@ fit_hmc <- function(formula,
     spatial_info = spatial_info,
     temporal_info = temporal_info,
     zi_info = zi_info,
+    latent_info = latent_info,
     formula = formula,
     data = data,
     family = family,
@@ -975,7 +990,7 @@ prepare_zi_for_hmc <- function(zi, data, N) {
 #' Initialize parameters for HMC with full feature support
 #' @keywords internal
 initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
-                                        temporal_info, zi_info) {
+                                        temporal_info, zi_info, latent_info = NULL) {
   n_params <- hmc_data$p_num + hmc_data$p_denom
 
   # Random effects (supports multi-term RE with slopes and correlations)
@@ -1030,6 +1045,14 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
     n_params <- n_params + zi_info$p_zi  # ZI regression coefficients
   }
 
+  # Latent factors
+  if (!is.null(latent_info) && latent_info$type != "none") {
+    K <- latent_info$n_factors
+    N <- latent_info$n_obs
+    # K log_sigma params + N*K factor score params
+    n_params <- n_params + K + N * K
+  }
+
   rep(0.0, n_params)
 }
 
@@ -1038,6 +1061,7 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 #' @keywords internal
 convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
                                            temporal_info, zi_info,
+                                           latent_info = NULL,
                                            formula, data, family,
                                            model_type, iter, warmup, chains) {
   # Handle multi-chain case
@@ -1101,6 +1125,7 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     spatial = spatial_info,
     temporal = temporal_info,
     zi = zi_info,
+    latent = latent_info,
     backend = "hmc",
     algorithm = "HMC",
     iter = iter,
@@ -1117,7 +1142,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     .internal = list(
       samples = all_samples,
       hmc_data = hmc_data,
-      model_type = model_type
+      model_type = model_type,
+      latent_info = latent_info
     )
   )
 

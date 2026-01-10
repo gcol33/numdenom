@@ -700,7 +700,7 @@ compute_fitted_laplace <- function(object) {
 #'   If `summary = FALSE`, a matrix of posterior draws (rows = draws, cols = obs).
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
 #' # Generate synthetic data
 #' set.seed(321)
 #' n <- 50

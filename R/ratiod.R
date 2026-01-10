@@ -31,6 +31,8 @@
 #'   See [temporal_rw1()], [temporal_rw2()], [temporal_ar1()].
 #' @param zi Optional zero-inflation specification.
 #'   See [zi_poisson()], [zi_negbin()], [hurdle_poisson()], [hurdle_negbin()].
+#' @param latent Optional latent factor specification for unmeasured confounders.
+#'   See [latent_factor()].
 #' @param priors Prior specification. See [ratiod_priors()].
 #' @param chains Number of MCMC chains (default 4).
 #' @param iter Total iterations per chain (default 2000).
@@ -109,6 +111,7 @@ ratiod <- function(formula,
                   spatial = NULL,
                   temporal = NULL,
                   zi = NULL,
+                  latent = NULL,
                   priors = NULL,
                   chains = 4,
                   iter = 2000,
@@ -137,6 +140,17 @@ ratiod <- function(formula,
   # Validate zero-inflation specification
   if (!is.null(zi)) {
     zi <- validate_zi(zi, data)
+  }
+
+  # Validate latent factor specification
+  if (!is.null(latent)) {
+    if (!inherits(latent, "ratiod_latent")) {
+      stop(
+        "`latent` must be a ratiod_latent object from latent_factor()",
+        call. = FALSE
+      )
+    }
+    latent <- validate_latent(latent, nrow(data))
   }
 
   # Auto-select backend based on model characteristics
@@ -275,6 +289,7 @@ ratiod <- function(formula,
       spatial = spatial,
       temporal = temporal,
       zi = zi,
+      latent = latent,
       priors = priors,
       iter = iter,
       warmup = warmup,

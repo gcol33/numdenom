@@ -39,7 +39,7 @@ NULL
 #'   site = factor(rep(1:10, each = n/10))
 #' )
 #'
-#' \donttest{
+#' \dontrun{
 #' # Fit model (slow, not run on CRAN)
 #' fit <- ratiod(
 #'   sp_count | total_count ~ habitat + (1 | site),
@@ -105,7 +105,7 @@ ratiod_negbin_negbin <- function(link_num = "log", link_denom = "log") {
 #'   site = factor(rep(1:10, each = 5))
 #' )
 #'
-#' \donttest{
+#' \dontrun{
 #' # Fit model (slow, not run on CRAN)
 #' fit <- ratiod(
 #'   detections | trials ~ effort + (1 | site),
@@ -175,7 +175,7 @@ ratiod_binomial <- function(link = "logit", denominator_known = TRUE) {
 #'   vessel = factor(rep(1:6, each = n/6))
 #' )
 #'
-#' \donttest{
+#' \dontrun{
 #' # Fit model (slow, not run on CRAN)
 #' fit <- ratiod(
 #'   catch | effort_hours ~ depth + season + (1 | vessel),
@@ -267,7 +267,7 @@ validate_link <- function(link, allowed) {
 #'   site = factor(rep(1:8, each = n/8))
 #' )
 #'
-#' \donttest{
+#' \dontrun{
 #' # Fit model (slow, not run on CRAN)
 #' fit <- ratiod(
 #'   infected | tested ~ treatment + (1 | site),
@@ -345,7 +345,7 @@ ratiod_beta_binomial <- function(link = "logit", denominator_known = TRUE) {
 #'   site = factor(rep(1:10, each = n/10))
 #' )
 #'
-#' \donttest{
+#' \dontrun{
 #' # Fit model (slow, not run on CRAN)
 #' fit <- ratiod(
 #'   species_biomass | total_biomass ~ habitat + (1 | site),
@@ -422,7 +422,7 @@ ratiod_gamma_gamma <- function(link_num = "log", link_denom = "log") {
 #'   cohort = factor(rep(1:6, each = n/6))
 #' )
 #'
-#' \donttest{
+#' \dontrun{
 #' # Fit model (slow, not run on CRAN)
 #' fit <- ratiod(
 #'   weight | length_cubed ~ age + sex + (1 | cohort),
