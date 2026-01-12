@@ -54,9 +54,10 @@ NULL
 #' )
 #'
 #' fit <- ratiod(
-#'   count | effort ~ x + temporal_rw1(year),
+#'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
+#'   temporal = temporal_rw1("year"),
 #'   backend = "hmc",
 #'   iter = 200,
 #'   warmup = 100,
@@ -74,9 +75,10 @@ NULL
 #' )
 #'
 #' fit2 <- ratiod(
-#'   count | effort ~ x + (1 | site) + temporal_rw1(year, group = site),
+#'   count | effort ~ x + (1 | site),
 #'   data = df_panel,
 #'   family = ratiod_poisson_gamma(),
+#'   temporal = temporal_rw1("year", group_var = "site"),
 #'   backend = "hmc",
 #'   iter = 200,
 #'   warmup = 100,
@@ -93,9 +95,10 @@ NULL
 #' )
 #'
 #' fit3 <- ratiod(
-#'   count | effort ~ x + temporal_rw1(month, cyclic = TRUE),
+#'   count | effort ~ x,
 #'   data = df_monthly,
 #'   family = ratiod_poisson_gamma(),
+#'   temporal = temporal_rw1("month", cyclic = TRUE),
 #'   backend = "hmc",
 #'   iter = 200,
 #'   warmup = 100,
@@ -169,9 +172,10 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #' )
 #'
 #' fit <- ratiod(
-#'   count | effort ~ x + temporal_rw2(year),
+#'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
+#'   temporal = temporal_rw2("year"),
 #'   backend = "hmc",
 #'   iter = 200,
 #'   warmup = 100,
@@ -251,9 +255,10 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #' )
 #'
 #' fit <- ratiod(
-#'   count | effort ~ x + temporal_ar1(year),
+#'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
+#'   temporal = temporal_ar1("year"),
 #'   backend = "hmc",
 #'   iter = 200,
 #'   warmup = 100,
@@ -271,9 +276,10 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #' )
 #'
 #' fit2 <- ratiod(
-#'   count | effort ~ x + temporal_ar1(year, group = site),
+#'   count | effort ~ x,
 #'   data = df_panel,
 #'   family = ratiod_poisson_gamma(),
+#'   temporal = temporal_ar1("year", group_var = "site"),
 #'   backend = "hmc",
 #'   iter = 200,
 #'   warmup = 100,
@@ -635,8 +641,8 @@ build_ar1_precision <- function(T, rho, tau = 1) {
 #' temporal_multiscale("month_id", trend = "rw2", seasonal = 12, short_term = "ar1")
 #' temporal_multiscale("year", trend = "rw2", seasonal = NULL, short_term = "none")
 #'
-#' \donttest{
-#' # Decompose into trend + seasonal + short-term (24 months)
+#' \dontrun{
+#' # Decompose into trend + seasonal + short-term (not run - experimental)
 #' set.seed(129)
 #' df <- data.frame(
 #'   month_id = 1:48,
@@ -655,41 +661,12 @@ build_ar1_precision <- function(T, rho, tau = 1) {
 #'     seasonal = 12,
 #'     short_term = "ar1"
 #'   ),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #'
 #' # Extract and plot components
 #' temporal_effects <- temporal(fit)
 #' plot(temporal_effects, component = "trend")
-#' plot(temporal_effects, component = "seasonal")
-#'
-#' # Trend only (no seasonal, no short-term)
-#' set.seed(130)
-#' df2 <- data.frame(
-#'   year = 2000:2017,
-#'   x = rnorm(18),
-#'   count = rpois(18, lambda = 30),
-#'   effort = rgamma(18, shape = 5, rate = 1)
-#' )
-#'
-#' fit2 <- ratiod(
-#'   count | effort ~ x,
-#'   data = df2,
-#'   family = ratiod_poisson_gamma(),
-#'   temporal = temporal_multiscale(
-#'     time_var = "year",
-#'     trend = "rw2",
-#'     seasonal = NULL,
-#'     short_term = "none"
-#'   ),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
-#' )
 #' }
 #'
 #' @seealso [temporal_rw1()], [temporal_rw2()], [temporal_ar1()] for
@@ -990,8 +967,8 @@ validate_temporal_multiscale <- function(temporal, data) {
 #' temporal_gp("day", cov = "matern", nu = 1.5)
 #' temporal_gp("month", cov = "periodic", period = 12)
 #'
-#' \donttest{
-#' # Irregularly-spaced time series
+#' \dontrun{
+#' # Irregularly-spaced time series (not run - GP temporal experimental)
 #' set.seed(140)
 #' times <- sort(runif(30, 0, 100))
 #' df <- data.frame(
@@ -1006,32 +983,7 @@ validate_temporal_multiscale <- function(temporal, data) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_gp("time"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
-#' )
-#'
-#' # Periodic seasonal pattern
-#' set.seed(141)
-#' df_season <- data.frame(
-#'   month = rep(1:12, 5),
-#'   year = rep(2020:2024, each = 12),
-#'   x = rnorm(60),
-#'   count = rpois(60, lambda = 15),
-#'   effort = rgamma(60, shape = 3, rate = 1)
-#' )
-#' df_season$time_idx <- df_season$year + (df_season$month - 1) / 12
-#'
-#' fit2 <- ratiod(
-#'   count | effort ~ x,
-#'   data = df_season,
-#'   family = ratiod_poisson_gamma(),
-#'   temporal = temporal_gp("time_idx", cov = "periodic", period = 1),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #' }
 #'
@@ -1273,8 +1225,8 @@ validate_temporal_gp <- function(temporal, data) {
 #' tvc <- temporal_tvc("year", terms = 1)
 #' print(tvc)
 #'
-#' \donttest{
-#' # Generate synthetic data with time-varying effect
+#' \dontrun{
+#' # Generate synthetic data with time-varying effect (not run - TVC experimental)
 #' set.seed(150)
 #' df <- data.frame(
 #'   year = rep(2010:2025, each = 5),
@@ -1554,8 +1506,8 @@ validate_tvc <- function(tvc, data, X) {
 #' - `term_names`: Names of TVC terms
 #'
 #' @examples
-#' \donttest{
-#' # Generate synthetic data
+#' \dontrun{
+#' # Generate synthetic data (not run - TVC experimental)
 #' set.seed(160)
 #' df <- data.frame(
 #'   year = rep(2015:2024, each = 5),
@@ -1842,8 +1794,8 @@ plot.ratiod_tvc_posterior <- function(x, term = 1, type = "ribbon", ...) {
 #' )
 #' print(rtr)
 #'
-#' \donttest{
-#' # Generate data with temporal confounding
+#' \dontrun{
+#' # Generate data with temporal confounding (not run - RTR experimental)
 #' set.seed(170)
 #' years <- 2000:2023
 #' n_per_year <- 4
@@ -2034,8 +1986,8 @@ apply_rtr_projection <- function(f, P_perp) {
 #' @return A `ratiod_temporal_posterior` object
 #'
 #' @examples
-#' \donttest{
-#' # Fit model with multi-scale temporal effects
+#' \dontrun{
+#' # Fit model with multi-scale temporal effects (not run - experimental)
 #' set.seed(131)
 #' df <- data.frame(
 #'   year = 1:40,
@@ -2049,19 +2001,12 @@ apply_rtr_projection <- function(f, P_perp) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_multiscale("year", trend = "rw2", seasonal = 12),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   iter = 200, warmup = 100, chains = 1
 #' )
 #'
 #' # Extract all temporal effects
 #' temp_post <- temporal(fit)
 #' summary(temp_post)
-#'
-#' # Extract just the trend
-#' trend_post <- temporal(fit, component = "trend")
-#' plot(trend_post)
 #' }
 #'
 #' @seealso [temporal_multiscale()], [temporal_rw1()]

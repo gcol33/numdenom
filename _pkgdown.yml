@@ -66,8 +66,12 @@ reference:
       - ratiod_lognormal
       - ratiod_hurdle_negbin
       - ratiod_hurdle_pois
+      - ratiod_hurdle_binomial
       - ratiod_zinegbin
       - ratiod_zipois
+      - ratiod_zibinomial
+      - ratiod_oibinomial
+      - ratiod_zoibinomial
       - hurdle_negbin
       - hurdle_poisson
       - zi_negbin

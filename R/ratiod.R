@@ -29,6 +29,8 @@
 #'   See [spatial_car()], [spatial_bym2()].
 #' @param temporal Optional temporal structure specification.
 #'   See [temporal_rw1()], [temporal_rw2()], [temporal_ar1()].
+#' @param spatiotemporal Optional spatiotemporal interaction specification.
+#'   See [spatiotemporal()], [spatiotemporal_gp()].
 #' @param zi Optional zero-inflation specification.
 #'   See [zi_poisson()], [zi_negbin()], [hurdle_poisson()], [hurdle_negbin()].
 #' @param latent Optional latent factor specification for unmeasured confounders.
@@ -110,6 +112,7 @@ ratiod <- function(formula,
                   shared = NULL,
                   spatial = NULL,
                   temporal = NULL,
+                  spatiotemporal = NULL,
                   zi = NULL,
                   latent = NULL,
                   priors = NULL,
@@ -151,6 +154,23 @@ ratiod <- function(formula,
       )
     }
     latent <- validate_latent(latent, nrow(data))
+  }
+
+  # Validate spatiotemporal specification
+  if (!is.null(spatiotemporal)) {
+    if (!inherits(spatiotemporal, "ratiod_spatiotemporal")) {
+      stop(
+        "`spatiotemporal` must be a ratiod_spatiotemporal object.\n",
+        "Options: spatiotemporal(), spatiotemporal_gp()",
+        call. = FALSE
+      )
+    }
+    # Validate and compute dimensions
+    if (inherits(spatiotemporal, "ratiod_st_gp")) {
+      spatiotemporal <- validate_st_gp(spatiotemporal, data)
+    } else {
+      spatiotemporal <- validate_spatiotemporal(spatiotemporal, data)
+    }
   }
 
   # Auto-select backend based on model characteristics
@@ -281,6 +301,10 @@ ratiod <- function(formula,
     if (!is.null(temporal)) {
       message(sprintf("  Temporal: %s (%d time points)", temporal$type, temporal$n_times))
     }
+    if (!is.null(spatiotemporal)) {
+      message(sprintf("  Spatiotemporal: %s (%d x %d)",
+                      spatiotemporal$type, spatiotemporal$n_spatial, spatiotemporal$n_times))
+    }
 
     result <- fit_hmc(
       formula = formula_spec,
@@ -288,6 +312,7 @@ ratiod <- function(formula,
       family = family,
       spatial = spatial,
       temporal = temporal,
+      spatiotemporal = spatiotemporal,
       zi = zi,
       latent = latent,
       priors = priors,
@@ -447,15 +472,15 @@ print.ratiod_fit <- function(x, ...) {
   cat("  Num fixed effects:", ncol(x$formula$numerator$X), "\n")
   cat("  Denom fixed effects:", ncol(x$formula$denominator$X), "\n")
 
-  n_re <- x$stan_data$n_re_groups
-  if (n_re > 0) {
+  n_re <- x$stan_data$n_re_groups %||% 0L
+  if (length(n_re) > 0 && n_re > 0) {
     cat("  Random effect groups:", n_re, "\n")
     if (x$formula$shared$type %in% c("inferred", "explicit")) {
       cat("  Shared structure:", x$formula$shared$type, "\n")
     }
   }
 
-  if (x$stan_data$use_spatial) {
+  if (isTRUE(x$stan_data$use_spatial)) {
     cat("  Spatial:", "Yes\n")
   }
 

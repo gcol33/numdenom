@@ -9,8 +9,14 @@
 #include <algorithm>
 #include <vector>
 
+// IMPORTANT: OpenMP is DISABLED in this file because:
+// 1. R's RNG (R::rnorm, etc.) is NOT thread-safe
+// 2. Rcpp objects use reference counting which is NOT thread-safe
+// The PG sampler calls rpg_int() which uses R's RNG extensively
 #ifdef _OPENMP
 #include <omp.h>
+// Disable OpenMP parallelization for this file
+#undef _OPENMP
 #endif
 
 using namespace Rcpp;
@@ -332,15 +338,17 @@ List pg_binomial_gibbs_impl(
       for (int j = 0; j < p; j++) {
         X_beta[i] += X(i, j) * beta[j];
       }
-      re_contrib[i] = re[group[i] - 1];  // group is 1-based
+      // Only access re if we have random effects
+      if (n_groups > 0) {
+        re_contrib[i] = re[group[i] - 1];  // group is 1-based
+      } else {
+        re_contrib[i] = 0.0;
+      }
       eta[i] = X_beta[i] + re_contrib[i];
     }
 
-    // 2. Sample omega ~ PG(n, eta) (parallelized)
-    // Note: PG sampling is independent across observations
-    #ifdef _OPENMP
-    #pragma omp parallel for schedule(static)
-    #endif
+    // 2. Sample omega ~ PG(n, eta)
+    // Note: NOT parallelized - R's RNG is not thread-safe
     for (int i = 0; i < N; i++) {
       omega[i] = rpg_int(n[i], eta[i]);
     }
@@ -431,12 +439,16 @@ Rcpp::List cpp_pg_binomial_gibbs(
     bool verbose = true,
     int n_threads = 1
 ) {
-  return ratiod::pg_binomial_gibbs_impl(
+  // CRITICAL: Must call GetRNGstate/PutRNGstate when using R's RNG from C++
+  GetRNGstate();
+  Rcpp::List result = ratiod::pg_binomial_gibbs_impl(
     y, n, X, group, n_groups,
     n_iter, n_warmup, thin,
     prior_beta_sd, prior_sigma_scale,
     store_eta, verbose, n_threads
   );
+  PutRNGstate();
+  return result;
 }
 
 // [[Rcpp::export]]
@@ -492,6 +504,9 @@ Rcpp::List cpp_pg_binomial_gibbs_spatial(
     bool verbose = true,
     int n_threads = 1
 ) {
+  // CRITICAL: Must call GetRNGstate/PutRNGstate when using R's RNG from C++
+  GetRNGstate();
+
   int N = y.size();
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
@@ -550,10 +565,8 @@ Rcpp::List cpp_pg_binomial_gibbs_spatial(
       eta[i] = X_beta[i] + re_contrib[i] + spatial_contrib[i];
     }
 
-    // 2. Sample omega ~ PG(n, eta) (parallelized)
-    #ifdef _OPENMP
-    #pragma omp parallel for schedule(static)
-    #endif
+    // 2. Sample omega ~ PG(n, eta)
+    // Note: NOT parallelized - R's RNG is not thread-safe
     for (int i = 0; i < N; i++) {
       omega[i] = ratiod::rpg_int(n[i], eta[i]);
     }
@@ -660,6 +673,7 @@ Rcpp::List cpp_pg_binomial_gibbs_spatial(
     result["eta"] = eta_draws;
   }
 
+  PutRNGstate();
   return result;
 }
 
@@ -725,6 +739,9 @@ Rcpp::List cpp_pg_binomial_gibbs_bym2(
     bool verbose = true,
     int n_threads = 1
 ) {
+  // CRITICAL: Must call GetRNGstate/PutRNGstate when using R's RNG from C++
+  GetRNGstate();
+
   int N = y.size();
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
@@ -789,10 +806,8 @@ Rcpp::List cpp_pg_binomial_gibbs_bym2(
       eta[i] = X_beta[i] + re_contrib[i] + spatial_contrib[i];
     }
 
-    // 2. Sample omega ~ PG(n, eta) (parallelized)
-    #ifdef _OPENMP
-    #pragma omp parallel for schedule(static)
-    #endif
+    // 2. Sample omega ~ PG(n, eta)
+    // Note: NOT parallelized - R's RNG is not thread-safe
     for (int i = 0; i < N; i++) {
       omega[i] = ratiod::rpg_int(n[i], eta[i]);
     }
@@ -926,6 +941,7 @@ Rcpp::List cpp_pg_binomial_gibbs_bym2(
     result["eta"] = eta_draws;
   }
 
+  PutRNGstate();
   return result;
 }
 
@@ -1075,6 +1091,9 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
     bool verbose = true,
     int n_threads = 1
 ) {
+  // CRITICAL: Must call GetRNGstate/PutRNGstate when using R's RNG from C++
+  GetRNGstate();
+
   int N = y.size();
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
@@ -1264,6 +1283,7 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
     result["eta"] = eta_draws_gp;
   }
 
+  PutRNGstate();
   return result;
 }
 
@@ -1297,6 +1317,9 @@ Rcpp::List cpp_pg_binomial_gibbs_temporal(
     bool verbose = true,
     int n_threads = 1
 ) {
+  // CRITICAL: Must call GetRNGstate/PutRNGstate when using R's RNG from C++
+  GetRNGstate();
+
   int N = y.size();
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
@@ -1606,6 +1629,7 @@ Rcpp::List cpp_pg_binomial_gibbs_temporal(
     result["eta"] = eta_draws_temp;
   }
 
+  PutRNGstate();
   return result;
 }
 
@@ -1653,6 +1677,9 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
     bool verbose = true,
     int n_threads = 1
 ) {
+  // CRITICAL: Must call GetRNGstate/PutRNGstate when using R's RNG from C++
+  GetRNGstate();
+
   int N = y.size();
   int p = X.ncol();
 
@@ -1950,6 +1977,7 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
     result["eta"] = eta_draws_temp;
   }
 
+  PutRNGstate();
   return result;
 }
 
@@ -1983,6 +2011,9 @@ Rcpp::List cpp_pg_binomial_gibbs_rsr(
     bool verbose = true,
     int n_threads = 1
 ) {
+  // CRITICAL: Must call GetRNGstate/PutRNGstate when using R's RNG from C++
+  GetRNGstate();
+
   int N = y.size();
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
@@ -2061,9 +2092,7 @@ Rcpp::List cpp_pg_binomial_gibbs_rsr(
     }
 
     // 4. Sample omega ~ PG(n, eta)
-    #ifdef _OPENMP
-    #pragma omp parallel for schedule(static)
-    #endif
+    // Note: NOT parallelized - R's RNG is not thread-safe
     for (int i = 0; i < N; i++) {
       omega[i] = ratiod::rpg_int(n[i], eta[i]);
     }
@@ -2183,5 +2212,6 @@ Rcpp::List cpp_pg_binomial_gibbs_rsr(
     result["eta"] = eta_draws;
   }
 
+  PutRNGstate();
   return result;
 }

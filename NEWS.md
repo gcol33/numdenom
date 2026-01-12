@@ -1,3 +1,43 @@
+# ratiod 1.2.0
+
+## New Features
+
+### Spatiotemporal Interaction
+
+* **Spatiotemporal interaction effects**: New `spatiotemporal()` function specifies
+  space-time interactions using Knorr-Held (2000) Type I-IV models:
+  - Type I: Unstructured (IID) interaction
+  - Type II: Structured time at each location
+  - Type III: Structured space at each time point
+  - Type IV: Fully structured (Kronecker product)
+  - Separable: For GP-based spatial/temporal effects
+
+* **Non-separable spatiotemporal GP**: New `spatiotemporal_gp()` function for continuous
+  space-time GP models with Gneiting or Cressie-Huang non-separable covariance.
+
+* **Spatiotemporal effect extraction**: New `spatiotemporal_effects()` extracts posterior
+  distributions in array, long, or summary format with visualization support.
+
+### Zero-Inflation Variants
+
+* **Zero-inflated binomial**: New `ratiod_zibinomial()` for proportions with excess zeros.
+
+* **One-inflated binomial**: New `ratiod_oibinomial()` for proportions with excess ones
+  (100% success/detection).
+
+* **Zero-and-one inflated binomial (ZOIB)**: New `ratiod_zoibinomial()` for proportions
+  with excess at both boundaries.
+
+* **Hurdle binomial**: New `ratiod_hurdle_binomial()` for binomial data with hurdle
+  at zero.
+
+## Documentation
+
+* New `vignette("spatial-temporal")` with examples of space-time modeling.
+* New `vignette("zero-inflation")` covering ZI, OI, ZOIB, and hurdle binomial models.
+
+---
+
 # ratiod 1.1.0
 
 ## New Features

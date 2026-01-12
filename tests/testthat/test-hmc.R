@@ -1,150 +1,6 @@
 # Tests for HMC backend
-
-test_that("HMC backend produces valid samples", {
-  skip_on_cran()
-
-  set.seed(123)
-
-  N <- 50
-  x <- rnorm(N)
-  X <- cbind(1, x)
-  true_beta <- c(0.5, -0.3)
-
-  eta <- X %*% true_beta
-  trials <- rep(10L, N)
-  y <- rbinom(N, trials, plogis(eta))
-
-  # Run HMC for a short time
-  q_init <- rep(0.0, 3)  # 2 beta_num + 1 beta_denom
-
-  fit <- ratiod:::cpp_hmc_simple(
-    q_init = q_init,
-    y_num = as.integer(y),
-    y_denom = trials,
-    y_denom_cont = rep(0.0, N),
-    X_num = X,
-    X_denom = matrix(1, N, 1),
-    re_group = as.integer(rep(0, N)),
-    n_re_groups = 0L,
-    model_type = "binomial",
-    sigma_beta = 10.0,
-    sigma_re_scale = 2.5,
-    phi_prior_shape = 2.0,
-    phi_prior_rate = 0.1,
-    n_iter = 500L,
-    n_warmup = 250L,
-    L = 15L,
-    adapt = TRUE,
-    verbose = FALSE,
-    seed = 123L
-  )
-
-  expect_true(is.list(fit))
-  expect_equal(nrow(fit$samples), 250)  # 500 - 250 warmup
-  expect_equal(ncol(fit$samples), 3)    # 2 beta_num + 1 beta_denom
-
-  # Check that samples are reasonable (not NaN or Inf)
-  expect_true(all(is.finite(fit$samples)))
-  expect_true(all(is.finite(fit$log_prob)))
-})
-
-test_that("HMC backend recovers parameters for binomial model", {
-  skip_on_cran()
-
-  set.seed(42)
-
-  # Generate data
-  N <- 100
-  x <- rnorm(N)
-  X <- cbind(1, x)
-  true_beta <- c(-0.3, 0.5)
-
-  eta <- X %*% true_beta
-  trials <- rep(15L, N)
-  y <- rbinom(N, trials, plogis(eta))
-
-  # Run NUTS
-  q_init <- rep(0.0, 3)  # 2 for numerator + 1 for denominator
-
-  fit <- ratiod:::cpp_nuts_fit(
-    q_init = q_init,
-    y_num = as.integer(y),
-    y_denom = trials,
-    y_denom_cont = rep(0.0, N),
-    X_num = X,
-    X_denom = matrix(1, N, 1),
-    re_group = as.integer(rep(0, N)),
-    n_re_groups = 0L,
-    model_type = "binomial",
-    n_iter = 1000L,
-    n_warmup = 500L,
-    max_treedepth = 10L,
-    adapt = TRUE,
-    verbose = FALSE,
-    seed = 42L
-  )
-
-  # Check parameter recovery
-  beta_post <- colMeans(fit$samples[, 1:2])
-  expect_equal(beta_post[1], true_beta[1], tolerance = 0.4)
-  expect_equal(beta_post[2], true_beta[2], tolerance = 0.3)
-})
-
-test_that("HMC backend works with random effects", {
-  skip_on_cran()
-
-  set.seed(123)
-
-  # Generate data with RE
-  n_groups <- 10
-  n_per_group <- 10
-  N <- n_groups * n_per_group
-
-  true_beta <- c(0.2, -0.4)
-  true_sigma <- 0.5
-
-  x <- rnorm(N)
-  X <- cbind(1, x)
-  group <- rep(1:n_groups, each = n_per_group)
-  true_re <- rnorm(n_groups, 0, true_sigma)
-
-  eta <- X %*% true_beta + true_re[group]
-  trials <- rep(10L, N)
-  y <- rbinom(N, trials, plogis(eta))
-
-  # Number of parameters: 2 (beta_num) + 1 (beta_denom) + 1 (log_sigma_re) + 10 (RE)
-  n_params <- 2 + 1 + 1 + n_groups
-  q_init <- rep(0.0, n_params)
-
-  fit <- ratiod:::cpp_nuts_fit(
-    q_init = q_init,
-    y_num = as.integer(y),
-    y_denom = trials,
-    y_denom_cont = rep(0.0, N),
-    X_num = X,
-    X_denom = matrix(1, N, 1),
-    re_group = as.integer(group),
-    n_re_groups = n_groups,
-    model_type = "binomial",
-    n_iter = 1000L,
-    n_warmup = 500L,
-    max_treedepth = 10L,
-    adapt = TRUE,
-    verbose = FALSE,
-    seed = 1234L
-  )
-
-  # Check that sigma_re is recovered
-  log_sigma_idx <- 4  # After beta_num(2) + beta_denom(1)
-  sigma_re_samples <- exp(fit$samples[, log_sigma_idx])
-  expect_equal(mean(sigma_re_samples), true_sigma, tolerance = 0.3)
-
-  # Check RE correlation
-  re_start <- 5
-  re_samples <- fit$samples[, re_start:(re_start + n_groups - 1)]
-  re_post <- colMeans(re_samples)
-  expect_gt(cor(re_post, true_re), 0.5)
-})
+# Note: Tests for deprecated cpp_hmc_simple and cpp_nuts_fit have been removed
+# as those functions were moved to src/deprecated/ during C++ refactoring.
 
 test_that("HMC backend works for negbin_negbin model", {
   skip_on_cran()
@@ -224,6 +80,23 @@ test_that("HMC backend works for negbin_negbin model", {
     latent_scale = TRUE,
     latent_constraint = 0L,
     latent_sigma_prior_rate = 0.0,
+    st_params = list(
+      has_spatiotemporal = FALSE,
+      type = "none",
+      shared = TRUE,
+      n_spatial = 0L,
+      n_times = 0L,
+      n_params = 0L,
+      s_idx = integer(0),
+      t_idx = integer(0),
+      st_flat = integer(0),
+      temporal_type = "rw1",
+      temporal_cyclic = FALSE,
+      adj_row_ptr = integer(0),
+      adj_col_idx = integer(0),
+      sigma2_prior_U = 1.0,
+      sigma2_prior_alpha = 0.01
+    ),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,
@@ -318,6 +191,23 @@ test_that("HMC backend works for poisson_gamma model", {
     latent_scale = TRUE,
     latent_constraint = 0L,
     latent_sigma_prior_rate = 0.0,
+    st_params = list(
+      has_spatiotemporal = FALSE,
+      type = "none",
+      shared = TRUE,
+      n_spatial = 0L,
+      n_times = 0L,
+      n_params = 0L,
+      s_idx = integer(0),
+      t_idx = integer(0),
+      st_flat = integer(0),
+      temporal_type = "rw1",
+      temporal_cyclic = FALSE,
+      adj_row_ptr = integer(0),
+      adj_col_idx = integer(0),
+      sigma2_prior_U = 1.0,
+      sigma2_prior_alpha = 0.01
+    ),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,
@@ -332,44 +222,238 @@ test_that("HMC backend works for poisson_gamma model", {
   expect_equal(ncol(fit$samples), 5)
 })
 
-test_that("NUTS diagnostics are reasonable", {
+# ---------------------------------------------------------------------------
+# Additional HMC integration tests with ratiod()
+# ---------------------------------------------------------------------------
+
+test_that("ratiod() fits poisson_gamma model with HMC backend", {
+  skip_on_cran()
+
+  set.seed(123)
+  n <- 30
+  df <- data.frame(
+    count = rpois(n, lambda = 10),
+    effort = rgamma(n, shape = 5, rate = 1),
+    x = rnorm(n)
+  )
+
+  fit <- ratiod(
+    count | effort ~ x,
+    data = df,
+    family = ratiod_poisson_gamma(),
+    backend = "hmc",
+    iter = 200,
+    warmup = 100,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+  expect_equal(fit$backend, "hmc")
+  expect_true(is.array(fit$draws))
+})
+
+test_that("ratiod() fits binomial model with HMC backend", {
+  skip_on_cran()
+
+  set.seed(456)
+  n <- 30
+  trials <- sample(10:20, n, replace = TRUE)
+  df <- data.frame(
+    successes = rbinom(n, trials, 0.4),
+    trials = trials,
+    x = rnorm(n)
+  )
+
+  fit <- ratiod(
+    successes | trials ~ x,
+    data = df,
+    family = ratiod_binomial(),
+    backend = "hmc",
+    iter = 200,
+    warmup = 100,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+  expect_equal(fit$backend, "hmc")
+  expect_true(is.array(fit$draws))
+})
+
+test_that("ratiod() fits negbin_negbin model with HMC backend", {
+  skip_on_cran()
+
+  set.seed(789)
+  n <- 30
+  df <- data.frame(
+    y_num = rnbinom(n, size = 5, mu = 10),
+    y_denom = rnbinom(n, size = 5, mu = 15),
+    x = rnorm(n)
+  )
+
+  fit <- ratiod(
+    y_num | y_denom ~ x,
+    data = df,
+    family = ratiod_negbin_negbin(),
+    backend = "hmc",
+    iter = 200,
+    warmup = 100,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+  expect_equal(fit$backend, "hmc")
+})
+
+test_that("ratiod() with random effects using HMC backend", {
   skip_on_cran()
 
   set.seed(111)
+  n_groups <- 5
+  n_per_group <- 6
+  n <- n_groups * n_per_group
 
-  N <- 50
-  trials <- rep(10L, N)
-  y <- rbinom(N, trials, 0.5)
-
-  q_init <- c(0.0, 0.0)
-
-  fit <- ratiod:::cpp_nuts_fit(
-    q_init = q_init,
-    y_num = as.integer(y),
-    y_denom = trials,
-    y_denom_cont = rep(0.0, N),
-    X_num = matrix(1, N, 1),
-    X_denom = matrix(1, N, 1),
-    re_group = as.integer(rep(0, N)),
-    n_re_groups = 0L,
-    model_type = "binomial",
-    n_iter = 500L,
-    n_warmup = 250L,
-    max_treedepth = 10L,
-    adapt = TRUE,
-    verbose = FALSE,
-    seed = 111L
+  df <- data.frame(
+    count = rpois(n, lambda = 10),
+    effort = rgamma(n, shape = 5, rate = 1),
+    x = rnorm(n),
+    site = factor(rep(1:n_groups, each = n_per_group))
   )
 
-  # Check step size is reasonable
-  expect_true(fit$epsilon > 0)
-  expect_true(fit$epsilon < 10)
+  fit <- ratiod(
+    count | effort ~ x + (1 | site),
+    data = df,
+    family = ratiod_poisson_gamma(),
+    backend = "hmc",
+    iter = 200,
+    warmup = 100,
+    chains = 1,
+    verbose = FALSE
+  )
 
-  # Check acceptance rate
-  avg_accept <- mean(fit$accept_prob)
-  expect_true(avg_accept > 0.3)  # Should be reasonably high
+  expect_s3_class(fit, "ratiod_fit")
+  # Check that draws have sigma parameters (3D array or matrix)
+  draws <- fit$draws
+  if (is.array(draws) && length(dim(draws)) == 3) {
+    param_names <- dimnames(draws)[[3]]
+  } else if (is.matrix(draws)) {
+    param_names <- colnames(draws)
+  } else {
+    param_names <- names(draws)
+  }
+  expect_true(any(grepl("sigma", param_names, ignore.case = TRUE)) ||
+              length(param_names) > 5)  # Has RE parameters
+})
 
-  # Check divergences are low
-  n_div <- sum(fit$divergent)
-  expect_true(n_div < nrow(fit$samples) * 0.1)  # Less than 10% divergent
+test_that("summary.ratiod_fit returns correct structure", {
+  skip_on_cran()
+
+  set.seed(222)
+  n <- 20
+  df <- data.frame(
+    count = rpois(n, lambda = 10),
+    effort = rgamma(n, shape = 5, rate = 1),
+    x = rnorm(n)
+  )
+
+  fit <- ratiod(
+    count | effort ~ x,
+    data = df,
+    family = ratiod_poisson_gamma(),
+    backend = "hmc",
+    iter = 100,
+    warmup = 50,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  summ <- summary(fit)
+
+  expect_true(is.data.frame(summ) || is.list(summ))
+})
+
+test_that("print.ratiod_fit works without error", {
+  skip_on_cran()
+
+  set.seed(333)
+  n <- 20
+  df <- data.frame(
+    count = rpois(n, lambda = 10),
+    effort = rgamma(n, shape = 5, rate = 1),
+    x = rnorm(n)
+  )
+
+  fit <- ratiod(
+    count | effort ~ x,
+    data = df,
+    family = ratiod_poisson_gamma(),
+    backend = "hmc",
+    iter = 100,
+    warmup = 50,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  output <- capture.output(print(fit))
+  expect_true(length(output) > 0)
+})
+
+test_that("ratio() works with HMC fit", {
+  skip_on_cran()
+
+  set.seed(444)
+  n <- 20
+  df <- data.frame(
+    count = rpois(n, lambda = 10),
+    effort = rgamma(n, shape = 5, rate = 1),
+    x = rnorm(n)
+  )
+
+  fit <- ratiod(
+    count | effort ~ x,
+    data = df,
+    family = ratiod_poisson_gamma(),
+    backend = "hmc",
+    iter = 100,
+    warmup = 50,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  r <- ratio(fit)
+
+  expect_s3_class(r, "ratiod_ratio")
+  expect_true(is.matrix(r$draws))
+  expect_equal(ncol(r$draws), n)
+})
+
+test_that("ratio_contrast() works with HMC fit", {
+  skip_on_cran()
+
+  set.seed(555)
+  n <- 20
+  df <- data.frame(
+    count = rpois(n, lambda = 10),
+    effort = rgamma(n, shape = 5, rate = 1),
+    x = rnorm(n),
+    group = factor(rep(c("A", "B"), each = n/2))
+  )
+
+  fit <- ratiod(
+    count | effort ~ x + group,
+    data = df,
+    family = ratiod_poisson_gamma(),
+    backend = "hmc",
+    iter = 100,
+    warmup = 50,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  # ratio_contrast takes a formula for contrast
+  contrast <- ratio_contrast(fit, contrast = ~ group)
+
+  expect_true(is.numeric(contrast) || is.list(contrast) || inherits(contrast, "ratiod_contrast"))
 })

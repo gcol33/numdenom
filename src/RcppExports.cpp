@@ -10,68 +10,9 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
-// cpp_nuts_fit
-Rcpp::List cpp_nuts_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, int n_iter, int n_warmup, int max_treedepth, bool adapt, bool verbose, unsigned int seed);
-RcppExport SEXP _ratiod_cpp_nuts_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_typeSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP max_treedepthSEXP, SEXP adaptSEXP, SEXP verboseSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type q_init(q_initSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y_num(y_numSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y_denom(y_denomSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type y_denom_cont(y_denom_contSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_num(X_numSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_denom(X_denomSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_group(re_groupSEXP);
-    Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
-    Rcpp::traits::input_parameter< std::string >::type model_type(model_typeSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_beta(sigma_betaSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_re_scale(sigma_re_scaleSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_shape(phi_prior_shapeSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_rate(phi_prior_rateSEXP);
-    Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
-    Rcpp::traits::input_parameter< int >::type n_warmup(n_warmupSEXP);
-    Rcpp::traits::input_parameter< int >::type max_treedepth(max_treedepthSEXP);
-    Rcpp::traits::input_parameter< bool >::type adapt(adaptSEXP);
-    Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_nuts_fit(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, max_treedepth, adapt, verbose, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
-// cpp_hmc_basic
-Rcpp::List cpp_hmc_basic(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, int n_iter, int n_warmup, double epsilon, int L, bool adapt, bool verbose, unsigned int seed);
-RcppExport SEXP _ratiod_cpp_hmc_basic(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_typeSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP epsilonSEXP, SEXP LSEXP, SEXP adaptSEXP, SEXP verboseSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type q_init(q_initSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y_num(y_numSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y_denom(y_denomSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type y_denom_cont(y_denom_contSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_num(X_numSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_denom(X_denomSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_group(re_groupSEXP);
-    Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
-    Rcpp::traits::input_parameter< std::string >::type model_type(model_typeSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_beta(sigma_betaSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_re_scale(sigma_re_scaleSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_shape(phi_prior_shapeSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_rate(phi_prior_rateSEXP);
-    Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
-    Rcpp::traits::input_parameter< int >::type n_warmup(n_warmupSEXP);
-    Rcpp::traits::input_parameter< double >::type epsilon(epsilonSEXP);
-    Rcpp::traits::input_parameter< int >::type L(LSEXP);
-    Rcpp::traits::input_parameter< bool >::type adapt(adaptSEXP);
-    Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_hmc_basic(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, epsilon, L, adapt, verbose, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
 // cpp_hmc_fit
-Rcpp::List cpp_hmc_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, int n_re_terms, Rcpp::IntegerMatrix re_group_matrix, Rcpp::IntegerVector re_n_groups_vec, bool has_re_slopes, bool has_re_correlated_slopes, Rcpp::IntegerVector re_n_coefs_vec, Rcpp::LogicalVector re_correlated_vec, Rcpp::IntegerVector re_n_chol_vec, Rcpp::List slope_matrices_list, std::string model_type_str, std::string spatial_type_str, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double bym2_scale_factor, std::string temporal_type_str, Rcpp::IntegerVector temporal_time_idx, Rcpp::IntegerVector temporal_group_idx, int n_times, int n_temporal_groups, int n_temporal_params, bool temporal_cyclic, bool temporal_shared, double tau_temporal_shape, double tau_temporal_rate, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, double tau_spatial_shape, double tau_spatial_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, bool has_latent, int latent_n_factors, bool latent_shared, bool latent_scale, int latent_constraint, double latent_sigma_prior_rate, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
-RcppExport SEXP _ratiod_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP n_re_termsSEXP, SEXP re_group_matrixSEXP, SEXP re_n_groups_vecSEXP, SEXP has_re_slopesSEXP, SEXP has_re_correlated_slopesSEXP, SEXP re_n_coefs_vecSEXP, SEXP re_correlated_vecSEXP, SEXP re_n_chol_vecSEXP, SEXP slope_matrices_listSEXP, SEXP model_type_strSEXP, SEXP spatial_type_strSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP bym2_scale_factorSEXP, SEXP temporal_type_strSEXP, SEXP temporal_time_idxSEXP, SEXP temporal_group_idxSEXP, SEXP n_timesSEXP, SEXP n_temporal_groupsSEXP, SEXP n_temporal_paramsSEXP, SEXP temporal_cyclicSEXP, SEXP temporal_sharedSEXP, SEXP tau_temporal_shapeSEXP, SEXP tau_temporal_rateSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP tau_spatial_shapeSEXP, SEXP tau_spatial_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP has_latentSEXP, SEXP latent_n_factorsSEXP, SEXP latent_sharedSEXP, SEXP latent_scaleSEXP, SEXP latent_constraintSEXP, SEXP latent_sigma_prior_rateSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
+Rcpp::List cpp_hmc_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, int n_re_terms, Rcpp::IntegerMatrix re_group_matrix, Rcpp::IntegerVector re_n_groups_vec, bool has_re_slopes, bool has_re_correlated_slopes, Rcpp::IntegerVector re_n_coefs_vec, Rcpp::LogicalVector re_correlated_vec, Rcpp::IntegerVector re_n_chol_vec, Rcpp::List slope_matrices_list, std::string model_type_str, std::string spatial_type_str, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double bym2_scale_factor, std::string temporal_type_str, Rcpp::IntegerVector temporal_time_idx, Rcpp::IntegerVector temporal_group_idx, int n_times, int n_temporal_groups, int n_temporal_params, bool temporal_cyclic, bool temporal_shared, double tau_temporal_shape, double tau_temporal_rate, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, double tau_spatial_shape, double tau_spatial_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, bool has_latent, int latent_n_factors, bool latent_shared, bool latent_scale, int latent_constraint, double latent_sigma_prior_rate, Rcpp::List st_params, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
+RcppExport SEXP _ratiod_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP n_re_termsSEXP, SEXP re_group_matrixSEXP, SEXP re_n_groups_vecSEXP, SEXP has_re_slopesSEXP, SEXP has_re_correlated_slopesSEXP, SEXP re_n_coefs_vecSEXP, SEXP re_correlated_vecSEXP, SEXP re_n_chol_vecSEXP, SEXP slope_matrices_listSEXP, SEXP model_type_strSEXP, SEXP spatial_type_strSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP bym2_scale_factorSEXP, SEXP temporal_type_strSEXP, SEXP temporal_time_idxSEXP, SEXP temporal_group_idxSEXP, SEXP n_timesSEXP, SEXP n_temporal_groupsSEXP, SEXP n_temporal_paramsSEXP, SEXP temporal_cyclicSEXP, SEXP temporal_sharedSEXP, SEXP tau_temporal_shapeSEXP, SEXP tau_temporal_rateSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP tau_spatial_shapeSEXP, SEXP tau_spatial_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP has_latentSEXP, SEXP latent_n_factorsSEXP, SEXP latent_sharedSEXP, SEXP latent_scaleSEXP, SEXP latent_constraintSEXP, SEXP latent_sigma_prior_rateSEXP, SEXP st_paramsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -125,6 +66,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type latent_scale(latent_scaleSEXP);
     Rcpp::traits::input_parameter< int >::type latent_constraint(latent_constraintSEXP);
     Rcpp::traits::input_parameter< double >::type latent_sigma_prior_rate(latent_sigma_prior_rateSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type st_params(st_paramsSEXP);
     Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
     Rcpp::traits::input_parameter< int >::type n_warmup(n_warmupSEXP);
     Rcpp::traits::input_parameter< int >::type L(LSEXP);
@@ -132,7 +74,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
     Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, n_re_terms, re_group_matrix, re_n_groups_vec, has_re_slopes, has_re_correlated_slopes, re_n_coefs_vec, re_correlated_vec, re_n_chol_vec, slope_matrices_list, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, has_latent, latent_n_factors, latent_shared, latent_scale, latent_constraint, latent_sigma_prior_rate, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
+    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, n_re_terms, re_group_matrix, re_n_groups_vec, has_re_slopes, has_re_correlated_slopes, re_n_coefs_vec, re_correlated_vec, re_n_chol_vec, slope_matrices_list, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, has_latent, latent_n_factors, latent_shared, latent_scale, latent_constraint, latent_sigma_prior_rate, st_params, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -226,35 +168,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
     Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
     rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit_gp(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_type_str, coords, nn_idx, nn_dist, nn_order, nn_order_inv, nn, cov_type_str, nu, gp_shared, gp_sigma2_prior_U, gp_sigma2_prior_alpha, gp_phi_prior_lower, gp_phi_prior_upper, nn_idx_local, nn_dist_local, nn_order_local, nn_order_inv_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_order_inv_regional, nn_regional, range_local_lower, range_local_upper, range_regional_lower, range_regional_upper, ms_sigma2_local_prior_U, ms_sigma2_local_prior_alpha, ms_sigma2_regional_prior_U, ms_sigma2_regional_prior_alpha, ms_temporal_type_str, ms_time_index, ms_group_index, ms_n_times, ms_n_groups, trend_type_str, seasonal_period, short_term_type_str, ms_temporal_shared, ms_sigma2_trend_prior_U, ms_sigma2_trend_prior_alpha, ms_sigma2_seasonal_prior_U, ms_sigma2_seasonal_prior_alpha, ms_sigma2_short_prior_U, ms_sigma2_short_prior_alpha, has_rsr, rsr_projection, rsr_n, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
-    return rcpp_result_gen;
-END_RCPP
-}
-// cpp_hmc_simple
-Rcpp::List cpp_hmc_simple(NumericVector q_init, IntegerVector y_num, IntegerVector y_denom, NumericVector y_denom_cont, NumericMatrix X_num, NumericMatrix X_denom, IntegerVector re_group, int n_re_groups, std::string model_type_str, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, int n_iter, int n_warmup, int L, bool adapt, bool verbose, unsigned int seed);
-RcppExport SEXP _ratiod_cpp_hmc_simple(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP adaptSEXP, SEXP verboseSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< NumericVector >::type q_init(q_initSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type y_num(y_numSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type y_denom(y_denomSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type y_denom_cont(y_denom_contSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type X_denom(X_denomSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type re_group(re_groupSEXP);
-    Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
-    Rcpp::traits::input_parameter< std::string >::type model_type_str(model_type_strSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_beta(sigma_betaSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_re_scale(sigma_re_scaleSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_shape(phi_prior_shapeSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_rate(phi_prior_rateSEXP);
-    Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
-    Rcpp::traits::input_parameter< int >::type n_warmup(n_warmupSEXP);
-    Rcpp::traits::input_parameter< int >::type L(LSEXP);
-    Rcpp::traits::input_parameter< bool >::type adapt(adaptSEXP);
-    Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_hmc_simple(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, n_iter, n_warmup, L, adapt, verbose, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -744,14 +657,868 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_test_leapfrog
+List cpp_test_leapfrog(NumericVector q_init, NumericVector p_init, double epsilon, int L);
+RcppExport SEXP _ratiod_cpp_test_leapfrog(SEXP q_initSEXP, SEXP p_initSEXP, SEXP epsilonSEXP, SEXP LSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type q_init(q_initSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type p_init(p_initSEXP);
+    Rcpp::traits::input_parameter< double >::type epsilon(epsilonSEXP);
+    Rcpp::traits::input_parameter< int >::type L(LSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_leapfrog(q_init, p_init, epsilon, L));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_hamiltonian
+double cpp_test_hamiltonian(NumericVector q, NumericVector p);
+RcppExport SEXP _ratiod_cpp_test_hamiltonian(SEXP qSEXP, SEXP pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type q(qSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type p(pSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_hamiltonian(q, p));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_log_sum_exp
+double cpp_test_log_sum_exp(NumericVector log_vals);
+RcppExport SEXP _ratiod_cpp_test_log_sum_exp(SEXP log_valsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type log_vals(log_valsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_log_sum_exp(log_vals));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_softmax
+NumericVector cpp_test_softmax(NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_softmax(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_softmax(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_inv_logit
+NumericVector cpp_test_inv_logit(NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_inv_logit(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_inv_logit(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_lgamma
+double cpp_test_lgamma(double x);
+RcppExport SEXP _ratiod_cpp_test_lgamma(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_lgamma(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_poisson_loglik
+double cpp_test_poisson_loglik(IntegerVector y, NumericVector lambda);
+RcppExport SEXP _ratiod_cpp_test_poisson_loglik(SEXP ySEXP, SEXP lambdaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lambda(lambdaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_poisson_loglik(y, lambda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_binomial_loglik
+double cpp_test_binomial_loglik(IntegerVector y, IntegerVector n, NumericVector p);
+RcppExport SEXP _ratiod_cpp_test_binomial_loglik(SEXP ySEXP, SEXP nSEXP, SEXP pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type n(nSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type p(pSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_binomial_loglik(y, n, p));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_negbin_loglik
+double cpp_test_negbin_loglik(IntegerVector y, NumericVector mu, double phi);
+RcppExport SEXP _ratiod_cpp_test_negbin_loglik(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_negbin_loglik(y, mu, phi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_normal_loglik
+double cpp_test_normal_loglik(NumericVector y, NumericVector mu, double sigma);
+RcppExport SEXP _ratiod_cpp_test_normal_loglik(SEXP ySEXP, SEXP muSEXP, SEXP sigmaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type sigma(sigmaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_normal_loglik(y, mu, sigma));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_cholesky
+NumericMatrix cpp_test_cholesky(NumericMatrix A);
+RcppExport SEXP _ratiod_cpp_test_cholesky(SEXP ASEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type A(ASEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_cholesky(A));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_matvec
+NumericVector cpp_test_matvec(NumericMatrix A, NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_matvec(SEXP ASEXP, SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type A(ASEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_matvec(A, x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_gradient
+List cpp_test_autodiff_gradient(NumericVector x_vals);
+RcppExport SEXP _ratiod_cpp_test_autodiff_gradient(SEXP x_valsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x_vals(x_valsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_gradient(x_vals));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_exp_chain
+List cpp_test_autodiff_exp_chain(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_exp_chain(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_exp_chain(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_log_likelihood
+List cpp_test_autodiff_log_likelihood(IntegerVector y, NumericVector eta);
+RcppExport SEXP _ratiod_cpp_test_autodiff_log_likelihood(SEXP ySEXP, SEXP etaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type eta(etaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_log_likelihood(y, eta));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_division
+List cpp_test_autodiff_division(double a_val, double b_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_division(SEXP a_valSEXP, SEXP b_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type a_val(a_valSEXP);
+    Rcpp::traits::input_parameter< double >::type b_val(b_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_division(a_val, b_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_lgamma
+List cpp_test_autodiff_lgamma(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_lgamma(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_lgamma(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_softplus
+List cpp_test_autodiff_softplus(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_softplus(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_softplus(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_inv_logit
+List cpp_test_autodiff_inv_logit(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_inv_logit(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_inv_logit(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_log
+List cpp_test_autodiff_log(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_log(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_log(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_sqrt
+List cpp_test_autodiff_sqrt(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_sqrt(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_sqrt(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_pow
+List cpp_test_autodiff_pow(double x_val, double p);
+RcppExport SEXP _ratiod_cpp_test_autodiff_pow(SEXP x_valSEXP, SEXP pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    Rcpp::traits::input_parameter< double >::type p(pSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_pow(x_val, p));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_log1p
+List cpp_test_autodiff_log1p(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_log1p(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_log1p(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_log_sum_exp
+List cpp_test_autodiff_log_sum_exp(double a_val, double b_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_log_sum_exp(SEXP a_valSEXP, SEXP b_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type a_val(a_valSEXP);
+    Rcpp::traits::input_parameter< double >::type b_val(b_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_log_sum_exp(a_val, b_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_logit
+List cpp_test_autodiff_logit(double x_val);
+RcppExport SEXP _ratiod_cpp_test_autodiff_logit(SEXP x_valSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_val(x_valSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_logit(x_val));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_autodiff_negbin_loglik
+List cpp_test_autodiff_negbin_loglik(IntegerVector y, NumericVector mu, double phi);
+RcppExport SEXP _ratiod_cpp_test_autodiff_negbin_loglik(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_autodiff_negbin_loglik(y, mu, phi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_laplace_binomial
+List cpp_test_laplace_binomial(int y, int n, double eta);
+RcppExport SEXP _ratiod_cpp_test_laplace_binomial(SEXP ySEXP, SEXP nSEXP, SEXP etaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< double >::type eta(etaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_laplace_binomial(y, n, eta));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_laplace_negbin
+List cpp_test_laplace_negbin(int y, double eta, double phi);
+RcppExport SEXP _ratiod_cpp_test_laplace_negbin(SEXP ySEXP, SEXP etaSEXP, SEXP phiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type eta(etaSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_laplace_negbin(y, eta, phi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_laplace_poisson
+List cpp_test_laplace_poisson(int y, double eta);
+RcppExport SEXP _ratiod_cpp_test_laplace_poisson(SEXP ySEXP, SEXP etaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type eta(etaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_laplace_poisson(y, eta));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_pg_update_beta
+NumericVector cpp_test_pg_update_beta(NumericVector kappa, NumericVector omega, NumericMatrix X, NumericVector re_contrib, double prior_sd);
+RcppExport SEXP _ratiod_cpp_test_pg_update_beta(SEXP kappaSEXP, SEXP omegaSEXP, SEXP XSEXP, SEXP re_contribSEXP, SEXP prior_sdSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type kappa(kappaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type omega(omegaSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X(XSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type re_contrib(re_contribSEXP);
+    Rcpp::traits::input_parameter< double >::type prior_sd(prior_sdSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_pg_update_beta(kappa, omega, X, re_contrib, prior_sd));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_pg_update_re
+NumericVector cpp_test_pg_update_re(NumericVector kappa, NumericVector omega, NumericVector X_beta, IntegerVector group, int n_groups, double sigma_re);
+RcppExport SEXP _ratiod_cpp_test_pg_update_re(SEXP kappaSEXP, SEXP omegaSEXP, SEXP X_betaSEXP, SEXP groupSEXP, SEXP n_groupsSEXP, SEXP sigma_reSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type kappa(kappaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type omega(omegaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type X_beta(X_betaSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type group(groupSEXP);
+    Rcpp::traits::input_parameter< int >::type n_groups(n_groupsSEXP);
+    Rcpp::traits::input_parameter< double >::type sigma_re(sigma_reSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_pg_update_re(kappa, omega, X_beta, group, n_groups, sigma_re));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_pg_update_sigma_re
+double cpp_test_pg_update_sigma_re(NumericVector re, double scale);
+RcppExport SEXP _ratiod_cpp_test_pg_update_sigma_re(SEXP reSEXP, SEXP scaleSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type re(reSEXP);
+    Rcpp::traits::input_parameter< double >::type scale(scaleSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_pg_update_sigma_re(re, scale));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_dot_product
+double cpp_test_dot_product(NumericVector x, NumericVector y);
+RcppExport SEXP _ratiod_cpp_test_dot_product(SEXP xSEXP, SEXP ySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y(ySEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_dot_product(x, y));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_norm_squared
+double cpp_test_norm_squared(NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_norm_squared(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_norm_squared(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_vector_sum
+double cpp_test_vector_sum(NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_vector_sum(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_vector_sum(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_axpy
+NumericVector cpp_test_axpy(double a, NumericVector x, NumericVector y);
+RcppExport SEXP _ratiod_cpp_test_axpy(SEXP aSEXP, SEXP xSEXP, SEXP ySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y(ySEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_axpy(a, x, y));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_scale
+NumericVector cpp_test_scale(double a, NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_scale(SEXP aSEXP, SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_scale(a, x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_linalg_matvec
+NumericVector cpp_test_linalg_matvec(NumericMatrix X, NumericVector beta);
+RcppExport SEXP _ratiod_cpp_test_linalg_matvec(SEXP XSEXP, SEXP betaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type X(XSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type beta(betaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_linalg_matvec(X, beta));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_linalg_matvec_add
+NumericVector cpp_test_linalg_matvec_add(NumericMatrix X, NumericVector beta, NumericVector y_init);
+RcppExport SEXP _ratiod_cpp_test_linalg_matvec_add(SEXP XSEXP, SEXP betaSEXP, SEXP y_initSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type X(XSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type beta(betaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_init(y_initSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_linalg_matvec_add(X, beta, y_init));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_linalg_matvec_transpose
+NumericVector cpp_test_linalg_matvec_transpose(NumericMatrix X, NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_linalg_matvec_transpose(SEXP XSEXP, SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type X(XSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_linalg_matvec_transpose(X, x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_sparse_laplacian_quadform
+double cpp_test_sparse_laplacian_quadform(IntegerVector row_ptr, IntegerVector col_idx, NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_sparse_laplacian_quadform(SEXP row_ptrSEXP, SEXP col_idxSEXP, SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type row_ptr(row_ptrSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type col_idx(col_idxSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_sparse_laplacian_quadform(row_ptr, col_idx, x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_linalg_log_sum_exp
+double cpp_test_linalg_log_sum_exp(double a, double b);
+RcppExport SEXP _ratiod_cpp_test_linalg_log_sum_exp(SEXP aSEXP, SEXP bSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< double >::type b(bSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_linalg_log_sum_exp(a, b));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_linalg_log_sum_exp_vec
+double cpp_test_linalg_log_sum_exp_vec(NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_linalg_log_sum_exp_vec(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_linalg_log_sum_exp_vec(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_softmax_inplace
+NumericVector cpp_test_softmax_inplace(NumericVector x);
+RcppExport SEXP _ratiod_cpp_test_softmax_inplace(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_softmax_inplace(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_compute_linear_predictors
+List cpp_test_compute_linear_predictors(NumericMatrix X_num, NumericVector beta_num, NumericMatrix X_denom, NumericVector beta_denom, int n_threads);
+RcppExport SEXP _ratiod_cpp_test_compute_linear_predictors(SEXP X_numSEXP, SEXP beta_numSEXP, SEXP X_denomSEXP, SEXP beta_denomSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type beta_num(beta_numSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_denom(X_denomSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type beta_denom(beta_denomSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_compute_linear_predictors(X_num, beta_num, X_denom, beta_denom, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_rw1_quadratic_form
+double cpp_test_rw1_quadratic_form(NumericVector phi, bool cyclic);
+RcppExport SEXP _ratiod_cpp_test_rw1_quadratic_form(SEXP phiSEXP, SEXP cyclicSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< bool >::type cyclic(cyclicSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_rw1_quadratic_form(phi, cyclic));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_rw2_quadratic_form
+double cpp_test_rw2_quadratic_form(NumericVector phi, bool cyclic);
+RcppExport SEXP _ratiod_cpp_test_rw2_quadratic_form(SEXP phiSEXP, SEXP cyclicSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< bool >::type cyclic(cyclicSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_rw2_quadratic_form(phi, cyclic));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_ar1_log_density
+double cpp_test_ar1_log_density(NumericVector phi, double rho, double tau);
+RcppExport SEXP _ratiod_cpp_test_ar1_log_density(SEXP phiSEXP, SEXP rhoSEXP, SEXP tauSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< double >::type rho(rhoSEXP);
+    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_ar1_log_density(phi, rho, tau));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_temporal_log_prior
+double cpp_test_temporal_log_prior(NumericVector phi, std::string type_str, double tau, double rho, bool cyclic);
+RcppExport SEXP _ratiod_cpp_test_temporal_log_prior(SEXP phiSEXP, SEXP type_strSEXP, SEXP tauSEXP, SEXP rhoSEXP, SEXP cyclicSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< std::string >::type type_str(type_strSEXP);
+    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
+    Rcpp::traits::input_parameter< double >::type rho(rhoSEXP);
+    Rcpp::traits::input_parameter< bool >::type cyclic(cyclicSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_temporal_log_prior(phi, type_str, tau, rho, cyclic));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_sum_to_zero_penalty
+double cpp_test_sum_to_zero_penalty(NumericVector phi, double lambda);
+RcppExport SEXP _ratiod_cpp_test_sum_to_zero_penalty(SEXP phiSEXP, SEXP lambdaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< double >::type lambda(lambdaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_sum_to_zero_penalty(phi, lambda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_log1pexp
+double cpp_test_log1pexp(double x);
+RcppExport SEXP _ratiod_cpp_test_log1pexp(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_log1pexp(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_logistic
+double cpp_test_zi_logistic(double x);
+RcppExport SEXP _ratiod_cpp_test_zi_logistic(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_logistic(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_log_logistic
+double cpp_test_log_logistic(double x);
+RcppExport SEXP _ratiod_cpp_test_log_logistic(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_log_logistic(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_log1m_logistic
+double cpp_test_log1m_logistic(double x);
+RcppExport SEXP _ratiod_cpp_test_log1m_logistic(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_log1m_logistic(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_poisson_lpmf
+double cpp_test_zi_poisson_lpmf(int y, double mu);
+RcppExport SEXP _ratiod_cpp_test_zi_poisson_lpmf(SEXP ySEXP, SEXP muSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_poisson_lpmf(y, mu));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_negbin_lpmf
+double cpp_test_zi_negbin_lpmf(int y, double mu, double phi);
+RcppExport SEXP _ratiod_cpp_test_zi_negbin_lpmf(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_negbin_lpmf(y, mu, phi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_poisson_lpmf_logit
+double cpp_test_zi_poisson_lpmf_logit(int y, double mu, double logit_zi);
+RcppExport SEXP _ratiod_cpp_test_zi_poisson_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP logit_ziSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type logit_zi(logit_ziSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_poisson_lpmf_logit(y, mu, logit_zi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_negbin_lpmf_logit
+double cpp_test_zi_negbin_lpmf_logit(int y, double mu, double phi, double logit_zi);
+RcppExport SEXP _ratiod_cpp_test_zi_negbin_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< double >::type logit_zi(logit_ziSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_negbin_lpmf_logit(y, mu, phi, logit_zi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_truncated_poisson_lpmf
+double cpp_test_truncated_poisson_lpmf(int y, double mu);
+RcppExport SEXP _ratiod_cpp_test_truncated_poisson_lpmf(SEXP ySEXP, SEXP muSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_truncated_poisson_lpmf(y, mu));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_truncated_negbin_lpmf
+double cpp_test_truncated_negbin_lpmf(int y, double mu, double phi);
+RcppExport SEXP _ratiod_cpp_test_truncated_negbin_lpmf(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_truncated_negbin_lpmf(y, mu, phi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_hurdle_poisson_lpmf_logit
+double cpp_test_hurdle_poisson_lpmf_logit(int y, double mu, double logit_theta);
+RcppExport SEXP _ratiod_cpp_test_hurdle_poisson_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP logit_thetaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type logit_theta(logit_thetaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_hurdle_poisson_lpmf_logit(y, mu, logit_theta));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_hurdle_negbin_lpmf_logit
+double cpp_test_hurdle_negbin_lpmf_logit(int y, double mu, double phi, double logit_theta);
+RcppExport SEXP _ratiod_cpp_test_hurdle_negbin_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_thetaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< double >::type logit_theta(logit_thetaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_hurdle_negbin_lpmf_logit(y, mu, phi, logit_theta));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_log_likelihood
+double cpp_test_zi_log_likelihood(int y, double mu, double phi, double logit_zi, std::string zi_type_str);
+RcppExport SEXP _ratiod_cpp_test_zi_log_likelihood(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP, SEXP zi_type_strSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< double >::type logit_zi(logit_ziSEXP);
+    Rcpp::traits::input_parameter< std::string >::type zi_type_str(zi_type_strSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_log_likelihood(y, mu, phi, logit_zi, zi_type_str));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_poisson_grad_logit_zi
+double cpp_test_zi_poisson_grad_logit_zi(int y, double mu, double logit_zi);
+RcppExport SEXP _ratiod_cpp_test_zi_poisson_grad_logit_zi(SEXP ySEXP, SEXP muSEXP, SEXP logit_ziSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type logit_zi(logit_ziSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_poisson_grad_logit_zi(y, mu, logit_zi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_zi_negbin_grad_logit_zi
+double cpp_test_zi_negbin_grad_logit_zi(int y, double mu, double phi, double logit_zi);
+RcppExport SEXP _ratiod_cpp_test_zi_negbin_grad_logit_zi(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< double >::type logit_zi(logit_ziSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_zi_negbin_grad_logit_zi(y, mu, phi, logit_zi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_hurdle_grad_logit_theta
+double cpp_test_hurdle_grad_logit_theta(int y, double logit_theta);
+RcppExport SEXP _ratiod_cpp_test_hurdle_grad_logit_theta(SEXP ySEXP, SEXP logit_thetaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type logit_theta(logit_thetaSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_hurdle_grad_logit_theta(y, logit_theta));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_get_max_threads
+int cpp_test_get_max_threads();
+RcppExport SEXP _ratiod_cpp_test_get_max_threads() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(cpp_test_get_max_threads());
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_parallel_dot_products
+List cpp_test_parallel_dot_products(NumericMatrix X, NumericVector y, int n_threads);
+RcppExport SEXP _ratiod_cpp_test_parallel_dot_products(SEXP XSEXP, SEXP ySEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type X(XSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_parallel_dot_products(X, y, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_parallel_likelihood
+List cpp_test_parallel_likelihood(IntegerVector y, NumericVector mu, int n_threads);
+RcppExport SEXP _ratiod_cpp_test_parallel_likelihood(SEXP ySEXP, SEXP muSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_parallel_likelihood(y, mu, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_test_parallel_independent
+NumericVector cpp_test_parallel_independent(int n, int n_threads);
+RcppExport SEXP _ratiod_cpp_test_parallel_independent(SEXP nSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_parallel_independent(n, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_ratiod_cpp_nuts_fit", (DL_FUNC) &_ratiod_cpp_nuts_fit, 19},
-    {"_ratiod_cpp_hmc_basic", (DL_FUNC) &_ratiod_cpp_hmc_basic, 20},
-    {"_ratiod_cpp_hmc_fit", (DL_FUNC) &_ratiod_cpp_hmc_fit, 57},
+    {"_ratiod_cpp_hmc_fit", (DL_FUNC) &_ratiod_cpp_hmc_fit, 58},
     {"_ratiod_cpp_get_max_threads", (DL_FUNC) &_ratiod_cpp_get_max_threads, 0},
     {"_ratiod_cpp_hmc_fit_gp", (DL_FUNC) &_ratiod_cpp_hmc_fit_gp, 73},
-    {"_ratiod_cpp_hmc_simple", (DL_FUNC) &_ratiod_cpp_hmc_simple, 19},
     {"_ratiod_cpp_laplace_fit", (DL_FUNC) &_ratiod_cpp_laplace_fit, 11},
     {"_ratiod_cpp_laplace_get_max_threads", (DL_FUNC) &_ratiod_cpp_laplace_get_max_threads, 0},
     {"_ratiod_cpp_laplace_fit_spatial", (DL_FUNC) &_ratiod_cpp_laplace_fit_spatial, 17},
@@ -771,6 +1538,76 @@ static const R_CallMethodDef CallEntries[] = {
     {"_ratiod_cpp_pg_binomial_gibbs_rsr", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs_rsr, 21},
     {"_ratiod_cpp_rpg1", (DL_FUNC) &_ratiod_cpp_rpg1, 1},
     {"_ratiod_cpp_rpg", (DL_FUNC) &_ratiod_cpp_rpg, 2},
+    {"_ratiod_cpp_test_leapfrog", (DL_FUNC) &_ratiod_cpp_test_leapfrog, 4},
+    {"_ratiod_cpp_test_hamiltonian", (DL_FUNC) &_ratiod_cpp_test_hamiltonian, 2},
+    {"_ratiod_cpp_test_log_sum_exp", (DL_FUNC) &_ratiod_cpp_test_log_sum_exp, 1},
+    {"_ratiod_cpp_test_softmax", (DL_FUNC) &_ratiod_cpp_test_softmax, 1},
+    {"_ratiod_cpp_test_inv_logit", (DL_FUNC) &_ratiod_cpp_test_inv_logit, 1},
+    {"_ratiod_cpp_test_lgamma", (DL_FUNC) &_ratiod_cpp_test_lgamma, 1},
+    {"_ratiod_cpp_test_poisson_loglik", (DL_FUNC) &_ratiod_cpp_test_poisson_loglik, 2},
+    {"_ratiod_cpp_test_binomial_loglik", (DL_FUNC) &_ratiod_cpp_test_binomial_loglik, 3},
+    {"_ratiod_cpp_test_negbin_loglik", (DL_FUNC) &_ratiod_cpp_test_negbin_loglik, 3},
+    {"_ratiod_cpp_test_normal_loglik", (DL_FUNC) &_ratiod_cpp_test_normal_loglik, 3},
+    {"_ratiod_cpp_test_cholesky", (DL_FUNC) &_ratiod_cpp_test_cholesky, 1},
+    {"_ratiod_cpp_test_matvec", (DL_FUNC) &_ratiod_cpp_test_matvec, 2},
+    {"_ratiod_cpp_test_autodiff_gradient", (DL_FUNC) &_ratiod_cpp_test_autodiff_gradient, 1},
+    {"_ratiod_cpp_test_autodiff_exp_chain", (DL_FUNC) &_ratiod_cpp_test_autodiff_exp_chain, 1},
+    {"_ratiod_cpp_test_autodiff_log_likelihood", (DL_FUNC) &_ratiod_cpp_test_autodiff_log_likelihood, 2},
+    {"_ratiod_cpp_test_autodiff_division", (DL_FUNC) &_ratiod_cpp_test_autodiff_division, 2},
+    {"_ratiod_cpp_test_autodiff_lgamma", (DL_FUNC) &_ratiod_cpp_test_autodiff_lgamma, 1},
+    {"_ratiod_cpp_test_autodiff_softplus", (DL_FUNC) &_ratiod_cpp_test_autodiff_softplus, 1},
+    {"_ratiod_cpp_test_autodiff_inv_logit", (DL_FUNC) &_ratiod_cpp_test_autodiff_inv_logit, 1},
+    {"_ratiod_cpp_test_autodiff_log", (DL_FUNC) &_ratiod_cpp_test_autodiff_log, 1},
+    {"_ratiod_cpp_test_autodiff_sqrt", (DL_FUNC) &_ratiod_cpp_test_autodiff_sqrt, 1},
+    {"_ratiod_cpp_test_autodiff_pow", (DL_FUNC) &_ratiod_cpp_test_autodiff_pow, 2},
+    {"_ratiod_cpp_test_autodiff_log1p", (DL_FUNC) &_ratiod_cpp_test_autodiff_log1p, 1},
+    {"_ratiod_cpp_test_autodiff_log_sum_exp", (DL_FUNC) &_ratiod_cpp_test_autodiff_log_sum_exp, 2},
+    {"_ratiod_cpp_test_autodiff_logit", (DL_FUNC) &_ratiod_cpp_test_autodiff_logit, 1},
+    {"_ratiod_cpp_test_autodiff_negbin_loglik", (DL_FUNC) &_ratiod_cpp_test_autodiff_negbin_loglik, 3},
+    {"_ratiod_cpp_test_laplace_binomial", (DL_FUNC) &_ratiod_cpp_test_laplace_binomial, 3},
+    {"_ratiod_cpp_test_laplace_negbin", (DL_FUNC) &_ratiod_cpp_test_laplace_negbin, 3},
+    {"_ratiod_cpp_test_laplace_poisson", (DL_FUNC) &_ratiod_cpp_test_laplace_poisson, 2},
+    {"_ratiod_cpp_test_pg_update_beta", (DL_FUNC) &_ratiod_cpp_test_pg_update_beta, 5},
+    {"_ratiod_cpp_test_pg_update_re", (DL_FUNC) &_ratiod_cpp_test_pg_update_re, 6},
+    {"_ratiod_cpp_test_pg_update_sigma_re", (DL_FUNC) &_ratiod_cpp_test_pg_update_sigma_re, 2},
+    {"_ratiod_cpp_test_dot_product", (DL_FUNC) &_ratiod_cpp_test_dot_product, 2},
+    {"_ratiod_cpp_test_norm_squared", (DL_FUNC) &_ratiod_cpp_test_norm_squared, 1},
+    {"_ratiod_cpp_test_vector_sum", (DL_FUNC) &_ratiod_cpp_test_vector_sum, 1},
+    {"_ratiod_cpp_test_axpy", (DL_FUNC) &_ratiod_cpp_test_axpy, 3},
+    {"_ratiod_cpp_test_scale", (DL_FUNC) &_ratiod_cpp_test_scale, 2},
+    {"_ratiod_cpp_test_linalg_matvec", (DL_FUNC) &_ratiod_cpp_test_linalg_matvec, 2},
+    {"_ratiod_cpp_test_linalg_matvec_add", (DL_FUNC) &_ratiod_cpp_test_linalg_matvec_add, 3},
+    {"_ratiod_cpp_test_linalg_matvec_transpose", (DL_FUNC) &_ratiod_cpp_test_linalg_matvec_transpose, 2},
+    {"_ratiod_cpp_test_sparse_laplacian_quadform", (DL_FUNC) &_ratiod_cpp_test_sparse_laplacian_quadform, 3},
+    {"_ratiod_cpp_test_linalg_log_sum_exp", (DL_FUNC) &_ratiod_cpp_test_linalg_log_sum_exp, 2},
+    {"_ratiod_cpp_test_linalg_log_sum_exp_vec", (DL_FUNC) &_ratiod_cpp_test_linalg_log_sum_exp_vec, 1},
+    {"_ratiod_cpp_test_softmax_inplace", (DL_FUNC) &_ratiod_cpp_test_softmax_inplace, 1},
+    {"_ratiod_cpp_test_compute_linear_predictors", (DL_FUNC) &_ratiod_cpp_test_compute_linear_predictors, 5},
+    {"_ratiod_cpp_test_rw1_quadratic_form", (DL_FUNC) &_ratiod_cpp_test_rw1_quadratic_form, 2},
+    {"_ratiod_cpp_test_rw2_quadratic_form", (DL_FUNC) &_ratiod_cpp_test_rw2_quadratic_form, 2},
+    {"_ratiod_cpp_test_ar1_log_density", (DL_FUNC) &_ratiod_cpp_test_ar1_log_density, 3},
+    {"_ratiod_cpp_test_temporal_log_prior", (DL_FUNC) &_ratiod_cpp_test_temporal_log_prior, 5},
+    {"_ratiod_cpp_test_sum_to_zero_penalty", (DL_FUNC) &_ratiod_cpp_test_sum_to_zero_penalty, 2},
+    {"_ratiod_cpp_test_log1pexp", (DL_FUNC) &_ratiod_cpp_test_log1pexp, 1},
+    {"_ratiod_cpp_test_zi_logistic", (DL_FUNC) &_ratiod_cpp_test_zi_logistic, 1},
+    {"_ratiod_cpp_test_log_logistic", (DL_FUNC) &_ratiod_cpp_test_log_logistic, 1},
+    {"_ratiod_cpp_test_log1m_logistic", (DL_FUNC) &_ratiod_cpp_test_log1m_logistic, 1},
+    {"_ratiod_cpp_test_zi_poisson_lpmf", (DL_FUNC) &_ratiod_cpp_test_zi_poisson_lpmf, 2},
+    {"_ratiod_cpp_test_zi_negbin_lpmf", (DL_FUNC) &_ratiod_cpp_test_zi_negbin_lpmf, 3},
+    {"_ratiod_cpp_test_zi_poisson_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_zi_poisson_lpmf_logit, 3},
+    {"_ratiod_cpp_test_zi_negbin_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_zi_negbin_lpmf_logit, 4},
+    {"_ratiod_cpp_test_truncated_poisson_lpmf", (DL_FUNC) &_ratiod_cpp_test_truncated_poisson_lpmf, 2},
+    {"_ratiod_cpp_test_truncated_negbin_lpmf", (DL_FUNC) &_ratiod_cpp_test_truncated_negbin_lpmf, 3},
+    {"_ratiod_cpp_test_hurdle_poisson_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_hurdle_poisson_lpmf_logit, 3},
+    {"_ratiod_cpp_test_hurdle_negbin_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_hurdle_negbin_lpmf_logit, 4},
+    {"_ratiod_cpp_test_zi_log_likelihood", (DL_FUNC) &_ratiod_cpp_test_zi_log_likelihood, 5},
+    {"_ratiod_cpp_test_zi_poisson_grad_logit_zi", (DL_FUNC) &_ratiod_cpp_test_zi_poisson_grad_logit_zi, 3},
+    {"_ratiod_cpp_test_zi_negbin_grad_logit_zi", (DL_FUNC) &_ratiod_cpp_test_zi_negbin_grad_logit_zi, 4},
+    {"_ratiod_cpp_test_hurdle_grad_logit_theta", (DL_FUNC) &_ratiod_cpp_test_hurdle_grad_logit_theta, 2},
+    {"_ratiod_cpp_test_get_max_threads", (DL_FUNC) &_ratiod_cpp_test_get_max_threads, 0},
+    {"_ratiod_cpp_test_parallel_dot_products", (DL_FUNC) &_ratiod_cpp_test_parallel_dot_products, 3},
+    {"_ratiod_cpp_test_parallel_likelihood", (DL_FUNC) &_ratiod_cpp_test_parallel_likelihood, 3},
+    {"_ratiod_cpp_test_parallel_independent", (DL_FUNC) &_ratiod_cpp_test_parallel_independent, 2},
     {NULL, NULL, 0}
 };
 

@@ -5,9 +5,15 @@
 #ifndef RATIOD_HMC_SVC_H
 #define RATIOD_HMC_SVC_H
 
+#define _USE_MATH_DEFINES  // For M_PI on Windows
 #include <vector>
 #include <cmath>
 #include <algorithm>
+
+// Fallback definition of M_PI if not provided by <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 namespace ratiod_svc {
 

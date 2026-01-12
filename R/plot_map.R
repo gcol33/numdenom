@@ -442,8 +442,11 @@ get_palette_scale <- function(palette, na_color, legend_title, geom = "fill") {
   viridis_palettes <- c("viridis", "magma", "plasma", "inferno",
                         "cividis", "mako", "rocket", "turbo")
 
+  # Check for viridis palette (single string)
+  is_viridis <- length(palette) == 1 && palette %in% viridis_palettes
+
   if (geom == "fill") {
-    if (palette %in% viridis_palettes) {
+    if (is_viridis) {
       ggplot2::scale_fill_viridis_c(option = palette, na.value = na_color,
                                      name = legend_title)
     } else if (is.character(palette) && length(palette) > 1) {
@@ -453,7 +456,7 @@ get_palette_scale <- function(palette, na_color, legend_title, geom = "fill") {
       ggplot2::scale_fill_viridis_c(na.value = na_color, name = legend_title)
     }
   } else {
-    if (palette %in% viridis_palettes) {
+    if (is_viridis) {
       ggplot2::scale_color_viridis_c(option = palette, na.value = na_color,
                                       name = legend_title)
     } else if (is.character(palette) && length(palette) > 1) {

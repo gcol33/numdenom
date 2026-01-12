@@ -1,6 +1,6 @@
 Package: ratiod
 Title: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
-Version: 1.1.0
+Version: 1.2.0
 Authors@R:
     person("Gilles", "Colling", email = "gilles.colling051@gmail.com", role = c("aut", "cre", "cph"),
            comment = c(ORCID = "0000-0003-3070-6066"))
@@ -8,7 +8,8 @@ Description: An opinionated framework for Bayesian hierarchical modelling of
     ratios, rates, and proportions. Ratios are treated as derived quantities,
     with all inference performed on the latent processes generating the numerator
     and denominator. Supports shared random effects, latent factors for unmeasured
-    confounders, spatial structure ('CAR'/'BYM2'/'GP'), and full uncertainty
+    confounders, spatial structure ('CAR'/'BYM2'/'GP'), spatiotemporal interaction
+    (Knorr-Held Type I-IV), zero-inflation variants, and full uncertainty
     propagation to ratio posteriors. Provides multiple inference backends
     including custom 'HMC'/'NUTS' (default), 'Laplace' approximation,
     and 'Polya-Gamma' Gibbs sampling.

@@ -15,6 +15,7 @@
 #include "hmc_gp.h"
 #include "hmc_temporal_multiscale.h"
 #include "hmc_latent.h"
+#include "hmc_spatiotemporal.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -29,6 +30,9 @@ using ratiod_gp::GPData;
 using ratiod_gp::MultiscaleGPData;
 using ratiod_gp::CovType;
 using ratiod_temporal::MultiscaleTemporalData;
+using ratiod_spatiotemporal::STType;
+using ratiod_spatiotemporal::SpatiotemporalData;
+using ratiod_spatiotemporal::NonsepType;
 
 // =====================================================================
 // Model configuration
@@ -145,6 +149,16 @@ struct ModelData {
   int latent_constraint;                // 0 = sum_to_zero, 1 = first_zero
   double latent_sigma_prior_rate;       // Exponential rate for PC prior on sigma
 
+  // Spatiotemporal interaction
+  bool has_spatiotemporal;
+  SpatiotemporalData spatiotemporal_data;
+  double st_sigma2_prior_U;             // PC prior for interaction variance
+  double st_sigma2_prior_alpha;
+  double st_phi_space_prior_lower;      // Uniform bounds for spatial range
+  double st_phi_space_prior_upper;
+  double st_phi_time_prior_lower;       // Uniform bounds for temporal range
+  double st_phi_time_prior_upper;
+
   // Dimensions
   int N;
 
@@ -245,6 +259,14 @@ struct ParamLayout {
   int log_sigma_latent_start, log_sigma_latent_end;  // Log sigma per factor
   int latent_factor_start, latent_factor_end;        // Factor scores (N x K)
 
+  // Spatiotemporal interaction parameters
+  int log_tau_st_idx;                                // Log precision for ST interaction
+  int log_tau_st2_idx;                               // Second precision (Type IV)
+  int logit_rho_st_idx;                              // AR1 autocorrelation if ST temporal is AR1
+  int log_phi_st_space_idx;                          // Log spatial range (GP-based)
+  int log_phi_st_time_idx;                           // Log temporal range (GP-based)
+  int st_delta_start, st_delta_end;                  // ST interaction effects (S * T)
+
   int total_params;
 
   bool has_re;
@@ -260,6 +282,8 @@ struct ParamLayout {
   bool has_zi;
   bool has_svc;
   bool has_latent;
+  bool has_spatiotemporal;
+  bool is_st_gp;
 };
 
 ParamLayout compute_param_layout(const ModelData& data);

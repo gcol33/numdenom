@@ -57,11 +57,10 @@ NULL
 #'   site = factor(rep(1:10, each = n/10))
 #' )
 #'
-#' \donttest{
-#' # Fit model (slow, not run on CRAN)
+#' \dontrun{
+#' # Fit model (not run - ZI models require specialized backend support)
 #' fit <- ratiod(
 #'   count | total ~ habitat + (1 | site),
-#'   zi = ~ habitat,
 #'   data = df,
 #'   family = ratiod_zinegbin(),
 #'   iter = 200, warmup = 100, chains = 1
@@ -143,11 +142,10 @@ ratiod_zinegbin <- function(link_num = "log", link_denom = "log",
 #'   vessel = factor(rep(1:6, each = n/6))
 #' )
 #'
-#' \donttest{
-#' # Fit model (slow, not run on CRAN)
+#' \dontrun{
+#' # Fit model (not run - ZI models require specialized backend support)
 #' fit <- ratiod(
 #'   catch | effort ~ depth + (1 | vessel),
-#'   zi = ~ 1,
 #'   data = df,
 #'   family = ratiod_zipois(denom_family = "gamma"),
 #'   iter = 200, warmup = 100, chains = 1
@@ -244,11 +242,10 @@ ratiod_zipois <- function(link_num = "log", link_denom = "log",
 #'   site = factor(rep(1:10, each = n/10))
 #' )
 #'
-#' \donttest{
-#' # Fit model (slow, not run on CRAN)
+#' \dontrun{
+#' # Fit model (not run - hurdle models require specialized backend support)
 #' fit <- ratiod(
 #'   count | total ~ habitat + (1 | site),
-#'   zi = ~ habitat,
 #'   data = df,
 #'   family = ratiod_hurdle_negbin(),
 #'   iter = 200, warmup = 100, chains = 1
@@ -395,4 +392,236 @@ print.ratiod_family_zi <- function(x, ...) {
       "\n")
 
   invisible(x)
+}
+
+
+#' Zero-inflated binomial family
+#'
+#' @description
+#' Zero-inflated binomial for the numerator when modeling proportions
+#' with excess zeros (e.g., species detection/non-detection).
+#'
+#' \deqn{P(Y = 0) = \pi + (1 - \pi) \cdot (1-p)^n}
+#' \deqn{P(Y = y) = (1 - \pi) \cdot \binom{n}{y} p^y (1-p)^{n-y}, \quad y > 0}
+#'
+#' @param link_num Link function for success probability (default: "logit")
+#' @param link_zi Link function for zero-inflation probability (default: "logit")
+#'
+#' @return A `ratiod_family` object with zero-inflation
+#'
+#' @details
+#' Use this family when modeling proportions (successes/trials) where
+#' excess zeros occur beyond what binomial predicts. Common applications:
+#' - Species occupancy with false negatives
+#' - Survey data with non-response
+#' - Epidemiological data with under-reporting
+#'
+#' @examples
+#' # Create family object
+#' fam <- ratiod_zibinomial()
+#' print(fam)
+#'
+#' @seealso [ratiod_binomial()], [ratiod_zinegbin()]
+#'
+#' @export
+ratiod_zibinomial <- function(link_num = "logit", link_zi = "logit") {
+
+  validate_link(link_num, c("logit", "probit", "cloglog"))
+
+  validate_link(link_zi, c("logit", "probit", "cloglog"))
+
+  structure(
+    list(
+      name = "zibinomial",
+      numerator = list(
+        distribution = "zero_inflated_binomial",
+        base_distribution = "binomial",
+        link = link_num,
+        link_zi = link_zi
+      ),
+      denominator = list(
+        distribution = "fixed",
+        link = NULL
+      ),
+      zero_inflated = TRUE,
+      zi_type = "mixture",
+      description = "Zero-inflated binomial numerator, fixed trials denominator"
+    ),
+    class = c("ratiod_family_zi", "ratiod_family", "list")
+  )
+}
+
+
+#' One-inflated binomial family
+#'
+#' @description
+#' One-inflated binomial for proportions with excess ones (100% success).
+#' Useful when perfect detection/success has a structural component.
+#'
+#' \deqn{P(Y = n) = \psi + (1 - \psi) \cdot p^n}
+#' \deqn{P(Y = y) = (1 - \psi) \cdot \binom{n}{y} p^y (1-p)^{n-y}, \quad y < n}
+#'
+#' @param link_num Link function for success probability (default: "logit")
+#' @param link_oi Link function for one-inflation probability (default: "logit")
+#'
+#' @return A `ratiod_family` object with one-inflation
+#'
+#' @details
+#' Use this when excess 100% success rates occur due to:
+#' - Perfect detection in highly suitable habitat
+#' - Saturation effects
+#' - Structural constraints ensuring full success
+#'
+#' @examples
+#' # Create family object
+#' fam <- ratiod_oibinomial()
+#' print(fam)
+#'
+#' @export
+ratiod_oibinomial <- function(link_num = "logit", link_oi = "logit") {
+
+  validate_link(link_num, c("logit", "probit", "cloglog"))
+  validate_link(link_oi, c("logit", "probit", "cloglog"))
+
+  structure(
+    list(
+      name = "oibinomial",
+      numerator = list(
+        distribution = "one_inflated_binomial",
+        base_distribution = "binomial",
+        link = link_num,
+        link_oi = link_oi
+      ),
+      denominator = list(
+        distribution = "fixed",
+        link = NULL
+      ),
+      zero_inflated = FALSE,  # One-inflated, not zero-inflated
+      one_inflated = TRUE,
+      zi_type = "one_inflated",
+      description = "One-inflated binomial numerator, fixed trials denominator"
+    ),
+    class = c("ratiod_family_zi", "ratiod_family", "list")
+  )
+}
+
+
+#' Zero-and-one inflated binomial family
+#'
+#' @description
+#' Zero-and-one inflated binomial for proportions with excess zeros AND ones.
+#' Commonly needed in ecological applications where both absence (structural)
+#' and perfect detection (saturation) have distinct processes.
+#'
+#' @param link_num Link function for success probability (default: "logit")
+#' @param link_zi Link function for zero-inflation probability (default: "logit")
+#' @param link_oi Link function for one-inflation probability (default: "logit")
+#'
+#' @return A `ratiod_family` object with zero-and-one inflation
+#'
+#' @details
+#' The ZOIB (Zero-and-One Inflated Binomial) model has three components:
+#' 1. Zero process: P(structural zero) = pi_0
+#' 2. One process: P(structural one | not zero) = pi_1
+#' 3. Binomial process: P(Y=y | non-structural) follows binomial
+#'
+#' Use when both boundaries (0 and n) have excess observations.
+#'
+#' @examples
+#' # Create family object
+#' fam <- ratiod_zoibinomial()
+#' print(fam)
+#'
+#' @export
+ratiod_zoibinomial <- function(link_num = "logit", link_zi = "logit",
+                               link_oi = "logit") {
+
+  validate_link(link_num, c("logit", "probit", "cloglog"))
+  validate_link(link_zi, c("logit", "probit", "cloglog"))
+  validate_link(link_oi, c("logit", "probit", "cloglog"))
+
+  structure(
+    list(
+      name = "zoibinomial",
+      numerator = list(
+        distribution = "zero_one_inflated_binomial",
+        base_distribution = "binomial",
+        link = link_num,
+        link_zi = link_zi,
+        link_oi = link_oi
+      ),
+      denominator = list(
+        distribution = "fixed",
+        link = NULL
+      ),
+      zero_inflated = TRUE,
+      one_inflated = TRUE,
+      zi_type = "zoib",
+      description = "Zero-and-one inflated binomial, fixed trials denominator"
+    ),
+    class = c("ratiod_family_zi", "ratiod_family", "list")
+  )
+}
+
+
+#' Hurdle binomial family
+#'
+#' @description
+#' Hurdle model for binomial data where zero counts are modeled separately
+#' from positive counts using a truncated binomial.
+#'
+#' @param link_num Link function for success probability (default: "logit")
+#' @param link_hurdle Link function for hurdle (P(Y > 0)) (default: "logit")
+#'
+#' @return A `ratiod_family` object with hurdle structure
+#'
+#' @examples
+#' fam <- ratiod_hurdle_binomial()
+#' print(fam)
+#'
+#' @export
+ratiod_hurdle_binomial <- function(link_num = "logit", link_hurdle = "logit") {
+
+  validate_link(link_num, c("logit", "probit", "cloglog"))
+  validate_link(link_hurdle, c("logit", "probit", "cloglog"))
+
+  structure(
+    list(
+      name = "hurdle_binomial",
+      numerator = list(
+        distribution = "hurdle_binomial",
+        base_distribution = "binomial",
+        link = link_num,
+        link_hurdle = link_hurdle
+      ),
+      denominator = list(
+        distribution = "fixed",
+        link = NULL
+      ),
+      zero_inflated = TRUE,
+      zi_type = "hurdle",
+      description = "Hurdle binomial numerator, fixed trials denominator"
+    ),
+    class = c("ratiod_family_zi", "ratiod_family", "list")
+  )
+}
+
+
+#' Check if family is one-inflated
+#'
+#' @param family A ratiod_family object
+#' @return Logical
+#' @keywords internal
+is_oi_family <- function(family) {
+  isTRUE(family$one_inflated)
+}
+
+
+#' Check if family is ZOIB (zero-and-one inflated)
+#'
+#' @param family A ratiod_family object
+#' @return Logical
+#' @keywords internal
+is_zoib_family <- function(family) {
+  isTRUE(family$zero_inflated) && isTRUE(family$one_inflated)
 }

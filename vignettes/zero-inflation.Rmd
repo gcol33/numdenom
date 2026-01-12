@@ -1,0 +1,301 @@
+---
+title: "Zero-Inflation and Hurdle Models"
+author: "Gilles Colling"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Zero-Inflation and Hurdle Models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  eval = FALSE
+)
+```
+
+## Overview
+
+Ecological and survey data often exhibit excess zeros beyond what standard distributions predict. ratiod provides several families to handle this:
+
+**Zero-inflated models** assume zeros come from two sources:
+1. Structural zeros (species truly absent, observer non-response)
+2. Sampling zeros (from the count/binomial process)
+
+**Hurdle models** assume all zeros come from a single "hurdle" process, with positive counts from a truncated distribution.
+
+## Available Families
+
+### Count Data (Numerator)
+
+| Family | Base | ZI Type | Use Case |
+|--------|------|---------|----------|
+| `ratiod_zinegbin()` | Negative binomial | Mixture | Overdispersed counts with excess zeros |
+| `ratiod_zipois()` | Poisson | Mixture | Counts where overdispersion is from zeros only |
+| `ratiod_hurdle_negbin()` | Negative binomial | Hurdle | Presence/absence + abundance |
+| `ratiod_hurdle_pois()` | Poisson | Hurdle | Presence/absence + Poisson counts |
+
+### Proportion Data (Binomial Numerator)
+
+| Family | Base | ZI Type | Use Case |
+|--------|------|---------|----------|
+| `ratiod_zibinomial()` | Binomial | Zero-inflated | Excess zero success rates |
+| `ratiod_oibinomial()` | Binomial | One-inflated | Excess 100% success rates |
+| `ratiod_zoibinomial()` | Binomial | Zero-and-one | Excess at both boundaries |
+| `ratiod_hurdle_binomial()` | Binomial | Hurdle | Zero vs positive successes |
+
+
+## Zero-Inflated Binomial
+
+Use `ratiod_zibinomial()` when modeling proportions with excess zeros beyond what binomial predicts.
+
+### Example: Species Detection
+
+```{r}
+library(ratiod)
+
+# Simulate detection data with structural zeros
+set.seed(123)
+n <- 100
+zi_prob <- 0.3  # 30% structural zeros
+
+df <- data.frame(
+  detected = ifelse(
+    runif(n) < zi_prob,
+    0,  # Structural zero
+    rbinom(n, size = 10, prob = 0.4)  # Binomial detections
+  ),
+  trials = 10,
+  habitat = factor(rep(c("forest", "grassland"), each = n/2)),
+  site = factor(rep(1:10, each = n/10))
+)
+
+# Fit zero-inflated binomial
+fit_zi <- ratiod(
+  detected | trials ~ habitat + (1 | site),
+  zi = ~ habitat,  # Predictors for zero-inflation
+
+  data = df,
+  family = ratiod_zibinomial(),
+  iter = 2000, chains = 2
+)
+
+summary(fit_zi)
+```
+
+The `zi` argument specifies the linear predictor for the zero-inflation probability. Use `~ 1` for intercept-only or include covariates that predict structural zeros.
+
+
+## One-Inflated Binomial
+
+Use `ratiod_oibinomial()` when data has excess ones (100% success rates).
+
+### Example: Survey Completion
+
+```{r}
+# Survey completion data with some "always complete" respondents
+set.seed(456)
+n <- 80
+oi_prob <- 0.2  # 20% always complete all items
+
+df <- data.frame(
+  completed = ifelse(
+    runif(n) < oi_prob,
+    20,  # Structural one (all items completed)
+    rbinom(n, size = 20, prob = 0.7)
+  ),
+  total_items = 20,
+  age_group = factor(sample(c("young", "middle", "old"), n, replace = TRUE)),
+  education = rnorm(n)
+)
+
+# Fit one-inflated binomial
+fit_oi <- ratiod(
+  completed | total_items ~ age_group + education,
+  oi = ~ age_group,  # Predictors for one-inflation
+  data = df,
+  family = ratiod_oibinomial(),
+  iter = 2000, chains = 2
+)
+
+summary(fit_oi)
+```
+
+
+## Zero-and-One Inflated Binomial (ZOIB)
+
+Use `ratiod_zoibinomial()` when data has excess at both boundaries.
+
+### Example: Vegetation Cover
+
+Vegetation cover data often has structural zeros (no vegetation) and structural ones (complete cover).
+
+```{r}
+set.seed(789)
+n <- 120
+zi_prob <- 0.15  # 15% bare ground
+oi_prob <- 0.10  # 10% complete cover (given not bare)
+
+df <- data.frame(
+  cover_points = sapply(1:n, function(i) {
+    if (runif(1) < zi_prob) {
+      0  # Structural zero
+    } else if (runif(1) < oi_prob) {
+      100  # Structural one
+    } else {
+      rbinom(1, size = 100, prob = 0.5)
+    }
+  }),
+  total_points = 100,
+  elevation = rnorm(n, 1000, 200),
+  aspect = factor(sample(c("N", "S", "E", "W"), n, replace = TRUE))
+)
+
+# Fit ZOIB model
+fit_zoib <- ratiod(
+  cover_points | total_points ~ elevation + aspect,
+  zi = ~ elevation,    # Zero-inflation predictors
+  oi = ~ elevation,    # One-inflation predictors
+  data = df,
+  family = ratiod_zoibinomial(),
+  iter = 2000, chains = 2
+)
+
+summary(fit_zoib)
+```
+
+
+## Hurdle Binomial
+
+Use `ratiod_hurdle_binomial()` when zeros represent a distinct process from positive counts.
+
+### Example: Occupancy with Detection
+
+```{r}
+set.seed(321)
+n <- 100
+occupancy_prob <- 0.7  # Probability of presence
+
+df <- data.frame(
+  detections = ifelse(
+    runif(n) > occupancy_prob,
+    0,  # Absent
+    1 + rbinom(n, size = 4, prob = 0.6)  # Present and detected 1-5 times
+  ),
+  visits = 5,
+  habitat_quality = rnorm(n),
+  site = factor(rep(1:20, each = 5))
+)
+
+# Fit hurdle binomial
+fit_hurdle <- ratiod(
+  detections | visits ~ habitat_quality + (1 | site),
+  zi = ~ habitat_quality,  # Predictors for hurdle (presence)
+  data = df,
+  family = ratiod_hurdle_binomial(),
+  iter = 2000, chains = 2
+)
+
+summary(fit_hurdle)
+```
+
+
+## Zero-Inflated Count Models
+
+For count numerators with continuous denominators (CPUE-type data):
+
+```{r}
+# Zero-inflated CPUE data
+set.seed(111)
+n <- 80
+zi_prob <- 0.25
+
+df <- data.frame(
+  catch = ifelse(
+    runif(n) < zi_prob,
+    0,
+    rnbinom(n, size = 3, mu = 8)
+  ),
+  effort = rgamma(n, shape = 4, rate = 1),
+  depth = rnorm(n),
+  season = factor(rep(c("spring", "summer"), each = n/2)),
+  vessel = factor(rep(1:8, each = n/8))
+)
+
+# Zero-inflated negative binomial with gamma denominator
+fit_zi_cpue <- ratiod(
+  catch | effort ~ depth + season + (1 | vessel),
+  zi = ~ season,
+  data = df,
+  family = ratiod_zinegbin(denom_family = "gamma"),
+  iter = 2000, chains = 2
+)
+
+summary(fit_zi_cpue)
+```
+
+
+## Choosing Between Models
+
+| Scenario | Recommended Family |
+|----------|-------------------|
+| Zeros from mixed sources (structural + sampling) | `ratiod_zi*()` |
+| All zeros from single process (presence/absence) | `ratiod_hurdle_*()` |
+| Excess at 0 only | `ratiod_zibinomial()` |
+| Excess at 1 (100%) only | `ratiod_oibinomial()` |
+| Excess at both 0 and 1 | `ratiod_zoibinomial()` |
+| Overdispersion primarily from zeros | `ratiod_zipois()` |
+| Overdispersion in zeros AND positive counts | `ratiod_zinegbin()` |
+
+
+## Model Comparison
+
+Compare ZI and non-ZI models using LOO-CV:
+
+```{r}
+# Fit standard model
+fit_standard <- ratiod(
+  detected | trials ~ habitat + (1 | site),
+  data = df,
+  family = ratiod_binomial(),
+  iter = 2000, chains = 2
+)
+
+# Fit zero-inflated model
+fit_zi <- ratiod(
+  detected | trials ~ habitat + (1 | site),
+  zi = ~ 1,
+  data = df,
+  family = ratiod_zibinomial(),
+  iter = 2000, chains = 2
+)
+
+# Compare
+loo_standard <- loo(fit_standard)
+loo_zi <- loo(fit_zi)
+loo_compare(loo_standard, loo_zi)
+```
+
+
+## Posterior Predictive Checks
+
+Validate ZI models with posterior predictive checks:
+```{r}
+# Check proportion of zeros
+pp_check(fit_zi, type = "stat", stat = function(y) mean(y == 0))
+
+# Check distribution
+pp_check(fit_zi, type = "dens_overlay")
+```
+
+
+## See Also
+
+- `vignette("getting-started")` - Basic usage
+- `vignette("spatial-temporal")` - Spatial and temporal models
+- `?ratiod_zibinomial`, `?ratiod_zoibinomial` - Function documentation

@@ -17,3 +17,6 @@
 ^PLAN_BACKEND_PARITY\.md$
 ^\.claude$
 ^cran-comments\.md$
+^src/tests$
+^TODO\.md$
+^cov_script\.R$

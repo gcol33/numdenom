@@ -5,8 +5,14 @@
 #ifndef QUOTR_HMC_TEMPORAL_H
 #define QUOTR_HMC_TEMPORAL_H
 
+#define _USE_MATH_DEFINES  // For M_PI on Windows
 #include <vector>
 #include <cmath>
+
+// Fallback definition of M_PI if not provided by <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 namespace ratiod_temporal {
 
@@ -159,6 +165,14 @@ inline double temporal_log_prior(
   } else if (type == TemporalType::AR1) {
     // AR1: proper prior
     log_prior += ar1_log_density(phi, T, rho, tau);
+
+  } else if (type == TemporalType::IID) {
+    // IID N(0, 1/tau): sum of independent normal log-densities
+    double sigma2 = 1.0 / tau;
+    double log_norm = -0.5 * std::log(2.0 * M_PI * sigma2);
+    for (int t = 0; t < T; t++) {
+      log_prior += log_norm - 0.5 * phi[t] * phi[t] / sigma2;
+    }
   }
 
   return log_prior;

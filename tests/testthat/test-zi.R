@@ -155,3 +155,92 @@ test_that("is_hurdle_family correctly identifies hurdle families", {
   expect_true(ratiod:::is_hurdle_family(ratiod_hurdle_pois()))
   expect_false(ratiod:::is_hurdle_family(ratiod_zinegbin()))
 })
+
+
+# ============================================================================
+# Tests for new ZI variants (v1.2.0)
+# ============================================================================
+
+test_that("ratiod_zibinomial creates correct structure", {
+  fam <- ratiod_zibinomial()
+
+  expect_s3_class(fam, "ratiod_family_zi")
+  expect_equal(fam$name, "zibinomial")
+  expect_true(fam$zero_inflated)
+  expect_equal(fam$zi_type, "mixture")
+  expect_equal(fam$numerator$base_distribution, "binomial")
+  expect_equal(fam$numerator$link, "logit")
+})
+
+
+test_that("ratiod_zibinomial accepts different links", {
+  fam <- ratiod_zibinomial(link_num = "probit", link_zi = "cloglog")
+
+  expect_equal(fam$numerator$link, "probit")
+  expect_equal(fam$numerator$link_zi, "cloglog")
+})
+
+
+test_that("ratiod_oibinomial creates one-inflated structure", {
+  fam <- ratiod_oibinomial()
+
+  expect_s3_class(fam, "ratiod_family_zi")
+  expect_equal(fam$name, "oibinomial")
+  expect_false(fam$zero_inflated)
+  expect_true(fam$one_inflated)
+  expect_equal(fam$zi_type, "one_inflated")
+})
+
+
+test_that("ratiod_zoibinomial creates ZOIB structure", {
+  fam <- ratiod_zoibinomial()
+
+  expect_s3_class(fam, "ratiod_family_zi")
+  expect_equal(fam$name, "zoibinomial")
+  expect_true(fam$zero_inflated)
+  expect_true(fam$one_inflated)
+  expect_equal(fam$zi_type, "zoib")
+  expect_true(!is.null(fam$numerator$link_zi))
+  expect_true(!is.null(fam$numerator$link_oi))
+})
+
+
+test_that("ratiod_hurdle_binomial creates correct structure", {
+  fam <- ratiod_hurdle_binomial()
+
+  expect_s3_class(fam, "ratiod_family_zi")
+  expect_equal(fam$name, "hurdle_binomial")
+  expect_true(fam$zero_inflated)
+  expect_equal(fam$zi_type, "hurdle")
+  expect_equal(fam$numerator$base_distribution, "binomial")
+})
+
+
+test_that("is_oi_family identifies one-inflated families", {
+  expect_true(ratiod:::is_oi_family(ratiod_oibinomial()))
+  expect_true(ratiod:::is_oi_family(ratiod_zoibinomial()))
+  expect_false(ratiod:::is_oi_family(ratiod_zinegbin()))
+  expect_false(ratiod:::is_oi_family(ratiod_zibinomial()))
+})
+
+
+test_that("is_zoib_family identifies ZOIB families", {
+  expect_true(ratiod:::is_zoib_family(ratiod_zoibinomial()))
+  expect_false(ratiod:::is_zoib_family(ratiod_oibinomial()))
+  expect_false(ratiod:::is_zoib_family(ratiod_zibinomial()))
+})
+
+
+test_that("print works for new ZI families", {
+  fam <- ratiod_zoibinomial()
+  output <- capture.output(print(fam))
+  expect_true(any(grepl("zoibinomial", output)))
+})
+
+
+test_that("all ZI families validate link functions", {
+  expect_error(ratiod_zibinomial(link_num = "invalid"))
+  expect_error(ratiod_oibinomial(link_oi = "invalid"))
+  expect_error(ratiod_zoibinomial(link_zi = "identity"))
+  expect_error(ratiod_hurdle_binomial(link_hurdle = "log"))
+})

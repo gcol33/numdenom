@@ -64,6 +64,7 @@ fit_hmc <- function(formula,
                     family,
                     spatial = NULL,
                     temporal = NULL,
+                    spatiotemporal = NULL,
                     zi = NULL,
                     latent = NULL,
                     priors = NULL,
@@ -110,6 +111,9 @@ fit_hmc <- function(formula,
 
   # Prepare latent factor structure
   latent_info <- prepare_latent_for_hmc(latent, hmc_data$N)
+
+  # Prepare spatiotemporal structure
+  spatiotemporal_info <- prepare_spatiotemporal_for_hmc(spatiotemporal, data)
 
   # Get prior parameters
   priors <- priors %||% ratiod_priors()
@@ -246,6 +250,24 @@ fit_hmc <- function(formula,
     latent_scale = latent_info$scale %||% TRUE,
     latent_constraint = as.integer(ifelse(latent_info$constraint == "sum_to_zero", 0L, 1L)),
     latent_sigma_prior_rate = latent_info$sigma_prior_rate,
+    # Spatiotemporal interaction (bundled as list to stay under .Call 65-arg limit)
+    st_params = list(
+      has_spatiotemporal = spatiotemporal_info$has_spatiotemporal %||% FALSE,
+      type = spatiotemporal_info$type %||% "none",
+      shared = spatiotemporal_info$shared %||% TRUE,
+      n_spatial = as.integer(spatiotemporal_info$n_spatial %||% 0L),
+      n_times = as.integer(spatiotemporal_info$n_times %||% 0L),
+      n_params = as.integer(spatiotemporal_info$n_params %||% 0L),
+      s_idx = as.integer(spatiotemporal_info$s_idx %||% integer(0)),
+      t_idx = as.integer(spatiotemporal_info$t_idx %||% integer(0)),
+      st_flat = as.integer(spatiotemporal_info$st_flat %||% integer(0)),
+      temporal_type = spatiotemporal_info$temporal_type %||% "rw1",
+      temporal_cyclic = spatiotemporal_info$temporal_cyclic %||% FALSE,
+      adj_row_ptr = as.integer(spatiotemporal_info$spatial_Q$adj_row_ptr %||% integer(0)),
+      adj_col_idx = as.integer(spatiotemporal_info$spatial_Q$adj_col_idx %||% integer(0)),
+      sigma2_prior_U = priors$st_sigma2_prior_U %||% 1.0,
+      sigma2_prior_alpha = priors$st_sigma2_prior_alpha %||% 0.01
+    ),
     # Sampler
     n_iter = as.integer(iter),
     n_warmup = as.integer(warmup),
@@ -262,6 +284,7 @@ fit_hmc <- function(formula,
     hmc_data = hmc_data,
     spatial_info = spatial_info,
     temporal_info = temporal_info,
+    spatiotemporal_info = spatiotemporal_info,
     zi_info = zi_info,
     latent_info = latent_info,
     formula = formula,
@@ -529,11 +552,17 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     ))
   }
 
-  # Extract spatial type
-  spatial_type <- if (inherits(spatial, "ratiod_spatial_bym2")) {
+  # Extract spatial type - check $type attribute or class
+  spatial_type <- if (inherits(spatial, "ratiod_gp")) {
+    "gp"
+  } else if (inherits(spatial, "ratiod_svc")) {
+    "svc"
+  } else if (inherits(spatial, "ratiod_spatial_bym2") ||
+             (!is.null(spatial$type) && spatial$type == "bym2")) {
     "bym2"
   } else if (inherits(spatial, "ratiod_spatial_car") ||
-             inherits(spatial, "ratiod_spatial_icar")) {
+             inherits(spatial, "ratiod_spatial_icar") ||
+             (!is.null(spatial$type) && spatial$type %in% c("car", "car_proper"))) {
     "icar"
   } else {
     stop("Unknown spatial structure type")
@@ -628,7 +657,9 @@ initialize_hmc_params_spatial <- function(hmc_data, model_type, spatial_info) {
 #' @keywords internal
 convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
                                               formula, data, family,
-                                              model_type, iter, warmup, chains) {
+                                              model_type, iter, warmup, chains,
+                                              temporal_info = NULL,
+                                              spatiotemporal_info = NULL) {
   # Handle multi-chain case
   if (chains > 1) {
     # Combine chains
@@ -671,6 +702,8 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
     data = data,
     family = family,
     spatial = spatial_info,
+    temporal = temporal_info,
+    spatiotemporal = spatiotemporal_info,
     backend = "hmc",
     algorithm = "HMC",
     iter = iter,
@@ -1060,7 +1093,9 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 #' Convert HMC output to ratiod_fit (full feature support)
 #' @keywords internal
 convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
-                                           temporal_info, zi_info,
+                                           temporal_info,
+                                           spatiotemporal_info = NULL,
+                                           zi_info,
                                            latent_info = NULL,
                                            formula, data, family,
                                            model_type, iter, warmup, chains) {
@@ -1124,6 +1159,7 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     family = family,
     spatial = spatial_info,
     temporal = temporal_info,
+    spatiotemporal = spatiotemporal_info,
     zi = zi_info,
     latent = latent_info,
     backend = "hmc",

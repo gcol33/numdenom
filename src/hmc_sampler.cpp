@@ -344,6 +344,52 @@ ParamLayout compute_param_layout(const ModelData& data) {
     layout.latent_factor_start = layout.latent_factor_end = -1;
   }
 
+  // Spatiotemporal interaction
+  layout.has_spatiotemporal = data.has_spatiotemporal;
+  layout.is_st_gp = (data.has_spatiotemporal &&
+                     (data.spatiotemporal_data.type == STType::SEPARABLE ||
+                      data.spatiotemporal_data.type == STType::NONSEP_GP));
+
+  if (layout.has_spatiotemporal && data.spatiotemporal_data.type != STType::NONE) {
+    // log_tau for interaction precision
+    layout.log_tau_st_idx = idx++;
+
+    // Second precision for Type IV (Kronecker)
+    if (data.spatiotemporal_data.type == STType::TYPE_IV) {
+      layout.log_tau_st2_idx = idx++;
+    } else {
+      layout.log_tau_st2_idx = -1;
+    }
+
+    // AR1 rho if temporal uses AR1
+    if (data.spatiotemporal_data.temporal_type == TemporalType::AR1) {
+      layout.logit_rho_st_idx = idx++;
+    } else {
+      layout.logit_rho_st_idx = -1;
+    }
+
+    // GP range parameters (for separable/non-separable GP)
+    if (layout.is_st_gp) {
+      layout.log_phi_st_space_idx = idx++;
+      layout.log_phi_st_time_idx = idx++;
+    } else {
+      layout.log_phi_st_space_idx = -1;
+      layout.log_phi_st_time_idx = -1;
+    }
+
+    // Spatiotemporal interaction effects
+    layout.st_delta_start = idx;
+    idx += data.spatiotemporal_data.n_params;
+    layout.st_delta_end = idx;
+  } else {
+    layout.log_tau_st_idx = -1;
+    layout.log_tau_st2_idx = -1;
+    layout.logit_rho_st_idx = -1;
+    layout.log_phi_st_space_idx = -1;
+    layout.log_phi_st_time_idx = -1;
+    layout.st_delta_start = layout.st_delta_end = -1;
+  }
+
   layout.total_params = idx;
   return layout;
 }
@@ -948,6 +994,80 @@ double compute_log_post(
     log_post += ratiod_latent::latent_factor_log_prior(latent_factors_vec, N, K, constraint);
   }
 
+  // Spatiotemporal interaction priors
+  double tau_st = 1.0, tau_st2 = 1.0, rho_st = 0.0;
+  double phi_st_space = 1.0, phi_st_time = 1.0;
+  const double* st_delta = nullptr;
+
+  if (layout.has_spatiotemporal && data.spatiotemporal_data.type != STType::NONE) {
+    // Extract precision parameter
+    double log_tau_st = params[layout.log_tau_st_idx];
+    tau_st = std::exp(log_tau_st);
+
+    // PC prior on tau (exponential on sigma = 1/sqrt(tau))
+    double sigma_st = 1.0 / std::sqrt(tau_st);
+    double lambda = -std::log(data.st_sigma2_prior_alpha) / data.st_sigma2_prior_U;
+    log_post += std::log(lambda) - lambda * sigma_st - std::log(2.0 * sigma_st);
+    log_post += log_tau_st;  // Jacobian for log transform
+
+    // Second precision for Type IV
+    if (layout.log_tau_st2_idx >= 0) {
+      double log_tau_st2 = params[layout.log_tau_st2_idx];
+      tau_st2 = std::exp(log_tau_st2);
+
+      // PC prior on tau2
+      double sigma_st2 = 1.0 / std::sqrt(tau_st2);
+      log_post += std::log(lambda) - lambda * sigma_st2 - std::log(2.0 * sigma_st2);
+      log_post += log_tau_st2;  // Jacobian
+    }
+
+    // AR1 rho parameter
+    if (layout.logit_rho_st_idx >= 0) {
+      double logit_rho_st = params[layout.logit_rho_st_idx];
+      rho_st = 2.0 / (1.0 + std::exp(-logit_rho_st)) - 1.0;  // Map to (-1, 1)
+
+      // Uniform(-1, 1) prior on rho
+      // Jacobian for logit((rho+1)/2) transform
+      double x = (rho_st + 1.0) / 2.0;
+      log_post += std::log(x) + std::log(1.0 - x);
+    }
+
+    // GP range parameters
+    if (layout.is_st_gp) {
+      double log_phi_space = params[layout.log_phi_st_space_idx];
+      double log_phi_time = params[layout.log_phi_st_time_idx];
+      phi_st_space = std::exp(log_phi_space);
+      phi_st_time = std::exp(log_phi_time);
+
+      // Uniform prior within bounds
+      if (phi_st_space < data.st_phi_space_prior_lower ||
+          phi_st_space > data.st_phi_space_prior_upper) {
+        return -std::numeric_limits<double>::infinity();
+      }
+      if (phi_st_time < data.st_phi_time_prior_lower ||
+          phi_st_time > data.st_phi_time_prior_upper) {
+        return -std::numeric_limits<double>::infinity();
+      }
+      log_post += log_phi_space + log_phi_time;  // Jacobians
+    }
+
+    // Spatiotemporal interaction effects
+    st_delta = &params[layout.st_delta_start];
+
+    // Apply spatiotemporal log-prior from hmc_spatiotemporal.h
+    log_post += ratiod_spatiotemporal::spatiotemporal_log_prior(
+      st_delta, tau_st, tau_st2, rho_st, phi_st_space, phi_st_time,
+      data.spatiotemporal_data
+    );
+
+    // Soft sum-to-zero constraint for identifiability
+    int S = data.spatiotemporal_data.n_spatial;
+    int T = data.spatiotemporal_data.n_times;
+    log_post += ratiod_spatiotemporal::st_sum_to_zero_penalty(
+      st_delta, S, T, 0.001, true, true
+    );
+  }
+
   // ============ LIKELIHOOD (parallelized) ============
 
   double log_lik = 0.0;
@@ -1125,6 +1245,22 @@ double compute_log_post(
         eta_denom += latent_effect;
       } else {
         eta_num += latent_effect;
+      }
+    }
+
+    // Add spatiotemporal interaction effect
+    if (layout.has_spatiotemporal && st_delta != nullptr) {
+      // Get spatiotemporal index for this observation
+      int st_idx = data.spatiotemporal_data.st_flat[i];
+      if (st_idx > 0) {
+        double st_effect = st_delta[st_idx - 1];  // Convert to 0-based
+
+        if (data.spatiotemporal_data.shared) {
+          eta_num += st_effect;
+          eta_denom += st_effect;
+        } else {
+          eta_num += st_effect;
+        }
       }
     }
 
@@ -1593,6 +1729,7 @@ Rcpp::List cpp_hmc_fit(
     bool latent_scale,
     int latent_constraint,
     double latent_sigma_prior_rate,
+    Rcpp::List st_params,
     int n_iter,
     int n_warmup,
     int L,
@@ -1787,6 +1924,76 @@ Rcpp::List cpp_hmc_fit(
   data.latent_scale = latent_scale;
   data.latent_constraint = latent_constraint;
   data.latent_sigma_prior_rate = latent_sigma_prior_rate;
+
+  // Spatiotemporal interaction - extract from list
+  bool has_spatiotemporal = st_params.size() > 0 && Rcpp::as<bool>(st_params["has_spatiotemporal"]);
+  data.has_spatiotemporal = has_spatiotemporal;
+  if (has_spatiotemporal) {
+    // Extract parameters from list
+    std::string st_type_str = Rcpp::as<std::string>(st_params["type"]);
+    bool st_shared = Rcpp::as<bool>(st_params["shared"]);
+    int st_n_spatial = Rcpp::as<int>(st_params["n_spatial"]);
+    int st_n_times = Rcpp::as<int>(st_params["n_times"]);
+    int st_n_params = Rcpp::as<int>(st_params["n_params"]);
+    Rcpp::IntegerVector st_s_idx = st_params["s_idx"];
+    Rcpp::IntegerVector st_t_idx = st_params["t_idx"];
+    Rcpp::IntegerVector st_flat = st_params["st_flat"];
+    std::string st_temporal_type_str = Rcpp::as<std::string>(st_params["temporal_type"]);
+    bool st_temporal_cyclic = Rcpp::as<bool>(st_params["temporal_cyclic"]);
+    Rcpp::IntegerVector st_adj_row_ptr = st_params["adj_row_ptr"];
+    Rcpp::IntegerVector st_adj_col_idx = st_params["adj_col_idx"];
+    double st_sigma2_prior_U = Rcpp::as<double>(st_params["sigma2_prior_U"]);
+    double st_sigma2_prior_alpha = Rcpp::as<double>(st_params["sigma2_prior_alpha"]);
+
+    // Parse ST type
+    if (st_type_str == "type_i") {
+      data.spatiotemporal_data.type = STType::TYPE_I;
+    } else if (st_type_str == "type_ii") {
+      data.spatiotemporal_data.type = STType::TYPE_II;
+    } else if (st_type_str == "type_iii") {
+      data.spatiotemporal_data.type = STType::TYPE_III;
+    } else if (st_type_str == "type_iv") {
+      data.spatiotemporal_data.type = STType::TYPE_IV;
+    } else if (st_type_str == "separable") {
+      data.spatiotemporal_data.type = STType::SEPARABLE;
+    } else if (st_type_str == "nonsep_gp") {
+      data.spatiotemporal_data.type = STType::NONSEP_GP;
+    } else {
+      data.spatiotemporal_data.type = STType::NONE;
+    }
+
+    data.spatiotemporal_data.shared = st_shared;
+    data.spatiotemporal_data.n_spatial = st_n_spatial;
+    data.spatiotemporal_data.n_times = st_n_times;
+    data.spatiotemporal_data.n_params = st_n_params;
+
+    // Observation indexing
+    data.spatiotemporal_data.s_idx = std::vector<int>(st_s_idx.begin(), st_s_idx.end());
+    data.spatiotemporal_data.t_idx = std::vector<int>(st_t_idx.begin(), st_t_idx.end());
+    data.spatiotemporal_data.st_flat = std::vector<int>(st_flat.begin(), st_flat.end());
+
+    // Temporal type for Type II/IV
+    if (st_temporal_type_str == "rw1") {
+      data.spatiotemporal_data.temporal_type = TemporalType::RW1;
+    } else if (st_temporal_type_str == "rw2") {
+      data.spatiotemporal_data.temporal_type = TemporalType::RW2;
+    } else if (st_temporal_type_str == "ar1") {
+      data.spatiotemporal_data.temporal_type = TemporalType::AR1;
+    } else {
+      data.spatiotemporal_data.temporal_type = TemporalType::RW1;  // Default
+    }
+    data.spatiotemporal_data.temporal_cyclic = st_temporal_cyclic;
+
+    // Spatial adjacency for Type III/IV
+    data.spatiotemporal_data.adj_row_ptr = std::vector<int>(st_adj_row_ptr.begin(), st_adj_row_ptr.end());
+    data.spatiotemporal_data.adj_col_idx = std::vector<int>(st_adj_col_idx.begin(), st_adj_col_idx.end());
+
+    // Prior parameters
+    data.st_sigma2_prior_U = st_sigma2_prior_U;
+    data.st_sigma2_prior_alpha = st_sigma2_prior_alpha;
+  } else {
+    data.spatiotemporal_data.type = STType::NONE;
+  }
 
   // Initialize parameters
   std::vector<double> q0(q_init.begin(), q_init.end());

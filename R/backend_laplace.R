@@ -168,7 +168,7 @@ fit_laplace <- function(formula,
 get_laplace_family <- function(family) {
   dist <- family$numerator$distribution
   if (dist == "binomial") return("binomial")
-  if (dist == "negbin" || dist == "negative_binomial") return("negbin")
+  if (dist %in% c("negbin", "negative_binomial", "neg_binomial_2")) return("negbin")
   if (dist == "poisson") return("poisson")
   stop("Unsupported family for Laplace backend: ", dist)
 }
@@ -696,10 +696,10 @@ prepare_spatial_for_laplace <- function(spatial, data, formula) {
   group_idx <- as.integer(group_factor)
   n_units <- nlevels(group_factor)
 
-  # Get adjacency structure
-  adj_matrix <- spatial$adj_matrix
+  # Get adjacency structure (may be stored as adj_matrix or adjacency)
+  adj_matrix <- spatial$adj_matrix %||% spatial$adjacency
   if (is.null(adj_matrix)) {
-    stop("Spatial structure must include adj_matrix")
+    stop("Spatial structure must include adj_matrix or adjacency")
   }
 
   # Convert adjacency matrix to CSR format

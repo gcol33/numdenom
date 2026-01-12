@@ -176,6 +176,14 @@ test_that("HMC with temporal RW1 runs", {
     latent_scale = TRUE,
     latent_constraint = 0L,
     latent_sigma_prior_rate = 0.0,
+    st_params = list(
+      has_spatiotemporal = FALSE, type = "none", shared = TRUE,
+      n_spatial = 0L, n_times = 0L, n_params = 0L,
+      s_idx = integer(0), t_idx = integer(0), st_flat = integer(0),
+      temporal_type = "rw1", temporal_cyclic = FALSE,
+      adj_row_ptr = integer(0), adj_col_idx = integer(0),
+      sigma2_prior_U = 1.0, sigma2_prior_alpha = 0.01
+    ),
     n_iter = 800L,
     n_warmup = 400L,
     L = 10L,
@@ -278,6 +286,14 @@ test_that("HMC with temporal AR1 runs", {
     latent_scale = TRUE,
     latent_constraint = 0L,
     latent_sigma_prior_rate = 0.0,
+    st_params = list(
+      has_spatiotemporal = FALSE, type = "none", shared = TRUE,
+      n_spatial = 0L, n_times = 0L, n_params = 0L,
+      s_idx = integer(0), t_idx = integer(0), st_flat = integer(0),
+      temporal_type = "rw1", temporal_cyclic = FALSE,
+      adj_row_ptr = integer(0), adj_col_idx = integer(0),
+      sigma2_prior_U = 1.0, sigma2_prior_alpha = 0.01
+    ),
     n_iter = 800L,
     n_warmup = 400L,
     L = 10L,
@@ -372,6 +388,14 @@ test_that("HMC with cyclic RW1 (seasonal) runs", {
     latent_scale = TRUE,
     latent_constraint = 0L,
     latent_sigma_prior_rate = 0.0,
+    st_params = list(
+      has_spatiotemporal = FALSE, type = "none", shared = TRUE,
+      n_spatial = 0L, n_times = 0L, n_params = 0L,
+      s_idx = integer(0), t_idx = integer(0), st_flat = integer(0),
+      temporal_type = "rw1", temporal_cyclic = FALSE,
+      adj_row_ptr = integer(0), adj_col_idx = integer(0),
+      sigma2_prior_U = 1.0, sigma2_prior_alpha = 0.01
+    ),
     n_iter = 600L,
     n_warmup = 300L,
     L = 10L,
@@ -471,6 +495,14 @@ test_that("HMC with panel temporal (group-specific) runs", {
     latent_scale = TRUE,
     latent_constraint = 0L,
     latent_sigma_prior_rate = 0.0,
+    st_params = list(
+      has_spatiotemporal = FALSE, type = "none", shared = TRUE,
+      n_spatial = 0L, n_times = 0L, n_params = 0L,
+      s_idx = integer(0), t_idx = integer(0), st_flat = integer(0),
+      temporal_type = "rw1", temporal_cyclic = FALSE,
+      adj_row_ptr = integer(0), adj_col_idx = integer(0),
+      sigma2_prior_U = 1.0, sigma2_prior_alpha = 0.01
+    ),
     n_iter = 600L,
     n_warmup = 300L,
     L = 10L,
@@ -559,6 +591,14 @@ test_that("HMC with temporal runs multiple chains in parallel", {
     latent_scale = TRUE,
     latent_constraint = 0L,
     latent_sigma_prior_rate = 0.0,
+    st_params = list(
+      has_spatiotemporal = FALSE, type = "none", shared = TRUE,
+      n_spatial = 0L, n_times = 0L, n_params = 0L,
+      s_idx = integer(0), t_idx = integer(0), st_flat = integer(0),
+      temporal_type = "rw1", temporal_cyclic = FALSE,
+      adj_row_ptr = integer(0), adj_col_idx = integer(0),
+      sigma2_prior_U = 1.0, sigma2_prior_alpha = 0.01
+    ),
     n_iter = 400L,
     n_warmup = 200L,
     L = 10L,

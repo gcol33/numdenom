@@ -523,10 +523,14 @@ get_predictions <- function(model, newdata, type, summary) {
     }
   } else if (type == "numerator") {
     pred <- model$draws$mu_num
-    if (is.null(pred)) pred <- exp(model$draws$eta_num)
+    if (is.null(pred) && !is.null(model$draws$eta_num)) {
+      pred <- exp(model$draws$eta_num)
+    }
   } else {
     pred <- model$draws$mu_denom
-    if (is.null(pred)) pred <- exp(model$draws$eta_denom)
+    if (is.null(pred) && !is.null(model$draws$eta_denom)) {
+      pred <- exp(model$draws$eta_denom)
+    }
   }
 
   if (is.null(pred)) {

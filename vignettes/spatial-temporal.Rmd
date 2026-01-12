@@ -272,7 +272,162 @@ fit <- ratiod(
 )
 ```
 
-This fits additive spatial and temporal effects. Full spatiotemporal interaction is planned for v1.2.
+This fits additive spatial and temporal effects. For interaction effects, see the next section.
+
+
+# Spatiotemporal Interaction
+
+When spatial patterns change over time (or temporal trends differ across space), additive models may be insufficient. ratiod supports spatiotemporal interaction effects following Knorr-Held (2000).
+
+## Interaction Types
+
+| Type | Description | Parameters |
+|------|-------------|------------|
+| Type I | Unstructured (IID) | $S \times T$ |
+| Type II | Structured time at each location | $S \times T$ |
+| Type III | Structured space at each time | $S \times T$ |
+| Type IV | Fully structured (Kronecker) | $S \times T$ |
+| Separable | For GP spatial/temporal | $S \times T$ |
+
+### Type I: Unstructured Interaction
+
+The simplest form assumes independent random effects for each space-time combination:
+
+$$
+\delta_{st} \stackrel{iid}{\sim} \text{Normal}(0, \sigma_\delta^2)
+$$
+
+```{r}
+fit <- ratiod(
+  count | effort ~ x,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  spatiotemporal = spatiotemporal(
+    spatial = spatial_car(adj, level = "group", group_var = "region"),
+    temporal = temporal_rw1("year"),
+    type = "I"
+  )
+)
+```
+
+### Type II: Structured Time at Each Location
+
+Each location has its own temporal random walk:
+
+$$
+\delta_{\cdot t}^{(s)} \sim \text{RW}(\sigma^2)
+$$
+
+This captures location-specific temporal trends.
+
+```{r}
+fit <- ratiod(
+  count | effort ~ x,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  spatiotemporal = spatiotemporal(
+    spatial = spatial_car(adj, level = "group", group_var = "region"),
+    temporal = temporal_rw1("year"),
+    type = "II"
+  )
+)
+```
+
+### Type III: Structured Space at Each Time Point
+
+Each time point has its own spatial field:
+
+$$
+\delta_{s \cdot}^{(t)} \sim \text{ICAR}(\tau)
+$$
+
+This captures time-specific spatial patterns.
+
+```{r}
+fit <- ratiod(
+  count | effort ~ x,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  spatiotemporal = spatiotemporal(
+    spatial = spatial_car(adj, level = "group", group_var = "region"),
+    temporal = temporal_rw1("year"),
+    type = "III"
+  )
+)
+```
+
+### Type IV: Fully Structured (Kronecker)
+
+Precision is the Kronecker product of spatial and temporal precision:
+
+$$
+Q_\delta = Q_s \otimes Q_t
+$$
+
+This is the most constrained and often most appropriate model.
+
+```{r}
+fit <- ratiod(
+  count | effort ~ x,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  spatiotemporal = spatiotemporal(
+    spatial = spatial_car(adj, level = "group", group_var = "region"),
+    temporal = temporal_rw1("year"),
+    type = "IV"
+  )
+)
+```
+
+## Non-Separable Spatiotemporal GP
+
+For continuous space-time data, use `spatiotemporal_gp()` with non-separable covariance:
+
+```{r}
+fit <- ratiod(
+  count | effort ~ x,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  spatiotemporal = spatiotemporal_gp(
+    ~ lon + lat,
+    time_var = "date",
+    nonsep_type = "gneiting"
+  )
+)
+```
+
+Non-separability types:
+
+- `"product"`: Separable (reference)
+- `"sum"`: Additive covariance
+- `"gneiting"`: Gneiting (2002) class
+- `"cressie_huang"`: Cressie-Huang (1999) class
+
+## Extracting Spatiotemporal Effects
+
+```{r}
+# Summary format
+st_effects <- spatiotemporal_effects(fit, format = "summary")
+head(st_effects)
+
+# Array format (S x T x draws)
+st_array <- spatiotemporal_effects(fit, format = "array")
+
+# Visualization
+plot(st_effects, type = "heatmap")
+plot(st_effects, type = "time_series")
+```
+
+## Model Selection
+
+Compare interaction types using LOO-CV:
+
+```{r}
+fit_type1 <- ratiod(..., spatiotemporal = spatiotemporal(..., type = "I"))
+fit_type4 <- ratiod(..., spatiotemporal = spatiotemporal(..., type = "IV"))
+
+loo_compare(loo(fit_type1), loo(fit_type4))
+```
 
 
 ## Prior Specification
