@@ -16,8 +16,8 @@
 // NOTE: OpenMP currently DISABLED pending investigation of Windows stability issues
 #ifdef _OPENMP
 #include <omp.h>
-#undef _OPENMP
 #endif
+#undef _OPENMP  // Always disable regardless of initial state
 
 using namespace Rcpp;
 

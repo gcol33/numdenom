@@ -54,8 +54,8 @@ NumericVector update_spatial_icar(
   // Single-site Gibbs updates for each spatial unit
   // Could be improved with block updates, but this is simple and works
   for (int j = 0; j < J; j++) {
-    // Get neighbors
-    IntegerVector neighbors = adj_list[j];
+    // Get neighbors - use eager copy to avoid GC issues with lazy views
+    std::vector<int> neighbors = Rcpp::as<std::vector<int>>(adj_list[j]);
     int n_j = n_neighbors[j];
 
     // Sum of neighbor values
@@ -125,7 +125,7 @@ double update_tau_icar(
     quad_form += n_neighbors[i] * phi[i] * phi[i];
 
     // Off-diagonal contribution: -2 * sum over neighbors (count each edge once)
-    IntegerVector neighbors = adj_list[i];
+    std::vector<int> neighbors = Rcpp::as<std::vector<int>>(adj_list[i]);
     for (int k = 0; k < n_neighbors[i]; k++) {
       int j = neighbors[k] - 1;
       if (j > i) {  // Count each edge once
@@ -194,7 +194,7 @@ NumericVector update_spatial_bym2(
   // The effective precision for phi_scaled comes from both data and ICAR prior
   // phi_scaled has unit variance marginally, so ICAR precision is 1.0
   for (int j = 0; j < J; j++) {
-    IntegerVector neighbors = adj_list[j];
+    std::vector<int> neighbors = Rcpp::as<std::vector<int>>(adj_list[j]);
     int n_j = n_neighbors[j];
 
     // Sum of neighbor values
