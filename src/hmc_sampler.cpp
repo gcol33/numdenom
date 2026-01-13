@@ -471,8 +471,6 @@ double compute_log_post(
     const ModelData& data,
     const ParamLayout& layout
 ) {
-  // Debug removed - use simpler approach
-
   // Extract parameters
   const double* beta_num = &params[layout.beta_num_start];
   const double* beta_denom = &params[layout.beta_denom_start];
@@ -1334,10 +1332,10 @@ void compute_gradient(
 
   double h = 1e-5;
 
-  // Parallelize gradient computation
-  #ifdef _OPENMP
-  #pragma omp parallel for schedule(static) num_threads(data.n_threads)
-  #endif
+  // NOTE: OpenMP disabled for GP models pending investigation of race conditions
+  // #ifdef _OPENMP
+  // #pragma omp parallel for schedule(static) num_threads(data.n_threads)
+  // #endif
   for (int i = 0; i < n; i++) {
     std::vector<double> params_plus = params;
     std::vector<double> params_minus = params;
@@ -1511,6 +1509,7 @@ HMCResultCpp run_hmc_chain_cpp(
   std::uniform_real_distribution<double> unif(0.0, 1.0);
 
   std::vector<double> q = q_init;
+
   double log_prob_current = compute_log_post(q, data, layout);
 
   double epsilon = find_reasonable_epsilon(q, data, layout, rng);
