@@ -19,12 +19,12 @@ knitr::opts_chunk$set(
 
 ## Overview
 
-This vignette covers spatial and temporal extensions in ratiod. These allow borrowing strength across neighboring locations or time points, improving estimates in data-sparse regions.
+This vignette covers spatial and temporal extensions in numdenom. These allow borrowing strength across neighboring locations or time points, improving estimates in data-sparse regions.
 
 
 # Spatial Models
 
-ratiod supports two spatial priors for areal (discrete region) data:
+numdenom supports two spatial priors for areal (discrete region) data:
 
 | Function | Prior | Use Case |
 |----------|-------|----------|
@@ -143,7 +143,7 @@ geom_sf(aes(fill = spatial_effect)) +
 
 # Temporal Models
 
-ratiod supports temporal priors for time series structure:
+numdenom supports temporal priors for time series structure:
 
 | Function | Prior | Use Case |
 |----------|-------|----------|
@@ -277,7 +277,7 @@ This fits additive spatial and temporal effects. For interaction effects, see th
 
 # Spatiotemporal Interaction
 
-When spatial patterns change over time (or temporal trends differ across space), additive models may be insufficient. ratiod supports spatiotemporal interaction effects following Knorr-Held (2000).
+When spatial patterns change over time (or temporal trends differ across space), additive models may be insufficient. numdenom supports spatiotemporal interaction effects following Knorr-Held (2000).
 
 ## Interaction Types
 

@@ -12,7 +12,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 
 // cpp_hmc_fit
 Rcpp::List cpp_hmc_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, std::string model_type_str, Rcpp::List re_params, Rcpp::List spatial_params, Rcpp::List temporal_params, Rcpp::List prior_params, Rcpp::List zi_params, Rcpp::List latent_params, Rcpp::List st_params, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
-RcppExport SEXP _ratiod_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP model_type_strSEXP, SEXP re_paramsSEXP, SEXP spatial_paramsSEXP, SEXP temporal_paramsSEXP, SEXP prior_paramsSEXP, SEXP zi_paramsSEXP, SEXP latent_paramsSEXP, SEXP st_paramsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
+RcppExport SEXP _numdenom_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP model_type_strSEXP, SEXP re_paramsSEXP, SEXP spatial_paramsSEXP, SEXP temporal_paramsSEXP, SEXP prior_paramsSEXP, SEXP zi_paramsSEXP, SEXP latent_paramsSEXP, SEXP st_paramsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -43,7 +43,7 @@ END_RCPP
 }
 // cpp_get_max_threads
 int cpp_get_max_threads();
-RcppExport SEXP _ratiod_cpp_get_max_threads() {
+RcppExport SEXP _numdenom_cpp_get_max_threads() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -53,7 +53,7 @@ END_RCPP
 }
 // cpp_hmc_fit_gp
 Rcpp::List cpp_hmc_fit_gp(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type_str, Rcpp::List gp_params, Rcpp::List ms_gp_params, Rcpp::List ms_temporal_params, Rcpp::List rsr_params, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
-RcppExport SEXP _ratiod_cpp_hmc_fit_gp(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP gp_paramsSEXP, SEXP ms_gp_paramsSEXP, SEXP ms_temporal_paramsSEXP, SEXP rsr_paramsSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
+RcppExport SEXP _numdenom_cpp_hmc_fit_gp(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP gp_paramsSEXP, SEXP ms_gp_paramsSEXP, SEXP ms_temporal_paramsSEXP, SEXP rsr_paramsSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -90,7 +90,7 @@ END_RCPP
 }
 // cpp_laplace_fit
 Rcpp::List cpp_laplace_fit(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _ratiod_cpp_laplace_fit(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_fit(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -111,7 +111,7 @@ END_RCPP
 }
 // cpp_laplace_get_max_threads
 int cpp_laplace_get_max_threads();
-RcppExport SEXP _ratiod_cpp_laplace_get_max_threads() {
+RcppExport SEXP _numdenom_cpp_laplace_get_max_threads() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -121,7 +121,7 @@ END_RCPP
 }
 // cpp_laplace_fit_spatial
 Rcpp::List cpp_laplace_fit_spatial(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::IntegerVector spatial_idx, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double tau_spatial, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _ratiod_cpp_laplace_fit_spatial(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP spatial_idxSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP tau_spatialSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_fit_spatial(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP spatial_idxSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP tau_spatialSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -148,7 +148,7 @@ END_RCPP
 }
 // cpp_laplace_sample
 Rcpp::NumericMatrix cpp_laplace_sample(Rcpp::NumericVector mode, Rcpp::NumericMatrix H, int n_samples);
-RcppExport SEXP _ratiod_cpp_laplace_sample(SEXP modeSEXP, SEXP HSEXP, SEXP n_samplesSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_sample(SEXP modeSEXP, SEXP HSEXP, SEXP n_samplesSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -161,7 +161,7 @@ END_RCPP
 }
 // cpp_laplace_fit_bym2
 Rcpp::List cpp_laplace_fit_bym2(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::IntegerVector spatial_idx, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double sigma_spatial, double rho, double scale_factor, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _ratiod_cpp_laplace_fit_bym2(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP spatial_idxSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP sigma_spatialSEXP, SEXP rhoSEXP, SEXP scale_factorSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_fit_bym2(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP spatial_idxSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP sigma_spatialSEXP, SEXP rhoSEXP, SEXP scale_factorSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -190,7 +190,7 @@ END_RCPP
 }
 // cpp_laplace_fit_gp
 Rcpp::List cpp_laplace_fit_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::NumericMatrix coords, Rcpp::IntegerMatrix nn_idx, Rcpp::NumericMatrix nn_dist, Rcpp::IntegerVector nn_order, int n_spatial, int nn, double sigma2_gp, double phi_gp, int cov_type, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _ratiod_cpp_laplace_fit_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP nn_idxSEXP, SEXP nn_distSEXP, SEXP nn_orderSEXP, SEXP n_spatialSEXP, SEXP nnSEXP, SEXP sigma2_gpSEXP, SEXP phi_gpSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_fit_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP nn_idxSEXP, SEXP nn_distSEXP, SEXP nn_orderSEXP, SEXP n_spatialSEXP, SEXP nnSEXP, SEXP sigma2_gpSEXP, SEXP phi_gpSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -220,7 +220,7 @@ END_RCPP
 }
 // cpp_laplace_fit_rsr
 Rcpp::List cpp_laplace_fit_rsr(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::IntegerVector spatial_idx, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double tau_spatial, Rcpp::NumericVector rsr_projection, int rsr_n, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _ratiod_cpp_laplace_fit_rsr(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP spatial_idxSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP tau_spatialSEXP, SEXP rsr_projectionSEXP, SEXP rsr_nSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_fit_rsr(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP spatial_idxSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP tau_spatialSEXP, SEXP rsr_projectionSEXP, SEXP rsr_nSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -249,7 +249,7 @@ END_RCPP
 }
 // cpp_laplace_fit_multiscale_gp
 Rcpp::List cpp_laplace_fit_multiscale_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::NumericMatrix coords, Rcpp::IntegerMatrix nn_idx_local, Rcpp::NumericMatrix nn_dist_local, Rcpp::IntegerVector nn_order_local, int nn_local, Rcpp::IntegerMatrix nn_idx_regional, Rcpp::NumericMatrix nn_dist_regional, Rcpp::IntegerVector nn_order_regional, int nn_regional, int n_spatial, double sigma2_local, double phi_local, double sigma2_regional, double phi_regional, int cov_type, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _ratiod_cpp_laplace_fit_multiscale_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP nn_idx_localSEXP, SEXP nn_dist_localSEXP, SEXP nn_order_localSEXP, SEXP nn_localSEXP, SEXP nn_idx_regionalSEXP, SEXP nn_dist_regionalSEXP, SEXP nn_order_regionalSEXP, SEXP nn_regionalSEXP, SEXP n_spatialSEXP, SEXP sigma2_localSEXP, SEXP phi_localSEXP, SEXP sigma2_regionalSEXP, SEXP phi_regionalSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_fit_multiscale_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP nn_idx_localSEXP, SEXP nn_dist_localSEXP, SEXP nn_order_localSEXP, SEXP nn_localSEXP, SEXP nn_idx_regionalSEXP, SEXP nn_dist_regionalSEXP, SEXP nn_order_regionalSEXP, SEXP nn_regionalSEXP, SEXP n_spatialSEXP, SEXP sigma2_localSEXP, SEXP phi_localSEXP, SEXP sigma2_regionalSEXP, SEXP phi_regionalSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -285,7 +285,7 @@ END_RCPP
 }
 // cpp_laplace_fit_multiscale_temporal
 Rcpp::List cpp_laplace_fit_multiscale_temporal(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::IntegerVector time_idx, int n_times, int seasonal_period, int trend_type, int short_type, double sigma2_trend, double sigma2_seasonal, double sigma2_short, double rho_short, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _ratiod_cpp_laplace_fit_multiscale_temporal(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP time_idxSEXP, SEXP n_timesSEXP, SEXP seasonal_periodSEXP, SEXP trend_typeSEXP, SEXP short_typeSEXP, SEXP sigma2_trendSEXP, SEXP sigma2_seasonalSEXP, SEXP sigma2_shortSEXP, SEXP rho_shortSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_laplace_fit_multiscale_temporal(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP time_idxSEXP, SEXP n_timesSEXP, SEXP seasonal_periodSEXP, SEXP trend_typeSEXP, SEXP short_typeSEXP, SEXP sigma2_trendSEXP, SEXP sigma2_seasonalSEXP, SEXP sigma2_shortSEXP, SEXP rho_shortSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -315,7 +315,7 @@ END_RCPP
 }
 // cpp_pg_binomial_gibbs
 Rcpp::List cpp_pg_binomial_gibbs(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector group, int n_groups, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_scale, bool store_eta, bool verbose, int n_threads);
-RcppExport SEXP _ratiod_cpp_pg_binomial_gibbs(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP groupSEXP, SEXP n_groupsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_scaleSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_pg_binomial_gibbs(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP groupSEXP, SEXP n_groupsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_scaleSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -338,7 +338,7 @@ END_RCPP
 }
 // cpp_pg_get_max_threads
 int cpp_pg_get_max_threads();
-RcppExport SEXP _ratiod_cpp_pg_get_max_threads() {
+RcppExport SEXP _numdenom_cpp_pg_get_max_threads() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -348,7 +348,7 @@ END_RCPP
 }
 // cpp_pg_binomial_gibbs_spatial
 Rcpp::List cpp_pg_binomial_gibbs_spatial(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector re_group, int n_re_groups, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::List adj_list, Rcpp::IntegerVector n_neighbors, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_re_scale, double prior_tau_shape, double prior_tau_rate, bool store_eta, bool verbose, int n_threads);
-RcppExport SEXP _ratiod_cpp_pg_binomial_gibbs_spatial(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_listSEXP, SEXP n_neighborsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_tau_shapeSEXP, SEXP prior_tau_rateSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_pg_binomial_gibbs_spatial(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_listSEXP, SEXP n_neighborsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_tau_shapeSEXP, SEXP prior_tau_rateSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -377,7 +377,7 @@ END_RCPP
 }
 // cpp_pg_binomial_gibbs_bym2
 Rcpp::List cpp_pg_binomial_gibbs_bym2(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector re_group, int n_re_groups, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::List adj_list, Rcpp::IntegerVector n_neighbors, double scale_factor, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_re_scale, double prior_sigma_spatial_scale, double prior_rho_alpha, double prior_rho_beta, bool store_eta, bool verbose, int n_threads);
-RcppExport SEXP _ratiod_cpp_pg_binomial_gibbs_bym2(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_listSEXP, SEXP n_neighborsSEXP, SEXP scale_factorSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_spatial_scaleSEXP, SEXP prior_rho_alphaSEXP, SEXP prior_rho_betaSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_pg_binomial_gibbs_bym2(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_listSEXP, SEXP n_neighborsSEXP, SEXP scale_factorSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_spatial_scaleSEXP, SEXP prior_rho_alphaSEXP, SEXP prior_rho_betaSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -408,7 +408,7 @@ END_RCPP
 }
 // cpp_pg_binomial_gibbs_gp
 Rcpp::List cpp_pg_binomial_gibbs_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector re_group, int n_re_groups, Rcpp::NumericMatrix coords, Rcpp::IntegerMatrix nn_idx, Rcpp::NumericMatrix nn_dist, Rcpp::IntegerVector nn_order, int n_spatial, int nn, double sigma2_gp_init, double phi_gp_init, int cov_type, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_re_scale, double prior_sigma_gp_U, double prior_sigma_gp_alpha, double prior_phi_lower, double prior_phi_upper, bool store_eta, bool verbose, int n_threads);
-RcppExport SEXP _ratiod_cpp_pg_binomial_gibbs_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP coordsSEXP, SEXP nn_idxSEXP, SEXP nn_distSEXP, SEXP nn_orderSEXP, SEXP n_spatialSEXP, SEXP nnSEXP, SEXP sigma2_gp_initSEXP, SEXP phi_gp_initSEXP, SEXP cov_typeSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_gp_USEXP, SEXP prior_sigma_gp_alphaSEXP, SEXP prior_phi_lowerSEXP, SEXP prior_phi_upperSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_pg_binomial_gibbs_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP coordsSEXP, SEXP nn_idxSEXP, SEXP nn_distSEXP, SEXP nn_orderSEXP, SEXP n_spatialSEXP, SEXP nnSEXP, SEXP sigma2_gp_initSEXP, SEXP phi_gp_initSEXP, SEXP cov_typeSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_gp_USEXP, SEXP prior_sigma_gp_alphaSEXP, SEXP prior_phi_lowerSEXP, SEXP prior_phi_upperSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -444,7 +444,7 @@ END_RCPP
 }
 // cpp_pg_binomial_gibbs_temporal
 Rcpp::List cpp_pg_binomial_gibbs_temporal(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector re_group, int n_re_groups, Rcpp::IntegerVector time_idx, int n_times, int seasonal_period, int trend_type, int short_type, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_re_scale, double prior_sigma_trend_scale, double prior_sigma_seasonal_scale, double prior_sigma_short_scale, double rho_short_init, bool store_eta, bool verbose, int n_threads);
-RcppExport SEXP _ratiod_cpp_pg_binomial_gibbs_temporal(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP time_idxSEXP, SEXP n_timesSEXP, SEXP seasonal_periodSEXP, SEXP trend_typeSEXP, SEXP short_typeSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_trend_scaleSEXP, SEXP prior_sigma_seasonal_scaleSEXP, SEXP prior_sigma_short_scaleSEXP, SEXP rho_short_initSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_pg_binomial_gibbs_temporal(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP time_idxSEXP, SEXP n_timesSEXP, SEXP seasonal_periodSEXP, SEXP trend_typeSEXP, SEXP short_typeSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_trend_scaleSEXP, SEXP prior_sigma_seasonal_scaleSEXP, SEXP prior_sigma_short_scaleSEXP, SEXP rho_short_initSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -476,7 +476,7 @@ END_RCPP
 }
 // cpp_pg_binomial_gibbs_multiscale_gp
 Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector re_group, int n_re_groups, Rcpp::NumericMatrix coords, Rcpp::IntegerMatrix nn_idx_local, Rcpp::NumericMatrix nn_dist_local, Rcpp::IntegerVector nn_order_local, int nn_local, Rcpp::IntegerMatrix nn_idx_regional, Rcpp::NumericMatrix nn_dist_regional, Rcpp::IntegerVector nn_order_regional, int nn_regional, int n_spatial, double sigma2_local_init, double phi_local_init, double sigma2_regional_init, double phi_regional_init, int cov_type, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_re_scale, double prior_sigma_local_U, double prior_sigma_local_alpha, double prior_phi_local_lower, double prior_phi_local_upper, double prior_sigma_regional_U, double prior_sigma_regional_alpha, double prior_phi_regional_lower, double prior_phi_regional_upper, bool store_eta, bool verbose, int n_threads);
-RcppExport SEXP _ratiod_cpp_pg_binomial_gibbs_multiscale_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP coordsSEXP, SEXP nn_idx_localSEXP, SEXP nn_dist_localSEXP, SEXP nn_order_localSEXP, SEXP nn_localSEXP, SEXP nn_idx_regionalSEXP, SEXP nn_dist_regionalSEXP, SEXP nn_order_regionalSEXP, SEXP nn_regionalSEXP, SEXP n_spatialSEXP, SEXP sigma2_local_initSEXP, SEXP phi_local_initSEXP, SEXP sigma2_regional_initSEXP, SEXP phi_regional_initSEXP, SEXP cov_typeSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_local_USEXP, SEXP prior_sigma_local_alphaSEXP, SEXP prior_phi_local_lowerSEXP, SEXP prior_phi_local_upperSEXP, SEXP prior_sigma_regional_USEXP, SEXP prior_sigma_regional_alphaSEXP, SEXP prior_phi_regional_lowerSEXP, SEXP prior_phi_regional_upperSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_pg_binomial_gibbs_multiscale_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP coordsSEXP, SEXP nn_idx_localSEXP, SEXP nn_dist_localSEXP, SEXP nn_order_localSEXP, SEXP nn_localSEXP, SEXP nn_idx_regionalSEXP, SEXP nn_dist_regionalSEXP, SEXP nn_order_regionalSEXP, SEXP nn_regionalSEXP, SEXP n_spatialSEXP, SEXP sigma2_local_initSEXP, SEXP phi_local_initSEXP, SEXP sigma2_regional_initSEXP, SEXP phi_regional_initSEXP, SEXP cov_typeSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_sigma_local_USEXP, SEXP prior_sigma_local_alphaSEXP, SEXP prior_phi_local_lowerSEXP, SEXP prior_phi_local_upperSEXP, SEXP prior_sigma_regional_USEXP, SEXP prior_sigma_regional_alphaSEXP, SEXP prior_phi_regional_lowerSEXP, SEXP prior_phi_regional_upperSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -522,7 +522,7 @@ END_RCPP
 }
 // cpp_pg_binomial_gibbs_rsr
 Rcpp::List cpp_pg_binomial_gibbs_rsr(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector re_group, int n_re_groups, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::List adj_list, Rcpp::IntegerVector n_neighbors, Rcpp::NumericVector rsr_projection, int rsr_n, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_re_scale, double prior_tau_shape, double prior_tau_rate, bool store_eta, bool verbose, int n_threads);
-RcppExport SEXP _ratiod_cpp_pg_binomial_gibbs_rsr(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_listSEXP, SEXP n_neighborsSEXP, SEXP rsr_projectionSEXP, SEXP rsr_nSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_tau_shapeSEXP, SEXP prior_tau_rateSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_pg_binomial_gibbs_rsr(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_listSEXP, SEXP n_neighborsSEXP, SEXP rsr_projectionSEXP, SEXP rsr_nSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_re_scaleSEXP, SEXP prior_tau_shapeSEXP, SEXP prior_tau_rateSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -553,7 +553,7 @@ END_RCPP
 }
 // cpp_rpg1
 Rcpp::NumericVector cpp_rpg1(Rcpp::NumericVector z);
-RcppExport SEXP _ratiod_cpp_rpg1(SEXP zSEXP) {
+RcppExport SEXP _numdenom_cpp_rpg1(SEXP zSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -564,7 +564,7 @@ END_RCPP
 }
 // cpp_rpg
 Rcpp::NumericVector cpp_rpg(Rcpp::IntegerVector b, Rcpp::NumericVector z);
-RcppExport SEXP _ratiod_cpp_rpg(SEXP bSEXP, SEXP zSEXP) {
+RcppExport SEXP _numdenom_cpp_rpg(SEXP bSEXP, SEXP zSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -576,7 +576,7 @@ END_RCPP
 }
 // cpp_test_leapfrog
 List cpp_test_leapfrog(NumericVector q_init, NumericVector p_init, double epsilon, int L);
-RcppExport SEXP _ratiod_cpp_test_leapfrog(SEXP q_initSEXP, SEXP p_initSEXP, SEXP epsilonSEXP, SEXP LSEXP) {
+RcppExport SEXP _numdenom_cpp_test_leapfrog(SEXP q_initSEXP, SEXP p_initSEXP, SEXP epsilonSEXP, SEXP LSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -590,7 +590,7 @@ END_RCPP
 }
 // cpp_test_hamiltonian
 double cpp_test_hamiltonian(NumericVector q, NumericVector p);
-RcppExport SEXP _ratiod_cpp_test_hamiltonian(SEXP qSEXP, SEXP pSEXP) {
+RcppExport SEXP _numdenom_cpp_test_hamiltonian(SEXP qSEXP, SEXP pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -602,7 +602,7 @@ END_RCPP
 }
 // cpp_test_log_sum_exp
 double cpp_test_log_sum_exp(NumericVector log_vals);
-RcppExport SEXP _ratiod_cpp_test_log_sum_exp(SEXP log_valsSEXP) {
+RcppExport SEXP _numdenom_cpp_test_log_sum_exp(SEXP log_valsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -613,7 +613,7 @@ END_RCPP
 }
 // cpp_test_softmax
 NumericVector cpp_test_softmax(NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_softmax(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_softmax(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -624,7 +624,7 @@ END_RCPP
 }
 // cpp_test_inv_logit
 NumericVector cpp_test_inv_logit(NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_inv_logit(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_inv_logit(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -635,7 +635,7 @@ END_RCPP
 }
 // cpp_test_lgamma
 double cpp_test_lgamma(double x);
-RcppExport SEXP _ratiod_cpp_test_lgamma(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_lgamma(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -646,7 +646,7 @@ END_RCPP
 }
 // cpp_test_poisson_loglik
 double cpp_test_poisson_loglik(IntegerVector y, NumericVector lambda);
-RcppExport SEXP _ratiod_cpp_test_poisson_loglik(SEXP ySEXP, SEXP lambdaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_poisson_loglik(SEXP ySEXP, SEXP lambdaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -658,7 +658,7 @@ END_RCPP
 }
 // cpp_test_binomial_loglik
 double cpp_test_binomial_loglik(IntegerVector y, IntegerVector n, NumericVector p);
-RcppExport SEXP _ratiod_cpp_test_binomial_loglik(SEXP ySEXP, SEXP nSEXP, SEXP pSEXP) {
+RcppExport SEXP _numdenom_cpp_test_binomial_loglik(SEXP ySEXP, SEXP nSEXP, SEXP pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -671,7 +671,7 @@ END_RCPP
 }
 // cpp_test_negbin_loglik
 double cpp_test_negbin_loglik(IntegerVector y, NumericVector mu, double phi);
-RcppExport SEXP _ratiod_cpp_test_negbin_loglik(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+RcppExport SEXP _numdenom_cpp_test_negbin_loglik(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -684,7 +684,7 @@ END_RCPP
 }
 // cpp_test_normal_loglik
 double cpp_test_normal_loglik(NumericVector y, NumericVector mu, double sigma);
-RcppExport SEXP _ratiod_cpp_test_normal_loglik(SEXP ySEXP, SEXP muSEXP, SEXP sigmaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_normal_loglik(SEXP ySEXP, SEXP muSEXP, SEXP sigmaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -697,7 +697,7 @@ END_RCPP
 }
 // cpp_test_cholesky
 NumericMatrix cpp_test_cholesky(NumericMatrix A);
-RcppExport SEXP _ratiod_cpp_test_cholesky(SEXP ASEXP) {
+RcppExport SEXP _numdenom_cpp_test_cholesky(SEXP ASEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -708,7 +708,7 @@ END_RCPP
 }
 // cpp_test_matvec
 NumericVector cpp_test_matvec(NumericMatrix A, NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_matvec(SEXP ASEXP, SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_matvec(SEXP ASEXP, SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -720,7 +720,7 @@ END_RCPP
 }
 // cpp_test_autodiff_gradient
 List cpp_test_autodiff_gradient(NumericVector x_vals);
-RcppExport SEXP _ratiod_cpp_test_autodiff_gradient(SEXP x_valsSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_gradient(SEXP x_valsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -731,7 +731,7 @@ END_RCPP
 }
 // cpp_test_autodiff_exp_chain
 List cpp_test_autodiff_exp_chain(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_exp_chain(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_exp_chain(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -742,7 +742,7 @@ END_RCPP
 }
 // cpp_test_autodiff_log_likelihood
 List cpp_test_autodiff_log_likelihood(IntegerVector y, NumericVector eta);
-RcppExport SEXP _ratiod_cpp_test_autodiff_log_likelihood(SEXP ySEXP, SEXP etaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_log_likelihood(SEXP ySEXP, SEXP etaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -754,7 +754,7 @@ END_RCPP
 }
 // cpp_test_autodiff_division
 List cpp_test_autodiff_division(double a_val, double b_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_division(SEXP a_valSEXP, SEXP b_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_division(SEXP a_valSEXP, SEXP b_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -766,7 +766,7 @@ END_RCPP
 }
 // cpp_test_autodiff_lgamma
 List cpp_test_autodiff_lgamma(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_lgamma(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_lgamma(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -777,7 +777,7 @@ END_RCPP
 }
 // cpp_test_autodiff_softplus
 List cpp_test_autodiff_softplus(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_softplus(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_softplus(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -788,7 +788,7 @@ END_RCPP
 }
 // cpp_test_autodiff_inv_logit
 List cpp_test_autodiff_inv_logit(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_inv_logit(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_inv_logit(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -799,7 +799,7 @@ END_RCPP
 }
 // cpp_test_autodiff_log
 List cpp_test_autodiff_log(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_log(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_log(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -810,7 +810,7 @@ END_RCPP
 }
 // cpp_test_autodiff_sqrt
 List cpp_test_autodiff_sqrt(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_sqrt(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_sqrt(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -821,7 +821,7 @@ END_RCPP
 }
 // cpp_test_autodiff_pow
 List cpp_test_autodiff_pow(double x_val, double p);
-RcppExport SEXP _ratiod_cpp_test_autodiff_pow(SEXP x_valSEXP, SEXP pSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_pow(SEXP x_valSEXP, SEXP pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -833,7 +833,7 @@ END_RCPP
 }
 // cpp_test_autodiff_log1p
 List cpp_test_autodiff_log1p(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_log1p(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_log1p(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -844,7 +844,7 @@ END_RCPP
 }
 // cpp_test_autodiff_log_sum_exp
 List cpp_test_autodiff_log_sum_exp(double a_val, double b_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_log_sum_exp(SEXP a_valSEXP, SEXP b_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_log_sum_exp(SEXP a_valSEXP, SEXP b_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -856,7 +856,7 @@ END_RCPP
 }
 // cpp_test_autodiff_logit
 List cpp_test_autodiff_logit(double x_val);
-RcppExport SEXP _ratiod_cpp_test_autodiff_logit(SEXP x_valSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_logit(SEXP x_valSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -867,7 +867,7 @@ END_RCPP
 }
 // cpp_test_autodiff_negbin_loglik
 List cpp_test_autodiff_negbin_loglik(IntegerVector y, NumericVector mu, double phi);
-RcppExport SEXP _ratiod_cpp_test_autodiff_negbin_loglik(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+RcppExport SEXP _numdenom_cpp_test_autodiff_negbin_loglik(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -880,7 +880,7 @@ END_RCPP
 }
 // cpp_test_laplace_binomial
 List cpp_test_laplace_binomial(int y, int n, double eta);
-RcppExport SEXP _ratiod_cpp_test_laplace_binomial(SEXP ySEXP, SEXP nSEXP, SEXP etaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_laplace_binomial(SEXP ySEXP, SEXP nSEXP, SEXP etaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -893,7 +893,7 @@ END_RCPP
 }
 // cpp_test_laplace_negbin
 List cpp_test_laplace_negbin(int y, double eta, double phi);
-RcppExport SEXP _ratiod_cpp_test_laplace_negbin(SEXP ySEXP, SEXP etaSEXP, SEXP phiSEXP) {
+RcppExport SEXP _numdenom_cpp_test_laplace_negbin(SEXP ySEXP, SEXP etaSEXP, SEXP phiSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -906,7 +906,7 @@ END_RCPP
 }
 // cpp_test_laplace_poisson
 List cpp_test_laplace_poisson(int y, double eta);
-RcppExport SEXP _ratiod_cpp_test_laplace_poisson(SEXP ySEXP, SEXP etaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_laplace_poisson(SEXP ySEXP, SEXP etaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -918,7 +918,7 @@ END_RCPP
 }
 // cpp_test_pg_update_beta
 NumericVector cpp_test_pg_update_beta(NumericVector kappa, NumericVector omega, NumericMatrix X, NumericVector re_contrib, double prior_sd);
-RcppExport SEXP _ratiod_cpp_test_pg_update_beta(SEXP kappaSEXP, SEXP omegaSEXP, SEXP XSEXP, SEXP re_contribSEXP, SEXP prior_sdSEXP) {
+RcppExport SEXP _numdenom_cpp_test_pg_update_beta(SEXP kappaSEXP, SEXP omegaSEXP, SEXP XSEXP, SEXP re_contribSEXP, SEXP prior_sdSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -933,7 +933,7 @@ END_RCPP
 }
 // cpp_test_pg_update_re
 NumericVector cpp_test_pg_update_re(NumericVector kappa, NumericVector omega, NumericVector X_beta, IntegerVector group, int n_groups, double sigma_re);
-RcppExport SEXP _ratiod_cpp_test_pg_update_re(SEXP kappaSEXP, SEXP omegaSEXP, SEXP X_betaSEXP, SEXP groupSEXP, SEXP n_groupsSEXP, SEXP sigma_reSEXP) {
+RcppExport SEXP _numdenom_cpp_test_pg_update_re(SEXP kappaSEXP, SEXP omegaSEXP, SEXP X_betaSEXP, SEXP groupSEXP, SEXP n_groupsSEXP, SEXP sigma_reSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -949,7 +949,7 @@ END_RCPP
 }
 // cpp_test_pg_update_sigma_re
 double cpp_test_pg_update_sigma_re(NumericVector re, double scale);
-RcppExport SEXP _ratiod_cpp_test_pg_update_sigma_re(SEXP reSEXP, SEXP scaleSEXP) {
+RcppExport SEXP _numdenom_cpp_test_pg_update_sigma_re(SEXP reSEXP, SEXP scaleSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -961,7 +961,7 @@ END_RCPP
 }
 // cpp_test_dot_product
 double cpp_test_dot_product(NumericVector x, NumericVector y);
-RcppExport SEXP _ratiod_cpp_test_dot_product(SEXP xSEXP, SEXP ySEXP) {
+RcppExport SEXP _numdenom_cpp_test_dot_product(SEXP xSEXP, SEXP ySEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -973,7 +973,7 @@ END_RCPP
 }
 // cpp_test_norm_squared
 double cpp_test_norm_squared(NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_norm_squared(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_norm_squared(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -984,7 +984,7 @@ END_RCPP
 }
 // cpp_test_vector_sum
 double cpp_test_vector_sum(NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_vector_sum(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_vector_sum(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -995,7 +995,7 @@ END_RCPP
 }
 // cpp_test_axpy
 NumericVector cpp_test_axpy(double a, NumericVector x, NumericVector y);
-RcppExport SEXP _ratiod_cpp_test_axpy(SEXP aSEXP, SEXP xSEXP, SEXP ySEXP) {
+RcppExport SEXP _numdenom_cpp_test_axpy(SEXP aSEXP, SEXP xSEXP, SEXP ySEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1008,7 +1008,7 @@ END_RCPP
 }
 // cpp_test_scale
 NumericVector cpp_test_scale(double a, NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_scale(SEXP aSEXP, SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_scale(SEXP aSEXP, SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1020,7 +1020,7 @@ END_RCPP
 }
 // cpp_test_linalg_matvec
 NumericVector cpp_test_linalg_matvec(NumericMatrix X, NumericVector beta);
-RcppExport SEXP _ratiod_cpp_test_linalg_matvec(SEXP XSEXP, SEXP betaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_linalg_matvec(SEXP XSEXP, SEXP betaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1032,7 +1032,7 @@ END_RCPP
 }
 // cpp_test_linalg_matvec_add
 NumericVector cpp_test_linalg_matvec_add(NumericMatrix X, NumericVector beta, NumericVector y_init);
-RcppExport SEXP _ratiod_cpp_test_linalg_matvec_add(SEXP XSEXP, SEXP betaSEXP, SEXP y_initSEXP) {
+RcppExport SEXP _numdenom_cpp_test_linalg_matvec_add(SEXP XSEXP, SEXP betaSEXP, SEXP y_initSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1045,7 +1045,7 @@ END_RCPP
 }
 // cpp_test_linalg_matvec_transpose
 NumericVector cpp_test_linalg_matvec_transpose(NumericMatrix X, NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_linalg_matvec_transpose(SEXP XSEXP, SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_linalg_matvec_transpose(SEXP XSEXP, SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1057,7 +1057,7 @@ END_RCPP
 }
 // cpp_test_sparse_laplacian_quadform
 double cpp_test_sparse_laplacian_quadform(IntegerVector row_ptr, IntegerVector col_idx, NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_sparse_laplacian_quadform(SEXP row_ptrSEXP, SEXP col_idxSEXP, SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_sparse_laplacian_quadform(SEXP row_ptrSEXP, SEXP col_idxSEXP, SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1070,7 +1070,7 @@ END_RCPP
 }
 // cpp_test_linalg_log_sum_exp
 double cpp_test_linalg_log_sum_exp(double a, double b);
-RcppExport SEXP _ratiod_cpp_test_linalg_log_sum_exp(SEXP aSEXP, SEXP bSEXP) {
+RcppExport SEXP _numdenom_cpp_test_linalg_log_sum_exp(SEXP aSEXP, SEXP bSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1082,7 +1082,7 @@ END_RCPP
 }
 // cpp_test_linalg_log_sum_exp_vec
 double cpp_test_linalg_log_sum_exp_vec(NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_linalg_log_sum_exp_vec(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_linalg_log_sum_exp_vec(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1093,7 +1093,7 @@ END_RCPP
 }
 // cpp_test_softmax_inplace
 NumericVector cpp_test_softmax_inplace(NumericVector x);
-RcppExport SEXP _ratiod_cpp_test_softmax_inplace(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_softmax_inplace(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1104,7 +1104,7 @@ END_RCPP
 }
 // cpp_test_compute_linear_predictors
 List cpp_test_compute_linear_predictors(NumericMatrix X_num, NumericVector beta_num, NumericMatrix X_denom, NumericVector beta_denom, int n_threads);
-RcppExport SEXP _ratiod_cpp_test_compute_linear_predictors(SEXP X_numSEXP, SEXP beta_numSEXP, SEXP X_denomSEXP, SEXP beta_denomSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_test_compute_linear_predictors(SEXP X_numSEXP, SEXP beta_numSEXP, SEXP X_denomSEXP, SEXP beta_denomSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1119,7 +1119,7 @@ END_RCPP
 }
 // cpp_test_rw1_quadratic_form
 double cpp_test_rw1_quadratic_form(NumericVector phi, bool cyclic);
-RcppExport SEXP _ratiod_cpp_test_rw1_quadratic_form(SEXP phiSEXP, SEXP cyclicSEXP) {
+RcppExport SEXP _numdenom_cpp_test_rw1_quadratic_form(SEXP phiSEXP, SEXP cyclicSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1131,7 +1131,7 @@ END_RCPP
 }
 // cpp_test_rw2_quadratic_form
 double cpp_test_rw2_quadratic_form(NumericVector phi, bool cyclic);
-RcppExport SEXP _ratiod_cpp_test_rw2_quadratic_form(SEXP phiSEXP, SEXP cyclicSEXP) {
+RcppExport SEXP _numdenom_cpp_test_rw2_quadratic_form(SEXP phiSEXP, SEXP cyclicSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1143,7 +1143,7 @@ END_RCPP
 }
 // cpp_test_ar1_log_density
 double cpp_test_ar1_log_density(NumericVector phi, double rho, double tau);
-RcppExport SEXP _ratiod_cpp_test_ar1_log_density(SEXP phiSEXP, SEXP rhoSEXP, SEXP tauSEXP) {
+RcppExport SEXP _numdenom_cpp_test_ar1_log_density(SEXP phiSEXP, SEXP rhoSEXP, SEXP tauSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1156,7 +1156,7 @@ END_RCPP
 }
 // cpp_test_temporal_log_prior
 double cpp_test_temporal_log_prior(NumericVector phi, std::string type_str, double tau, double rho, bool cyclic);
-RcppExport SEXP _ratiod_cpp_test_temporal_log_prior(SEXP phiSEXP, SEXP type_strSEXP, SEXP tauSEXP, SEXP rhoSEXP, SEXP cyclicSEXP) {
+RcppExport SEXP _numdenom_cpp_test_temporal_log_prior(SEXP phiSEXP, SEXP type_strSEXP, SEXP tauSEXP, SEXP rhoSEXP, SEXP cyclicSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1171,7 +1171,7 @@ END_RCPP
 }
 // cpp_test_sum_to_zero_penalty
 double cpp_test_sum_to_zero_penalty(NumericVector phi, double lambda);
-RcppExport SEXP _ratiod_cpp_test_sum_to_zero_penalty(SEXP phiSEXP, SEXP lambdaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_sum_to_zero_penalty(SEXP phiSEXP, SEXP lambdaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1183,7 +1183,7 @@ END_RCPP
 }
 // cpp_test_log1pexp
 double cpp_test_log1pexp(double x);
-RcppExport SEXP _ratiod_cpp_test_log1pexp(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_log1pexp(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1194,7 +1194,7 @@ END_RCPP
 }
 // cpp_test_zi_logistic
 double cpp_test_zi_logistic(double x);
-RcppExport SEXP _ratiod_cpp_test_zi_logistic(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_logistic(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1205,7 +1205,7 @@ END_RCPP
 }
 // cpp_test_log_logistic
 double cpp_test_log_logistic(double x);
-RcppExport SEXP _ratiod_cpp_test_log_logistic(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_log_logistic(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1216,7 +1216,7 @@ END_RCPP
 }
 // cpp_test_log1m_logistic
 double cpp_test_log1m_logistic(double x);
-RcppExport SEXP _ratiod_cpp_test_log1m_logistic(SEXP xSEXP) {
+RcppExport SEXP _numdenom_cpp_test_log1m_logistic(SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1227,7 +1227,7 @@ END_RCPP
 }
 // cpp_test_zi_poisson_lpmf
 double cpp_test_zi_poisson_lpmf(int y, double mu);
-RcppExport SEXP _ratiod_cpp_test_zi_poisson_lpmf(SEXP ySEXP, SEXP muSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_poisson_lpmf(SEXP ySEXP, SEXP muSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1239,7 +1239,7 @@ END_RCPP
 }
 // cpp_test_zi_negbin_lpmf
 double cpp_test_zi_negbin_lpmf(int y, double mu, double phi);
-RcppExport SEXP _ratiod_cpp_test_zi_negbin_lpmf(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_negbin_lpmf(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1252,7 +1252,7 @@ END_RCPP
 }
 // cpp_test_zi_poisson_lpmf_logit
 double cpp_test_zi_poisson_lpmf_logit(int y, double mu, double logit_zi);
-RcppExport SEXP _ratiod_cpp_test_zi_poisson_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP logit_ziSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_poisson_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP logit_ziSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1265,7 +1265,7 @@ END_RCPP
 }
 // cpp_test_zi_negbin_lpmf_logit
 double cpp_test_zi_negbin_lpmf_logit(int y, double mu, double phi, double logit_zi);
-RcppExport SEXP _ratiod_cpp_test_zi_negbin_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_negbin_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1279,7 +1279,7 @@ END_RCPP
 }
 // cpp_test_truncated_poisson_lpmf
 double cpp_test_truncated_poisson_lpmf(int y, double mu);
-RcppExport SEXP _ratiod_cpp_test_truncated_poisson_lpmf(SEXP ySEXP, SEXP muSEXP) {
+RcppExport SEXP _numdenom_cpp_test_truncated_poisson_lpmf(SEXP ySEXP, SEXP muSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1291,7 +1291,7 @@ END_RCPP
 }
 // cpp_test_truncated_negbin_lpmf
 double cpp_test_truncated_negbin_lpmf(int y, double mu, double phi);
-RcppExport SEXP _ratiod_cpp_test_truncated_negbin_lpmf(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
+RcppExport SEXP _numdenom_cpp_test_truncated_negbin_lpmf(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1304,7 +1304,7 @@ END_RCPP
 }
 // cpp_test_hurdle_poisson_lpmf_logit
 double cpp_test_hurdle_poisson_lpmf_logit(int y, double mu, double logit_theta);
-RcppExport SEXP _ratiod_cpp_test_hurdle_poisson_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP logit_thetaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_hurdle_poisson_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP logit_thetaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1317,7 +1317,7 @@ END_RCPP
 }
 // cpp_test_hurdle_negbin_lpmf_logit
 double cpp_test_hurdle_negbin_lpmf_logit(int y, double mu, double phi, double logit_theta);
-RcppExport SEXP _ratiod_cpp_test_hurdle_negbin_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_thetaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_hurdle_negbin_lpmf_logit(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_thetaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1331,7 +1331,7 @@ END_RCPP
 }
 // cpp_test_zi_log_likelihood
 double cpp_test_zi_log_likelihood(int y, double mu, double phi, double logit_zi, std::string zi_type_str);
-RcppExport SEXP _ratiod_cpp_test_zi_log_likelihood(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP, SEXP zi_type_strSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_log_likelihood(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP, SEXP zi_type_strSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1346,7 +1346,7 @@ END_RCPP
 }
 // cpp_test_zi_poisson_grad_logit_zi
 double cpp_test_zi_poisson_grad_logit_zi(int y, double mu, double logit_zi);
-RcppExport SEXP _ratiod_cpp_test_zi_poisson_grad_logit_zi(SEXP ySEXP, SEXP muSEXP, SEXP logit_ziSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_poisson_grad_logit_zi(SEXP ySEXP, SEXP muSEXP, SEXP logit_ziSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1359,7 +1359,7 @@ END_RCPP
 }
 // cpp_test_zi_negbin_grad_logit_zi
 double cpp_test_zi_negbin_grad_logit_zi(int y, double mu, double phi, double logit_zi);
-RcppExport SEXP _ratiod_cpp_test_zi_negbin_grad_logit_zi(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP) {
+RcppExport SEXP _numdenom_cpp_test_zi_negbin_grad_logit_zi(SEXP ySEXP, SEXP muSEXP, SEXP phiSEXP, SEXP logit_ziSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1373,7 +1373,7 @@ END_RCPP
 }
 // cpp_test_hurdle_grad_logit_theta
 double cpp_test_hurdle_grad_logit_theta(int y, double logit_theta);
-RcppExport SEXP _ratiod_cpp_test_hurdle_grad_logit_theta(SEXP ySEXP, SEXP logit_thetaSEXP) {
+RcppExport SEXP _numdenom_cpp_test_hurdle_grad_logit_theta(SEXP ySEXP, SEXP logit_thetaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1385,7 +1385,7 @@ END_RCPP
 }
 // cpp_test_get_max_threads
 int cpp_test_get_max_threads();
-RcppExport SEXP _ratiod_cpp_test_get_max_threads() {
+RcppExport SEXP _numdenom_cpp_test_get_max_threads() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1395,7 +1395,7 @@ END_RCPP
 }
 // cpp_test_parallel_dot_products
 List cpp_test_parallel_dot_products(NumericMatrix X, NumericVector y, int n_threads);
-RcppExport SEXP _ratiod_cpp_test_parallel_dot_products(SEXP XSEXP, SEXP ySEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_test_parallel_dot_products(SEXP XSEXP, SEXP ySEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1408,7 +1408,7 @@ END_RCPP
 }
 // cpp_test_parallel_likelihood
 List cpp_test_parallel_likelihood(IntegerVector y, NumericVector mu, int n_threads);
-RcppExport SEXP _ratiod_cpp_test_parallel_likelihood(SEXP ySEXP, SEXP muSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_test_parallel_likelihood(SEXP ySEXP, SEXP muSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1421,7 +1421,7 @@ END_RCPP
 }
 // cpp_test_parallel_independent
 NumericVector cpp_test_parallel_independent(int n, int n_threads);
-RcppExport SEXP _ratiod_cpp_test_parallel_independent(SEXP nSEXP, SEXP n_threadsSEXP) {
+RcppExport SEXP _numdenom_cpp_test_parallel_independent(SEXP nSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1433,102 +1433,102 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_ratiod_cpp_hmc_fit", (DL_FUNC) &_ratiod_cpp_hmc_fit, 21},
-    {"_ratiod_cpp_get_max_threads", (DL_FUNC) &_ratiod_cpp_get_max_threads, 0},
-    {"_ratiod_cpp_hmc_fit_gp", (DL_FUNC) &_ratiod_cpp_hmc_fit_gp, 27},
-    {"_ratiod_cpp_laplace_fit", (DL_FUNC) &_ratiod_cpp_laplace_fit, 11},
-    {"_ratiod_cpp_laplace_get_max_threads", (DL_FUNC) &_ratiod_cpp_laplace_get_max_threads, 0},
-    {"_ratiod_cpp_laplace_fit_spatial", (DL_FUNC) &_ratiod_cpp_laplace_fit_spatial, 17},
-    {"_ratiod_cpp_laplace_sample", (DL_FUNC) &_ratiod_cpp_laplace_sample, 3},
-    {"_ratiod_cpp_laplace_fit_bym2", (DL_FUNC) &_ratiod_cpp_laplace_fit_bym2, 19},
-    {"_ratiod_cpp_laplace_fit_gp", (DL_FUNC) &_ratiod_cpp_laplace_fit_gp, 20},
-    {"_ratiod_cpp_laplace_fit_rsr", (DL_FUNC) &_ratiod_cpp_laplace_fit_rsr, 19},
-    {"_ratiod_cpp_laplace_fit_multiscale_gp", (DL_FUNC) &_ratiod_cpp_laplace_fit_multiscale_gp, 26},
-    {"_ratiod_cpp_laplace_fit_multiscale_temporal", (DL_FUNC) &_ratiod_cpp_laplace_fit_multiscale_temporal, 20},
-    {"_ratiod_cpp_pg_binomial_gibbs", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs, 13},
-    {"_ratiod_cpp_pg_get_max_threads", (DL_FUNC) &_ratiod_cpp_pg_get_max_threads, 0},
-    {"_ratiod_cpp_pg_binomial_gibbs_spatial", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs_spatial, 19},
-    {"_ratiod_cpp_pg_binomial_gibbs_bym2", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs_bym2, 21},
-    {"_ratiod_cpp_pg_binomial_gibbs_gp", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs_gp, 26},
-    {"_ratiod_cpp_pg_binomial_gibbs_temporal", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs_temporal, 22},
-    {"_ratiod_cpp_pg_binomial_gibbs_multiscale_gp", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs_multiscale_gp, 36},
-    {"_ratiod_cpp_pg_binomial_gibbs_rsr", (DL_FUNC) &_ratiod_cpp_pg_binomial_gibbs_rsr, 21},
-    {"_ratiod_cpp_rpg1", (DL_FUNC) &_ratiod_cpp_rpg1, 1},
-    {"_ratiod_cpp_rpg", (DL_FUNC) &_ratiod_cpp_rpg, 2},
-    {"_ratiod_cpp_test_leapfrog", (DL_FUNC) &_ratiod_cpp_test_leapfrog, 4},
-    {"_ratiod_cpp_test_hamiltonian", (DL_FUNC) &_ratiod_cpp_test_hamiltonian, 2},
-    {"_ratiod_cpp_test_log_sum_exp", (DL_FUNC) &_ratiod_cpp_test_log_sum_exp, 1},
-    {"_ratiod_cpp_test_softmax", (DL_FUNC) &_ratiod_cpp_test_softmax, 1},
-    {"_ratiod_cpp_test_inv_logit", (DL_FUNC) &_ratiod_cpp_test_inv_logit, 1},
-    {"_ratiod_cpp_test_lgamma", (DL_FUNC) &_ratiod_cpp_test_lgamma, 1},
-    {"_ratiod_cpp_test_poisson_loglik", (DL_FUNC) &_ratiod_cpp_test_poisson_loglik, 2},
-    {"_ratiod_cpp_test_binomial_loglik", (DL_FUNC) &_ratiod_cpp_test_binomial_loglik, 3},
-    {"_ratiod_cpp_test_negbin_loglik", (DL_FUNC) &_ratiod_cpp_test_negbin_loglik, 3},
-    {"_ratiod_cpp_test_normal_loglik", (DL_FUNC) &_ratiod_cpp_test_normal_loglik, 3},
-    {"_ratiod_cpp_test_cholesky", (DL_FUNC) &_ratiod_cpp_test_cholesky, 1},
-    {"_ratiod_cpp_test_matvec", (DL_FUNC) &_ratiod_cpp_test_matvec, 2},
-    {"_ratiod_cpp_test_autodiff_gradient", (DL_FUNC) &_ratiod_cpp_test_autodiff_gradient, 1},
-    {"_ratiod_cpp_test_autodiff_exp_chain", (DL_FUNC) &_ratiod_cpp_test_autodiff_exp_chain, 1},
-    {"_ratiod_cpp_test_autodiff_log_likelihood", (DL_FUNC) &_ratiod_cpp_test_autodiff_log_likelihood, 2},
-    {"_ratiod_cpp_test_autodiff_division", (DL_FUNC) &_ratiod_cpp_test_autodiff_division, 2},
-    {"_ratiod_cpp_test_autodiff_lgamma", (DL_FUNC) &_ratiod_cpp_test_autodiff_lgamma, 1},
-    {"_ratiod_cpp_test_autodiff_softplus", (DL_FUNC) &_ratiod_cpp_test_autodiff_softplus, 1},
-    {"_ratiod_cpp_test_autodiff_inv_logit", (DL_FUNC) &_ratiod_cpp_test_autodiff_inv_logit, 1},
-    {"_ratiod_cpp_test_autodiff_log", (DL_FUNC) &_ratiod_cpp_test_autodiff_log, 1},
-    {"_ratiod_cpp_test_autodiff_sqrt", (DL_FUNC) &_ratiod_cpp_test_autodiff_sqrt, 1},
-    {"_ratiod_cpp_test_autodiff_pow", (DL_FUNC) &_ratiod_cpp_test_autodiff_pow, 2},
-    {"_ratiod_cpp_test_autodiff_log1p", (DL_FUNC) &_ratiod_cpp_test_autodiff_log1p, 1},
-    {"_ratiod_cpp_test_autodiff_log_sum_exp", (DL_FUNC) &_ratiod_cpp_test_autodiff_log_sum_exp, 2},
-    {"_ratiod_cpp_test_autodiff_logit", (DL_FUNC) &_ratiod_cpp_test_autodiff_logit, 1},
-    {"_ratiod_cpp_test_autodiff_negbin_loglik", (DL_FUNC) &_ratiod_cpp_test_autodiff_negbin_loglik, 3},
-    {"_ratiod_cpp_test_laplace_binomial", (DL_FUNC) &_ratiod_cpp_test_laplace_binomial, 3},
-    {"_ratiod_cpp_test_laplace_negbin", (DL_FUNC) &_ratiod_cpp_test_laplace_negbin, 3},
-    {"_ratiod_cpp_test_laplace_poisson", (DL_FUNC) &_ratiod_cpp_test_laplace_poisson, 2},
-    {"_ratiod_cpp_test_pg_update_beta", (DL_FUNC) &_ratiod_cpp_test_pg_update_beta, 5},
-    {"_ratiod_cpp_test_pg_update_re", (DL_FUNC) &_ratiod_cpp_test_pg_update_re, 6},
-    {"_ratiod_cpp_test_pg_update_sigma_re", (DL_FUNC) &_ratiod_cpp_test_pg_update_sigma_re, 2},
-    {"_ratiod_cpp_test_dot_product", (DL_FUNC) &_ratiod_cpp_test_dot_product, 2},
-    {"_ratiod_cpp_test_norm_squared", (DL_FUNC) &_ratiod_cpp_test_norm_squared, 1},
-    {"_ratiod_cpp_test_vector_sum", (DL_FUNC) &_ratiod_cpp_test_vector_sum, 1},
-    {"_ratiod_cpp_test_axpy", (DL_FUNC) &_ratiod_cpp_test_axpy, 3},
-    {"_ratiod_cpp_test_scale", (DL_FUNC) &_ratiod_cpp_test_scale, 2},
-    {"_ratiod_cpp_test_linalg_matvec", (DL_FUNC) &_ratiod_cpp_test_linalg_matvec, 2},
-    {"_ratiod_cpp_test_linalg_matvec_add", (DL_FUNC) &_ratiod_cpp_test_linalg_matvec_add, 3},
-    {"_ratiod_cpp_test_linalg_matvec_transpose", (DL_FUNC) &_ratiod_cpp_test_linalg_matvec_transpose, 2},
-    {"_ratiod_cpp_test_sparse_laplacian_quadform", (DL_FUNC) &_ratiod_cpp_test_sparse_laplacian_quadform, 3},
-    {"_ratiod_cpp_test_linalg_log_sum_exp", (DL_FUNC) &_ratiod_cpp_test_linalg_log_sum_exp, 2},
-    {"_ratiod_cpp_test_linalg_log_sum_exp_vec", (DL_FUNC) &_ratiod_cpp_test_linalg_log_sum_exp_vec, 1},
-    {"_ratiod_cpp_test_softmax_inplace", (DL_FUNC) &_ratiod_cpp_test_softmax_inplace, 1},
-    {"_ratiod_cpp_test_compute_linear_predictors", (DL_FUNC) &_ratiod_cpp_test_compute_linear_predictors, 5},
-    {"_ratiod_cpp_test_rw1_quadratic_form", (DL_FUNC) &_ratiod_cpp_test_rw1_quadratic_form, 2},
-    {"_ratiod_cpp_test_rw2_quadratic_form", (DL_FUNC) &_ratiod_cpp_test_rw2_quadratic_form, 2},
-    {"_ratiod_cpp_test_ar1_log_density", (DL_FUNC) &_ratiod_cpp_test_ar1_log_density, 3},
-    {"_ratiod_cpp_test_temporal_log_prior", (DL_FUNC) &_ratiod_cpp_test_temporal_log_prior, 5},
-    {"_ratiod_cpp_test_sum_to_zero_penalty", (DL_FUNC) &_ratiod_cpp_test_sum_to_zero_penalty, 2},
-    {"_ratiod_cpp_test_log1pexp", (DL_FUNC) &_ratiod_cpp_test_log1pexp, 1},
-    {"_ratiod_cpp_test_zi_logistic", (DL_FUNC) &_ratiod_cpp_test_zi_logistic, 1},
-    {"_ratiod_cpp_test_log_logistic", (DL_FUNC) &_ratiod_cpp_test_log_logistic, 1},
-    {"_ratiod_cpp_test_log1m_logistic", (DL_FUNC) &_ratiod_cpp_test_log1m_logistic, 1},
-    {"_ratiod_cpp_test_zi_poisson_lpmf", (DL_FUNC) &_ratiod_cpp_test_zi_poisson_lpmf, 2},
-    {"_ratiod_cpp_test_zi_negbin_lpmf", (DL_FUNC) &_ratiod_cpp_test_zi_negbin_lpmf, 3},
-    {"_ratiod_cpp_test_zi_poisson_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_zi_poisson_lpmf_logit, 3},
-    {"_ratiod_cpp_test_zi_negbin_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_zi_negbin_lpmf_logit, 4},
-    {"_ratiod_cpp_test_truncated_poisson_lpmf", (DL_FUNC) &_ratiod_cpp_test_truncated_poisson_lpmf, 2},
-    {"_ratiod_cpp_test_truncated_negbin_lpmf", (DL_FUNC) &_ratiod_cpp_test_truncated_negbin_lpmf, 3},
-    {"_ratiod_cpp_test_hurdle_poisson_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_hurdle_poisson_lpmf_logit, 3},
-    {"_ratiod_cpp_test_hurdle_negbin_lpmf_logit", (DL_FUNC) &_ratiod_cpp_test_hurdle_negbin_lpmf_logit, 4},
-    {"_ratiod_cpp_test_zi_log_likelihood", (DL_FUNC) &_ratiod_cpp_test_zi_log_likelihood, 5},
-    {"_ratiod_cpp_test_zi_poisson_grad_logit_zi", (DL_FUNC) &_ratiod_cpp_test_zi_poisson_grad_logit_zi, 3},
-    {"_ratiod_cpp_test_zi_negbin_grad_logit_zi", (DL_FUNC) &_ratiod_cpp_test_zi_negbin_grad_logit_zi, 4},
-    {"_ratiod_cpp_test_hurdle_grad_logit_theta", (DL_FUNC) &_ratiod_cpp_test_hurdle_grad_logit_theta, 2},
-    {"_ratiod_cpp_test_get_max_threads", (DL_FUNC) &_ratiod_cpp_test_get_max_threads, 0},
-    {"_ratiod_cpp_test_parallel_dot_products", (DL_FUNC) &_ratiod_cpp_test_parallel_dot_products, 3},
-    {"_ratiod_cpp_test_parallel_likelihood", (DL_FUNC) &_ratiod_cpp_test_parallel_likelihood, 3},
-    {"_ratiod_cpp_test_parallel_independent", (DL_FUNC) &_ratiod_cpp_test_parallel_independent, 2},
+    {"_numdenom_cpp_hmc_fit", (DL_FUNC) &_numdenom_cpp_hmc_fit, 21},
+    {"_numdenom_cpp_get_max_threads", (DL_FUNC) &_numdenom_cpp_get_max_threads, 0},
+    {"_numdenom_cpp_hmc_fit_gp", (DL_FUNC) &_numdenom_cpp_hmc_fit_gp, 27},
+    {"_numdenom_cpp_laplace_fit", (DL_FUNC) &_numdenom_cpp_laplace_fit, 11},
+    {"_numdenom_cpp_laplace_get_max_threads", (DL_FUNC) &_numdenom_cpp_laplace_get_max_threads, 0},
+    {"_numdenom_cpp_laplace_fit_spatial", (DL_FUNC) &_numdenom_cpp_laplace_fit_spatial, 17},
+    {"_numdenom_cpp_laplace_sample", (DL_FUNC) &_numdenom_cpp_laplace_sample, 3},
+    {"_numdenom_cpp_laplace_fit_bym2", (DL_FUNC) &_numdenom_cpp_laplace_fit_bym2, 19},
+    {"_numdenom_cpp_laplace_fit_gp", (DL_FUNC) &_numdenom_cpp_laplace_fit_gp, 20},
+    {"_numdenom_cpp_laplace_fit_rsr", (DL_FUNC) &_numdenom_cpp_laplace_fit_rsr, 19},
+    {"_numdenom_cpp_laplace_fit_multiscale_gp", (DL_FUNC) &_numdenom_cpp_laplace_fit_multiscale_gp, 26},
+    {"_numdenom_cpp_laplace_fit_multiscale_temporal", (DL_FUNC) &_numdenom_cpp_laplace_fit_multiscale_temporal, 20},
+    {"_numdenom_cpp_pg_binomial_gibbs", (DL_FUNC) &_numdenom_cpp_pg_binomial_gibbs, 13},
+    {"_numdenom_cpp_pg_get_max_threads", (DL_FUNC) &_numdenom_cpp_pg_get_max_threads, 0},
+    {"_numdenom_cpp_pg_binomial_gibbs_spatial", (DL_FUNC) &_numdenom_cpp_pg_binomial_gibbs_spatial, 19},
+    {"_numdenom_cpp_pg_binomial_gibbs_bym2", (DL_FUNC) &_numdenom_cpp_pg_binomial_gibbs_bym2, 21},
+    {"_numdenom_cpp_pg_binomial_gibbs_gp", (DL_FUNC) &_numdenom_cpp_pg_binomial_gibbs_gp, 26},
+    {"_numdenom_cpp_pg_binomial_gibbs_temporal", (DL_FUNC) &_numdenom_cpp_pg_binomial_gibbs_temporal, 22},
+    {"_numdenom_cpp_pg_binomial_gibbs_multiscale_gp", (DL_FUNC) &_numdenom_cpp_pg_binomial_gibbs_multiscale_gp, 36},
+    {"_numdenom_cpp_pg_binomial_gibbs_rsr", (DL_FUNC) &_numdenom_cpp_pg_binomial_gibbs_rsr, 21},
+    {"_numdenom_cpp_rpg1", (DL_FUNC) &_numdenom_cpp_rpg1, 1},
+    {"_numdenom_cpp_rpg", (DL_FUNC) &_numdenom_cpp_rpg, 2},
+    {"_numdenom_cpp_test_leapfrog", (DL_FUNC) &_numdenom_cpp_test_leapfrog, 4},
+    {"_numdenom_cpp_test_hamiltonian", (DL_FUNC) &_numdenom_cpp_test_hamiltonian, 2},
+    {"_numdenom_cpp_test_log_sum_exp", (DL_FUNC) &_numdenom_cpp_test_log_sum_exp, 1},
+    {"_numdenom_cpp_test_softmax", (DL_FUNC) &_numdenom_cpp_test_softmax, 1},
+    {"_numdenom_cpp_test_inv_logit", (DL_FUNC) &_numdenom_cpp_test_inv_logit, 1},
+    {"_numdenom_cpp_test_lgamma", (DL_FUNC) &_numdenom_cpp_test_lgamma, 1},
+    {"_numdenom_cpp_test_poisson_loglik", (DL_FUNC) &_numdenom_cpp_test_poisson_loglik, 2},
+    {"_numdenom_cpp_test_binomial_loglik", (DL_FUNC) &_numdenom_cpp_test_binomial_loglik, 3},
+    {"_numdenom_cpp_test_negbin_loglik", (DL_FUNC) &_numdenom_cpp_test_negbin_loglik, 3},
+    {"_numdenom_cpp_test_normal_loglik", (DL_FUNC) &_numdenom_cpp_test_normal_loglik, 3},
+    {"_numdenom_cpp_test_cholesky", (DL_FUNC) &_numdenom_cpp_test_cholesky, 1},
+    {"_numdenom_cpp_test_matvec", (DL_FUNC) &_numdenom_cpp_test_matvec, 2},
+    {"_numdenom_cpp_test_autodiff_gradient", (DL_FUNC) &_numdenom_cpp_test_autodiff_gradient, 1},
+    {"_numdenom_cpp_test_autodiff_exp_chain", (DL_FUNC) &_numdenom_cpp_test_autodiff_exp_chain, 1},
+    {"_numdenom_cpp_test_autodiff_log_likelihood", (DL_FUNC) &_numdenom_cpp_test_autodiff_log_likelihood, 2},
+    {"_numdenom_cpp_test_autodiff_division", (DL_FUNC) &_numdenom_cpp_test_autodiff_division, 2},
+    {"_numdenom_cpp_test_autodiff_lgamma", (DL_FUNC) &_numdenom_cpp_test_autodiff_lgamma, 1},
+    {"_numdenom_cpp_test_autodiff_softplus", (DL_FUNC) &_numdenom_cpp_test_autodiff_softplus, 1},
+    {"_numdenom_cpp_test_autodiff_inv_logit", (DL_FUNC) &_numdenom_cpp_test_autodiff_inv_logit, 1},
+    {"_numdenom_cpp_test_autodiff_log", (DL_FUNC) &_numdenom_cpp_test_autodiff_log, 1},
+    {"_numdenom_cpp_test_autodiff_sqrt", (DL_FUNC) &_numdenom_cpp_test_autodiff_sqrt, 1},
+    {"_numdenom_cpp_test_autodiff_pow", (DL_FUNC) &_numdenom_cpp_test_autodiff_pow, 2},
+    {"_numdenom_cpp_test_autodiff_log1p", (DL_FUNC) &_numdenom_cpp_test_autodiff_log1p, 1},
+    {"_numdenom_cpp_test_autodiff_log_sum_exp", (DL_FUNC) &_numdenom_cpp_test_autodiff_log_sum_exp, 2},
+    {"_numdenom_cpp_test_autodiff_logit", (DL_FUNC) &_numdenom_cpp_test_autodiff_logit, 1},
+    {"_numdenom_cpp_test_autodiff_negbin_loglik", (DL_FUNC) &_numdenom_cpp_test_autodiff_negbin_loglik, 3},
+    {"_numdenom_cpp_test_laplace_binomial", (DL_FUNC) &_numdenom_cpp_test_laplace_binomial, 3},
+    {"_numdenom_cpp_test_laplace_negbin", (DL_FUNC) &_numdenom_cpp_test_laplace_negbin, 3},
+    {"_numdenom_cpp_test_laplace_poisson", (DL_FUNC) &_numdenom_cpp_test_laplace_poisson, 2},
+    {"_numdenom_cpp_test_pg_update_beta", (DL_FUNC) &_numdenom_cpp_test_pg_update_beta, 5},
+    {"_numdenom_cpp_test_pg_update_re", (DL_FUNC) &_numdenom_cpp_test_pg_update_re, 6},
+    {"_numdenom_cpp_test_pg_update_sigma_re", (DL_FUNC) &_numdenom_cpp_test_pg_update_sigma_re, 2},
+    {"_numdenom_cpp_test_dot_product", (DL_FUNC) &_numdenom_cpp_test_dot_product, 2},
+    {"_numdenom_cpp_test_norm_squared", (DL_FUNC) &_numdenom_cpp_test_norm_squared, 1},
+    {"_numdenom_cpp_test_vector_sum", (DL_FUNC) &_numdenom_cpp_test_vector_sum, 1},
+    {"_numdenom_cpp_test_axpy", (DL_FUNC) &_numdenom_cpp_test_axpy, 3},
+    {"_numdenom_cpp_test_scale", (DL_FUNC) &_numdenom_cpp_test_scale, 2},
+    {"_numdenom_cpp_test_linalg_matvec", (DL_FUNC) &_numdenom_cpp_test_linalg_matvec, 2},
+    {"_numdenom_cpp_test_linalg_matvec_add", (DL_FUNC) &_numdenom_cpp_test_linalg_matvec_add, 3},
+    {"_numdenom_cpp_test_linalg_matvec_transpose", (DL_FUNC) &_numdenom_cpp_test_linalg_matvec_transpose, 2},
+    {"_numdenom_cpp_test_sparse_laplacian_quadform", (DL_FUNC) &_numdenom_cpp_test_sparse_laplacian_quadform, 3},
+    {"_numdenom_cpp_test_linalg_log_sum_exp", (DL_FUNC) &_numdenom_cpp_test_linalg_log_sum_exp, 2},
+    {"_numdenom_cpp_test_linalg_log_sum_exp_vec", (DL_FUNC) &_numdenom_cpp_test_linalg_log_sum_exp_vec, 1},
+    {"_numdenom_cpp_test_softmax_inplace", (DL_FUNC) &_numdenom_cpp_test_softmax_inplace, 1},
+    {"_numdenom_cpp_test_compute_linear_predictors", (DL_FUNC) &_numdenom_cpp_test_compute_linear_predictors, 5},
+    {"_numdenom_cpp_test_rw1_quadratic_form", (DL_FUNC) &_numdenom_cpp_test_rw1_quadratic_form, 2},
+    {"_numdenom_cpp_test_rw2_quadratic_form", (DL_FUNC) &_numdenom_cpp_test_rw2_quadratic_form, 2},
+    {"_numdenom_cpp_test_ar1_log_density", (DL_FUNC) &_numdenom_cpp_test_ar1_log_density, 3},
+    {"_numdenom_cpp_test_temporal_log_prior", (DL_FUNC) &_numdenom_cpp_test_temporal_log_prior, 5},
+    {"_numdenom_cpp_test_sum_to_zero_penalty", (DL_FUNC) &_numdenom_cpp_test_sum_to_zero_penalty, 2},
+    {"_numdenom_cpp_test_log1pexp", (DL_FUNC) &_numdenom_cpp_test_log1pexp, 1},
+    {"_numdenom_cpp_test_zi_logistic", (DL_FUNC) &_numdenom_cpp_test_zi_logistic, 1},
+    {"_numdenom_cpp_test_log_logistic", (DL_FUNC) &_numdenom_cpp_test_log_logistic, 1},
+    {"_numdenom_cpp_test_log1m_logistic", (DL_FUNC) &_numdenom_cpp_test_log1m_logistic, 1},
+    {"_numdenom_cpp_test_zi_poisson_lpmf", (DL_FUNC) &_numdenom_cpp_test_zi_poisson_lpmf, 2},
+    {"_numdenom_cpp_test_zi_negbin_lpmf", (DL_FUNC) &_numdenom_cpp_test_zi_negbin_lpmf, 3},
+    {"_numdenom_cpp_test_zi_poisson_lpmf_logit", (DL_FUNC) &_numdenom_cpp_test_zi_poisson_lpmf_logit, 3},
+    {"_numdenom_cpp_test_zi_negbin_lpmf_logit", (DL_FUNC) &_numdenom_cpp_test_zi_negbin_lpmf_logit, 4},
+    {"_numdenom_cpp_test_truncated_poisson_lpmf", (DL_FUNC) &_numdenom_cpp_test_truncated_poisson_lpmf, 2},
+    {"_numdenom_cpp_test_truncated_negbin_lpmf", (DL_FUNC) &_numdenom_cpp_test_truncated_negbin_lpmf, 3},
+    {"_numdenom_cpp_test_hurdle_poisson_lpmf_logit", (DL_FUNC) &_numdenom_cpp_test_hurdle_poisson_lpmf_logit, 3},
+    {"_numdenom_cpp_test_hurdle_negbin_lpmf_logit", (DL_FUNC) &_numdenom_cpp_test_hurdle_negbin_lpmf_logit, 4},
+    {"_numdenom_cpp_test_zi_log_likelihood", (DL_FUNC) &_numdenom_cpp_test_zi_log_likelihood, 5},
+    {"_numdenom_cpp_test_zi_poisson_grad_logit_zi", (DL_FUNC) &_numdenom_cpp_test_zi_poisson_grad_logit_zi, 3},
+    {"_numdenom_cpp_test_zi_negbin_grad_logit_zi", (DL_FUNC) &_numdenom_cpp_test_zi_negbin_grad_logit_zi, 4},
+    {"_numdenom_cpp_test_hurdle_grad_logit_theta", (DL_FUNC) &_numdenom_cpp_test_hurdle_grad_logit_theta, 2},
+    {"_numdenom_cpp_test_get_max_threads", (DL_FUNC) &_numdenom_cpp_test_get_max_threads, 0},
+    {"_numdenom_cpp_test_parallel_dot_products", (DL_FUNC) &_numdenom_cpp_test_parallel_dot_products, 3},
+    {"_numdenom_cpp_test_parallel_likelihood", (DL_FUNC) &_numdenom_cpp_test_parallel_likelihood, 3},
+    {"_numdenom_cpp_test_parallel_independent", (DL_FUNC) &_numdenom_cpp_test_parallel_independent, 2},
     {NULL, NULL, 0}
 };
 
-RcppExport void R_init_ratiod(DllInfo *dll) {
+RcppExport void R_init_numdenom(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

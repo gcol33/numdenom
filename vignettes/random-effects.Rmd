@@ -21,7 +21,7 @@ knitr::opts_chunk$set(
 
 ## Overview
 
-This vignette covers random effects in ratiod, including random intercepts, random slopes, crossed effects, and nested effects. ratiod uses lme4-style formula syntax with extensions for correlated vs. uncorrelated slopes.
+This vignette covers random effects in numdenom, including random intercepts, random slopes, crossed effects, and nested effects. numdenom uses lme4-style formula syntax with extensions for correlated vs. uncorrelated slopes.
 
 # Random Intercepts
 
@@ -167,7 +167,7 @@ fit <- ratiod(
 
 # Formula Expansion
 
-ratiod supports lme4-style formula expansion for random slopes.
+numdenom supports lme4-style formula expansion for random slopes.
 
 ## Interactions
 
@@ -201,7 +201,7 @@ fit <- ratiod(
 
 ## Parameter Naming
 
-ratiod cleans parameter names for readability:
+numdenom cleans parameter names for readability:
 
 | Formula Term | Parameter Name |
 |--------------|----------------|
@@ -214,7 +214,7 @@ ratiod cleans parameter names for readability:
 
 # Shared Random Effects
 
-By default, ratiod shares random effects between numerator and denominator when the same grouping factor appears in both. This is the core of the ratiod philosophy (see `vignette("philosophy")`).
+By default, numdenom shares random effects between numerator and denominator when the same grouping factor appears in both. This is the core of the numdenom philosophy (see `vignette("philosophy")`).
 
 ## Default: Shared Structure
 
@@ -281,7 +281,7 @@ re$site$depth      # Slope component
 
 ## Default PC Priors
 
-ratiod uses penalized complexity (PC) priors that favor simpler models:
+numdenom uses penalized complexity (PC) priors that favor simpler models:
 
 ```{r}
 # Default: P(sigma > 1) = 0.01

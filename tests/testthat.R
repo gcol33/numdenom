@@ -5,6 +5,6 @@
 # Learn more about testing at https://r-pkgs.org/testing-basics.html
 
 library(testthat)
-library(ratiod)
+library(numdenom)
 
-test_check("ratiod")
+test_check("numdenom")

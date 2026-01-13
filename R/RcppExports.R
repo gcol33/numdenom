@@ -2,370 +2,370 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 cpp_hmc_fit <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, model_type_str, re_params, spatial_params, temporal_params, prior_params, zi_params, latent_params, st_params, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose) {
-    .Call(`_ratiod_cpp_hmc_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, model_type_str, re_params, spatial_params, temporal_params, prior_params, zi_params, latent_params, st_params, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
+    .Call(`_numdenom_cpp_hmc_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, model_type_str, re_params, spatial_params, temporal_params, prior_params, zi_params, latent_params, st_params, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
 }
 
 cpp_get_max_threads <- function() {
-    .Call(`_ratiod_cpp_get_max_threads`)
+    .Call(`_numdenom_cpp_get_max_threads`)
 }
 
 cpp_hmc_fit_gp <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose) {
-    .Call(`_ratiod_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
+    .Call(`_numdenom_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
 }
 
 cpp_laplace_fit <- function(y, n, X, re_idx, n_re_groups, sigma_re, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_ratiod_cpp_laplace_fit`, y, n, X, re_idx, n_re_groups, sigma_re, family, phi, max_iter, tol, n_threads)
+    .Call(`_numdenom_cpp_laplace_fit`, y, n, X, re_idx, n_re_groups, sigma_re, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_get_max_threads <- function() {
-    .Call(`_ratiod_cpp_laplace_get_max_threads`)
+    .Call(`_numdenom_cpp_laplace_get_max_threads`)
 }
 
 cpp_laplace_fit_spatial <- function(y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_ratiod_cpp_laplace_fit_spatial`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, family, phi, max_iter, tol, n_threads)
+    .Call(`_numdenom_cpp_laplace_fit_spatial`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_sample <- function(mode, H, n_samples) {
-    .Call(`_ratiod_cpp_laplace_sample`, mode, H, n_samples)
+    .Call(`_numdenom_cpp_laplace_sample`, mode, H, n_samples)
 }
 
 cpp_laplace_fit_bym2 <- function(y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, sigma_spatial, rho, scale_factor, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_ratiod_cpp_laplace_fit_bym2`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, sigma_spatial, rho, scale_factor, family, phi, max_iter, tol, n_threads)
+    .Call(`_numdenom_cpp_laplace_fit_bym2`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, sigma_spatial, rho, scale_factor, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_fit_gp <- function(y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp, phi_gp, cov_type, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_ratiod_cpp_laplace_fit_gp`, y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp, phi_gp, cov_type, family, phi, max_iter, tol, n_threads)
+    .Call(`_numdenom_cpp_laplace_fit_gp`, y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp, phi_gp, cov_type, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_fit_rsr <- function(y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, rsr_projection, rsr_n, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_ratiod_cpp_laplace_fit_rsr`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, rsr_projection, rsr_n, family, phi, max_iter, tol, n_threads)
+    .Call(`_numdenom_cpp_laplace_fit_rsr`, y, n, X, re_idx, n_re_groups, sigma_re, spatial_idx, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, tau_spatial, rsr_projection, rsr_n, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_fit_multiscale_gp <- function(y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local, phi_local, sigma2_regional, phi_regional, cov_type, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_ratiod_cpp_laplace_fit_multiscale_gp`, y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local, phi_local, sigma2_regional, phi_regional, cov_type, family, phi, max_iter, tol, n_threads)
+    .Call(`_numdenom_cpp_laplace_fit_multiscale_gp`, y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local, phi_local, sigma2_regional, phi_regional, cov_type, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_laplace_fit_multiscale_temporal <- function(y, n, X, re_idx, n_re_groups, sigma_re, time_idx, n_times, seasonal_period, trend_type, short_type, sigma2_trend, sigma2_seasonal, sigma2_short, rho_short, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
-    .Call(`_ratiod_cpp_laplace_fit_multiscale_temporal`, y, n, X, re_idx, n_re_groups, sigma_re, time_idx, n_times, seasonal_period, trend_type, short_type, sigma2_trend, sigma2_seasonal, sigma2_short, rho_short, family, phi, max_iter, tol, n_threads)
+    .Call(`_numdenom_cpp_laplace_fit_multiscale_temporal`, y, n, X, re_idx, n_re_groups, sigma_re, time_idx, n_times, seasonal_period, trend_type, short_type, sigma2_trend, sigma2_seasonal, sigma2_short, rho_short, family, phi, max_iter, tol, n_threads)
 }
 
 cpp_pg_binomial_gibbs <- function(y, n, X, group, n_groups, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_scale = 2.5, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_ratiod_cpp_pg_binomial_gibbs`, y, n, X, group, n_groups, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_scale, store_eta, verbose, n_threads)
+    .Call(`_numdenom_cpp_pg_binomial_gibbs`, y, n, X, group, n_groups, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_scale, store_eta, verbose, n_threads)
 }
 
 cpp_pg_get_max_threads <- function() {
-    .Call(`_ratiod_cpp_pg_get_max_threads`)
+    .Call(`_numdenom_cpp_pg_get_max_threads`)
 }
 
 cpp_pg_binomial_gibbs_spatial <- function(y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_tau_shape = 1.0, prior_tau_rate = 0.01, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_ratiod_cpp_pg_binomial_gibbs_spatial`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_tau_shape, prior_tau_rate, store_eta, verbose, n_threads)
+    .Call(`_numdenom_cpp_pg_binomial_gibbs_spatial`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_tau_shape, prior_tau_rate, store_eta, verbose, n_threads)
 }
 
 cpp_pg_binomial_gibbs_bym2 <- function(y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, scale_factor, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_spatial_scale = 2.5, prior_rho_alpha = 0.5, prior_rho_beta = 0.5, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_ratiod_cpp_pg_binomial_gibbs_bym2`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, scale_factor, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_spatial_scale, prior_rho_alpha, prior_rho_beta, store_eta, verbose, n_threads)
+    .Call(`_numdenom_cpp_pg_binomial_gibbs_bym2`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, scale_factor, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_spatial_scale, prior_rho_alpha, prior_rho_beta, store_eta, verbose, n_threads)
 }
 
 cpp_pg_binomial_gibbs_gp <- function(y, n, X, re_group, n_re_groups, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp_init, phi_gp_init, cov_type, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_gp_U = 1.0, prior_sigma_gp_alpha = 0.01, prior_phi_lower = 0.01, prior_phi_upper = 10.0, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_ratiod_cpp_pg_binomial_gibbs_gp`, y, n, X, re_group, n_re_groups, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp_init, phi_gp_init, cov_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_gp_U, prior_sigma_gp_alpha, prior_phi_lower, prior_phi_upper, store_eta, verbose, n_threads)
+    .Call(`_numdenom_cpp_pg_binomial_gibbs_gp`, y, n, X, re_group, n_re_groups, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp_init, phi_gp_init, cov_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_gp_U, prior_sigma_gp_alpha, prior_phi_lower, prior_phi_upper, store_eta, verbose, n_threads)
 }
 
 cpp_pg_binomial_gibbs_temporal <- function(y, n, X, re_group, n_re_groups, time_idx, n_times, seasonal_period, trend_type, short_type, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_trend_scale = 1.0, prior_sigma_seasonal_scale = 1.0, prior_sigma_short_scale = 1.0, rho_short_init = 0.5, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_ratiod_cpp_pg_binomial_gibbs_temporal`, y, n, X, re_group, n_re_groups, time_idx, n_times, seasonal_period, trend_type, short_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_trend_scale, prior_sigma_seasonal_scale, prior_sigma_short_scale, rho_short_init, store_eta, verbose, n_threads)
+    .Call(`_numdenom_cpp_pg_binomial_gibbs_temporal`, y, n, X, re_group, n_re_groups, time_idx, n_times, seasonal_period, trend_type, short_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_trend_scale, prior_sigma_seasonal_scale, prior_sigma_short_scale, rho_short_init, store_eta, verbose, n_threads)
 }
 
 cpp_pg_binomial_gibbs_multiscale_gp <- function(y, n, X, re_group, n_re_groups, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local_init, phi_local_init, sigma2_regional_init, phi_regional_init, cov_type, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_local_U = 1.0, prior_sigma_local_alpha = 0.01, prior_phi_local_lower = 0.01, prior_phi_local_upper = 5.0, prior_sigma_regional_U = 1.0, prior_sigma_regional_alpha = 0.01, prior_phi_regional_lower = 0.1, prior_phi_regional_upper = 20.0, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_ratiod_cpp_pg_binomial_gibbs_multiscale_gp`, y, n, X, re_group, n_re_groups, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local_init, phi_local_init, sigma2_regional_init, phi_regional_init, cov_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_local_U, prior_sigma_local_alpha, prior_phi_local_lower, prior_phi_local_upper, prior_sigma_regional_U, prior_sigma_regional_alpha, prior_phi_regional_lower, prior_phi_regional_upper, store_eta, verbose, n_threads)
+    .Call(`_numdenom_cpp_pg_binomial_gibbs_multiscale_gp`, y, n, X, re_group, n_re_groups, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local_init, phi_local_init, sigma2_regional_init, phi_regional_init, cov_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_local_U, prior_sigma_local_alpha, prior_phi_local_lower, prior_phi_local_upper, prior_sigma_regional_U, prior_sigma_regional_alpha, prior_phi_regional_lower, prior_phi_regional_upper, store_eta, verbose, n_threads)
 }
 
 cpp_pg_binomial_gibbs_rsr <- function(y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, rsr_projection, rsr_n, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_tau_shape = 1.0, prior_tau_rate = 0.01, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
-    .Call(`_ratiod_cpp_pg_binomial_gibbs_rsr`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, rsr_projection, rsr_n, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_tau_shape, prior_tau_rate, store_eta, verbose, n_threads)
+    .Call(`_numdenom_cpp_pg_binomial_gibbs_rsr`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, rsr_projection, rsr_n, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_tau_shape, prior_tau_rate, store_eta, verbose, n_threads)
 }
 
 cpp_rpg1 <- function(z) {
-    .Call(`_ratiod_cpp_rpg1`, z)
+    .Call(`_numdenom_cpp_rpg1`, z)
 }
 
 cpp_rpg <- function(b, z) {
-    .Call(`_ratiod_cpp_rpg`, b, z)
+    .Call(`_numdenom_cpp_rpg`, b, z)
 }
 
 cpp_test_leapfrog <- function(q_init, p_init, epsilon, L) {
-    .Call(`_ratiod_cpp_test_leapfrog`, q_init, p_init, epsilon, L)
+    .Call(`_numdenom_cpp_test_leapfrog`, q_init, p_init, epsilon, L)
 }
 
 cpp_test_hamiltonian <- function(q, p) {
-    .Call(`_ratiod_cpp_test_hamiltonian`, q, p)
+    .Call(`_numdenom_cpp_test_hamiltonian`, q, p)
 }
 
 cpp_test_log_sum_exp <- function(log_vals) {
-    .Call(`_ratiod_cpp_test_log_sum_exp`, log_vals)
+    .Call(`_numdenom_cpp_test_log_sum_exp`, log_vals)
 }
 
 cpp_test_softmax <- function(x) {
-    .Call(`_ratiod_cpp_test_softmax`, x)
+    .Call(`_numdenom_cpp_test_softmax`, x)
 }
 
 cpp_test_inv_logit <- function(x) {
-    .Call(`_ratiod_cpp_test_inv_logit`, x)
+    .Call(`_numdenom_cpp_test_inv_logit`, x)
 }
 
 cpp_test_lgamma <- function(x) {
-    .Call(`_ratiod_cpp_test_lgamma`, x)
+    .Call(`_numdenom_cpp_test_lgamma`, x)
 }
 
 cpp_test_poisson_loglik <- function(y, lambda) {
-    .Call(`_ratiod_cpp_test_poisson_loglik`, y, lambda)
+    .Call(`_numdenom_cpp_test_poisson_loglik`, y, lambda)
 }
 
 cpp_test_binomial_loglik <- function(y, n, p) {
-    .Call(`_ratiod_cpp_test_binomial_loglik`, y, n, p)
+    .Call(`_numdenom_cpp_test_binomial_loglik`, y, n, p)
 }
 
 cpp_test_negbin_loglik <- function(y, mu, phi) {
-    .Call(`_ratiod_cpp_test_negbin_loglik`, y, mu, phi)
+    .Call(`_numdenom_cpp_test_negbin_loglik`, y, mu, phi)
 }
 
 cpp_test_normal_loglik <- function(y, mu, sigma) {
-    .Call(`_ratiod_cpp_test_normal_loglik`, y, mu, sigma)
+    .Call(`_numdenom_cpp_test_normal_loglik`, y, mu, sigma)
 }
 
 cpp_test_cholesky <- function(A) {
-    .Call(`_ratiod_cpp_test_cholesky`, A)
+    .Call(`_numdenom_cpp_test_cholesky`, A)
 }
 
 cpp_test_matvec <- function(A, x) {
-    .Call(`_ratiod_cpp_test_matvec`, A, x)
+    .Call(`_numdenom_cpp_test_matvec`, A, x)
 }
 
 cpp_test_autodiff_gradient <- function(x_vals) {
-    .Call(`_ratiod_cpp_test_autodiff_gradient`, x_vals)
+    .Call(`_numdenom_cpp_test_autodiff_gradient`, x_vals)
 }
 
 cpp_test_autodiff_exp_chain <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_exp_chain`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_exp_chain`, x_val)
 }
 
 cpp_test_autodiff_log_likelihood <- function(y, eta) {
-    .Call(`_ratiod_cpp_test_autodiff_log_likelihood`, y, eta)
+    .Call(`_numdenom_cpp_test_autodiff_log_likelihood`, y, eta)
 }
 
 cpp_test_autodiff_division <- function(a_val, b_val) {
-    .Call(`_ratiod_cpp_test_autodiff_division`, a_val, b_val)
+    .Call(`_numdenom_cpp_test_autodiff_division`, a_val, b_val)
 }
 
 cpp_test_autodiff_lgamma <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_lgamma`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_lgamma`, x_val)
 }
 
 cpp_test_autodiff_softplus <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_softplus`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_softplus`, x_val)
 }
 
 cpp_test_autodiff_inv_logit <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_inv_logit`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_inv_logit`, x_val)
 }
 
 cpp_test_autodiff_log <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_log`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_log`, x_val)
 }
 
 cpp_test_autodiff_sqrt <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_sqrt`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_sqrt`, x_val)
 }
 
 cpp_test_autodiff_pow <- function(x_val, p) {
-    .Call(`_ratiod_cpp_test_autodiff_pow`, x_val, p)
+    .Call(`_numdenom_cpp_test_autodiff_pow`, x_val, p)
 }
 
 cpp_test_autodiff_log1p <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_log1p`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_log1p`, x_val)
 }
 
 cpp_test_autodiff_log_sum_exp <- function(a_val, b_val) {
-    .Call(`_ratiod_cpp_test_autodiff_log_sum_exp`, a_val, b_val)
+    .Call(`_numdenom_cpp_test_autodiff_log_sum_exp`, a_val, b_val)
 }
 
 cpp_test_autodiff_logit <- function(x_val) {
-    .Call(`_ratiod_cpp_test_autodiff_logit`, x_val)
+    .Call(`_numdenom_cpp_test_autodiff_logit`, x_val)
 }
 
 cpp_test_autodiff_negbin_loglik <- function(y, mu, phi) {
-    .Call(`_ratiod_cpp_test_autodiff_negbin_loglik`, y, mu, phi)
+    .Call(`_numdenom_cpp_test_autodiff_negbin_loglik`, y, mu, phi)
 }
 
 cpp_test_laplace_binomial <- function(y, n, eta) {
-    .Call(`_ratiod_cpp_test_laplace_binomial`, y, n, eta)
+    .Call(`_numdenom_cpp_test_laplace_binomial`, y, n, eta)
 }
 
 cpp_test_laplace_negbin <- function(y, eta, phi) {
-    .Call(`_ratiod_cpp_test_laplace_negbin`, y, eta, phi)
+    .Call(`_numdenom_cpp_test_laplace_negbin`, y, eta, phi)
 }
 
 cpp_test_laplace_poisson <- function(y, eta) {
-    .Call(`_ratiod_cpp_test_laplace_poisson`, y, eta)
+    .Call(`_numdenom_cpp_test_laplace_poisson`, y, eta)
 }
 
 cpp_test_pg_update_beta <- function(kappa, omega, X, re_contrib, prior_sd) {
-    .Call(`_ratiod_cpp_test_pg_update_beta`, kappa, omega, X, re_contrib, prior_sd)
+    .Call(`_numdenom_cpp_test_pg_update_beta`, kappa, omega, X, re_contrib, prior_sd)
 }
 
 cpp_test_pg_update_re <- function(kappa, omega, X_beta, group, n_groups, sigma_re) {
-    .Call(`_ratiod_cpp_test_pg_update_re`, kappa, omega, X_beta, group, n_groups, sigma_re)
+    .Call(`_numdenom_cpp_test_pg_update_re`, kappa, omega, X_beta, group, n_groups, sigma_re)
 }
 
 cpp_test_pg_update_sigma_re <- function(re, scale) {
-    .Call(`_ratiod_cpp_test_pg_update_sigma_re`, re, scale)
+    .Call(`_numdenom_cpp_test_pg_update_sigma_re`, re, scale)
 }
 
 cpp_test_dot_product <- function(x, y) {
-    .Call(`_ratiod_cpp_test_dot_product`, x, y)
+    .Call(`_numdenom_cpp_test_dot_product`, x, y)
 }
 
 cpp_test_norm_squared <- function(x) {
-    .Call(`_ratiod_cpp_test_norm_squared`, x)
+    .Call(`_numdenom_cpp_test_norm_squared`, x)
 }
 
 cpp_test_vector_sum <- function(x) {
-    .Call(`_ratiod_cpp_test_vector_sum`, x)
+    .Call(`_numdenom_cpp_test_vector_sum`, x)
 }
 
 cpp_test_axpy <- function(a, x, y) {
-    .Call(`_ratiod_cpp_test_axpy`, a, x, y)
+    .Call(`_numdenom_cpp_test_axpy`, a, x, y)
 }
 
 cpp_test_scale <- function(a, x) {
-    .Call(`_ratiod_cpp_test_scale`, a, x)
+    .Call(`_numdenom_cpp_test_scale`, a, x)
 }
 
 cpp_test_linalg_matvec <- function(X, beta) {
-    .Call(`_ratiod_cpp_test_linalg_matvec`, X, beta)
+    .Call(`_numdenom_cpp_test_linalg_matvec`, X, beta)
 }
 
 cpp_test_linalg_matvec_add <- function(X, beta, y_init) {
-    .Call(`_ratiod_cpp_test_linalg_matvec_add`, X, beta, y_init)
+    .Call(`_numdenom_cpp_test_linalg_matvec_add`, X, beta, y_init)
 }
 
 cpp_test_linalg_matvec_transpose <- function(X, x) {
-    .Call(`_ratiod_cpp_test_linalg_matvec_transpose`, X, x)
+    .Call(`_numdenom_cpp_test_linalg_matvec_transpose`, X, x)
 }
 
 cpp_test_sparse_laplacian_quadform <- function(row_ptr, col_idx, x) {
-    .Call(`_ratiod_cpp_test_sparse_laplacian_quadform`, row_ptr, col_idx, x)
+    .Call(`_numdenom_cpp_test_sparse_laplacian_quadform`, row_ptr, col_idx, x)
 }
 
 cpp_test_linalg_log_sum_exp <- function(a, b) {
-    .Call(`_ratiod_cpp_test_linalg_log_sum_exp`, a, b)
+    .Call(`_numdenom_cpp_test_linalg_log_sum_exp`, a, b)
 }
 
 cpp_test_linalg_log_sum_exp_vec <- function(x) {
-    .Call(`_ratiod_cpp_test_linalg_log_sum_exp_vec`, x)
+    .Call(`_numdenom_cpp_test_linalg_log_sum_exp_vec`, x)
 }
 
 cpp_test_softmax_inplace <- function(x) {
-    .Call(`_ratiod_cpp_test_softmax_inplace`, x)
+    .Call(`_numdenom_cpp_test_softmax_inplace`, x)
 }
 
 cpp_test_compute_linear_predictors <- function(X_num, beta_num, X_denom, beta_denom, n_threads) {
-    .Call(`_ratiod_cpp_test_compute_linear_predictors`, X_num, beta_num, X_denom, beta_denom, n_threads)
+    .Call(`_numdenom_cpp_test_compute_linear_predictors`, X_num, beta_num, X_denom, beta_denom, n_threads)
 }
 
 cpp_test_rw1_quadratic_form <- function(phi, cyclic) {
-    .Call(`_ratiod_cpp_test_rw1_quadratic_form`, phi, cyclic)
+    .Call(`_numdenom_cpp_test_rw1_quadratic_form`, phi, cyclic)
 }
 
 cpp_test_rw2_quadratic_form <- function(phi, cyclic) {
-    .Call(`_ratiod_cpp_test_rw2_quadratic_form`, phi, cyclic)
+    .Call(`_numdenom_cpp_test_rw2_quadratic_form`, phi, cyclic)
 }
 
 cpp_test_ar1_log_density <- function(phi, rho, tau) {
-    .Call(`_ratiod_cpp_test_ar1_log_density`, phi, rho, tau)
+    .Call(`_numdenom_cpp_test_ar1_log_density`, phi, rho, tau)
 }
 
 cpp_test_temporal_log_prior <- function(phi, type_str, tau, rho, cyclic) {
-    .Call(`_ratiod_cpp_test_temporal_log_prior`, phi, type_str, tau, rho, cyclic)
+    .Call(`_numdenom_cpp_test_temporal_log_prior`, phi, type_str, tau, rho, cyclic)
 }
 
 cpp_test_sum_to_zero_penalty <- function(phi, lambda) {
-    .Call(`_ratiod_cpp_test_sum_to_zero_penalty`, phi, lambda)
+    .Call(`_numdenom_cpp_test_sum_to_zero_penalty`, phi, lambda)
 }
 
 cpp_test_log1pexp <- function(x) {
-    .Call(`_ratiod_cpp_test_log1pexp`, x)
+    .Call(`_numdenom_cpp_test_log1pexp`, x)
 }
 
 cpp_test_zi_logistic <- function(x) {
-    .Call(`_ratiod_cpp_test_zi_logistic`, x)
+    .Call(`_numdenom_cpp_test_zi_logistic`, x)
 }
 
 cpp_test_log_logistic <- function(x) {
-    .Call(`_ratiod_cpp_test_log_logistic`, x)
+    .Call(`_numdenom_cpp_test_log_logistic`, x)
 }
 
 cpp_test_log1m_logistic <- function(x) {
-    .Call(`_ratiod_cpp_test_log1m_logistic`, x)
+    .Call(`_numdenom_cpp_test_log1m_logistic`, x)
 }
 
 cpp_test_zi_poisson_lpmf <- function(y, mu) {
-    .Call(`_ratiod_cpp_test_zi_poisson_lpmf`, y, mu)
+    .Call(`_numdenom_cpp_test_zi_poisson_lpmf`, y, mu)
 }
 
 cpp_test_zi_negbin_lpmf <- function(y, mu, phi) {
-    .Call(`_ratiod_cpp_test_zi_negbin_lpmf`, y, mu, phi)
+    .Call(`_numdenom_cpp_test_zi_negbin_lpmf`, y, mu, phi)
 }
 
 cpp_test_zi_poisson_lpmf_logit <- function(y, mu, logit_zi) {
-    .Call(`_ratiod_cpp_test_zi_poisson_lpmf_logit`, y, mu, logit_zi)
+    .Call(`_numdenom_cpp_test_zi_poisson_lpmf_logit`, y, mu, logit_zi)
 }
 
 cpp_test_zi_negbin_lpmf_logit <- function(y, mu, phi, logit_zi) {
-    .Call(`_ratiod_cpp_test_zi_negbin_lpmf_logit`, y, mu, phi, logit_zi)
+    .Call(`_numdenom_cpp_test_zi_negbin_lpmf_logit`, y, mu, phi, logit_zi)
 }
 
 cpp_test_truncated_poisson_lpmf <- function(y, mu) {
-    .Call(`_ratiod_cpp_test_truncated_poisson_lpmf`, y, mu)
+    .Call(`_numdenom_cpp_test_truncated_poisson_lpmf`, y, mu)
 }
 
 cpp_test_truncated_negbin_lpmf <- function(y, mu, phi) {
-    .Call(`_ratiod_cpp_test_truncated_negbin_lpmf`, y, mu, phi)
+    .Call(`_numdenom_cpp_test_truncated_negbin_lpmf`, y, mu, phi)
 }
 
 cpp_test_hurdle_poisson_lpmf_logit <- function(y, mu, logit_theta) {
-    .Call(`_ratiod_cpp_test_hurdle_poisson_lpmf_logit`, y, mu, logit_theta)
+    .Call(`_numdenom_cpp_test_hurdle_poisson_lpmf_logit`, y, mu, logit_theta)
 }
 
 cpp_test_hurdle_negbin_lpmf_logit <- function(y, mu, phi, logit_theta) {
-    .Call(`_ratiod_cpp_test_hurdle_negbin_lpmf_logit`, y, mu, phi, logit_theta)
+    .Call(`_numdenom_cpp_test_hurdle_negbin_lpmf_logit`, y, mu, phi, logit_theta)
 }
 
 cpp_test_zi_log_likelihood <- function(y, mu, phi, logit_zi, zi_type_str) {
-    .Call(`_ratiod_cpp_test_zi_log_likelihood`, y, mu, phi, logit_zi, zi_type_str)
+    .Call(`_numdenom_cpp_test_zi_log_likelihood`, y, mu, phi, logit_zi, zi_type_str)
 }
 
 cpp_test_zi_poisson_grad_logit_zi <- function(y, mu, logit_zi) {
-    .Call(`_ratiod_cpp_test_zi_poisson_grad_logit_zi`, y, mu, logit_zi)
+    .Call(`_numdenom_cpp_test_zi_poisson_grad_logit_zi`, y, mu, logit_zi)
 }
 
 cpp_test_zi_negbin_grad_logit_zi <- function(y, mu, phi, logit_zi) {
-    .Call(`_ratiod_cpp_test_zi_negbin_grad_logit_zi`, y, mu, phi, logit_zi)
+    .Call(`_numdenom_cpp_test_zi_negbin_grad_logit_zi`, y, mu, phi, logit_zi)
 }
 
 cpp_test_hurdle_grad_logit_theta <- function(y, logit_theta) {
-    .Call(`_ratiod_cpp_test_hurdle_grad_logit_theta`, y, logit_theta)
+    .Call(`_numdenom_cpp_test_hurdle_grad_logit_theta`, y, logit_theta)
 }
 
 cpp_test_get_max_threads <- function() {
-    .Call(`_ratiod_cpp_test_get_max_threads`)
+    .Call(`_numdenom_cpp_test_get_max_threads`)
 }
 
 cpp_test_parallel_dot_products <- function(X, y, n_threads) {
-    .Call(`_ratiod_cpp_test_parallel_dot_products`, X, y, n_threads)
+    .Call(`_numdenom_cpp_test_parallel_dot_products`, X, y, n_threads)
 }
 
 cpp_test_parallel_likelihood <- function(y, mu, n_threads) {
-    .Call(`_ratiod_cpp_test_parallel_likelihood`, y, mu, n_threads)
+    .Call(`_numdenom_cpp_test_parallel_likelihood`, y, mu, n_threads)
 }
 
 cpp_test_parallel_independent <- function(n, n_threads) {
-    .Call(`_ratiod_cpp_test_parallel_independent`, n, n_threads)
+    .Call(`_numdenom_cpp_test_parallel_independent`, n, n_threads)
 }
 

@@ -1,4 +1,4 @@
-# ratiod 1.2.0
+# numdenom 1.2.0
 
 ## New Features
 
@@ -38,7 +38,7 @@
 
 ---
 
-# ratiod 1.1.0
+# numdenom 1.1.0
 
 ## New Features
 
@@ -56,7 +56,7 @@
 
 * Updated `vignette("random-effects")` with section on latent factors.
 
-# ratiod 1.0.0
+# numdenom 1.0.0
 
 Initial release with:
 

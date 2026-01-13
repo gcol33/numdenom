@@ -60,9 +60,9 @@ This assumes the ratio is the quantity of interest and that effort affects catch
 
 3. **Uncertainty in effort is ignored**: Effort measurements have error. Offset models treat effort as fixed and known.
 
-## The ratiod Solution: Joint Modelling
+## The numdenom Solution: Joint Modelling
 
-ratiod takes a different approach. Instead of modelling the ratio, we jointly model the two processes that generate it:
+numdenom takes a different approach. Instead of modelling the ratio, we jointly model the two processes that generate it:
 
 $$
 Y_i \sim \text{Distribution}_1(\mu_Y, \phi_Y) \quad \text{(numerator)}
@@ -105,11 +105,11 @@ With shared structure:
 3. The shared effect **cancels in the ratio** (it appears in both $\eta$ and $\xi$)
 4. What remains is the **true ratio signal**, not confounded by site quality
 
-This is why ratiod makes shared structure the **default**. Independence is a special case that must be explicitly requested—and triggers a warning.
+This is why numdenom makes shared structure the **default**. Independence is a special case that must be explicitly requested—and triggers a warning.
 
 ## The Three Families
 
-ratiod provides three model families for different data types:
+numdenom provides three model families for different data types:
 
 ### 1. Two-Process Counts: `ratiod_negbin_negbin()`
 
@@ -199,9 +199,9 @@ The warning reminds you that this is a strong assumption.
 | Model ratio directly | Heteroscedasticity, ignores denominator uncertainty |
 | Use offset | Assumes proportionality, ignores effort structure |
 | Independent joint model | Spurious ratio effects from shared unmeasured drivers |
-| **ratiod (shared structure)** | Correct propagation of uncertainty, shared drivers cancel |
+| **numdenom (shared structure)** | Correct propagation of uncertainty, shared drivers cancel |
 
-ratiod enforces the correct approach by design:
+numdenom enforces the correct approach by design:
 
 - **No offsets allowed**
 - **Shared structure by default**

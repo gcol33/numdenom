@@ -19,7 +19,7 @@ knitr::opts_chunk$set(
 
 ## Overview
 
-This vignette demonstrates complete analysis workflows using ratiod. Each example shows data preparation, model fitting, diagnostics, and inference. See `vignette("getting-started")` for basic usage and `vignette("philosophy")` for statistical motivation.
+This vignette demonstrates complete analysis workflows using numdenom. Each example shows data preparation, model fitting, diagnostics, and inference. See `vignette("getting-started")` for basic usage and `vignette("philosophy")` for statistical motivation.
 
 
 # Workflow 1: Fisheries CPUE
@@ -33,7 +33,7 @@ This vignette demonstrates complete analysis workflows using ratiod. Each exampl
 ### Data
 
 ```{r}
-library(ratiod)
+library(numdenom)
 
 # Simulated fisheries data
 set.seed(42)

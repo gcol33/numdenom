@@ -1,12 +1,12 @@
-# ratiod
+# numdenom
 
-[![R-CMD-check](https://github.com/gcol33/ratiod/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/gcol33/ratiod/actions/workflows/R-CMD-check.yml)
-[![Codecov test coverage](https://codecov.io/gh/gcol33/ratiod/graph/badge.svg)](https://app.codecov.io/gh/gcol33/ratiod)
+[![R-CMD-check](https://github.com/gcol33/numdenom/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/gcol33/numdenom/actions/workflows/R-CMD-check.yml)
+[![Codecov test coverage](https://codecov.io/gh/gcol33/numdenom/graph/badge.svg)](https://app.codecov.io/gh/gcol33/numdenom)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Bayesian Hierarchical Modelling of Ratios, Rates, and Proportions**
 
-The `ratiod` package provides a principled framework for modelling ratios, rates, and proportions in ecological and related data. Unlike traditional approaches that model ratios directly, `ratiod` performs inference on the latent processes generating the numerator and denominator, computing ratios post hoc with full uncertainty propagation.
+The `numdenom` package provides a principled framework for modelling ratios, rates, and proportions in ecological and related data. Unlike traditional approaches that model ratios directly, `numdenom` performs inference on the latent processes generating the numerator and denominator, computing ratios post hoc with full uncertainty propagation.
 
 ## Philosophy
 
@@ -22,7 +22,7 @@ All inference is performed on the latent processes generating the numerator and 
 ## Quick Start
 
 ```r
-library(ratiod)
+library(numdenom)
 
 # Fit a model for count ratios (e.g., relative abundance)
 fit <- ratiod(
@@ -42,7 +42,7 @@ ratio_contrast(fit, "habitat")
 
 Ratios, rates, and proportions are ubiquitous in ecological and biological research: relative abundance, catch-per-unit-effort (CPUE), survival rates, proportional cover. Yet standard statistical approaches—modelling ratios directly or using offsets—can produce biased inference when numerator and denominator share unmeasured drivers.
 
-`ratiod` addresses this by:
+`numdenom` addresses this by:
 
 1. **Modelling both components jointly** with shared random effects by default
 2. **Computing ratios post hoc** from the full posterior, preserving uncertainty
@@ -92,7 +92,7 @@ This makes the package useful for:
 ```r
 # Install development version from GitHub
 # install.packages("pak")
-pak::pak("gcol33/ratiod")
+pak::pak("gcol33/numdenom")
 ```
 
 ## Usage Examples
@@ -100,7 +100,7 @@ pak::pak("gcol33/ratiod")
 ### Basic: Count Ratios
 
 ```r
-library(ratiod)
+library(numdenom)
 
 # Relative abundance of a focal species
 fit <- ratiod(
@@ -195,15 +195,15 @@ fit <- ratiod(
 | Ratio regression | ✗ | ✗ | Low |
 | GLM with offset | ✗ | Partial | Medium |
 | Separate models | ✗ | ✗ | High |
-| **ratiod** | ✓ (default) | ✓ | High |
+| **numdenom** | ✓ (default) | ✓ | High |
 
 ## Documentation
 
-- [Quick Start](https://gillescolling.com/ratiod/articles/getting-started.html) — Installation and basic usage
-- [Why Ratios Are Not Data](https://gillescolling.com/ratiod/articles/philosophy.html) — Statistical motivation
-- [Complete Workflows](https://gillescolling.com/ratiod/articles/workflows.html) — Real-world analysis examples
-- [Spatial and Temporal Models](https://gillescolling.com/ratiod/articles/spatial-temporal.html) — CAR, BYM2, AR(1), random walk
-- [Random Effects](https://gillescolling.com/ratiod/articles/random-effects.html) — Random slopes, nested/crossed RE
+- [Quick Start](https://gillescolling.com/numdenom/articles/getting-started.html) — Installation and basic usage
+- [Why Ratios Are Not Data](https://gillescolling.com/numdenom/articles/philosophy.html) — Statistical motivation
+- [Complete Workflows](https://gillescolling.com/numdenom/articles/workflows.html) — Real-world analysis examples
+- [Spatial and Temporal Models](https://gillescolling.com/numdenom/articles/spatial-temporal.html) — CAR, BYM2, AR(1), random walk
+- [Random Effects](https://gillescolling.com/numdenom/articles/random-effects.html) — Random slopes, nested/crossed RE
 
 ## Support
 
@@ -222,10 +222,10 @@ MIT (see the LICENSE.md file)
 ## Citation
 
 ```bibtex
-@software{ratiod,
+@software{numdenom,
   author = {Colling, Gilles},
-  title = {ratiod: Bayesian Hierarchical Modelling of Ratios, Rates, and Proportions},
+  title = {numdenom: Bayesian Hierarchical Modelling of Ratios, Rates, and Proportions},
   year = {2025},
-  url = {https://github.com/gcol33/ratiod}
+  url = {https://github.com/gcol33/numdenom}
 }
 ```

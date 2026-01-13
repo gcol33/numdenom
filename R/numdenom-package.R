@@ -1,7 +1,7 @@
 #' @keywords internal
 "_PACKAGE"
 
-#' @useDynLib ratiod, .registration = TRUE
+#' @useDynLib numdenom, .registration = TRUE
 #' @importFrom Rcpp sourceCpp
 #' @importFrom stats as.formula model.frame model.matrix na.pass quantile sd optim fitted predict rnorm rnbinom var ar cor pnorm qnorm reshape
 #' @importFrom utils head
@@ -9,7 +9,7 @@
 #' @importFrom graphics abline lines polygon
 NULL
 
-#' ratiod: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
+#' numdenom: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
 #'
 #' @description
 #' An opinionated framework for Bayesian hierarchical modelling of ratios,
@@ -18,7 +18,6 @@ NULL
 #' **Ratios are not data. They are derived quantities.**
 #'
 #' All inference is performed on the latent processes generating the numerator
-
 #' and the denominator, never on their quotient. Ratios, rates, and proportions
 #' are computed post hoc with full uncertainty propagation.
 #'
@@ -37,8 +36,8 @@ NULL
 #'   \item Explicit rejection of offset-based approaches
 #' }
 #'
-#' @name ratiod-package
-#' @aliases ratiod-package
+#' @name numdenom-package
+#' @aliases numdenom-package
 NULL
 
 # Suppress R CMD check notes about global variables

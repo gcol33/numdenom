@@ -22,22 +22,22 @@ knitr::opts_chunk$set(
 ## Installation
 
 ```{r, eval = FALSE}
-pak::pak("gcol33/ratiod")
+pak::pak("gcol33/numdenom")
 ```
 
 ```{r, eval = FALSE}
-library(ratiod)
+library(numdenom)
 ```
 
-## What ratiod Does
+## What numdenom Does
 
-ratiod fits Bayesian hierarchical models for ratios, rates, and proportions. Instead of modelling ratios directly (which is statistically problematic), ratiod jointly models the numerator and denominator processes, then derives ratios with full uncertainty propagation.
+numdenom fits Bayesian hierarchical models for ratios, rates, and proportions. Instead of modelling ratios directly (which is statistically problematic), numdenom jointly models the numerator and denominator processes, then derives ratios with full uncertainty propagation.
 
 See `vignette("philosophy")` for the statistical motivation.
 
 ## The Three Families
 
-ratiod provides three model families for common ratio types:
+numdenom provides three model families for common ratio types:
 
 | Family | Numerator | Denominator | Use Case |
 |--------|-----------|-------------|----------|
@@ -50,7 +50,7 @@ ratiod provides three model families for common ratio types:
 Catch per unit effort with site-level variation:
 
 ```{r}
-library(ratiod)
+library(numdenom)
 
 # Simulated trawl data
 set.seed(123)
