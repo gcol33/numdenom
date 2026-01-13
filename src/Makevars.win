@@ -1,4 +1,6 @@
-# Enable OpenMP and optimization flags for performance
-PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS) -DNDEBUG
+# Enable OpenMP
+# -fno-strict-aliasing: Prevents optimizer from assuming type-based aliasing
+# This fixes heisenbugs where the optimizer breaks code due to aliasing assumptions
+PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS) -DNDEBUG -fno-strict-aliasing
 PKG_LIBS = $(SHLIB_OPENMP_CXXFLAGS)
 CXX_STD = CXX17

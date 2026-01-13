@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <atomic>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -159,8 +160,9 @@ ParamLayout compute_param_layout(const ModelData& data) {
     layout.log_phi_denom_idx = -1;
   }
 
-  // Spatial effects
-  layout.has_spatial = (data.spatial_type != SpatialType::NONE);
+  // Spatial effects (ICAR/BYM2 only - GP handled separately below)
+  layout.has_spatial = (data.spatial_type == SpatialType::ICAR ||
+                        data.spatial_type == SpatialType::BYM2);
   layout.is_bym2 = (data.spatial_type == SpatialType::BYM2);
 
   if (layout.has_spatial) {
@@ -469,6 +471,8 @@ double compute_log_post(
     const ModelData& data,
     const ParamLayout& layout
 ) {
+  // Debug removed - use simpler approach
+
   // Extract parameters
   const double* beta_num = &params[layout.beta_num_start];
   const double* beta_denom = &params[layout.beta_denom_start];
@@ -799,6 +803,10 @@ double compute_log_post(
     log_post += log_phi_gp;  // Jacobian
 
     // NNGP prior on spatial effects
+    // Bounds check: ensure we don't read past end of params vector
+    if (layout.gp_w_start + data.gp_data.n_obs > (int)params.size()) {
+      return -INFINITY;  // Invalid parameter layout
+    }
     std::vector<double> w_vec(gp_w, gp_w + data.gp_data.n_obs);
 
     // Apply RSR projection if enabled
@@ -1138,8 +1146,8 @@ double compute_log_post(
       }
     }
 
-    // Add spatial effect
-    if (layout.has_spatial && data.spatial_group[i] > 0) {
+    // Add spatial effect (ICAR/BYM2, not GP which is handled separately)
+    if (layout.has_spatial && !data.spatial_group.empty() && data.spatial_group[i] > 0) {
       int s = data.spatial_group[i] - 1;
       double spatial_effect;
 
@@ -1159,7 +1167,7 @@ double compute_log_post(
     }
 
     // Add temporal effect (shared between num and denom by default)
-    if (layout.has_temporal && data.temporal_time_idx[i] > 0) {
+    if (layout.has_temporal && !data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
       int t = data.temporal_time_idx[i] - 1;  // Time index (0-based)
       int g = data.temporal_group_idx[i] - 1;  // Group index (0-based)
       int T = data.n_times;
@@ -1677,6 +1685,15 @@ std::vector<HMCResult> run_hmc_parallel_chains(
 // R EXPORTS
 // =====================================================================
 
+// HMC sampler with bundled list arguments to avoid R's 65-arg limit for .Call
+// Parameters are bundled into logical groups:
+//   re_params: random effects (group, n_groups, n_terms, group_matrix, slopes, etc.)
+//   spatial_params: spatial structure (type, group, adjacency, etc.)
+//   temporal_params: temporal structure (type, time_idx, group_idx, etc.)
+//   prior_params: prior hyperparameters
+//   zi_params: zero-inflation (type, X_zi, prior_sd)
+//   latent_params: latent factors
+//   st_params: spatiotemporal interaction
 // [[Rcpp::export]]
 Rcpp::List cpp_hmc_fit(
     Rcpp::NumericVector q_init,
@@ -1685,50 +1702,13 @@ Rcpp::List cpp_hmc_fit(
     Rcpp::NumericVector y_denom_cont,
     Rcpp::NumericMatrix X_num,
     Rcpp::NumericMatrix X_denom,
-    Rcpp::IntegerVector re_group,
-    int n_re_groups,
-    int n_re_terms,
-    Rcpp::IntegerMatrix re_group_matrix,
-    Rcpp::IntegerVector re_n_groups_vec,
-    bool has_re_slopes,
-    bool has_re_correlated_slopes,
-    Rcpp::IntegerVector re_n_coefs_vec,
-    Rcpp::LogicalVector re_correlated_vec,
-    Rcpp::IntegerVector re_n_chol_vec,
-    Rcpp::List slope_matrices_list,
     std::string model_type_str,
-    std::string spatial_type_str,
-    Rcpp::IntegerVector spatial_group,
-    int n_spatial_units,
-    Rcpp::IntegerVector adj_row_ptr,
-    Rcpp::IntegerVector adj_col_idx,
-    Rcpp::IntegerVector n_neighbors,
-    double bym2_scale_factor,
-    std::string temporal_type_str,
-    Rcpp::IntegerVector temporal_time_idx,
-    Rcpp::IntegerVector temporal_group_idx,
-    int n_times,
-    int n_temporal_groups,
-    int n_temporal_params,
-    bool temporal_cyclic,
-    bool temporal_shared,
-    double tau_temporal_shape,
-    double tau_temporal_rate,
-    double sigma_beta,
-    double sigma_re_scale,
-    double phi_prior_shape,
-    double phi_prior_rate,
-    double tau_spatial_shape,
-    double tau_spatial_rate,
-    std::string zi_type_str,
-    Rcpp::NumericMatrix X_zi,
-    double zi_prior_sd,
-    bool has_latent,
-    int latent_n_factors,
-    bool latent_shared,
-    bool latent_scale,
-    int latent_constraint,
-    double latent_sigma_prior_rate,
+    Rcpp::List re_params,
+    Rcpp::List spatial_params,
+    Rcpp::List temporal_params,
+    Rcpp::List prior_params,
+    Rcpp::List zi_params,
+    Rcpp::List latent_params,
     Rcpp::List st_params,
     int n_iter,
     int n_warmup,
@@ -1740,7 +1720,101 @@ Rcpp::List cpp_hmc_fit(
 ) {
   using namespace ratiod_hmc;
 
+  // =========================================================================
+  // Extract bundled parameters from lists with defensive checks
+  // =========================================================================
+
+  // Random effects parameters
+  // Use eager deep copies to prevent R GC from invalidating memory during HMC
+  std::vector<int> re_group = Rcpp::as<std::vector<int>>(re_params["group"]);
+  int n_re_groups = Rcpp::as<int>(re_params["n_groups"]);
+  int n_re_terms = Rcpp::as<int>(re_params["n_terms"]);
+
+  // Handle group_matrix which may be numeric or integer
+  Rcpp::IntegerMatrix re_group_matrix;
+  SEXP group_mat_sexp = re_params["group_matrix"];
+  if (Rf_isMatrix(group_mat_sexp)) {
+    if (TYPEOF(group_mat_sexp) == INTSXP) {
+      re_group_matrix = Rcpp::as<Rcpp::IntegerMatrix>(group_mat_sexp);
+    } else {
+      // Convert numeric to integer
+      Rcpp::NumericMatrix nm(group_mat_sexp);
+      re_group_matrix = Rcpp::IntegerMatrix(nm.nrow(), nm.ncol());
+      for (int i = 0; i < nm.nrow(); i++) {
+        for (int j = 0; j < nm.ncol(); j++) {
+          re_group_matrix(i, j) = static_cast<int>(nm(i, j));
+        }
+      }
+    }
+  } else {
+    // Create dummy matrix
+    re_group_matrix = Rcpp::IntegerMatrix(1, 1);
+    re_group_matrix(0, 0) = 0;
+  }
+
+  std::vector<int> re_n_groups_vec = Rcpp::as<std::vector<int>>(re_params["n_groups_vec"]);
+  bool has_re_slopes = Rcpp::as<bool>(re_params["has_slopes"]);
+  bool has_re_correlated_slopes = Rcpp::as<bool>(re_params["has_correlated_slopes"]);
+  std::vector<int> re_n_coefs_vec = Rcpp::as<std::vector<int>>(re_params["n_coefs_vec"]);
+  std::vector<int> re_correlated_vec = Rcpp::as<std::vector<int>>(re_params["correlated_vec"]);
+  std::vector<int> re_n_chol_vec = Rcpp::as<std::vector<int>>(re_params["n_chol_vec"]);
+  Rcpp::List slope_matrices_list = re_params["slope_matrices"];
+
+  // Spatial parameters (eager deep copies)
+  std::string spatial_type_str = Rcpp::as<std::string>(spatial_params["type"]);
+  std::vector<int> spatial_group = Rcpp::as<std::vector<int>>(spatial_params["group"]);
+  int n_spatial_units = Rcpp::as<int>(spatial_params["n_units"]);
+  std::vector<int> adj_row_ptr = Rcpp::as<std::vector<int>>(spatial_params["adj_row_ptr"]);
+  std::vector<int> adj_col_idx = Rcpp::as<std::vector<int>>(spatial_params["adj_col_idx"]);
+  std::vector<int> n_neighbors = Rcpp::as<std::vector<int>>(spatial_params["n_neighbors"]);
+  double bym2_scale_factor = Rcpp::as<double>(spatial_params["bym2_scale"]);
+
+  // Temporal parameters (eager deep copies)
+  std::string temporal_type_str = Rcpp::as<std::string>(temporal_params["type"]);
+  std::vector<int> temporal_time_idx = Rcpp::as<std::vector<int>>(temporal_params["time_idx"]);
+  std::vector<int> temporal_group_idx = Rcpp::as<std::vector<int>>(temporal_params["group_idx"]);
+  int n_times = Rcpp::as<int>(temporal_params["n_times"]);
+  int n_temporal_groups = Rcpp::as<int>(temporal_params["n_groups"]);
+  int n_temporal_params = Rcpp::as<int>(temporal_params["n_params"]);
+  bool temporal_cyclic = Rcpp::as<bool>(temporal_params["cyclic"]);
+  bool temporal_shared = Rcpp::as<bool>(temporal_params["shared"]);
+  double tau_temporal_shape = Rcpp::as<double>(temporal_params["tau_shape"]);
+  double tau_temporal_rate = Rcpp::as<double>(temporal_params["tau_rate"]);
+
+  // Prior parameters
+  double sigma_beta = Rcpp::as<double>(prior_params["sigma_beta"]);
+  double sigma_re_scale = Rcpp::as<double>(prior_params["sigma_re_scale"]);
+  double phi_prior_shape = Rcpp::as<double>(prior_params["phi_shape"]);
+  double phi_prior_rate = Rcpp::as<double>(prior_params["phi_rate"]);
+  double tau_spatial_shape = Rcpp::as<double>(prior_params["tau_spatial_shape"]);
+  double tau_spatial_rate = Rcpp::as<double>(prior_params["tau_spatial_rate"]);
+
+  // Zero-inflation parameters
+  std::string zi_type_str = Rcpp::as<std::string>(zi_params["type"]);
+
+  // Handle X_zi which may be numeric matrix or NULL
+  Rcpp::NumericMatrix X_zi;
+  SEXP xzi_sexp = zi_params["X"];
+  if (!Rf_isNull(xzi_sexp) && Rf_isMatrix(xzi_sexp)) {
+    X_zi = Rcpp::as<Rcpp::NumericMatrix>(xzi_sexp);
+  } else {
+    // Create empty dummy matrix
+    X_zi = Rcpp::NumericMatrix(1, 1);
+    X_zi(0, 0) = 1.0;
+  }
+  double zi_prior_sd = Rcpp::as<double>(zi_params["prior_sd"]);
+
+  // Latent factor parameters
+  bool has_latent = Rcpp::as<bool>(latent_params["has_latent"]);
+  int latent_n_factors = Rcpp::as<int>(latent_params["n_factors"]);
+  bool latent_shared = Rcpp::as<bool>(latent_params["shared"]);
+  bool latent_scale = Rcpp::as<bool>(latent_params["scale"]);
+  int latent_constraint = Rcpp::as<int>(latent_params["constraint"]);
+  double latent_sigma_prior_rate = Rcpp::as<double>(latent_params["sigma_prior_rate"]);
+
+  // =========================================================================
   // Set up model data
+  // =========================================================================
   ModelData data;
 
   // Copy response data
@@ -1767,8 +1841,8 @@ Rcpp::List cpp_hmc_fit(
     }
   }
 
-  // Random effects
-  data.re_group = std::vector<int>(re_group.begin(), re_group.end());
+  // Random effects (already deep copied above)
+  data.re_group = re_group;
   data.n_re_groups = n_re_groups;
   data.n_re_terms = n_re_terms;
 
@@ -1860,11 +1934,11 @@ Rcpp::List cpp_hmc_fit(
     data.spatial_type = SpatialType::NONE;
   }
 
-  data.spatial_group = std::vector<int>(spatial_group.begin(), spatial_group.end());
+  data.spatial_group = spatial_group;  // Already deep copied above
   data.n_spatial_units = n_spatial_units;
-  data.adj_row_ptr = std::vector<int>(adj_row_ptr.begin(), adj_row_ptr.end());
-  data.adj_col_idx = std::vector<int>(adj_col_idx.begin(), adj_col_idx.end());
-  data.n_neighbors = std::vector<int>(n_neighbors.begin(), n_neighbors.end());
+  data.adj_row_ptr = adj_row_ptr;
+  data.adj_col_idx = adj_col_idx;
+  data.n_neighbors = n_neighbors;
   data.bym2_scale_factor = bym2_scale_factor;
 
   // Temporal structure
@@ -1878,8 +1952,8 @@ Rcpp::List cpp_hmc_fit(
     data.temporal_type = TemporalType::NONE;
   }
 
-  data.temporal_time_idx = std::vector<int>(temporal_time_idx.begin(), temporal_time_idx.end());
-  data.temporal_group_idx = std::vector<int>(temporal_group_idx.begin(), temporal_group_idx.end());
+  data.temporal_time_idx = temporal_time_idx;  // Already deep copied above
+  data.temporal_group_idx = temporal_group_idx;
   data.n_times = n_times;
   data.n_temporal_groups = n_temporal_groups;
   data.n_temporal_params = n_temporal_params;
@@ -1929,19 +2003,19 @@ Rcpp::List cpp_hmc_fit(
   bool has_spatiotemporal = st_params.size() > 0 && Rcpp::as<bool>(st_params["has_spatiotemporal"]);
   data.has_spatiotemporal = has_spatiotemporal;
   if (has_spatiotemporal) {
-    // Extract parameters from list
+    // Extract parameters from list (eager deep copies to prevent R GC issues)
     std::string st_type_str = Rcpp::as<std::string>(st_params["type"]);
     bool st_shared = Rcpp::as<bool>(st_params["shared"]);
     int st_n_spatial = Rcpp::as<int>(st_params["n_spatial"]);
     int st_n_times = Rcpp::as<int>(st_params["n_times"]);
     int st_n_params = Rcpp::as<int>(st_params["n_params"]);
-    Rcpp::IntegerVector st_s_idx = st_params["s_idx"];
-    Rcpp::IntegerVector st_t_idx = st_params["t_idx"];
-    Rcpp::IntegerVector st_flat = st_params["st_flat"];
+    std::vector<int> st_s_idx = Rcpp::as<std::vector<int>>(st_params["s_idx"]);
+    std::vector<int> st_t_idx = Rcpp::as<std::vector<int>>(st_params["t_idx"]);
+    std::vector<int> st_flat = Rcpp::as<std::vector<int>>(st_params["st_flat"]);
     std::string st_temporal_type_str = Rcpp::as<std::string>(st_params["temporal_type"]);
     bool st_temporal_cyclic = Rcpp::as<bool>(st_params["temporal_cyclic"]);
-    Rcpp::IntegerVector st_adj_row_ptr = st_params["adj_row_ptr"];
-    Rcpp::IntegerVector st_adj_col_idx = st_params["adj_col_idx"];
+    std::vector<int> st_adj_row_ptr = Rcpp::as<std::vector<int>>(st_params["adj_row_ptr"]);
+    std::vector<int> st_adj_col_idx = Rcpp::as<std::vector<int>>(st_params["adj_col_idx"]);
     double st_sigma2_prior_U = Rcpp::as<double>(st_params["sigma2_prior_U"]);
     double st_sigma2_prior_alpha = Rcpp::as<double>(st_params["sigma2_prior_alpha"]);
 
@@ -1967,10 +2041,10 @@ Rcpp::List cpp_hmc_fit(
     data.spatiotemporal_data.n_times = st_n_times;
     data.spatiotemporal_data.n_params = st_n_params;
 
-    // Observation indexing
-    data.spatiotemporal_data.s_idx = std::vector<int>(st_s_idx.begin(), st_s_idx.end());
-    data.spatiotemporal_data.t_idx = std::vector<int>(st_t_idx.begin(), st_t_idx.end());
-    data.spatiotemporal_data.st_flat = std::vector<int>(st_flat.begin(), st_flat.end());
+    // Observation indexing (already deep copied above)
+    data.spatiotemporal_data.s_idx = st_s_idx;
+    data.spatiotemporal_data.t_idx = st_t_idx;
+    data.spatiotemporal_data.st_flat = st_flat;
 
     // Temporal type for Type II/IV
     if (st_temporal_type_str == "rw1") {
@@ -1984,9 +2058,9 @@ Rcpp::List cpp_hmc_fit(
     }
     data.spatiotemporal_data.temporal_cyclic = st_temporal_cyclic;
 
-    // Spatial adjacency for Type III/IV
-    data.spatiotemporal_data.adj_row_ptr = std::vector<int>(st_adj_row_ptr.begin(), st_adj_row_ptr.end());
-    data.spatiotemporal_data.adj_col_idx = std::vector<int>(st_adj_col_idx.begin(), st_adj_col_idx.end());
+    // Spatial adjacency for Type III/IV (already deep copied above)
+    data.spatiotemporal_data.adj_row_ptr = st_adj_row_ptr;
+    data.spatiotemporal_data.adj_col_idx = st_adj_col_idx;
 
     // Prior parameters
     data.st_sigma2_prior_U = st_sigma2_prior_U;
@@ -1997,6 +2071,10 @@ Rcpp::List cpp_hmc_fit(
 
   // Initialize parameters
   std::vector<double> q0(q_init.begin(), q_init.end());
+
+  // Memory barrier to ensure all copies complete before HMC execution
+  // This prevents R GC from invalidating memory during sampling
+  std::atomic_thread_fence(std::memory_order_seq_cst);
 
   // Run sampler
   if (n_chains == 1) {
@@ -2062,6 +2140,12 @@ int cpp_get_max_threads() {
   #endif
 }
 
+// HMC sampler for GP-based spatial models
+// Parameters are bundled into lists to avoid R's .Call argument limit:
+//   gp_params: GP spatial parameters
+//   ms_gp_params: multiscale GP parameters
+//   ms_temporal_params: multiscale temporal parameters
+//   rsr_params: RSR parameters
 // [[Rcpp::export]]
 Rcpp::List cpp_hmc_fit_gp(
     Rcpp::NumericVector q_init,
@@ -2073,56 +2157,10 @@ Rcpp::List cpp_hmc_fit_gp(
     Rcpp::IntegerVector re_group,
     int n_re_groups,
     std::string model_type_str,
-    std::string gp_type_str,
-    Rcpp::NumericVector coords,
-    Rcpp::IntegerVector nn_idx,
-    Rcpp::NumericVector nn_dist,
-    Rcpp::IntegerVector nn_order,
-    Rcpp::IntegerVector nn_order_inv,
-    int nn,
-    std::string cov_type_str,
-    double nu,
-    bool gp_shared,
-    double gp_sigma2_prior_U,
-    double gp_sigma2_prior_alpha,
-    double gp_phi_prior_lower,
-    double gp_phi_prior_upper,
-    Rcpp::IntegerVector nn_idx_local,
-    Rcpp::NumericVector nn_dist_local,
-    Rcpp::IntegerVector nn_order_local,
-    Rcpp::IntegerVector nn_order_inv_local,
-    int nn_local,
-    Rcpp::IntegerVector nn_idx_regional,
-    Rcpp::NumericVector nn_dist_regional,
-    Rcpp::IntegerVector nn_order_regional,
-    Rcpp::IntegerVector nn_order_inv_regional,
-    int nn_regional,
-    double range_local_lower,
-    double range_local_upper,
-    double range_regional_lower,
-    double range_regional_upper,
-    double ms_sigma2_local_prior_U,
-    double ms_sigma2_local_prior_alpha,
-    double ms_sigma2_regional_prior_U,
-    double ms_sigma2_regional_prior_alpha,
-    std::string ms_temporal_type_str,
-    Rcpp::IntegerVector ms_time_index,
-    Rcpp::IntegerVector ms_group_index,
-    int ms_n_times,
-    int ms_n_groups,
-    std::string trend_type_str,
-    int seasonal_period,
-    std::string short_term_type_str,
-    bool ms_temporal_shared,
-    double ms_sigma2_trend_prior_U,
-    double ms_sigma2_trend_prior_alpha,
-    double ms_sigma2_seasonal_prior_U,
-    double ms_sigma2_seasonal_prior_alpha,
-    double ms_sigma2_short_prior_U,
-    double ms_sigma2_short_prior_alpha,
-    bool has_rsr,
-    Rcpp::NumericVector rsr_projection,
-    int rsr_n,
+    Rcpp::List gp_params,
+    Rcpp::List ms_gp_params,
+    Rcpp::List ms_temporal_params,
+    Rcpp::List rsr_params,
     double sigma_beta,
     double sigma_re_scale,
     double phi_prior_shape,
@@ -2138,6 +2176,77 @@ Rcpp::List cpp_hmc_fit_gp(
     int n_threads,
     bool verbose
 ) {
+  // Force all Rcpp parameter extractions into eagerly-copied std::vectors FIRST
+  // This prevents R garbage collection from invalidating lazy Rcpp views during C++ execution
+  // The original debug output workaround worked because I/O forced R to sync; this achieves
+  // the same effect through explicit eager copying without visible output.
+
+  // Extract GP parameters - convert to native C++ types immediately
+  std::string gp_type_str = Rcpp::as<std::string>(gp_params["gp_type"]);
+
+  // Force eager copy into std::vectors (not Rcpp views that could be GC'd)
+  std::vector<double> coords_vec = Rcpp::as<std::vector<double>>(gp_params["coords"]);
+  std::vector<int> nn_idx_vec = Rcpp::as<std::vector<int>>(gp_params["nn_idx"]);
+  std::vector<double> nn_dist_vec = Rcpp::as<std::vector<double>>(gp_params["nn_dist"]);
+  std::vector<int> nn_order_vec = Rcpp::as<std::vector<int>>(gp_params["nn_order"]);
+  std::vector<int> nn_order_inv_vec = Rcpp::as<std::vector<int>>(gp_params["nn_order_inv"]);
+
+  int nn = Rcpp::as<int>(gp_params["nn"]);
+  std::string cov_type_str = Rcpp::as<std::string>(gp_params["cov_type"]);
+  double nu = Rcpp::as<double>(gp_params["nu"]);
+  bool gp_shared = Rcpp::as<bool>(gp_params["shared"]);
+  double gp_sigma2_prior_U = Rcpp::as<double>(gp_params["sigma2_prior_U"]);
+  double gp_sigma2_prior_alpha = Rcpp::as<double>(gp_params["sigma2_prior_alpha"]);
+  double gp_phi_prior_lower = Rcpp::as<double>(gp_params["phi_prior_lower"]);
+  double gp_phi_prior_upper = Rcpp::as<double>(gp_params["phi_prior_upper"]);
+
+  // Memory barrier to ensure all extractions complete before proceeding
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+
+  // Extract multiscale GP parameters - eager copy to std::vectors
+  std::vector<int> nn_idx_local_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_idx_local"]);
+  std::vector<double> nn_dist_local_vec = Rcpp::as<std::vector<double>>(ms_gp_params["nn_dist_local"]);
+  std::vector<int> nn_order_local_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_order_local"]);
+  std::vector<int> nn_order_inv_local_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_order_inv_local"]);
+  int nn_local = Rcpp::as<int>(ms_gp_params["nn_local"]);
+  std::vector<int> nn_idx_regional_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_idx_regional"]);
+  std::vector<double> nn_dist_regional_vec = Rcpp::as<std::vector<double>>(ms_gp_params["nn_dist_regional"]);
+  std::vector<int> nn_order_regional_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_order_regional"]);
+  std::vector<int> nn_order_inv_regional_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_order_inv_regional"]);
+  int nn_regional = Rcpp::as<int>(ms_gp_params["nn_regional"]);
+  double range_local_lower = Rcpp::as<double>(ms_gp_params["range_local_lower"]);
+  double range_local_upper = Rcpp::as<double>(ms_gp_params["range_local_upper"]);
+  double range_regional_lower = Rcpp::as<double>(ms_gp_params["range_regional_lower"]);
+  double range_regional_upper = Rcpp::as<double>(ms_gp_params["range_regional_upper"]);
+  double ms_sigma2_local_prior_U = Rcpp::as<double>(ms_gp_params["sigma2_local_prior_U"]);
+  double ms_sigma2_local_prior_alpha = Rcpp::as<double>(ms_gp_params["sigma2_local_prior_alpha"]);
+  double ms_sigma2_regional_prior_U = Rcpp::as<double>(ms_gp_params["sigma2_regional_prior_U"]);
+  double ms_sigma2_regional_prior_alpha = Rcpp::as<double>(ms_gp_params["sigma2_regional_prior_alpha"]);
+
+  // Extract multiscale temporal parameters - eager copy
+  std::string ms_temporal_type_str = Rcpp::as<std::string>(ms_temporal_params["type"]);
+  std::vector<int> ms_time_index_vec = Rcpp::as<std::vector<int>>(ms_temporal_params["time_index"]);
+  std::vector<int> ms_group_index_vec = Rcpp::as<std::vector<int>>(ms_temporal_params["group_index"]);
+  int ms_n_times = Rcpp::as<int>(ms_temporal_params["n_times"]);
+  int ms_n_groups = Rcpp::as<int>(ms_temporal_params["n_groups"]);
+  std::string trend_type_str = Rcpp::as<std::string>(ms_temporal_params["trend_type"]);
+  int seasonal_period = Rcpp::as<int>(ms_temporal_params["seasonal_period"]);
+  std::string short_term_type_str = Rcpp::as<std::string>(ms_temporal_params["short_term_type"]);
+  bool ms_temporal_shared = Rcpp::as<bool>(ms_temporal_params["shared"]);
+  double ms_sigma2_trend_prior_U = Rcpp::as<double>(ms_temporal_params["sigma2_trend_prior_U"]);
+  double ms_sigma2_trend_prior_alpha = Rcpp::as<double>(ms_temporal_params["sigma2_trend_prior_alpha"]);
+  double ms_sigma2_seasonal_prior_U = Rcpp::as<double>(ms_temporal_params["sigma2_seasonal_prior_U"]);
+  double ms_sigma2_seasonal_prior_alpha = Rcpp::as<double>(ms_temporal_params["sigma2_seasonal_prior_alpha"]);
+  double ms_sigma2_short_prior_U = Rcpp::as<double>(ms_temporal_params["sigma2_short_prior_U"]);
+  double ms_sigma2_short_prior_alpha = Rcpp::as<double>(ms_temporal_params["sigma2_short_prior_alpha"]);
+
+  // Extract RSR parameters - eager copy
+  bool has_rsr = Rcpp::as<bool>(rsr_params["has_rsr"]);
+  std::vector<double> rsr_projection_vec = Rcpp::as<std::vector<double>>(rsr_params["projection"]);
+  int rsr_n = Rcpp::as<int>(rsr_params["n"]);
+
+  // Second memory barrier after all Rcpp extractions
+  std::atomic_thread_fence(std::memory_order_seq_cst);
   using namespace ratiod_hmc;
 
   // Set up model data
@@ -2204,11 +2313,18 @@ Rcpp::List cpp_hmc_fit_gp(
 
     data.gp_data.n_obs = data.N;
     data.gp_data.nn = nn;
-    data.gp_data.coords = std::vector<double>(coords.begin(), coords.end());
-    data.gp_data.nn_idx = std::vector<int>(nn_idx.begin(), nn_idx.end());
-    data.gp_data.nn_dist = std::vector<double>(nn_dist.begin(), nn_dist.end());
-    data.gp_data.nn_order = std::vector<int>(nn_order.begin(), nn_order.end());
-    data.gp_data.nn_order_inv = std::vector<int>(nn_order_inv.begin(), nn_order_inv.end());
+    data.gp_data.coords = coords_vec;  // Already std::vector from eager copy
+    data.gp_data.nn_idx = nn_idx_vec;
+    data.gp_data.nn_dist = nn_dist_vec;
+    // Convert from R's 1-based to C++'s 0-based indexing
+    data.gp_data.nn_order.resize(nn_order_vec.size());
+    for (size_t i = 0; i < nn_order_vec.size(); i++) {
+      data.gp_data.nn_order[i] = nn_order_vec[i] - 1;
+    }
+    data.gp_data.nn_order_inv.resize(nn_order_inv_vec.size());
+    for (size_t i = 0; i < nn_order_inv_vec.size(); i++) {
+      data.gp_data.nn_order_inv[i] = nn_order_inv_vec[i] - 1;
+    }
     data.gp_data.cov_type = cov_type;
     data.gp_data.nu = nu;
     data.gp_data.shared = gp_shared;
@@ -2224,21 +2340,35 @@ Rcpp::List cpp_hmc_fit_gp(
     data.has_multiscale_gp = true;
 
     data.multiscale_gp_data.n_obs = data.N;
-    data.multiscale_gp_data.coords = std::vector<double>(coords.begin(), coords.end());
+    data.multiscale_gp_data.coords = coords_vec;  // Already std::vector from eager copy
 
-    // Local scale
+    // Local scale - use pre-copied std::vectors
     data.multiscale_gp_data.nn_local = nn_local;
-    data.multiscale_gp_data.nn_idx_local = std::vector<int>(nn_idx_local.begin(), nn_idx_local.end());
-    data.multiscale_gp_data.nn_dist_local = std::vector<double>(nn_dist_local.begin(), nn_dist_local.end());
-    data.multiscale_gp_data.nn_order_local = std::vector<int>(nn_order_local.begin(), nn_order_local.end());
-    data.multiscale_gp_data.nn_order_inv_local = std::vector<int>(nn_order_inv_local.begin(), nn_order_inv_local.end());
+    data.multiscale_gp_data.nn_idx_local = nn_idx_local_vec;
+    data.multiscale_gp_data.nn_dist_local = nn_dist_local_vec;
+    // Convert from R's 1-based to C++'s 0-based indexing
+    data.multiscale_gp_data.nn_order_local.resize(nn_order_local_vec.size());
+    for (size_t i = 0; i < nn_order_local_vec.size(); i++) {
+      data.multiscale_gp_data.nn_order_local[i] = nn_order_local_vec[i] - 1;
+    }
+    data.multiscale_gp_data.nn_order_inv_local.resize(nn_order_inv_local_vec.size());
+    for (size_t i = 0; i < nn_order_inv_local_vec.size(); i++) {
+      data.multiscale_gp_data.nn_order_inv_local[i] = nn_order_inv_local_vec[i] - 1;
+    }
 
-    // Regional scale
+    // Regional scale - use pre-copied std::vectors
     data.multiscale_gp_data.nn_regional = nn_regional;
-    data.multiscale_gp_data.nn_idx_regional = std::vector<int>(nn_idx_regional.begin(), nn_idx_regional.end());
-    data.multiscale_gp_data.nn_dist_regional = std::vector<double>(nn_dist_regional.begin(), nn_dist_regional.end());
-    data.multiscale_gp_data.nn_order_regional = std::vector<int>(nn_order_regional.begin(), nn_order_regional.end());
-    data.multiscale_gp_data.nn_order_inv_regional = std::vector<int>(nn_order_inv_regional.begin(), nn_order_inv_regional.end());
+    data.multiscale_gp_data.nn_idx_regional = nn_idx_regional_vec;
+    data.multiscale_gp_data.nn_dist_regional = nn_dist_regional_vec;
+    // Convert from R's 1-based to C++'s 0-based indexing
+    data.multiscale_gp_data.nn_order_regional.resize(nn_order_regional_vec.size());
+    for (size_t i = 0; i < nn_order_regional_vec.size(); i++) {
+      data.multiscale_gp_data.nn_order_regional[i] = nn_order_regional_vec[i] - 1;
+    }
+    data.multiscale_gp_data.nn_order_inv_regional.resize(nn_order_inv_regional_vec.size());
+    for (size_t i = 0; i < nn_order_inv_regional_vec.size(); i++) {
+      data.multiscale_gp_data.nn_order_inv_regional[i] = nn_order_inv_regional_vec[i] - 1;
+    }
 
     // Range constraints
     data.multiscale_gp_data.range_local_lower = range_local_lower;
@@ -2272,8 +2402,8 @@ Rcpp::List cpp_hmc_fit_gp(
     data.multiscale_temporal_data.n_times = ms_n_times;
     data.multiscale_temporal_data.n_groups = ms_n_groups;
     data.multiscale_temporal_data.n_obs = data.N;
-    data.multiscale_temporal_data.time_index = std::vector<int>(ms_time_index.begin(), ms_time_index.end());
-    data.multiscale_temporal_data.group_index = std::vector<int>(ms_group_index.begin(), ms_group_index.end());
+    data.multiscale_temporal_data.time_index = ms_time_index_vec;  // Already std::vector from eager copy
+    data.multiscale_temporal_data.group_index = ms_group_index_vec;
     data.multiscale_temporal_data.shared = ms_temporal_shared;
     data.multiscale_temporal_data.seasonal_period = seasonal_period;
 
@@ -2301,10 +2431,10 @@ Rcpp::List cpp_hmc_fit_gp(
   data.n_temporal_groups = 0;
   data.n_temporal_params = 0;
 
-  // RSR structure
+  // RSR structure - use pre-copied std::vector
   data.has_rsr = has_rsr;
-  if (has_rsr && rsr_projection.size() > 0) {
-    data.rsr_projection = std::vector<double>(rsr_projection.begin(), rsr_projection.end());
+  if (has_rsr && !rsr_projection_vec.empty()) {
+    data.rsr_projection = rsr_projection_vec;
     data.rsr_n = rsr_n;
   } else {
     data.rsr_n = 0;
@@ -2335,7 +2465,10 @@ Rcpp::List cpp_hmc_fit_gp(
   // Parallelization
   data.n_threads = n_threads;
 
-  // Initialize parameters
+  // Final memory barrier before HMC execution
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+
+  // Initialize parameters - use explicit std::vector copy from Rcpp
   std::vector<double> q0(q_init.begin(), q_init.end());
 
   // Run sampler

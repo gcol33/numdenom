@@ -170,7 +170,8 @@ test_that("plot_acf respects lags parameter", {
 test_that("plot_pairs works with mock fit", {
   fit <- make_mock_fit()
 
-  result <- plot_pairs(fit)
+  # suppressWarnings for single-chain warning from bayesplot
+  result <- suppressWarnings(plot_pairs(fit))
   expect_true(is.null(result) || inherits(result, "gg") ||
               inherits(result, "ggmatrix") || is.list(result) || is.matrix(result))
 })
@@ -182,7 +183,8 @@ test_that("plot_pairs errors on non-ratiod_fit", {
 test_that("plot_pairs respects n_pars", {
   fit <- make_mock_fit()
 
-  result <- plot_pairs(fit, n_pars = 3)
+  # suppressWarnings for single-chain warning from bayesplot
+  result <- suppressWarnings(plot_pairs(fit, n_pars = 3))
   expect_true(TRUE)
 })
 

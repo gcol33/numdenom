@@ -101,7 +101,20 @@ fit_hmc <- function(formula,
   }
 
   # Prepare spatial structure
-  spatial_info <- prepare_spatial_for_hmc(spatial, data, hmc_data$N)
+  # Check if GP-based spatial (requires different sampler)
+  use_gp_sampler <- is_gp_spatial(spatial)
+
+  if (use_gp_sampler) {
+    # GP spatial uses dedicated sampler
+    gp_info <- prepare_gp_for_hmc(spatial, data, hmc_data$N)
+    spatial_info <- list(type = gp_info$gp_type, n_units = hmc_data$N,
+                         group = seq_len(hmc_data$N), adj_row_ptr = integer(1),
+                         adj_col_idx = integer(0), n_neighbors = integer(0),
+                         bym2_scale = 1.0)
+  } else {
+    gp_info <- NULL
+    spatial_info <- prepare_spatial_for_hmc(spatial, data, hmc_data$N)
+  }
 
   # Prepare temporal structure
   temporal_info <- prepare_temporal_for_hmc(temporal, data, hmc_data$N)
@@ -192,66 +205,177 @@ fit_hmc <- function(formula,
     slope_matrices_list <- list()
   }
 
-  # Run sampler
-  fit_raw <- cpp_hmc_fit(
-    q_init = q_init,
-    y_num = as.integer(hmc_data$y_num),
-    y_denom = as.integer(hmc_data$y_denom),
-    y_denom_cont = hmc_data$y_denom_cont,
-    X_num = hmc_data$X_num,
-    X_denom = hmc_data$X_denom,
-    re_group = as.integer(hmc_data$re_group),
-    n_re_groups = as.integer(hmc_data$n_re_groups),
-    n_re_terms = as.integer(n_re_terms),
-    re_group_matrix = as.matrix(re_group_matrix),
-    re_n_groups_vec = as.integer(re_n_groups_vec),
-    # Random slopes
-    has_re_slopes = has_re_slopes,
-    has_re_correlated_slopes = has_re_correlated_slopes,
-    re_n_coefs_vec = as.integer(re_n_coefs_vec),
-    re_correlated_vec = as.logical(re_correlated_vec),
-    re_n_chol_vec = as.integer(re_n_chol_vec),
-    slope_matrices_list = slope_matrices_list,
-    model_type_str = model_type,
-    # Spatial
-    spatial_type_str = spatial_info$type,
-    spatial_group = as.integer(spatial_info$group),
-    n_spatial_units = spatial_info$n_units,
-    adj_row_ptr = as.integer(spatial_info$adj_row_ptr),
-    adj_col_idx = as.integer(spatial_info$adj_col_idx),
-    n_neighbors = as.integer(spatial_info$n_neighbors),
-    bym2_scale_factor = spatial_info$bym2_scale,
-    # Temporal
-    temporal_type_str = temporal_info$type,
-    temporal_time_idx = as.integer(temporal_info$time_index),
-    temporal_group_idx = as.integer(temporal_info$group_index),
-    n_times = as.integer(temporal_info$n_times),
-    n_temporal_groups = as.integer(temporal_info$n_groups),
-    n_temporal_params = as.integer(temporal_info$n_temporal_params),
-    temporal_cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
-    temporal_shared = temporal_info$shared %||% TRUE,
-    tau_temporal_shape = tau_temporal_shape,
-    tau_temporal_rate = tau_temporal_rate,
-    # Priors
-    sigma_beta = sigma_beta,
-    sigma_re_scale = sigma_re_scale,
-    phi_prior_shape = phi_shape,
-    phi_prior_rate = phi_rate,
-    tau_spatial_shape = tau_spatial_shape,
-    tau_spatial_rate = tau_spatial_rate,
-    # Zero-inflation
-    zi_type_str = zi_info$type,
-    X_zi = zi_info$X_zi,
-    zi_prior_sd = priors$zi_prior_sd %||% 10.0,
-    # Latent factors
-    has_latent = latent_info$type != "none",
-    latent_n_factors = as.integer(latent_info$n_factors),
-    latent_shared = latent_info$shared,
-    latent_scale = latent_info$scale %||% TRUE,
-    latent_constraint = as.integer(ifelse(latent_info$constraint == "sum_to_zero", 0L, 1L)),
-    latent_sigma_prior_rate = latent_info$sigma_prior_rate,
-    # Spatiotemporal interaction (bundled as list to stay under .Call 65-arg limit)
-    st_params = list(
+  # Run sampler - branch based on GP vs non-GP spatial
+  if (use_gp_sampler) {
+    # Prepare multiscale temporal if present
+    ms_temporal_info <- prepare_multiscale_temporal_for_hmc(temporal, data, hmc_data$N)
+
+    # Prepare RSR if present
+    rsr_info <- prepare_rsr_for_hmc(spatial, data)
+
+    # Bundle GP parameters into list for C++
+    gp_params <- list(
+      gp_type = gp_info$gp_type,
+      coords = gp_info$coords,
+      nn_idx = as.integer(gp_info$nn_idx),
+      nn_dist = gp_info$nn_dist,
+      nn_order = as.integer(gp_info$nn_order),
+      nn_order_inv = as.integer(gp_info$nn_order_inv),
+      nn = as.integer(gp_info$nn),
+      cov_type = gp_info$cov_type,
+      nu = gp_info$nu %||% 1.5,  # Default nu for non-Matern covariances
+      shared = gp_info$shared,
+      sigma2_prior_U = priors$gp_sigma2_prior_U %||% 1.0,
+      sigma2_prior_alpha = priors$gp_sigma2_prior_alpha %||% 0.01,
+      phi_prior_lower = priors$gp_phi_prior_lower %||% 0.01,
+      phi_prior_upper = priors$gp_phi_prior_upper %||% 100.0
+    )
+
+    # Bundle multiscale GP parameters
+    ms_gp_params <- list(
+      nn_idx_local = as.integer(gp_info$nn_idx_local),
+      nn_dist_local = gp_info$nn_dist_local,
+      nn_order_local = as.integer(gp_info$nn_order_local),
+      nn_order_inv_local = as.integer(gp_info$nn_order_inv_local),
+      nn_local = as.integer(gp_info$nn_local),
+      nn_idx_regional = as.integer(gp_info$nn_idx_regional),
+      nn_dist_regional = gp_info$nn_dist_regional,
+      nn_order_regional = as.integer(gp_info$nn_order_regional),
+      nn_order_inv_regional = as.integer(gp_info$nn_order_inv_regional),
+      nn_regional = as.integer(gp_info$nn_regional),
+      range_local_lower = gp_info$range_local_lower,
+      range_local_upper = gp_info$range_local_upper,
+      range_regional_lower = gp_info$range_regional_lower,
+      range_regional_upper = gp_info$range_regional_upper,
+      sigma2_local_prior_U = priors$ms_sigma2_local_prior_U %||% 1.0,
+      sigma2_local_prior_alpha = priors$ms_sigma2_local_prior_alpha %||% 0.01,
+      sigma2_regional_prior_U = priors$ms_sigma2_regional_prior_U %||% 1.0,
+      sigma2_regional_prior_alpha = priors$ms_sigma2_regional_prior_alpha %||% 0.01
+    )
+
+    # Bundle multiscale temporal parameters
+    ms_temporal_params <- list(
+      type = ms_temporal_info$ms_temporal_type,
+      time_index = as.integer(ms_temporal_info$ms_time_index),
+      group_index = as.integer(ms_temporal_info$ms_group_index),
+      n_times = as.integer(ms_temporal_info$ms_n_times),
+      n_groups = as.integer(ms_temporal_info$ms_n_groups),
+      trend_type = ms_temporal_info$trend_type,
+      seasonal_period = as.integer(ms_temporal_info$seasonal_period),
+      short_term_type = ms_temporal_info$short_term_type,
+      shared = ms_temporal_info$shared,
+      sigma2_trend_prior_U = priors$ms_sigma2_trend_prior_U %||% 1.0,
+      sigma2_trend_prior_alpha = priors$ms_sigma2_trend_prior_alpha %||% 0.01,
+      sigma2_seasonal_prior_U = priors$ms_sigma2_seasonal_prior_U %||% 1.0,
+      sigma2_seasonal_prior_alpha = priors$ms_sigma2_seasonal_prior_alpha %||% 0.01,
+      sigma2_short_prior_U = priors$ms_sigma2_short_prior_U %||% 1.0,
+      sigma2_short_prior_alpha = priors$ms_sigma2_short_prior_alpha %||% 0.01
+    )
+
+    # Bundle RSR parameters
+    rsr_params <- list(
+      has_rsr = rsr_info$has_rsr,
+      projection = rsr_info$rsr_projection,
+      n = as.integer(rsr_info$rsr_n)
+    )
+
+    fit_raw <- cpp_hmc_fit_gp(
+      q_init = q_init,
+      y_num = as.integer(hmc_data$y_num),
+      y_denom = as.integer(hmc_data$y_denom),
+      y_denom_cont = hmc_data$y_denom_cont,
+      X_num = hmc_data$X_num,
+      X_denom = hmc_data$X_denom,
+      re_group = as.integer(hmc_data$re_group),
+      n_re_groups = as.integer(hmc_data$n_re_groups),
+      model_type_str = model_type,
+      # Bundled parameter lists
+      gp_params = gp_params,
+      ms_gp_params = ms_gp_params,
+      ms_temporal_params = ms_temporal_params,
+      rsr_params = rsr_params,
+      # Priors
+      sigma_beta = sigma_beta,
+      sigma_re_scale = sigma_re_scale,
+      phi_prior_shape = phi_shape,
+      phi_prior_rate = phi_rate,
+      # Zero-inflation
+      zi_type_str = zi_info$type,
+      X_zi = zi_info$X_zi,
+      zi_prior_sd = priors$zi_prior_sd %||% 10.0,
+      # Sampler
+      n_iter = as.integer(iter),
+      n_warmup = as.integer(warmup),
+      L = as.integer(L),
+      n_chains = as.integer(chains),
+      seed = as.integer(seed),
+      n_threads = n_threads_within,
+      verbose = verbose
+    )
+  } else {
+    # Bundle parameters into lists to stay under R's 65-argument limit for .Call
+    re_params <- list(
+      group = as.integer(hmc_data$re_group),
+      n_groups = as.integer(hmc_data$n_re_groups),
+      n_terms = as.integer(n_re_terms),
+      group_matrix = as.matrix(re_group_matrix),
+      n_groups_vec = as.integer(re_n_groups_vec),
+      has_slopes = has_re_slopes,
+      has_correlated_slopes = has_re_correlated_slopes,
+      n_coefs_vec = as.integer(re_n_coefs_vec),
+      correlated_vec = as.logical(re_correlated_vec),
+      n_chol_vec = as.integer(re_n_chol_vec),
+      slope_matrices = slope_matrices_list
+    )
+
+    spatial_params <- list(
+      type = spatial_info$type,
+      group = as.integer(spatial_info$group),
+      n_units = spatial_info$n_units,
+      adj_row_ptr = as.integer(spatial_info$adj_row_ptr),
+      adj_col_idx = as.integer(spatial_info$adj_col_idx),
+      n_neighbors = as.integer(spatial_info$n_neighbors),
+      bym2_scale = spatial_info$bym2_scale
+    )
+
+    temporal_params <- list(
+      type = temporal_info$type,
+      time_idx = as.integer(temporal_info$time_index),
+      group_idx = as.integer(temporal_info$group_index),
+      n_times = as.integer(temporal_info$n_times),
+      n_groups = as.integer(temporal_info$n_groups),
+      n_params = as.integer(temporal_info$n_temporal_params),
+      cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
+      shared = temporal_info$shared %||% TRUE,
+      tau_shape = tau_temporal_shape,
+      tau_rate = tau_temporal_rate
+    )
+
+    prior_params <- list(
+      sigma_beta = sigma_beta,
+      sigma_re_scale = sigma_re_scale,
+      phi_shape = phi_shape,
+      phi_rate = phi_rate,
+      tau_spatial_shape = tau_spatial_shape,
+      tau_spatial_rate = tau_spatial_rate
+    )
+
+    zi_params <- list(
+      type = zi_info$type,
+      X = zi_info$X_zi,
+      prior_sd = priors$zi_prior_sd %||% 10.0
+    )
+
+    latent_params <- list(
+      has_latent = latent_info$type != "none",
+      n_factors = as.integer(latent_info$n_factors),
+      shared = latent_info$shared,
+      scale = latent_info$scale %||% TRUE,
+      constraint = as.integer(ifelse(latent_info$constraint == "sum_to_zero", 0L, 1L)),
+      sigma_prior_rate = latent_info$sigma_prior_rate
+    )
+
+    st_params <- list(
       has_spatiotemporal = spatiotemporal_info$has_spatiotemporal %||% FALSE,
       type = spatiotemporal_info$type %||% "none",
       shared = spatiotemporal_info$shared %||% TRUE,
@@ -267,16 +391,32 @@ fit_hmc <- function(formula,
       adj_col_idx = as.integer(spatiotemporal_info$spatial_Q$adj_col_idx %||% integer(0)),
       sigma2_prior_U = priors$st_sigma2_prior_U %||% 1.0,
       sigma2_prior_alpha = priors$st_sigma2_prior_alpha %||% 0.01
-    ),
-    # Sampler
-    n_iter = as.integer(iter),
-    n_warmup = as.integer(warmup),
-    L = as.integer(L),
-    n_chains = as.integer(chains),
-    seed = as.integer(seed),
-    n_threads = n_threads_within,
-    verbose = verbose
-  )
+    )
+
+    fit_raw <- cpp_hmc_fit(
+      q_init = q_init,
+      y_num = as.integer(hmc_data$y_num),
+      y_denom = as.integer(hmc_data$y_denom),
+      y_denom_cont = hmc_data$y_denom_cont,
+      X_num = hmc_data$X_num,
+      X_denom = hmc_data$X_denom,
+      model_type_str = model_type,
+      re_params = re_params,
+      spatial_params = spatial_params,
+      temporal_params = temporal_params,
+      prior_params = prior_params,
+      zi_params = zi_params,
+      latent_params = latent_params,
+      st_params = st_params,
+      n_iter = as.integer(iter),
+      n_warmup = as.integer(warmup),
+      L = as.integer(L),
+      n_chains = as.integer(chains),
+      seed = as.integer(seed),
+      n_threads = n_threads_within,
+      verbose = verbose
+    )
+  }
 
   # Convert to ratiod_fit
   fit <- convert_hmc_to_ratiod_fit_full(
@@ -1061,6 +1201,13 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
   } else if (spatial_info$type == "bym2") {
     # log_sigma + logit_rho + phi_scaled + theta
     n_params <- n_params + 2 + 2 * spatial_info$n_units
+  } else if (spatial_info$type == "gp") {
+    # log_sigma2_gp + log_phi_gp + gp_w
+    n_params <- n_params + 2 + spatial_info$n_units
+  } else if (spatial_info$type == "multiscale_gp") {
+    # local: log_sigma2 + log_phi + w
+    # regional: log_sigma2 + log_phi + w
+    n_params <- n_params + 4 + 2 * spatial_info$n_units
   }
 
   # Temporal
@@ -1651,15 +1798,18 @@ prepare_gp_for_hmc <- function(gp, data, N) {
     ))
   }
 
-  # Validate GP specification
+  # Validate GP specification (computes neighbor structure)
   validated <- validate_gp(gp, data)
 
   # Extract coordinates
-  coords_mat <- validated$coords
+  coords_mat <- validated$coords_matrix
   coords_flat <- as.vector(t(coords_mat))  # Row-major flatten
 
   if (inherits(gp, "ratiod_multiscale")) {
     # Multi-scale GP
+    local_info <- validated$neighbor_info_local
+    regional_info <- validated$neighbor_info_regional
+
     list(
       gp_type = "multiscale_gp",
       coords = coords_flat,
@@ -1670,16 +1820,16 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_order_inv = integer(0),
       nn = 0L,
       # Local scale
-      nn_idx_local = as.integer(as.vector(t(validated$neighbors_local))),
-      nn_dist_local = as.vector(t(validated$distances_local)),
-      nn_order_local = as.integer(validated$order_local),
-      nn_order_inv_local = as.integer(validated$order_inv_local),
+      nn_idx_local = as.integer(as.vector(t(local_info$nn_idx))),
+      nn_dist_local = as.vector(t(local_info$nn_dist)),
+      nn_order_local = as.integer(local_info$nn_order),
+      nn_order_inv_local = as.integer(local_info$nn_order_inv),
       nn_local = as.integer(gp$nn_local),
       # Regional scale
-      nn_idx_regional = as.integer(as.vector(t(validated$neighbors_regional))),
-      nn_dist_regional = as.vector(t(validated$distances_regional)),
-      nn_order_regional = as.integer(validated$order_regional),
-      nn_order_inv_regional = as.integer(validated$order_inv_regional),
+      nn_idx_regional = as.integer(as.vector(t(regional_info$nn_idx))),
+      nn_dist_regional = as.vector(t(regional_info$nn_dist)),
+      nn_order_regional = as.integer(regional_info$nn_order),
+      nn_order_inv_regional = as.integer(regional_info$nn_order_inv),
       nn_regional = as.integer(gp$nn_regional),
       # Range constraints
       range_local_lower = gp$range_local[1],
@@ -1693,13 +1843,15 @@ prepare_gp_for_hmc <- function(gp, data, N) {
     )
   } else {
     # Single-scale GP
+    nn_info <- validated$neighbor_info
+
     list(
       gp_type = "gp",
       coords = coords_flat,
-      nn_idx = as.integer(as.vector(t(validated$neighbors))),
-      nn_dist = as.vector(t(validated$distances)),
-      nn_order = as.integer(validated$order),
-      nn_order_inv = as.integer(validated$order_inv),
+      nn_idx = as.integer(as.vector(t(nn_info$nn_idx))),
+      nn_dist = as.vector(t(nn_info$nn_dist)),
+      nn_order = as.integer(nn_info$nn_order),
+      nn_order_inv = as.integer(nn_info$nn_order_inv),
       nn = as.integer(gp$nn),
       # Multi-scale params (not used for single-scale)
       nn_idx_local = integer(0),

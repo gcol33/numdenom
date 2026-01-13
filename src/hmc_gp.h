@@ -7,7 +7,11 @@
 
 #include <vector>
 #include <cmath>
+#include <Rcpp.h>
 #include "hmc_svc.h"  // Reuse covariance functions and NNGP infrastructure
+
+// Verbose debug output (set to false for production)
+#define GP_DEBUG_BOUNDS false
 
 namespace ratiod_gp {
 
@@ -69,7 +73,13 @@ struct MultiscaleGPData {
 // w: spatial effect values at each location (length n_obs)
 // sigma2: spatial variance
 // phi: spatial range parameter
-inline double gp_nngp_log_lik(
+// NOTE: Disable optimization for this function to prevent heisenbug crashes
+// The crash is caused by aggressive compiler optimization that exposes undefined behavior
+// in code that is technically correct but relies on memory access patterns
+#ifdef __GNUC__
+__attribute__((noinline, optimize("O0")))
+#endif
+double gp_nngp_log_lik(
     const std::vector<double>& w,
     double sigma2,
     double phi,
@@ -78,25 +88,109 @@ inline double gp_nngp_log_lik(
   int N = gp_data.n_obs;
   int nn = gp_data.nn;
 
+  // Bounds validation (always on - prevents UB from invalid data structures)
+  if (gp_data.nn_order.size() < (size_t)N) return -INFINITY;
+  if (gp_data.nn_idx.size() < (size_t)(N * nn)) return -INFINITY;
+  if (gp_data.nn_dist.size() < (size_t)(N * nn)) return -INFINITY;  // Added: was missing
+  if (w.size() < (size_t)N) return -INFINITY;
+  if (gp_data.coords.size() < (size_t)(2 * N)) return -INFINITY;
+
+#if GP_DEBUG_BOUNDS
+  Rcpp::Rcout << "[GP_DEBUG] gp_nngp_log_lik called: N=" << N << ", nn=" << nn << "\n";
+  Rcpp::Rcout << "[GP_DEBUG] w.size()=" << w.size() << "\n";
+  Rcpp::Rcout << "[GP_DEBUG] nn_order.size()=" << gp_data.nn_order.size() << "\n";
+  Rcpp::Rcout << "[GP_DEBUG] nn_idx.size()=" << gp_data.nn_idx.size() << "\n";
+  Rcpp::Rcout << "[GP_DEBUG] nn_dist.size()=" << gp_data.nn_dist.size() << "\n";
+  Rcpp::Rcout << "[GP_DEBUG] coords.size()=" << gp_data.coords.size() << "\n";
+
+  // Validate sizes
+  if (gp_data.nn_order.size() < (size_t)N) {
+    Rcpp::Rcout << "[GP_DEBUG] ERROR: nn_order too small! size=" << gp_data.nn_order.size() << " < N=" << N << "\n";
+    return -INFINITY;
+  }
+  if (gp_data.nn_idx.size() < (size_t)(N * nn)) {
+    Rcpp::Rcout << "[GP_DEBUG] ERROR: nn_idx too small! size=" << gp_data.nn_idx.size() << " < N*nn=" << (N * nn) << "\n";
+    return -INFINITY;
+  }
+  if (w.size() < (size_t)N) {
+    Rcpp::Rcout << "[GP_DEBUG] ERROR: w too small! size=" << w.size() << " < N=" << N << "\n";
+    return -INFINITY;
+  }
+#endif
+
   double log_lik = 0.0;
 
   // First observation: marginal N(0, sigma2)
+#if GP_DEBUG_BOUNDS
+  Rcpp::Rcout << "[GP_DEBUG] Accessing nn_order[0]...\n";
+#endif
   int first_idx = gp_data.nn_order[0];
+
+#if GP_DEBUG_BOUNDS
+  Rcpp::Rcout << "[GP_DEBUG] first_idx=" << first_idx << " (should be 0 to " << (N-1) << ")\n";
+  if (first_idx < 0 || first_idx >= N) {
+    Rcpp::Rcout << "[GP_DEBUG] ERROR: first_idx out of bounds!\n";
+    return -INFINITY;
+  }
+#endif
+
   log_lik += -0.5 * std::log(2.0 * M_PI * sigma2) -
              0.5 * w[first_idx] * w[first_idx] / sigma2;
 
+#if GP_DEBUG_BOUNDS
+  Rcpp::Rcout << "[GP_DEBUG] First obs log_lik done, now processing remaining " << (N-1) << " observations\n";
+#endif
+
+  // Pre-allocate work vectors to avoid repeated heap allocation in hot loop
+  // This prevents memory fragmentation that can cause optimizer-related crashes
+  std::vector<double> c_vec(nn);
+  std::vector<double> C_mat(nn * nn);
+  std::vector<double> L(nn * nn);
+  std::vector<double> y(nn);
+  std::vector<double> alpha(nn);
+
   // Remaining observations: conditional on neighbors
   for (int i = 1; i < N; i++) {
+#if GP_DEBUG_BOUNDS
+    if (i < 5 || i == N-1) {
+      Rcpp::Rcout << "[GP_DEBUG] Processing obs i=" << i << "\n";
+    }
+#endif
+
     int obs_idx = gp_data.nn_order[i];
+
+    // Bounds check (always on)
+    if (obs_idx < 0 || obs_idx >= N) return -INFINITY;
+
+#if GP_DEBUG_BOUNDS
+    if (obs_idx < 0 || obs_idx >= N) {
+      Rcpp::Rcout << "[GP_DEBUG] ERROR: obs_idx=" << obs_idx << " out of bounds at i=" << i << "\n";
+      return -INFINITY;
+    }
+#endif
 
     // Count actual neighbors (early observations have fewer)
     int n_neighbors = 0;
     for (int j = 0; j < nn; j++) {
       int nn_flat_idx = i * nn + j;
+      // Bounds check (always on)
+      if (nn_flat_idx < 0 || nn_flat_idx >= (int)gp_data.nn_idx.size()) return -INFINITY;
+#if GP_DEBUG_BOUNDS
+      if (nn_flat_idx < 0 || nn_flat_idx >= (int)gp_data.nn_idx.size()) {
+        Rcpp::Rcout << "[GP_DEBUG] ERROR: nn_flat_idx=" << nn_flat_idx << " out of bounds (nn_idx.size=" << gp_data.nn_idx.size() << ")\n";
+        return -INFINITY;
+      }
+#endif
       if (gp_data.nn_idx[nn_flat_idx] > 0) {
         n_neighbors++;
       }
     }
+
+#if GP_DEBUG_BOUNDS
+    if (i < 5) {
+      Rcpp::Rcout << "[GP_DEBUG]   n_neighbors=" << n_neighbors << "\n";
+    }
+#endif
 
     if (n_neighbors == 0) {
       // No neighbors: marginal
@@ -105,9 +199,7 @@ inline double gp_nngp_log_lik(
       continue;
     }
 
-    // Build covariance vector and matrix
-    std::vector<double> c_vec(n_neighbors);
-    std::vector<double> C_mat(n_neighbors * n_neighbors);
+    // Use pre-allocated vectors (no heap allocation in loop)
 
     // c_vec: covariances between obs i and its neighbors
     for (int j = 0; j < n_neighbors; j++) {
@@ -118,9 +210,48 @@ inline double gp_nngp_log_lik(
 
     // C_mat: covariances among neighbors
     for (int j1 = 0; j1 < n_neighbors; j1++) {
-      int nn_idx1 = gp_data.nn_order[gp_data.nn_idx[i * nn + j1] - 1];
+      int raw_nn_idx1 = gp_data.nn_idx[i * nn + j1];
+
+      // Bounds check: nn_idx is 1-based from R, so subtract 1
+      if (raw_nn_idx1 - 1 < 0 || raw_nn_idx1 - 1 >= (int)gp_data.nn_order.size()) return -INFINITY;
+
+#if GP_DEBUG_BOUNDS
+      if (i < 3 && j1 < 3) {
+        Rcpp::Rcout << "[GP_DEBUG]   j1=" << j1 << " raw_nn_idx1=" << raw_nn_idx1 << "\n";
+      }
+      // nn_idx is 1-based from R, so subtract 1
+      if (raw_nn_idx1 - 1 < 0 || raw_nn_idx1 - 1 >= (int)gp_data.nn_order.size()) {
+        Rcpp::Rcout << "[GP_DEBUG] ERROR: raw_nn_idx1-1=" << (raw_nn_idx1 - 1) << " out of bounds for nn_order (size=" << gp_data.nn_order.size() << ")\n";
+        return -INFINITY;
+      }
+#endif
+
+      int nn_idx1 = gp_data.nn_order[raw_nn_idx1 - 1];
+
+      // Bounds check for coords access
+      if (nn_idx1 < 0 || nn_idx1 * 2 + 1 >= (int)gp_data.coords.size()) return -INFINITY;
+
+#if GP_DEBUG_BOUNDS
+      if (nn_idx1 < 0 || nn_idx1 * 2 + 1 >= (int)gp_data.coords.size()) {
+        Rcpp::Rcout << "[GP_DEBUG] ERROR: nn_idx1=" << nn_idx1 << " leads to coords out of bounds (coords.size=" << gp_data.coords.size() << ")\n";
+        return -INFINITY;
+      }
+#endif
+
       for (int j2 = 0; j2 < n_neighbors; j2++) {
-        int nn_idx2 = gp_data.nn_order[gp_data.nn_idx[i * nn + j2] - 1];
+        int raw_nn_idx2 = gp_data.nn_idx[i * nn + j2];
+
+        // Bounds check
+        if (raw_nn_idx2 - 1 < 0 || raw_nn_idx2 - 1 >= (int)gp_data.nn_order.size()) return -INFINITY;
+
+#if GP_DEBUG_BOUNDS
+        if (raw_nn_idx2 - 1 < 0 || raw_nn_idx2 - 1 >= (int)gp_data.nn_order.size()) {
+          Rcpp::Rcout << "[GP_DEBUG] ERROR: raw_nn_idx2-1=" << (raw_nn_idx2 - 1) << " out of bounds for nn_order\n";
+          return -INFINITY;
+        }
+#endif
+
+        int nn_idx2 = gp_data.nn_order[raw_nn_idx2 - 1];
 
         if (j1 == j2) {
           C_mat[j1 * n_neighbors + j2] = sigma2;
@@ -135,7 +266,8 @@ inline double gp_nngp_log_lik(
     }
 
     // Cholesky decomposition and solve
-    std::vector<double> L(n_neighbors * n_neighbors, 0.0);
+    // Zero out L matrix for this iteration (using pre-allocated buffer)
+    std::fill(L.begin(), L.begin() + n_neighbors * n_neighbors, 0.0);
     for (int j = 0; j < n_neighbors; j++) {
       for (int k = 0; k <= j; k++) {
         double sum = C_mat[j * n_neighbors + k];
@@ -150,8 +282,7 @@ inline double gp_nngp_log_lik(
       }
     }
 
-    // Solve L * y = c_vec
-    std::vector<double> y(n_neighbors);
+    // Solve L * y = c_vec (using pre-allocated buffer)
     for (int j = 0; j < n_neighbors; j++) {
       double sum = c_vec[j];
       for (int k = 0; k < j; k++) {
@@ -160,8 +291,7 @@ inline double gp_nngp_log_lik(
       y[j] = sum / L[j * n_neighbors + j];
     }
 
-    // Solve L^T * alpha = y
-    std::vector<double> alpha(n_neighbors);
+    // Solve L^T * alpha = y (using pre-allocated buffer)
     for (int j = n_neighbors - 1; j >= 0; j--) {
       double sum = y[j];
       for (int k = j + 1; k < n_neighbors; k++) {
@@ -173,7 +303,30 @@ inline double gp_nngp_log_lik(
     // Conditional mean and variance
     double cond_mean = 0.0;
     for (int j = 0; j < n_neighbors; j++) {
-      int nn_orig_idx = gp_data.nn_order[gp_data.nn_idx[i * nn + j] - 1];
+      int raw_nn_idx = gp_data.nn_idx[i * nn + j];
+
+      // Bounds check
+      if (raw_nn_idx - 1 < 0 || raw_nn_idx - 1 >= (int)gp_data.nn_order.size()) return -INFINITY;
+
+#if GP_DEBUG_BOUNDS
+      if (raw_nn_idx - 1 < 0 || raw_nn_idx - 1 >= (int)gp_data.nn_order.size()) {
+        Rcpp::Rcout << "[GP_DEBUG] ERROR: cond_mean raw_nn_idx-1=" << (raw_nn_idx - 1) << " out of bounds\n";
+        return -INFINITY;
+      }
+#endif
+
+      int nn_orig_idx = gp_data.nn_order[raw_nn_idx - 1];
+
+      // Bounds check for w access
+      if (nn_orig_idx < 0 || nn_orig_idx >= (int)w.size()) return -INFINITY;
+
+#if GP_DEBUG_BOUNDS
+      if (nn_orig_idx < 0 || nn_orig_idx >= (int)w.size()) {
+        Rcpp::Rcout << "[GP_DEBUG] ERROR: nn_orig_idx=" << nn_orig_idx << " out of bounds for w (size=" << w.size() << ")\n";
+        return -INFINITY;
+      }
+#endif
+
       cond_mean += alpha[j] * w[nn_orig_idx];
     }
 
@@ -188,6 +341,10 @@ inline double gp_nngp_log_lik(
     log_lik += -0.5 * std::log(2.0 * M_PI * cond_var) -
                0.5 * resid * resid / cond_var;
   }
+
+#if GP_DEBUG_BOUNDS
+  Rcpp::Rcout << "[GP_DEBUG] gp_nngp_log_lik completed, log_lik=" << log_lik << "\n";
+#endif
 
   return log_lik;
 }

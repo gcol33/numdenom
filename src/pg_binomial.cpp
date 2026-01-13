@@ -9,13 +9,13 @@
 #include <algorithm>
 #include <vector>
 
-// IMPORTANT: OpenMP is DISABLED in this file because:
-// 1. R's RNG (R::rnorm, etc.) is NOT thread-safe
-// 2. Rcpp objects use reference counting which is NOT thread-safe
-// The PG sampler calls rpg_int() which uses R's RNG extensively
+// OpenMP parallelization notes:
+// - SAFE to parallelize: matrix-vector products (X*beta), linear predictor computation
+// - NOT SAFE: loops calling R's RNG (R::rnorm, rpg_int) or modifying Rcpp objects
+// The #pragma omp directives below are applied ONLY to safe arithmetic operations
+// NOTE: OpenMP currently DISABLED pending investigation of Windows stability issues
 #ifdef _OPENMP
 #include <omp.h>
-// Disable OpenMP parallelization for this file
 #undef _OPENMP
 #endif
 

@@ -2,6 +2,100 @@
 # Note: Tests for deprecated cpp_hmc_simple and cpp_nuts_fit have been removed
 # as those functions were moved to src/deprecated/ during C++ refactoring.
 
+# Helper functions for creating bundled parameters
+make_re_params_hmc <- function(n, group = rep(0L, n), n_groups = 0L, n_terms = 0L) {
+  list(
+    group = as.integer(group),
+    n_groups = as.integer(n_groups),
+    n_terms = as.integer(n_terms),
+    group_matrix = matrix(0L, nrow = n, ncol = 1),
+    n_groups_vec = as.integer(n_groups),
+    has_slopes = FALSE,
+    has_correlated_slopes = FALSE,
+    n_coefs_vec = integer(0),
+    correlated_vec = logical(0),
+    n_chol_vec = integer(0),
+    slope_matrices = list()
+  )
+}
+
+make_spatial_params_hmc <- function(n) {
+  list(
+    type = "none",
+    group = rep(0L, n),
+    n_units = 0L,
+    adj_row_ptr = 0L,
+    adj_col_idx = integer(0),
+    n_neighbors = integer(0),
+    bym2_scale = 1.0
+  )
+}
+
+make_temporal_params_hmc <- function(n) {
+  list(
+    type = "none",
+    time_idx = rep(0L, n),
+    group_idx = rep(0L, n),
+    n_times = 0L,
+    n_groups = 0L,
+    n_params = 0L,
+    cyclic = FALSE,
+    shared = TRUE,
+    tau_shape = 2.0,
+    tau_rate = 0.5
+  )
+}
+
+make_prior_params_hmc <- function() {
+  list(
+    sigma_beta = 10.0,
+    sigma_re_scale = 2.5,
+    phi_shape = 2.0,
+    phi_rate = 0.1,
+    tau_spatial_shape = 1.0,
+    tau_spatial_rate = 0.01
+  )
+}
+
+make_zi_params_hmc <- function(n) {
+  list(
+    type = "none",
+    X = matrix(0, nrow = n, ncol = 1),
+    prior_sd = 10.0
+  )
+}
+
+make_latent_params_hmc <- function() {
+  list(
+    has_latent = FALSE,
+    n_factors = 0L,
+    shared = FALSE,
+    scale = TRUE,
+    constraint = 0L,
+    sigma_prior_rate = 0.0
+  )
+}
+
+make_st_params_hmc <- function() {
+  list(
+    has_spatiotemporal = FALSE,
+    type = "none",
+    shared = TRUE,
+    n_spatial = 0L,
+    n_times = 0L,
+    n_params = 0L,
+    s_idx = integer(0),
+    t_idx = integer(0),
+    st_flat = integer(0),
+    temporal_type = "rw1",
+    temporal_cyclic = FALSE,
+    adj_row_ptr = integer(0),
+    adj_col_idx = integer(0),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01
+  )
+}
+
 test_that("HMC backend works for negbin_negbin model", {
   skip_on_cran()
 
@@ -26,7 +120,7 @@ test_that("HMC backend works for negbin_negbin model", {
   # Parameters: beta_num(2) + beta_denom(2) + log_phi_num + log_phi_denom = 6
   q_init <- c(rep(0.0, 4), log(5), log(5))  # Initialize phi at 5
 
-  # Use cpp_hmc_fit which has working step-size adaptation
+  # Use cpp_hmc_fit with bundled list arguments
   fit <- ratiod:::cpp_hmc_fit(
     q_init = q_init,
     y_num = as.integer(y_num),
@@ -34,69 +128,14 @@ test_that("HMC backend works for negbin_negbin model", {
     y_denom_cont = rep(0.0, N),
     X_num = X,
     X_denom = X,
-    re_group = rep(0L, N),
-    n_re_groups = 0L,
-    # Multi-term RE parameters
-    n_re_terms = 0L,
-    re_group_matrix = matrix(0L, nrow = N, ncol = 1),
-    re_n_groups_vec = 0L,
-    # Random slopes parameters
-    has_re_slopes = FALSE,
-    has_re_correlated_slopes = FALSE,
-    re_n_coefs_vec = integer(0),
-    re_correlated_vec = logical(0),
-    re_n_chol_vec = integer(0),
-    slope_matrices_list = list(),
     model_type_str = "negbin_negbin",
-    spatial_type_str = "none",
-    spatial_group = rep(0L, N),
-    n_spatial_units = 0L,
-    adj_row_ptr = 0L,
-    adj_col_idx = integer(0),
-    n_neighbors = integer(0),
-    bym2_scale_factor = 1.0,
-    temporal_type_str = "none",
-    temporal_time_idx = rep(0L, N),
-    temporal_group_idx = rep(0L, N),
-    n_times = 0L,
-    n_temporal_groups = 0L,
-    n_temporal_params = 0L,
-    temporal_cyclic = FALSE,
-    temporal_shared = TRUE,
-    tau_temporal_shape = 2.0,
-    tau_temporal_rate = 0.5,
-    sigma_beta = 10.0,
-    sigma_re_scale = 2.5,
-    phi_prior_shape = 2.0,
-    phi_prior_rate = 0.1,
-    tau_spatial_shape = 1.0,
-    tau_spatial_rate = 0.01,
-    zi_type_str = "none",
-    X_zi = matrix(0, nrow = N, ncol = 1),
-    zi_prior_sd = 10.0,
-    has_latent = FALSE,
-    latent_n_factors = 0L,
-    latent_shared = FALSE,
-    latent_scale = TRUE,
-    latent_constraint = 0L,
-    latent_sigma_prior_rate = 0.0,
-    st_params = list(
-      has_spatiotemporal = FALSE,
-      type = "none",
-      shared = TRUE,
-      n_spatial = 0L,
-      n_times = 0L,
-      n_params = 0L,
-      s_idx = integer(0),
-      t_idx = integer(0),
-      st_flat = integer(0),
-      temporal_type = "rw1",
-      temporal_cyclic = FALSE,
-      adj_row_ptr = integer(0),
-      adj_col_idx = integer(0),
-      sigma2_prior_U = 1.0,
-      sigma2_prior_alpha = 0.01
-    ),
+    re_params = make_re_params_hmc(N),
+    spatial_params = make_spatial_params_hmc(N),
+    temporal_params = make_temporal_params_hmc(N),
+    prior_params = make_prior_params_hmc(),
+    zi_params = make_zi_params_hmc(N),
+    latent_params = make_latent_params_hmc(),
+    st_params = make_st_params_hmc(),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,
@@ -137,7 +176,7 @@ test_that("HMC backend works for poisson_gamma model", {
   # Parameters: beta_num(2) + beta_denom(2) + log_shape = 5
   q_init <- c(rep(0.0, 4), log(3))
 
-  # Use cpp_hmc_fit which has working step-size adaptation
+  # Use cpp_hmc_fit with bundled list arguments
   fit <- ratiod:::cpp_hmc_fit(
     q_init = q_init,
     y_num = as.integer(y_num),
@@ -145,69 +184,14 @@ test_that("HMC backend works for poisson_gamma model", {
     y_denom_cont = y_denom,
     X_num = X,
     X_denom = X,
-    re_group = rep(0L, N),
-    n_re_groups = 0L,
-    # Multi-term RE parameters
-    n_re_terms = 0L,
-    re_group_matrix = matrix(0L, nrow = N, ncol = 1),
-    re_n_groups_vec = 0L,
-    # Random slopes parameters
-    has_re_slopes = FALSE,
-    has_re_correlated_slopes = FALSE,
-    re_n_coefs_vec = integer(0),
-    re_correlated_vec = logical(0),
-    re_n_chol_vec = integer(0),
-    slope_matrices_list = list(),
     model_type_str = "poisson_gamma",
-    spatial_type_str = "none",
-    spatial_group = rep(0L, N),
-    n_spatial_units = 0L,
-    adj_row_ptr = 0L,
-    adj_col_idx = integer(0),
-    n_neighbors = integer(0),
-    bym2_scale_factor = 1.0,
-    temporal_type_str = "none",
-    temporal_time_idx = rep(0L, N),
-    temporal_group_idx = rep(0L, N),
-    n_times = 0L,
-    n_temporal_groups = 0L,
-    n_temporal_params = 0L,
-    temporal_cyclic = FALSE,
-    temporal_shared = TRUE,
-    tau_temporal_shape = 2.0,
-    tau_temporal_rate = 0.5,
-    sigma_beta = 10.0,
-    sigma_re_scale = 2.5,
-    phi_prior_shape = 2.0,
-    phi_prior_rate = 0.1,
-    tau_spatial_shape = 1.0,
-    tau_spatial_rate = 0.01,
-    zi_type_str = "none",
-    X_zi = matrix(0, nrow = N, ncol = 1),
-    zi_prior_sd = 10.0,
-    has_latent = FALSE,
-    latent_n_factors = 0L,
-    latent_shared = FALSE,
-    latent_scale = TRUE,
-    latent_constraint = 0L,
-    latent_sigma_prior_rate = 0.0,
-    st_params = list(
-      has_spatiotemporal = FALSE,
-      type = "none",
-      shared = TRUE,
-      n_spatial = 0L,
-      n_times = 0L,
-      n_params = 0L,
-      s_idx = integer(0),
-      t_idx = integer(0),
-      st_flat = integer(0),
-      temporal_type = "rw1",
-      temporal_cyclic = FALSE,
-      adj_row_ptr = integer(0),
-      adj_col_idx = integer(0),
-      sigma2_prior_U = 1.0,
-      sigma2_prior_alpha = 0.01
-    ),
+    re_params = make_re_params_hmc(N),
+    spatial_params = make_spatial_params_hmc(N),
+    temporal_params = make_temporal_params_hmc(N),
+    prior_params = make_prior_params_hmc(),
+    zi_params = make_zi_params_hmc(N),
+    latent_params = make_latent_params_hmc(),
+    st_params = make_st_params_hmc(),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,

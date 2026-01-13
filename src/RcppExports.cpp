@@ -11,8 +11,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // cpp_hmc_fit
-Rcpp::List cpp_hmc_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, int n_re_terms, Rcpp::IntegerMatrix re_group_matrix, Rcpp::IntegerVector re_n_groups_vec, bool has_re_slopes, bool has_re_correlated_slopes, Rcpp::IntegerVector re_n_coefs_vec, Rcpp::LogicalVector re_correlated_vec, Rcpp::IntegerVector re_n_chol_vec, Rcpp::List slope_matrices_list, std::string model_type_str, std::string spatial_type_str, Rcpp::IntegerVector spatial_group, int n_spatial_units, Rcpp::IntegerVector adj_row_ptr, Rcpp::IntegerVector adj_col_idx, Rcpp::IntegerVector n_neighbors, double bym2_scale_factor, std::string temporal_type_str, Rcpp::IntegerVector temporal_time_idx, Rcpp::IntegerVector temporal_group_idx, int n_times, int n_temporal_groups, int n_temporal_params, bool temporal_cyclic, bool temporal_shared, double tau_temporal_shape, double tau_temporal_rate, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, double tau_spatial_shape, double tau_spatial_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, bool has_latent, int latent_n_factors, bool latent_shared, bool latent_scale, int latent_constraint, double latent_sigma_prior_rate, Rcpp::List st_params, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
-RcppExport SEXP _ratiod_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP n_re_termsSEXP, SEXP re_group_matrixSEXP, SEXP re_n_groups_vecSEXP, SEXP has_re_slopesSEXP, SEXP has_re_correlated_slopesSEXP, SEXP re_n_coefs_vecSEXP, SEXP re_correlated_vecSEXP, SEXP re_n_chol_vecSEXP, SEXP slope_matrices_listSEXP, SEXP model_type_strSEXP, SEXP spatial_type_strSEXP, SEXP spatial_groupSEXP, SEXP n_spatial_unitsSEXP, SEXP adj_row_ptrSEXP, SEXP adj_col_idxSEXP, SEXP n_neighborsSEXP, SEXP bym2_scale_factorSEXP, SEXP temporal_type_strSEXP, SEXP temporal_time_idxSEXP, SEXP temporal_group_idxSEXP, SEXP n_timesSEXP, SEXP n_temporal_groupsSEXP, SEXP n_temporal_paramsSEXP, SEXP temporal_cyclicSEXP, SEXP temporal_sharedSEXP, SEXP tau_temporal_shapeSEXP, SEXP tau_temporal_rateSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP tau_spatial_shapeSEXP, SEXP tau_spatial_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP has_latentSEXP, SEXP latent_n_factorsSEXP, SEXP latent_sharedSEXP, SEXP latent_scaleSEXP, SEXP latent_constraintSEXP, SEXP latent_sigma_prior_rateSEXP, SEXP st_paramsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
+Rcpp::List cpp_hmc_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, std::string model_type_str, Rcpp::List re_params, Rcpp::List spatial_params, Rcpp::List temporal_params, Rcpp::List prior_params, Rcpp::List zi_params, Rcpp::List latent_params, Rcpp::List st_params, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
+RcppExport SEXP _ratiod_cpp_hmc_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP model_type_strSEXP, SEXP re_paramsSEXP, SEXP spatial_paramsSEXP, SEXP temporal_paramsSEXP, SEXP prior_paramsSEXP, SEXP zi_paramsSEXP, SEXP latent_paramsSEXP, SEXP st_paramsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -22,50 +22,13 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type y_denom_cont(y_denom_contSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_num(X_numSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_denom(X_denomSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_group(re_groupSEXP);
-    Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
-    Rcpp::traits::input_parameter< int >::type n_re_terms(n_re_termsSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerMatrix >::type re_group_matrix(re_group_matrixSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_n_groups_vec(re_n_groups_vecSEXP);
-    Rcpp::traits::input_parameter< bool >::type has_re_slopes(has_re_slopesSEXP);
-    Rcpp::traits::input_parameter< bool >::type has_re_correlated_slopes(has_re_correlated_slopesSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_n_coefs_vec(re_n_coefs_vecSEXP);
-    Rcpp::traits::input_parameter< Rcpp::LogicalVector >::type re_correlated_vec(re_correlated_vecSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_n_chol_vec(re_n_chol_vecSEXP);
-    Rcpp::traits::input_parameter< Rcpp::List >::type slope_matrices_list(slope_matrices_listSEXP);
     Rcpp::traits::input_parameter< std::string >::type model_type_str(model_type_strSEXP);
-    Rcpp::traits::input_parameter< std::string >::type spatial_type_str(spatial_type_strSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type spatial_group(spatial_groupSEXP);
-    Rcpp::traits::input_parameter< int >::type n_spatial_units(n_spatial_unitsSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type adj_row_ptr(adj_row_ptrSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type adj_col_idx(adj_col_idxSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type n_neighbors(n_neighborsSEXP);
-    Rcpp::traits::input_parameter< double >::type bym2_scale_factor(bym2_scale_factorSEXP);
-    Rcpp::traits::input_parameter< std::string >::type temporal_type_str(temporal_type_strSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type temporal_time_idx(temporal_time_idxSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type temporal_group_idx(temporal_group_idxSEXP);
-    Rcpp::traits::input_parameter< int >::type n_times(n_timesSEXP);
-    Rcpp::traits::input_parameter< int >::type n_temporal_groups(n_temporal_groupsSEXP);
-    Rcpp::traits::input_parameter< int >::type n_temporal_params(n_temporal_paramsSEXP);
-    Rcpp::traits::input_parameter< bool >::type temporal_cyclic(temporal_cyclicSEXP);
-    Rcpp::traits::input_parameter< bool >::type temporal_shared(temporal_sharedSEXP);
-    Rcpp::traits::input_parameter< double >::type tau_temporal_shape(tau_temporal_shapeSEXP);
-    Rcpp::traits::input_parameter< double >::type tau_temporal_rate(tau_temporal_rateSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_beta(sigma_betaSEXP);
-    Rcpp::traits::input_parameter< double >::type sigma_re_scale(sigma_re_scaleSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_shape(phi_prior_shapeSEXP);
-    Rcpp::traits::input_parameter< double >::type phi_prior_rate(phi_prior_rateSEXP);
-    Rcpp::traits::input_parameter< double >::type tau_spatial_shape(tau_spatial_shapeSEXP);
-    Rcpp::traits::input_parameter< double >::type tau_spatial_rate(tau_spatial_rateSEXP);
-    Rcpp::traits::input_parameter< std::string >::type zi_type_str(zi_type_strSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_zi(X_ziSEXP);
-    Rcpp::traits::input_parameter< double >::type zi_prior_sd(zi_prior_sdSEXP);
-    Rcpp::traits::input_parameter< bool >::type has_latent(has_latentSEXP);
-    Rcpp::traits::input_parameter< int >::type latent_n_factors(latent_n_factorsSEXP);
-    Rcpp::traits::input_parameter< bool >::type latent_shared(latent_sharedSEXP);
-    Rcpp::traits::input_parameter< bool >::type latent_scale(latent_scaleSEXP);
-    Rcpp::traits::input_parameter< int >::type latent_constraint(latent_constraintSEXP);
-    Rcpp::traits::input_parameter< double >::type latent_sigma_prior_rate(latent_sigma_prior_rateSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type re_params(re_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type spatial_params(spatial_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type temporal_params(temporal_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type prior_params(prior_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type zi_params(zi_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type latent_params(latent_paramsSEXP);
     Rcpp::traits::input_parameter< Rcpp::List >::type st_params(st_paramsSEXP);
     Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
     Rcpp::traits::input_parameter< int >::type n_warmup(n_warmupSEXP);
@@ -74,7 +37,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
     Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, n_re_terms, re_group_matrix, re_n_groups_vec, has_re_slopes, has_re_correlated_slopes, re_n_coefs_vec, re_correlated_vec, re_n_chol_vec, slope_matrices_list, model_type_str, spatial_type_str, spatial_group, n_spatial_units, adj_row_ptr, adj_col_idx, n_neighbors, bym2_scale_factor, temporal_type_str, temporal_time_idx, temporal_group_idx, n_times, n_temporal_groups, n_temporal_params, temporal_cyclic, temporal_shared, tau_temporal_shape, tau_temporal_rate, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, tau_spatial_shape, tau_spatial_rate, zi_type_str, X_zi, zi_prior_sd, has_latent, latent_n_factors, latent_shared, latent_scale, latent_constraint, latent_sigma_prior_rate, st_params, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
+    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, model_type_str, re_params, spatial_params, temporal_params, prior_params, zi_params, latent_params, st_params, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -89,8 +52,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_hmc_fit_gp
-Rcpp::List cpp_hmc_fit_gp(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type_str, std::string gp_type_str, Rcpp::NumericVector coords, Rcpp::IntegerVector nn_idx, Rcpp::NumericVector nn_dist, Rcpp::IntegerVector nn_order, Rcpp::IntegerVector nn_order_inv, int nn, std::string cov_type_str, double nu, bool gp_shared, double gp_sigma2_prior_U, double gp_sigma2_prior_alpha, double gp_phi_prior_lower, double gp_phi_prior_upper, Rcpp::IntegerVector nn_idx_local, Rcpp::NumericVector nn_dist_local, Rcpp::IntegerVector nn_order_local, Rcpp::IntegerVector nn_order_inv_local, int nn_local, Rcpp::IntegerVector nn_idx_regional, Rcpp::NumericVector nn_dist_regional, Rcpp::IntegerVector nn_order_regional, Rcpp::IntegerVector nn_order_inv_regional, int nn_regional, double range_local_lower, double range_local_upper, double range_regional_lower, double range_regional_upper, double ms_sigma2_local_prior_U, double ms_sigma2_local_prior_alpha, double ms_sigma2_regional_prior_U, double ms_sigma2_regional_prior_alpha, std::string ms_temporal_type_str, Rcpp::IntegerVector ms_time_index, Rcpp::IntegerVector ms_group_index, int ms_n_times, int ms_n_groups, std::string trend_type_str, int seasonal_period, std::string short_term_type_str, bool ms_temporal_shared, double ms_sigma2_trend_prior_U, double ms_sigma2_trend_prior_alpha, double ms_sigma2_seasonal_prior_U, double ms_sigma2_seasonal_prior_alpha, double ms_sigma2_short_prior_U, double ms_sigma2_short_prior_alpha, bool has_rsr, Rcpp::NumericVector rsr_projection, int rsr_n, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
-RcppExport SEXP _ratiod_cpp_hmc_fit_gp(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP gp_type_strSEXP, SEXP coordsSEXP, SEXP nn_idxSEXP, SEXP nn_distSEXP, SEXP nn_orderSEXP, SEXP nn_order_invSEXP, SEXP nnSEXP, SEXP cov_type_strSEXP, SEXP nuSEXP, SEXP gp_sharedSEXP, SEXP gp_sigma2_prior_USEXP, SEXP gp_sigma2_prior_alphaSEXP, SEXP gp_phi_prior_lowerSEXP, SEXP gp_phi_prior_upperSEXP, SEXP nn_idx_localSEXP, SEXP nn_dist_localSEXP, SEXP nn_order_localSEXP, SEXP nn_order_inv_localSEXP, SEXP nn_localSEXP, SEXP nn_idx_regionalSEXP, SEXP nn_dist_regionalSEXP, SEXP nn_order_regionalSEXP, SEXP nn_order_inv_regionalSEXP, SEXP nn_regionalSEXP, SEXP range_local_lowerSEXP, SEXP range_local_upperSEXP, SEXP range_regional_lowerSEXP, SEXP range_regional_upperSEXP, SEXP ms_sigma2_local_prior_USEXP, SEXP ms_sigma2_local_prior_alphaSEXP, SEXP ms_sigma2_regional_prior_USEXP, SEXP ms_sigma2_regional_prior_alphaSEXP, SEXP ms_temporal_type_strSEXP, SEXP ms_time_indexSEXP, SEXP ms_group_indexSEXP, SEXP ms_n_timesSEXP, SEXP ms_n_groupsSEXP, SEXP trend_type_strSEXP, SEXP seasonal_periodSEXP, SEXP short_term_type_strSEXP, SEXP ms_temporal_sharedSEXP, SEXP ms_sigma2_trend_prior_USEXP, SEXP ms_sigma2_trend_prior_alphaSEXP, SEXP ms_sigma2_seasonal_prior_USEXP, SEXP ms_sigma2_seasonal_prior_alphaSEXP, SEXP ms_sigma2_short_prior_USEXP, SEXP ms_sigma2_short_prior_alphaSEXP, SEXP has_rsrSEXP, SEXP rsr_projectionSEXP, SEXP rsr_nSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
+Rcpp::List cpp_hmc_fit_gp(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type_str, Rcpp::List gp_params, Rcpp::List ms_gp_params, Rcpp::List ms_temporal_params, Rcpp::List rsr_params, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose);
+RcppExport SEXP _ratiod_cpp_hmc_fit_gp(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP gp_paramsSEXP, SEXP ms_gp_paramsSEXP, SEXP ms_temporal_paramsSEXP, SEXP rsr_paramsSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -103,56 +66,10 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type re_group(re_groupSEXP);
     Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
     Rcpp::traits::input_parameter< std::string >::type model_type_str(model_type_strSEXP);
-    Rcpp::traits::input_parameter< std::string >::type gp_type_str(gp_type_strSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type coords(coordsSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_idx(nn_idxSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type nn_dist(nn_distSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order(nn_orderSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order_inv(nn_order_invSEXP);
-    Rcpp::traits::input_parameter< int >::type nn(nnSEXP);
-    Rcpp::traits::input_parameter< std::string >::type cov_type_str(cov_type_strSEXP);
-    Rcpp::traits::input_parameter< double >::type nu(nuSEXP);
-    Rcpp::traits::input_parameter< bool >::type gp_shared(gp_sharedSEXP);
-    Rcpp::traits::input_parameter< double >::type gp_sigma2_prior_U(gp_sigma2_prior_USEXP);
-    Rcpp::traits::input_parameter< double >::type gp_sigma2_prior_alpha(gp_sigma2_prior_alphaSEXP);
-    Rcpp::traits::input_parameter< double >::type gp_phi_prior_lower(gp_phi_prior_lowerSEXP);
-    Rcpp::traits::input_parameter< double >::type gp_phi_prior_upper(gp_phi_prior_upperSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_idx_local(nn_idx_localSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type nn_dist_local(nn_dist_localSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order_local(nn_order_localSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order_inv_local(nn_order_inv_localSEXP);
-    Rcpp::traits::input_parameter< int >::type nn_local(nn_localSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_idx_regional(nn_idx_regionalSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type nn_dist_regional(nn_dist_regionalSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order_regional(nn_order_regionalSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order_inv_regional(nn_order_inv_regionalSEXP);
-    Rcpp::traits::input_parameter< int >::type nn_regional(nn_regionalSEXP);
-    Rcpp::traits::input_parameter< double >::type range_local_lower(range_local_lowerSEXP);
-    Rcpp::traits::input_parameter< double >::type range_local_upper(range_local_upperSEXP);
-    Rcpp::traits::input_parameter< double >::type range_regional_lower(range_regional_lowerSEXP);
-    Rcpp::traits::input_parameter< double >::type range_regional_upper(range_regional_upperSEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_local_prior_U(ms_sigma2_local_prior_USEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_local_prior_alpha(ms_sigma2_local_prior_alphaSEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_regional_prior_U(ms_sigma2_regional_prior_USEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_regional_prior_alpha(ms_sigma2_regional_prior_alphaSEXP);
-    Rcpp::traits::input_parameter< std::string >::type ms_temporal_type_str(ms_temporal_type_strSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ms_time_index(ms_time_indexSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ms_group_index(ms_group_indexSEXP);
-    Rcpp::traits::input_parameter< int >::type ms_n_times(ms_n_timesSEXP);
-    Rcpp::traits::input_parameter< int >::type ms_n_groups(ms_n_groupsSEXP);
-    Rcpp::traits::input_parameter< std::string >::type trend_type_str(trend_type_strSEXP);
-    Rcpp::traits::input_parameter< int >::type seasonal_period(seasonal_periodSEXP);
-    Rcpp::traits::input_parameter< std::string >::type short_term_type_str(short_term_type_strSEXP);
-    Rcpp::traits::input_parameter< bool >::type ms_temporal_shared(ms_temporal_sharedSEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_trend_prior_U(ms_sigma2_trend_prior_USEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_trend_prior_alpha(ms_sigma2_trend_prior_alphaSEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_seasonal_prior_U(ms_sigma2_seasonal_prior_USEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_seasonal_prior_alpha(ms_sigma2_seasonal_prior_alphaSEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_short_prior_U(ms_sigma2_short_prior_USEXP);
-    Rcpp::traits::input_parameter< double >::type ms_sigma2_short_prior_alpha(ms_sigma2_short_prior_alphaSEXP);
-    Rcpp::traits::input_parameter< bool >::type has_rsr(has_rsrSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type rsr_projection(rsr_projectionSEXP);
-    Rcpp::traits::input_parameter< int >::type rsr_n(rsr_nSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type gp_params(gp_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type ms_gp_params(ms_gp_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type ms_temporal_params(ms_temporal_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type rsr_params(rsr_paramsSEXP);
     Rcpp::traits::input_parameter< double >::type sigma_beta(sigma_betaSEXP);
     Rcpp::traits::input_parameter< double >::type sigma_re_scale(sigma_re_scaleSEXP);
     Rcpp::traits::input_parameter< double >::type phi_prior_shape(phi_prior_shapeSEXP);
@@ -167,7 +84,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
     Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit_gp(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_type_str, coords, nn_idx, nn_dist, nn_order, nn_order_inv, nn, cov_type_str, nu, gp_shared, gp_sigma2_prior_U, gp_sigma2_prior_alpha, gp_phi_prior_lower, gp_phi_prior_upper, nn_idx_local, nn_dist_local, nn_order_local, nn_order_inv_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_order_inv_regional, nn_regional, range_local_lower, range_local_upper, range_regional_lower, range_regional_upper, ms_sigma2_local_prior_U, ms_sigma2_local_prior_alpha, ms_sigma2_regional_prior_U, ms_sigma2_regional_prior_alpha, ms_temporal_type_str, ms_time_index, ms_group_index, ms_n_times, ms_n_groups, trend_type_str, seasonal_period, short_term_type_str, ms_temporal_shared, ms_sigma2_trend_prior_U, ms_sigma2_trend_prior_alpha, ms_sigma2_seasonal_prior_U, ms_sigma2_seasonal_prior_alpha, ms_sigma2_short_prior_U, ms_sigma2_short_prior_alpha, has_rsr, rsr_projection, rsr_n, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
+    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit_gp(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1516,9 +1433,9 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_ratiod_cpp_hmc_fit", (DL_FUNC) &_ratiod_cpp_hmc_fit, 58},
+    {"_ratiod_cpp_hmc_fit", (DL_FUNC) &_ratiod_cpp_hmc_fit, 21},
     {"_ratiod_cpp_get_max_threads", (DL_FUNC) &_ratiod_cpp_get_max_threads, 0},
-    {"_ratiod_cpp_hmc_fit_gp", (DL_FUNC) &_ratiod_cpp_hmc_fit_gp, 73},
+    {"_ratiod_cpp_hmc_fit_gp", (DL_FUNC) &_ratiod_cpp_hmc_fit_gp, 27},
     {"_ratiod_cpp_laplace_fit", (DL_FUNC) &_ratiod_cpp_laplace_fit, 11},
     {"_ratiod_cpp_laplace_get_max_threads", (DL_FUNC) &_ratiod_cpp_laplace_get_max_threads, 0},
     {"_ratiod_cpp_laplace_fit_spatial", (DL_FUNC) &_ratiod_cpp_laplace_fit_spatial, 17},
