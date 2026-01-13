@@ -10,6 +10,10 @@ inst/stan/*.rds
 src/*.o
 src/*.so
 src/*.dll
+src/tests/*.exe
+src/tests/*.gcno
+src/tests/*.gcda
+src/tests/*.gcov
 
 # Build artifacts
 *.tar.gz

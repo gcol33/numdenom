@@ -18,5 +18,6 @@
 ^\.claude$
 ^cran-comments\.md$
 ^src/tests$
+^src/deprecated$
 ^TODO\.md$
 ^cov_script\.R$
