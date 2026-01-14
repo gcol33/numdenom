@@ -1,5 +1,10 @@
 # Enable OpenMP
 # -fno-strict-aliasing: Prevents optimizer from assuming type-based aliasing
+# This fixes heisenbugs where the optimizer breaks code due to aliasing assumptions
 PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS) -DNDEBUG -fno-strict-aliasing
 PKG_LIBS = $(SHLIB_OPENMP_CXXFLAGS)
 CXX_STD = CXX17
+
+# O2 optimization enabled via cpp_hmc_fit_gp_v2 interface
+# The v2 function takes a single List parameter, reducing Rcpp template
+# instantiation at the ABI boundary from 27+ types to 1

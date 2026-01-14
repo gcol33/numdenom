@@ -13,6 +13,10 @@ cpp_hmc_fit_gp <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom,
     .Call(`_numdenom_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose)
 }
 
+cpp_hmc_fit_gp_v2 <- function(args) {
+    .Call(`_numdenom_cpp_hmc_fit_gp_v2`, args)
+}
+
 cpp_laplace_fit <- function(y, n, X, re_idx, n_re_groups, sigma_re, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
     .Call(`_numdenom_cpp_laplace_fit`, y, n, X, re_idx, n_re_groups, sigma_re, family, phi, max_iter, tol, n_threads)
 }

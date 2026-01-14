@@ -88,6 +88,17 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_hmc_fit_gp_v2
+Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args);
+RcppExport SEXP _numdenom_cpp_hmc_fit_gp_v2(SEXP argsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type args(argsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit_gp_v2(args));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_laplace_fit
 Rcpp::List cpp_laplace_fit(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, std::string family, double phi, int max_iter, double tol, int n_threads);
 RcppExport SEXP _numdenom_cpp_laplace_fit(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
@@ -1436,6 +1447,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_numdenom_cpp_hmc_fit", (DL_FUNC) &_numdenom_cpp_hmc_fit, 21},
     {"_numdenom_cpp_get_max_threads", (DL_FUNC) &_numdenom_cpp_get_max_threads, 0},
     {"_numdenom_cpp_hmc_fit_gp", (DL_FUNC) &_numdenom_cpp_hmc_fit_gp, 27},
+    {"_numdenom_cpp_hmc_fit_gp_v2", (DL_FUNC) &_numdenom_cpp_hmc_fit_gp_v2, 1},
     {"_numdenom_cpp_laplace_fit", (DL_FUNC) &_numdenom_cpp_laplace_fit, 11},
     {"_numdenom_cpp_laplace_get_max_threads", (DL_FUNC) &_numdenom_cpp_laplace_get_max_threads, 0},
     {"_numdenom_cpp_laplace_fit_spatial", (DL_FUNC) &_numdenom_cpp_laplace_fit_spatial, 17},
