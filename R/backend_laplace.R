@@ -62,7 +62,8 @@ fit_laplace <- function(formula,
   } else if (family_type == "negbin") {
     y <- formula$numerator$response
     n_trials <- rep(1L, length(y))  # Placeholder
-    phi <- priors$phi %||% 1.0
+    # Extract phi: may be a prior object or scalar
+    phi <- extract_prior_default(priors$phi, default = 1.0)
   } else {
     y <- formula$numerator$response
     n_trials <- rep(1L, length(y))
@@ -75,9 +76,9 @@ fit_laplace <- function(formula,
   # Random effects
   re_info <- extract_re_for_laplace(formula)
 
-  # Hyperparameters
-  sigma_re <- priors$sigma_re %||% 1.0
-  tau_spatial <- priors$tau_spatial %||% 1.0
+  # Hyperparameters (extract from prior objects if needed)
+  sigma_re <- extract_prior_default(priors$sigma, default = 1.0)
+  tau_spatial <- extract_prior_default(priors$tau_spatial, default = 1.0)
 
   # Check if spatial model
   has_spatial <- !is.null(spatial)
@@ -160,6 +161,51 @@ fit_laplace <- function(formula,
   )
 
   return(fit)
+}
+
+
+#' Extract default value from prior specification
+#'
+#' @description
+#' Handles prior objects (e.g., from `prior_pc()`) by extracting a reasonable
+#' default value, or returns numeric values unchanged.
+#'
+#' @param prior A prior object or numeric value
+#' @param default Default value to use if prior is NULL
+#' @return A numeric scalar
+#' @keywords internal
+extract_prior_default <- function(prior, default = 1.0) {
+  if (is.null(prior)) {
+    return(default)
+  }
+
+  if (is.numeric(prior) && length(prior) == 1) {
+    return(prior)
+  }
+
+  if (inherits(prior, "ratiod_prior")) {
+    # For prior objects, use a reasonable default based on the distribution
+    # PC prior: use the prior mean (1/rate) or just use the default
+    # Other priors: use their location parameter if available
+    if (prior$distribution == "pc") {
+      # PC prior mean = 1/rate, but for Laplace we often want a fixed value
+      # Use the upper bound U as a conservative estimate
+      return(prior$U %||% default)
+    } else if (prior$distribution == "normal") {
+      return(prior$mean %||% default)
+    } else if (prior$distribution == "half_normal" ||
+               prior$distribution == "half_cauchy") {
+      return(prior$scale %||% default)
+    } else if (prior$distribution == "gamma") {
+      # Gamma mean = shape/rate
+      return((prior$shape / prior$rate) %||% default)
+    }
+    # Fallback for other prior types
+    return(default)
+  }
+
+  # Fallback: return default for unrecognized types
+  return(default)
 }
 
 
