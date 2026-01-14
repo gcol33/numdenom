@@ -252,6 +252,51 @@ inline double parallel_block_reduce(int N, int block_size, int n_threads, Func f
 // Numerical utilities
 // ============================================================================
 
+// Maximum safe argument for exp() to avoid overflow
+// exp(709) ≈ 8.2e307, exp(710) = inf
+constexpr double EXP_MAX_ARG = 700.0;
+
+// Minimum safe argument for exp() to avoid underflow to exact zero
+// exp(-745) ≈ 5e-324 (smallest subnormal), exp(-746) = 0
+constexpr double EXP_MIN_ARG = -700.0;
+
+// Safe exponential that prevents overflow/underflow
+// Returns exp(x) clamped to finite range
+inline double safe_exp(double x) {
+  if (x > EXP_MAX_ARG) return std::exp(EXP_MAX_ARG);  // ~1e304
+  if (x < EXP_MIN_ARG) return std::exp(EXP_MIN_ARG);  // ~1e-304
+  return std::exp(x);
+}
+
+// Safe log that handles zero and negative inputs
+// Returns log(x) or -infinity for x <= 0
+inline double safe_log(double x) {
+  if (x <= 0.0) return -std::numeric_limits<double>::infinity();
+  return std::log(x);
+}
+
+// Clamp value to range [lo, hi]
+inline double clamp(double x, double lo, double hi) {
+  return std::max(lo, std::min(x, hi));
+}
+
+// Check if value is finite (not NaN or Inf)
+inline bool is_finite(double x) {
+  return std::isfinite(x);
+}
+
+// Safe inverse logit (logistic function) that avoids overflow
+// Returns 1 / (1 + exp(-x))
+inline double safe_inv_logit(double x) {
+  if (x > 0) {
+    double exp_neg_x = safe_exp(-x);
+    return 1.0 / (1.0 + exp_neg_x);
+  } else {
+    double exp_x = safe_exp(x);
+    return exp_x / (1.0 + exp_x);
+  }
+}
+
 // Log-sum-exp for numerical stability
 inline double log_sum_exp(double a, double b) {
   double max_val = std::max(a, b);

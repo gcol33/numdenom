@@ -4,6 +4,7 @@
 
 #include "pg_binomial.h"
 #include "pg_rng.h"
+#include "linalg_fast.h"
 #include <Rcpp.h>
 #include <cmath>
 #include <algorithm>
@@ -1218,7 +1219,8 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
     }
 
     // 6. Update GP hyperparameters via MH
-    double sigma2_prop = std::exp(std::log(sigma2_gp) + R::rnorm(0, 0.1));
+    double sigma2_prop = ratiod_linalg::safe_exp(std::log(sigma2_gp) + R::rnorm(0, 0.1));
+    if (!std::isfinite(sigma2_prop) || sigma2_prop <= 0) sigma2_prop = sigma2_gp;
     double log_prior_curr = -(-std::log(prior_sigma_gp_alpha) / prior_sigma_gp_U) * std::sqrt(sigma2_gp);
     double log_prior_prop = -(-std::log(prior_sigma_gp_alpha) / prior_sigma_gp_U) * std::sqrt(sigma2_prop);
 
@@ -1234,8 +1236,8 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
       sigma2_gp = sigma2_prop;
     }
 
-    double phi_prop = std::exp(std::log(phi_gp) + R::rnorm(0, 0.1));
-    if (phi_prop >= prior_phi_lower && phi_prop <= prior_phi_upper) {
+    double phi_prop = ratiod_linalg::safe_exp(std::log(phi_gp) + R::rnorm(0, 0.1));
+    if (std::isfinite(phi_prop) && phi_prop >= prior_phi_lower && phi_prop <= prior_phi_upper) {
       double log_alpha_phi = std::log(phi_prop) - std::log(phi_gp);
       if (std::log(R::runif(0, 1)) < log_alpha_phi) {
         phi_gp = phi_prop;
@@ -1884,8 +1886,8 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
     sigma2_regional = 1.0 / R::rgamma(shape_regional, 1.0 / rate_regional);
 
     // Update phi_local via random walk MH
-    double phi_local_prop = phi_local * std::exp(R::rnorm(0, 0.1));
-    if (phi_local_prop >= prior_phi_local_lower && phi_local_prop <= prior_phi_local_upper) {
+    double phi_local_prop = phi_local * ratiod_linalg::safe_exp(R::rnorm(0, 0.1));
+    if (std::isfinite(phi_local_prop) && phi_local_prop >= prior_phi_local_lower && phi_local_prop <= prior_phi_local_upper) {
       double ll_curr = 0.0, ll_prop = 0.0;
       for (int i = 0; i < n_spatial; i++) {
         double cond_mean_curr = 0.0, cond_mean_prop = 0.0;
@@ -1907,8 +1909,8 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
     }
 
     // Update phi_regional via MH
-    double phi_regional_prop = phi_regional * std::exp(R::rnorm(0, 0.1));
-    if (phi_regional_prop >= prior_phi_regional_lower && phi_regional_prop <= prior_phi_regional_upper) {
+    double phi_regional_prop = phi_regional * ratiod_linalg::safe_exp(R::rnorm(0, 0.1));
+    if (std::isfinite(phi_regional_prop) && phi_regional_prop >= prior_phi_regional_lower && phi_regional_prop <= prior_phi_regional_upper) {
       double ll_curr = 0.0, ll_prop = 0.0;
       for (int i = 0; i < n_spatial; i++) {
         double cond_mean_curr = 0.0, cond_mean_prop = 0.0;

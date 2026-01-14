@@ -3,6 +3,7 @@
 // Implements nested Laplace approximation for latent Gaussian models
 
 #include "laplace_core.h"
+#include "linalg_fast.h"
 #include <Rcpp.h>
 #include <cmath>
 #include <algorithm>
@@ -63,7 +64,7 @@ double neg_hess_log_lik_binomial(int y, int n, double eta) {
 // Log-likelihood for negative binomial: y ~ NegBin(mu = exp(eta), phi)
 // Parameterization: E[Y] = mu, Var[Y] = mu + mu²/phi
 double log_lik_negbin(int y, double eta, double phi) {
-  double mu = std::exp(eta);
+  double mu = ratiod_linalg::safe_exp(eta);
   // log p = lgamma(y + phi) - lgamma(phi) - lgamma(y+1)
   //       + phi * log(phi/(mu+phi)) + y * log(mu/(mu+phi))
   double log_p = R::lgammafn(y + phi) - R::lgammafn(phi) - R::lgammafn(y + 1.0)
@@ -75,7 +76,7 @@ double log_lik_negbin(int y, double eta, double phi) {
 // Gradient: d/d(eta) log p = y - (y + phi) * mu / (mu + phi)
 //                          = y - (y + phi) * p where p = mu/(mu+phi)
 double grad_log_lik_negbin(int y, double eta, double phi) {
-  double mu = std::exp(eta);
+  double mu = ratiod_linalg::safe_exp(eta);
   double p = mu / (mu + phi);
   return y - (y + phi) * p;
 }
@@ -83,7 +84,7 @@ double grad_log_lik_negbin(int y, double eta, double phi) {
 // Negative Hessian: (y + phi) * p * (1-p) * mu (chain rule factor)
 // Actually: -d²/d(eta)² = (y + phi) * mu * phi / (mu + phi)²
 double neg_hess_log_lik_negbin(int y, double eta, double phi) {
-  double mu = std::exp(eta);
+  double mu = ratiod_linalg::safe_exp(eta);
   double denom = mu + phi;
   return (y + phi) * mu * phi / (denom * denom);
 }
@@ -91,17 +92,17 @@ double neg_hess_log_lik_negbin(int y, double eta, double phi) {
 // Log-likelihood for Poisson: y ~ Poisson(mu = exp(eta))
 double log_lik_poisson(int y, double eta) {
   // log p = y * eta - exp(eta) - lgamma(y+1)
-  return y * eta - std::exp(eta) - R::lgammafn(y + 1.0);
+  return y * eta - ratiod_linalg::safe_exp(eta) - R::lgammafn(y + 1.0);
 }
 
 // Gradient: d/d(eta) log p = y - exp(eta)
 double grad_log_lik_poisson(int y, double eta) {
-  return y - std::exp(eta);
+  return y - ratiod_linalg::safe_exp(eta);
 }
 
 // Negative Hessian: exp(eta)
 double neg_hess_log_lik_poisson(int y, double eta) {
-  return std::exp(eta);
+  return ratiod_linalg::safe_exp(eta);
 }
 
 // ---------------------------------------------------------------------
@@ -375,11 +376,31 @@ LaplaceResult laplace_mode_dense(
       delta[j] = sum / L(j, j);
     }
 
-    // Update x
+    // Update x with NaN/Inf checking
     double step_size = 1.0;
     double max_delta = 0.0;
+    bool has_nan = false;
     for (int j = 0; j < n_x; j++) {
+      if (!std::isfinite(delta[j])) {
+        has_nan = true;
+        break;
+      }
       max_delta = std::max(max_delta, std::abs(delta[j]));
+    }
+
+    // If NaN detected, try smaller step or abort
+    if (has_nan) {
+      // Reset to previous iteration with smaller step
+      step_size = 0.1;
+      for (int j = 0; j < n_x; j++) {
+        if (std::isfinite(delta[j])) {
+          x[j] += step_size * delta[j];
+        }
+      }
+      continue;  // Try next iteration
+    }
+
+    for (int j = 0; j < n_x; j++) {
       x[j] += step_size * delta[j];
     }
 

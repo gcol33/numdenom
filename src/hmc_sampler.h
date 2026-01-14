@@ -328,11 +328,23 @@ struct LeapfrogResult {
 struct DualAveraging {
   double mu, log_epsilon_bar, H_bar;
   double gamma, t0, kappa;
+  double target_accept;  // Target acceptance rate (dimension-adaptive)
   int m;
 
-  DualAveraging(double epsilon_init = 1.0);
+  // Default constructor with dimension-adaptive target
+  DualAveraging(double epsilon_init = 1.0, int n_params = 1);
   double update(double alpha);
   double final_epsilon() const;
+
+  // Compute dimension-adaptive target acceptance rate
+  // Based on optimal scaling theory: lower for higher dimensions
+  static double compute_target(int n_params) {
+    // For d dimensions: target ≈ 0.65 for d=1, decreasing to ~0.55 for d≥50
+    if (n_params <= 5) return 0.65;
+    if (n_params <= 20) return 0.60;
+    if (n_params <= 50) return 0.57;
+    return 0.55;
+  }
 };
 
 struct ChainState {

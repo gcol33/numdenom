@@ -732,7 +732,7 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
   for (i in seq_len(n_units)) {
     neighbors <- which(adj[i, ] > 0)
     n_neighbors[i] <- length(neighbors)
-    adj_col_idx <- c(adj_col_idx, neighbors)
+    adj_col_idx <- c(adj_col_idx, neighbors - 1L)  # Convert to 0-based for C++
     adj_row_ptr[i + 1] <- adj_row_ptr[i] + n_neighbors[i]
   }
 
@@ -1173,17 +1173,13 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 
   if (n_re_terms > 0) {
     if (has_slopes) {
-      # With slopes: total_sigma_params (log scale) + total_chol_params (if correlated) + total_re_params RE effects
       n_params <- n_params + hmc_data$total_sigma_params + hmc_data$total_re_params
       if (has_correlated_slopes) {
-        # Add Cholesky parameters for correlated slopes
         n_params <- n_params + hmc_data$total_chol_params
       }
     } else if (n_re_terms > 1) {
-      # Multiple RE terms (intercept only): n_re_terms sigma + total_re_groups RE
       n_params <- n_params + n_re_terms + hmc_data$total_re_groups
     } else if (hmc_data$n_re_groups > 0) {
-      # Single RE term (intercept only): 1 sigma + n_re_groups RE params
       n_params <- n_params + 1 + hmc_data$n_re_groups
     }
   }
@@ -1197,39 +1193,32 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 
   # Spatial
   if (spatial_info$type == "icar") {
-    n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
+    n_params <- n_params + 1 + spatial_info$n_units
   } else if (spatial_info$type == "bym2") {
-    # log_sigma + logit_rho + phi_scaled + theta
     n_params <- n_params + 2 + 2 * spatial_info$n_units
   } else if (spatial_info$type == "gp") {
-    # log_sigma2_gp + log_phi_gp + gp_w
     n_params <- n_params + 2 + spatial_info$n_units
   } else if (spatial_info$type == "multiscale_gp") {
-    # local: log_sigma2 + log_phi + w
-    # regional: log_sigma2 + log_phi + w
     n_params <- n_params + 4 + 2 * spatial_info$n_units
   }
 
   # Temporal
   if (temporal_info$type != "none") {
-    # log_tau_temporal + temporal effects
     n_params <- n_params + 1 + temporal_info$n_temporal_params
-    # AR1 also has rho parameter
     if (temporal_info$type == "ar1") {
-      n_params <- n_params + 1  # logit_rho_ar1
+      n_params <- n_params + 1
     }
   }
 
   # Zero-inflation
   if (zi_info$type != "none") {
-    n_params <- n_params + zi_info$p_zi  # ZI regression coefficients
+    n_params <- n_params + zi_info$p_zi
   }
 
   # Latent factors
   if (!is.null(latent_info) && latent_info$type != "none") {
     K <- latent_info$n_factors
     N <- latent_info$n_obs
-    # K log_sigma params + N*K factor score params
     n_params <- n_params + K + N * K
   }
 
