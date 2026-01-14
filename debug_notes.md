@@ -39,3 +39,20 @@ All spatial models now work and are faster than Stan:
 1. Always verify R→C++ index conversions (1-based vs 0-based)
 2. CSR format column indices must match array bounds in C++
 3. Add bounds checking in debug builds for spatial indexing
+
+---
+
+## 2026-01-14: GP Spatial Segfault (OPEN)
+
+### Symptom
+- Segmentation fault when using `spatial = spatial_gp(~ lon + lat, ...)`
+- Crash occurs during HMC sampling
+- Affects rows 7, 8, 18, 27, 38 in gradient_methods.md
+
+### Status
+- Not yet investigated
+- Likely similar indexing issue as ICAR fix, but in GP-specific code path
+
+### Priority
+- Low - GP is less commonly used than ICAR/BYM2
+- All other spatial models (ICAR, BYM2) work correctly
