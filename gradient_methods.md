@@ -5,8 +5,8 @@
 ```
 Families (3):   BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA
 Spatial (5):    NONE, ICAR, BYM2, GP, MULTISCALE_GP
-Temporal (5):   NONE, RW1, RW2, AR1, IID
-ZI (5):         NONE, ZI, HURDLE
+Temporal (4):   NONE, RW1, RW2, AR1
+ZI (3):         NONE, ZI, HURDLE
 RE (4):         NONE, intercept, slopes, crossed
 ```
 
@@ -32,17 +32,17 @@ RE (4):         NONE, intercept, slopes, crossed
 | 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | A | ✅ 21.1x |
 | 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | N | |
 | 8 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | N | |
-| 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | A | |
-| 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | A | |
+| 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | A | ✅ 11.0x |
+| 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | A | ✅ 10.2x |
 | 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | A | ✅ 9.9x |
-| 12 | poisson_gamma | ✓ | ✗ | IID | ✗ | A | |
-| 13 | poisson_gamma | ✓ | ✗ | ✗ | ZI | A | |
-| 14 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | A | |
+| ~~12~~ | ~~poisson_gamma~~ | ~~✓~~ | ~~✗~~ | ~~IID~~ | ~~✗~~ | - | N/A (not impl.) |
+| 13 | poisson_gamma | ✓ | ✗ | ✗ | ZI | A | ✅ 10.3x |
+| 14 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | A | ✅ 10.3x |
 | 15 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | A | ✅ 25.2x |
 | 16 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | A | ✅ 11.4x |
-| 17 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | A | |
+| 17 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | A | ✅ 11.1x |
 | 18 | poisson_gamma | ✓ | GP | RW1 | ✗ | N | |
-| 19 | poisson_gamma | ✓ | ICAR | ✗ | ZI | A | |
+| 19 | poisson_gamma | ✓ | ICAR | ✗ | ZI | A | ✅ 10.2x |
 | 20 | poisson_gamma | slopes | ICAR | ✗ | ✗ | A | ✅ 18.9x |
 | 21 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | A | ✅ 6.4x |
 | 22 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | A | ✅ 3.8x |
@@ -53,8 +53,8 @@ RE (4):         NONE, intercept, slopes, crossed
 | 27 | negbin_negbin | ✓ | GP | ✗ | ✗ | N | |
 | 28 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | A | ✅ 6.2x |
 | 29 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | A | ✅ 8.6x |
-| 30 | negbin_negbin | ✓ | ✗ | ✗ | ZI | A | |
-| 31 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | A | |
+| 30 | negbin_negbin | ✓ | ✗ | ✗ | ZI | A | ✅ 5.8x |
+| 31 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | A | ✅ 5.7x |
 | 32 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | A | ✅ 7.9x |
 | 33 | binomial | ✗ | ✗ | ✗ | ✗ | A | ✅ 16.5x |
 | 34 | binomial | ✓ | ✗ | ✗ | ✗ | A | ✅ 15.3x |
@@ -73,9 +73,9 @@ RE (4):         NONE, intercept, slopes, crossed
 | Grad | Count | % | Checked |
 |:----:|------:|--:|--------:|
 | H | 2 | 5% | 2 |
-| A | 34 | 83% | 22 |
-| N | 5 | 12% | 0 |
-| **Total** | 41 | | **24/41** |
+| A | 33 | 82% | 33 |
+| N | 5 | 13% | 0 |
+| **Total** | 40 | | **35/40** |
 
 ### Known Issues
 - **GP spatial uses numerical gradients** (rows 7, 8, 18, 27, 38) - autodiff has heisenbug, using numerical fallback (~0.6x vs Stan)
