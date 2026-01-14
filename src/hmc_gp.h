@@ -7,7 +7,7 @@
 
 #include <vector>
 #include <cmath>
-#include <Rcpp.h>
+#include <RcppEigen.h>
 #include "hmc_svc.h"  // Reuse covariance functions and NNGP infrastructure
 
 // Verbose debug output (set to false for production)
@@ -135,13 +135,11 @@ double gp_nngp_log_lik(
   Rcpp::Rcout << "[GP_DEBUG] First obs log_lik done, now processing remaining " << (N-1) << " observations\n";
 #endif
 
-  // Pre-allocate work vectors to avoid repeated heap allocation in hot loop
-  // This prevents memory fragmentation that can cause optimizer-related crashes
-  std::vector<double> c_vec(nn);
-  std::vector<double> C_mat(nn * nn);
-  std::vector<double> L(nn * nn);
-  std::vector<double> y(nn);
-  std::vector<double> alpha(nn);
+  // Pre-allocate Eigen matrices/vectors for Cholesky solve
+  // Using Eigen avoids hand-rolled linear algebra bugs and leverages SIMD
+  Eigen::VectorXd c_vec(nn);
+  Eigen::MatrixXd C_mat(nn, nn);
+  Eigen::VectorXd alpha(nn);
 
   // Remaining observations: conditional on neighbors
   for (int i = 1; i < N; i++) {
@@ -193,13 +191,11 @@ double gp_nngp_log_lik(
       continue;
     }
 
-    // Use pre-allocated vectors (no heap allocation in loop)
-
     // c_vec: covariances between obs i and its neighbors
     for (int j = 0; j < n_neighbors; j++) {
       int nn_flat_idx = i * nn + j;
       double d = gp_data.nn_dist[nn_flat_idx];
-      c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
+      c_vec(j) = compute_cov(d, sigma2, phi, gp_data.cov_type);
     }
 
     // C_mat: covariances among neighbors
@@ -248,51 +244,23 @@ double gp_nngp_log_lik(
         int nn_idx2 = gp_data.nn_order[raw_nn_idx2 - 1];
 
         if (j1 == j2) {
-          C_mat[j1 * n_neighbors + j2] = sigma2;
+          C_mat(j1, j2) = sigma2;
         } else {
           double d12 = std::sqrt(
             std::pow(gp_data.coords[nn_idx1 * 2] - gp_data.coords[nn_idx2 * 2], 2) +
             std::pow(gp_data.coords[nn_idx1 * 2 + 1] - gp_data.coords[nn_idx2 * 2 + 1], 2)
           );
-          C_mat[j1 * n_neighbors + j2] = compute_cov(d12, sigma2, phi, gp_data.cov_type);
+          C_mat(j1, j2) = compute_cov(d12, sigma2, phi, gp_data.cov_type);
         }
       }
     }
 
-    // Cholesky decomposition and solve
-    // Zero out L matrix for this iteration (using pre-allocated buffer)
-    std::fill(L.begin(), L.begin() + n_neighbors * n_neighbors, 0.0);
-    for (int j = 0; j < n_neighbors; j++) {
-      for (int k = 0; k <= j; k++) {
-        double sum = C_mat[j * n_neighbors + k];
-        for (int m = 0; m < k; m++) {
-          sum -= L[j * n_neighbors + m] * L[k * n_neighbors + m];
-        }
-        if (j == k) {
-          L[j * n_neighbors + j] = std::sqrt(std::max(1e-10, sum));
-        } else {
-          L[j * n_neighbors + k] = sum / L[k * n_neighbors + k];
-        }
-      }
-    }
-
-    // Solve L * y = c_vec (using pre-allocated buffer)
-    for (int j = 0; j < n_neighbors; j++) {
-      double sum = c_vec[j];
-      for (int k = 0; k < j; k++) {
-        sum -= L[j * n_neighbors + k] * y[k];
-      }
-      y[j] = sum / L[j * n_neighbors + j];
-    }
-
-    // Solve L^T * alpha = y (using pre-allocated buffer)
-    for (int j = n_neighbors - 1; j >= 0; j--) {
-      double sum = y[j];
-      for (int k = j + 1; k < n_neighbors; k++) {
-        sum -= L[k * n_neighbors + j] * alpha[k];
-      }
-      alpha[j] = sum / L[j * n_neighbors + j];
-    }
+    // Solve C_mat * alpha = c_vec using Eigen's Cholesky (LLT) decomposition
+    // This replaces hand-rolled Cholesky which had optimizer-related bugs on Windows
+    Eigen::MatrixXd C_sub = C_mat.topLeftCorner(n_neighbors, n_neighbors);
+    Eigen::VectorXd c_sub = c_vec.head(n_neighbors);
+    Eigen::LLT<Eigen::MatrixXd> llt(C_sub);
+    alpha.head(n_neighbors) = llt.solve(c_sub);
 
     // Conditional mean and variance
     double cond_mean = 0.0;
@@ -321,12 +289,12 @@ double gp_nngp_log_lik(
       }
 #endif
 
-      cond_mean += alpha[j] * w[nn_orig_idx];
+      cond_mean += alpha(j) * w[nn_orig_idx];
     }
 
     double c_Cinv_c = 0.0;
     for (int j = 0; j < n_neighbors; j++) {
-      c_Cinv_c += c_vec[j] * alpha[j];
+      c_Cinv_c += c_vec(j) * alpha(j);
     }
     double cond_var = std::max(1e-10, sigma2 - c_Cinv_c);
 
