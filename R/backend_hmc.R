@@ -279,7 +279,9 @@ fit_hmc <- function(formula,
       n = as.integer(rsr_info$rsr_n)
     )
 
-    fit_raw <- cpp_hmc_fit_gp(
+    # Use O2-safe interface with single List parameter
+    # This minimizes Rcpp template instantiation at ABI boundary
+    fit_raw <- cpp_hmc_fit_gp_v2(list(
       q_init = q_init,
       y_num = as.integer(hmc_data$y_num),
       y_denom = as.integer(hmc_data$y_denom),
@@ -311,7 +313,7 @@ fit_hmc <- function(formula,
       seed = as.integer(seed),
       n_threads = n_threads_within,
       verbose = verbose
-    )
+    ))
   } else {
     # Bundle parameters into lists to stay under R's 65-argument limit for .Call
     re_params <- list(
@@ -1182,6 +1184,9 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
     } else if (hmc_data$n_re_groups > 0) {
       n_params <- n_params + 1 + hmc_data$n_re_groups
     }
+  } else if (hmc_data$n_re_groups > 0) {
+    # Single-term legacy path (used by GP interface where n_re_terms = 0)
+    n_params <- n_params + 1 + hmc_data$n_re_groups
   }
 
   # Overdispersion

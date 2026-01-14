@@ -1583,7 +1583,7 @@ bool verify_gradient(
   }
 
   if (max_diff > tol) {
-    Rcpp::Rcout << "Gradient mismatch! Max rel diff: " << max_diff
+    Rcpp::Rcerr << "Gradient mismatch! Max rel diff: " << max_diff
                 << " at param " << worst_idx
                 << " (analytical: " << grad_analytical[worst_idx]
                 << ", numerical: " << grad_numerical[worst_idx] << ")\n";
@@ -2142,7 +2142,7 @@ HMCResult run_hmc_chain(
     for (int i = 0; i < cpp_result.n_sample; i++) {
       n_div += cpp_result.divergent[i];
     }
-    Rcpp::Rcout << "Chain " << (chain_id + 1) << " complete. "
+    Rcpp::Rcerr << "Chain " << (chain_id + 1) << " complete. "
                 << "Divergent: " << n_div << std::endl;
   }
 
@@ -2198,7 +2198,7 @@ std::vector<HMCResult> run_hmc_parallel_chains(
       for (int i = 0; i < cpp_results[c].n_sample; i++) {
         n_div += cpp_results[c].divergent[i];
       }
-      Rcpp::Rcout << "Chain " << (c + 1) << " complete. "
+      Rcpp::Rcerr << "Chain " << (c + 1) << " complete. "
                   << "Divergent: " << n_div << std::endl;
     }
   }
@@ -2810,6 +2810,8 @@ Rcpp::List cpp_hmc_fit_gp(
   // Initialize multi-term RE fields to indicate single-term mode
   data.n_re_terms = 0;  // 0 means use legacy single-term path
   data.total_re_groups = n_re_groups;
+  data.has_re_slopes = false;  // GP interface doesn't support random slopes
+  data.has_re_correlated_slopes = false;
 
   // Model type
   if (model_type_str == "binomial") {
@@ -2957,6 +2959,15 @@ Rcpp::List cpp_hmc_fit_gp(
   data.n_times = 0;
   data.n_temporal_groups = 0;
   data.n_temporal_params = 0;
+  data.temporal_cyclic = false;
+  data.temporal_shared = false;
+  data.tau_temporal_shape = 1.0;
+  data.tau_temporal_rate = 0.01;
+
+  // Multi-term RE structure (not used in GP interface - single term only)
+  data.total_re_params = 0;
+  data.total_sigma_params = 0;
+  data.total_chol_params = 0;
 
   // RSR structure - use pre-copied std::vector
   data.has_rsr = has_rsr;
@@ -2993,10 +3004,12 @@ Rcpp::List cpp_hmc_fit_gp(
   data.has_latent = false;
   data.latent_n_factors = 0;
   data.latent_shared = false;
+  data.latent_scale = false;
   data.latent_constraint = 0;
   data.latent_sigma_prior_rate = 1.0;
 
   // Spatiotemporal not used in GP interface
+  data.has_spatiotemporal = false;
   data.spatiotemporal_data.type = STType::NONE;
 
   // Parallelization
@@ -3061,4 +3074,50 @@ Rcpp::List cpp_hmc_fit_gp(
       Rcpp::Named("n_chains") = n_chains
     );
   }
+}
+
+// [[Rcpp::export]]
+Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
+  // O2-safe interface: single List parameter to minimize Rcpp template instantiation
+  // at ABI boundary. All parameter extraction happens inside function body where
+  // compiler has full visibility.
+
+  // Extract all parameters from the list - matching cpp_hmc_fit_gp signature
+  Rcpp::NumericVector q_init = Rcpp::as<Rcpp::NumericVector>(args["q_init"]);
+  Rcpp::IntegerVector y_num = Rcpp::as<Rcpp::IntegerVector>(args["y_num"]);
+  Rcpp::IntegerVector y_denom = Rcpp::as<Rcpp::IntegerVector>(args["y_denom"]);
+  Rcpp::NumericVector y_denom_cont = Rcpp::as<Rcpp::NumericVector>(args["y_denom_cont"]);
+  Rcpp::NumericMatrix X_num = Rcpp::as<Rcpp::NumericMatrix>(args["X_num"]);
+  Rcpp::NumericMatrix X_denom = Rcpp::as<Rcpp::NumericMatrix>(args["X_denom"]);
+  Rcpp::IntegerVector re_group = Rcpp::as<Rcpp::IntegerVector>(args["re_group"]);
+  int n_re_groups = Rcpp::as<int>(args["n_re_groups"]);
+  std::string model_type_str = Rcpp::as<std::string>(args["model_type_str"]);
+  Rcpp::List gp_params = Rcpp::as<Rcpp::List>(args["gp_params"]);
+  Rcpp::List ms_gp_params = Rcpp::as<Rcpp::List>(args["ms_gp_params"]);
+  Rcpp::List ms_temporal_params = Rcpp::as<Rcpp::List>(args["ms_temporal_params"]);
+  Rcpp::List rsr_params = Rcpp::as<Rcpp::List>(args["rsr_params"]);
+  double sigma_beta = Rcpp::as<double>(args["sigma_beta"]);
+  double sigma_re_scale = Rcpp::as<double>(args["sigma_re_scale"]);
+  double phi_prior_shape = Rcpp::as<double>(args["phi_prior_shape"]);
+  double phi_prior_rate = Rcpp::as<double>(args["phi_prior_rate"]);
+  std::string zi_type_str = Rcpp::as<std::string>(args["zi_type_str"]);
+  Rcpp::NumericMatrix X_zi = Rcpp::as<Rcpp::NumericMatrix>(args["X_zi"]);
+  double zi_prior_sd = Rcpp::as<double>(args["zi_prior_sd"]);
+  int n_iter = Rcpp::as<int>(args["n_iter"]);
+  int n_warmup = Rcpp::as<int>(args["n_warmup"]);
+  int L = Rcpp::as<int>(args["L"]);
+  int n_chains = Rcpp::as<int>(args["n_chains"]);
+  unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+  int n_threads = Rcpp::as<int>(args["n_threads"]);
+  bool verbose = Rcpp::as<bool>(args["verbose"]);
+
+  // Delegate to the original implementation
+  return cpp_hmc_fit_gp(
+    q_init, y_num, y_denom, y_denom_cont,
+    X_num, X_denom, re_group, n_re_groups,
+    model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params,
+    sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate,
+    zi_type_str, X_zi, zi_prior_sd,
+    n_iter, n_warmup, L, n_chains, seed, n_threads, verbose
+  );
 }
