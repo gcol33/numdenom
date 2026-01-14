@@ -823,7 +823,8 @@ double compute_log_post(
       w_vec = w_projected;
     }
 
-    log_post += ratiod_gp::gp_nngp_log_lik(w_vec, sigma2_gp, phi_gp, data.gp_data);
+    double gp_ll = ratiod_gp::gp_nngp_log_lik(w_vec, sigma2_gp, phi_gp, data.gp_data);
+    log_post += gp_ll;
   }
 
   // Multi-scale GP spatial priors
@@ -1083,9 +1084,12 @@ double compute_log_post(
 
   double log_lik = 0.0;
 
+  // NOTE: Disable OpenMP for GP models to avoid race conditions
+  // The GP NNGP likelihood accesses shared data structures that may not be thread-safe
   #ifdef _OPENMP
+  int use_threads = (layout.is_gp || layout.is_multiscale_gp) ? 1 : data.n_threads;
   #pragma omp parallel for reduction(+:log_lik) schedule(static) \
-          num_threads(data.n_threads)
+          num_threads(use_threads)
   #endif
   for (int i = 0; i < data.N; i++) {
     // Linear predictor for numerator (using optimized dot product)
@@ -1628,11 +1632,14 @@ void compute_gradient(
     // Use hand-coded analytical gradients for simple Poisson-Gamma (fastest, 9x)
     if (can_use_analytical_gradient(data, layout)) {
         compute_gradient_analytical(params, data, layout, grad);
+    } else if (layout.is_gp || layout.is_multiscale_gp) {
+        // GP models not yet supported in autodiff (log_post_impl.h missing GP)
+        // Fall back to numerical gradients until GP autodiff is implemented
+        compute_gradient_numerical(params, data, layout, grad);
     } else {
         // Use autodiff for all other models (fast, 3-5x)
         compute_gradient_autodiff(params, data, layout, grad);
     }
-    // NOTE: Numerical gradients removed - too slow for publication
 }
 
 // =====================================================================
@@ -2981,6 +2988,16 @@ Rcpp::List cpp_hmc_fit_gp(
 
   // SVC not used in GP interface
   data.has_svc = false;
+
+  // Latent factors not used in GP interface
+  data.has_latent = false;
+  data.latent_n_factors = 0;
+  data.latent_shared = false;
+  data.latent_constraint = 0;
+  data.latent_sigma_prior_rate = 1.0;
+
+  // Spatiotemporal not used in GP interface
+  data.spatiotemporal_data.type = STType::NONE;
 
   // Parallelization
   data.n_threads = n_threads;

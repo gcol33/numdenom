@@ -73,12 +73,6 @@ struct MultiscaleGPData {
 // w: spatial effect values at each location (length n_obs)
 // sigma2: spatial variance
 // phi: spatial range parameter
-// NOTE: Disable optimization for this function to prevent heisenbug crashes
-// The crash is caused by aggressive compiler optimization that exposes undefined behavior
-// in code that is technically correct but relies on memory access patterns
-#ifdef __GNUC__
-__attribute__((noinline, optimize("O0")))
-#endif
 double gp_nngp_log_lik(
     const std::vector<double>& w,
     double sigma2,

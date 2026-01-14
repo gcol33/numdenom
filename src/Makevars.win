@@ -1,11 +1,5 @@
 # Enable OpenMP
 # -fno-strict-aliasing: Prevents optimizer from assuming type-based aliasing
-# This fixes heisenbugs where the optimizer breaks code due to aliasing assumptions
 PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS) -DNDEBUG -fno-strict-aliasing
 PKG_LIBS = $(SHLIB_OPENMP_CXXFLAGS)
 CXX_STD = CXX17
-
-# Use -O1 globally to prevent heisenbug in GP models
-# Higher optimization levels cause crashes in the NNGP likelihood computation
-# This applies to all files but the performance impact is minimal
-PKG_CXXFLAGS += -O1
