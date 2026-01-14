@@ -2169,21 +2169,37 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   // Use pure C++ containers in parallel region
   std::vector<HMCResultCpp> cpp_results(n_chains);
 
+  // Check if we can safely parallelize
+  // Autodiff uses a global tape that is NOT thread-safe, so we must run
+  // chains sequentially for models that require autodiff gradients
+  bool can_parallelize = can_use_analytical_gradient(data, layout) ||
+                         layout.is_gp || layout.is_multiscale_gp;  // GP uses numerical
+
 #ifdef _OPENMP
-  // Run chains in parallel - C++ containers only, no R objects
-  #pragma omp parallel for schedule(static) num_threads(n_chains)
-  for (int c = 0; c < n_chains; c++) {
-    cpp_results[c] = run_hmc_chain_cpp(
-      q_init, data, layout,
-      n_iter, n_warmup, L, c, seed, false  // verbose=false in parallel
-    );
+  if (can_parallelize && n_chains > 1) {
+    // Run chains in parallel - only for analytical/numerical gradient models
+    #pragma omp parallel for schedule(static) num_threads(n_chains)
+    for (int c = 0; c < n_chains; c++) {
+      cpp_results[c] = run_hmc_chain_cpp(
+        q_init, data, layout,
+        n_iter, n_warmup, L, c, seed, false  // verbose=false in parallel
+      );
+    }
+  } else {
+    // Sequential execution for autodiff models (global tape not thread-safe)
+    for (int c = 0; c < n_chains; c++) {
+      cpp_results[c] = run_hmc_chain_cpp(
+        q_init, data, layout,
+        n_iter, n_warmup, L, c, seed, verbose
+      );
+    }
   }
 #else
-  // Sequential fallback
+  // Sequential fallback when OpenMP not available
   for (int c = 0; c < n_chains; c++) {
     cpp_results[c] = run_hmc_chain_cpp(
       q_init, data, layout,
-      n_iter, n_warmup, L, c, seed, false
+      n_iter, n_warmup, L, c, seed, verbose
     );
   }
 #endif
@@ -2193,7 +2209,8 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   for (int c = 0; c < n_chains; c++) {
     results[c] = cpp_to_r_result(cpp_results[c], n_params);
 
-    if (verbose) {
+    if (verbose && can_parallelize) {
+      // Only print here if we ran in parallel (otherwise already printed)
       int n_div = 0;
       for (int i = 0; i < cpp_results[c].n_sample; i++) {
         n_div += cpp_results[c].divergent[i];
