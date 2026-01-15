@@ -724,7 +724,7 @@ as.data.frame.ratiod_fit <- function(x, ...) {
 #'   count | effort ~ depth + (1|site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   iter = 200, warmup = 100, chains = 2
 #' )
 #' plot(fit)
 #' plot(fit, pars = "beta_num", type = "both")
