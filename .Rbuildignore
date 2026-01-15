@@ -21,3 +21,10 @@
 ^src/deprecated$
 ^TODO\.md$
 ^cov_script\.R$
+^debug_gp_crash\.md$
+^gradient_methods\.md$
+^PROMPT_GP_HEISENBUG\.md$
+^benchmarks$
+^\.RData$
+^\.\.Rcheck$
+^.*\.tar\.gz$

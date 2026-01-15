@@ -748,16 +748,16 @@ prepare_spatial_for_laplace <- function(spatial, data, formula) {
     stop("Spatial structure must include adj_matrix or adjacency")
   }
 
-  # Convert adjacency matrix to CSR format
+  # Convert adjacency matrix to CSR format (0-based indexing for C++)
   n_neighbors <- integer(n_units)
   adj_row_ptr <- integer(n_units + 1)
   adj_col_idx <- integer(0)
 
-  adj_row_ptr[1] <- 1L  # 1-based for R
+  adj_row_ptr[1] <- 0L  # 0-based for C++
   for (i in seq_len(n_units)) {
     neighbors <- which(adj_matrix[i, ] != 0)
     n_neighbors[i] <- length(neighbors)
-    adj_col_idx <- c(adj_col_idx, neighbors)
+    adj_col_idx <- c(adj_col_idx, neighbors - 1L)  # Convert to 0-based for C++
     adj_row_ptr[i + 1] <- adj_row_ptr[i] + n_neighbors[i]
   }
 
@@ -863,13 +863,19 @@ compute_hessian_spatial <- function(y, n_trials, X, re_idx, n_re_groups,
   }
 
   # Add ICAR precision for spatial
+  # Note: adj_row_ptr and adj_col_idx use 0-based indexing (for C++ compatibility)
   for (s in seq_len(n_spatial_units)) {
     sp_idx <- spatial_start + s
     H[sp_idx, sp_idx] <- H[sp_idx, sp_idx] + tau_spatial * n_neighbors[s]
-    for (k in adj_row_ptr[s]:(adj_row_ptr[s + 1] - 1)) {
-      neighbor <- adj_col_idx[k]
-      nb_idx <- spatial_start + neighbor
-      H[sp_idx, nb_idx] <- H[sp_idx, nb_idx] - tau_spatial
+    # Convert 0-based CSR indices to R's 1-based indexing
+    start_k <- adj_row_ptr[s] + 1L
+    end_k <- adj_row_ptr[s + 1]
+    if (end_k >= start_k) {
+      for (k in start_k:end_k) {
+        neighbor <- adj_col_idx[k] + 1L  # 0-based to 1-based
+        nb_idx <- spatial_start + neighbor
+        H[sp_idx, nb_idx] <- H[sp_idx, nb_idx] - tau_spatial
+      }
     }
   }
 
@@ -1173,13 +1179,19 @@ compute_hessian_bym2 <- function(y, n_trials, X, re_idx, n_re_groups,
   }
 
   # Add ICAR precision for phi_scaled
+  # Note: adj_row_ptr and adj_col_idx use 0-based indexing (for C++ compatibility)
   for (s in seq_len(n_spatial_units)) {
     phi_idx <- phi_start + s
     H[phi_idx, phi_idx] <- H[phi_idx, phi_idx] + n_neighbors[s]
-    for (k in adj_row_ptr[s]:(adj_row_ptr[s + 1] - 1)) {
-      neighbor <- adj_col_idx[k]
-      nb_idx <- phi_start + neighbor
-      H[phi_idx, nb_idx] <- H[phi_idx, nb_idx] - 1.0
+    # Convert 0-based CSR indices to R's 1-based indexing
+    start_k <- adj_row_ptr[s] + 1L
+    end_k <- adj_row_ptr[s + 1]
+    if (end_k >= start_k) {
+      for (k in start_k:end_k) {
+        neighbor <- adj_col_idx[k] + 1L  # 0-based to 1-based
+        nb_idx <- phi_start + neighbor
+        H[phi_idx, nb_idx] <- H[phi_idx, nb_idx] - 1.0
+      }
     }
   }
 
@@ -1908,14 +1920,18 @@ compute_hessian_rsr <- function(y, n_trials, X, re_idx, n_re_groups,
   }
 
   # ICAR prior on spatial effects
+  # Note: adj_row_ptr and adj_col_idx use 0-based indexing (for C++ compatibility)
   if (n_spatial_units > 0) {
     for (s in seq_len(n_spatial_units)) {
       H[spatial_start + s, spatial_start + s] <- H[spatial_start + s, spatial_start + s] +
         tau_spatial * n_neighbors[s]
 
-      for (k in (adj_row_ptr[s] + 1):adj_row_ptr[s + 1]) {
-        if (k <= length(adj_col_idx)) {
-          neighbor <- adj_col_idx[k]
+      # Convert 0-based CSR indices to R's 1-based indexing
+      start_k <- adj_row_ptr[s] + 1L
+      end_k <- adj_row_ptr[s + 1]
+      if (end_k >= start_k) {
+        for (k in start_k:end_k) {
+          neighbor <- adj_col_idx[k] + 1L  # 0-based to 1-based
           H[spatial_start + s, spatial_start + neighbor] <-
             H[spatial_start + s, spatial_start + neighbor] - tau_spatial
         }

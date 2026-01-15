@@ -393,9 +393,10 @@ test_that("compute_hessian_spatial returns correct dimensions", {
   spatial_idx <- as.integer(rep(1:4, each = 3))
   n_spatial_units <- 4L
 
-  # Simple chain adjacency
-  adj_row_ptr <- c(1L, 2L, 4L, 6L, 7L)
-  adj_col_idx <- c(2L, 1L, 3L, 2L, 4L, 3L)
+  # Simple chain adjacency (0-based indexing for C++ compatibility)
+  # Site 1 neighbors: [2], Site 2: [1,3], Site 3: [2,4], Site 4: [3]
+  adj_row_ptr <- c(0L, 1L, 3L, 5L, 6L)  # 0-based row pointers
+  adj_col_idx <- c(1L, 0L, 2L, 1L, 3L, 2L)  # 0-based neighbor indices
   n_neighbors <- c(1L, 2L, 2L, 1L)
 
   p <- ncol(X)

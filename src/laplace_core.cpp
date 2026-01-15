@@ -835,7 +835,7 @@ LaplaceResult laplace_mode_spatial(
       // Gradient from ICAR: -tau * (n_neighbors[s] * phi_s - sum of neighbors)
       double neighbor_sum = 0.0;
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;  // 1-based to 0-based
+        int neighbor = adj_col_idx[k];  // Already 0-based
         neighbor_sum += x[spatial_start + neighbor];
       }
       grad[sp_idx] -= tau_spatial * (n_neighbors[s] * phi_s - neighbor_sum);
@@ -845,7 +845,7 @@ LaplaceResult laplace_mode_spatial(
 
       // Hessian off-diagonal
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;
+        int neighbor = adj_col_idx[k];  // Already 0-based
         int nb_idx = spatial_start + neighbor;
         H(sp_idx, nb_idx) -= tau_spatial;
       }
@@ -1006,7 +1006,7 @@ LaplaceResult laplace_mode_spatial(
       double phi_s = x[spatial_start + s];
       quad_form += n_neighbors[s] * phi_s * phi_s;
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;
+        int neighbor = adj_col_idx[k];  // Already 0-based
         if (neighbor > s) {  // Count each edge once
           double phi_n = x[spatial_start + neighbor];
           quad_form -= 2.0 * phi_s * phi_n;
@@ -1314,14 +1314,14 @@ LaplaceResult laplace_mode_bym2(
 
       double neighbor_sum = 0.0;
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;
+        int neighbor = adj_col_idx[k];  // Already 0-based
         neighbor_sum += x[phi_start + neighbor];
       }
       // ICAR with precision 1 (variance scaling handled by sigma_spatial)
       grad[phi_idx] -= (n_neighbors[s] * phi_s - neighbor_sum);
       H(phi_idx, phi_idx) += n_neighbors[s];
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;
+        int neighbor = adj_col_idx[k];  // Already 0-based
         H(phi_idx, phi_start + neighbor) -= 1.0;
       }
     }
@@ -1482,7 +1482,7 @@ LaplaceResult laplace_mode_bym2(
     double phi_s = x[phi_start + s];
     quad_form += n_neighbors[s] * phi_s * phi_s;
     for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-      int neighbor = adj_col_idx[k] - 1;
+      int neighbor = adj_col_idx[k];  // Already 0-based
       if (neighbor > s) {
         quad_form -= 2.0 * phi_s * x[phi_start + neighbor];
       }
@@ -2960,14 +2960,14 @@ LaplaceResult laplace_mode_rsr(
 
       double neighbor_sum = 0.0;
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;
+        int neighbor = adj_col_idx[k];  // Already 0-based
         neighbor_sum += x[spatial_start + neighbor];
       }
       grad[sp_idx] -= tau_spatial * (n_neighbors[s] * phi_s - neighbor_sum);
       H(sp_idx, sp_idx) += tau_spatial * n_neighbors[s];
 
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;
+        int neighbor = adj_col_idx[k];  // Already 0-based
         int nb_idx = spatial_start + neighbor;
         H(sp_idx, nb_idx) -= tau_spatial;
       }
@@ -3124,7 +3124,7 @@ LaplaceResult laplace_mode_rsr(
       double phi_s = x[spatial_start + s];
       quad_form += n_neighbors[s] * phi_s * phi_s;
       for (int k = adj_row_ptr[s]; k < adj_row_ptr[s + 1]; k++) {
-        int neighbor = adj_col_idx[k] - 1;
+        int neighbor = adj_col_idx[k];  // Already 0-based
         if (neighbor > s) {
           double phi_n = x[spatial_start + neighbor];
           quad_form -= 2.0 * phi_s * phi_n;
