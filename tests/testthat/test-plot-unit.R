@@ -76,7 +76,7 @@ test_that("mcmc_diagnostics returns diagnostics data frame", {
 test_that("select_main_params filters correctly", {
   all_pars <- c("beta_num[1]", "beta_num[2]", "sigma_re", "re[1]", "re[2]", "spatial[1]")
 
-  result <- ratiod:::select_main_params(all_pars)
+  result <- numdenom:::select_main_params(all_pars)
 
   expect_true("beta_num[1]" %in% result)
   expect_true("sigma_re" %in% result)
@@ -88,18 +88,18 @@ test_that("select_main_params filters correctly", {
 test_that("grep_params matches patterns", {
   all_pars <- c("beta_num[1]", "beta_num[2]", "beta_denom[1]", "sigma_re")
 
-  result <- ratiod:::grep_params("beta_num", all_pars)
+  result <- numdenom:::grep_params("beta_num", all_pars)
   expect_equal(length(result), 2)
   expect_true(all(grepl("beta_num", result)))
 
-  result2 <- ratiod:::grep_params("sigma", all_pars)
+  result2 <- numdenom:::grep_params("sigma", all_pars)
   expect_equal(result2, "sigma_re")
 })
 
 # Test ratiod_diag_colors exists
 test_that("ratiod_diag_colors is defined", {
   expect_true(exists("ratiod_diag_colors", where = asNamespace("ratiod")))
-  colors <- ratiod:::ratiod_diag_colors
+  colors <- numdenom:::ratiod_diag_colors
   expect_true(is.list(colors))
   expect_true("good" %in% names(colors))
   expect_true("bad" %in% names(colors))
@@ -298,7 +298,7 @@ test_that("spectrum0_ar computes spectral density", {
   set.seed(123)
   x <- rnorm(100)
 
-  result <- ratiod:::spectrum0_ar(x)
+  result <- numdenom:::spectrum0_ar(x)
   expect_true(is.numeric(result))
   expect_true(result > 0)
 })
@@ -306,7 +306,7 @@ test_that("spectrum0_ar computes spectral density", {
 test_that("spectrum0_ar handles short sequences", {
   x <- rnorm(5)
 
-  result <- ratiod:::spectrum0_ar(x)
+  result <- numdenom:::spectrum0_ar(x)
   expect_true(is.numeric(result))
 })
 
@@ -337,7 +337,7 @@ test_that("plot_rhat_base works", {
   diag$parameter <- factor(diag$parameter, levels = diag$parameter)
 
   # Should not error
-  expect_silent(ratiod:::plot_rhat_base(diag, threshold = 1.01))
+  expect_silent(numdenom:::plot_rhat_base(diag, threshold = 1.01))
 })
 
 # Test plot_ess_base (base R fallback)
@@ -349,14 +349,14 @@ test_that("plot_ess_base works", {
   )
   diag$parameter <- factor(diag$parameter, levels = diag$parameter)
 
-  expect_silent(ratiod:::plot_ess_base(diag, threshold = 400, type = "bulk"))
+  expect_silent(numdenom:::plot_ess_base(diag, threshold = 400, type = "bulk"))
 })
 
 # Test get_draws_array helper
 test_that("get_draws_array converts to array format", {
   fit <- make_mock_fit(n_draws = 100, n_chains = 2)
 
-  result <- ratiod:::get_draws_array(fit)
+  result <- numdenom:::get_draws_array(fit)
 
   expect_true(is.list(result))
   expect_true("draws" %in% names(result))

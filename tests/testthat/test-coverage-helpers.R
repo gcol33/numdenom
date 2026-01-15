@@ -46,7 +46,7 @@ test_that("make_standata works for basic model", {
   formula <- ratiod_formula(count | total ~ x, data = df)
   family <- ratiod_negbin_negbin()
 
-  standata <- ratiod:::make_standata(
+  standata <- numdenom:::make_standata(
     formula = formula,
     family = family,
     data = df

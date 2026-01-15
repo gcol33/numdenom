@@ -35,6 +35,7 @@ Suggests:
     bayesplot,
     patchwork,
     ggplot2,
+    gridExtra,
     stars,
     sf,
     Matrix,

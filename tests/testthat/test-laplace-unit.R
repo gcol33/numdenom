@@ -6,19 +6,19 @@
 
 test_that("get_laplace_family returns binomial for binomial family", {
   family <- ratiod_binomial()
-  result <- ratiod:::get_laplace_family(family)
+  result <- numdenom:::get_laplace_family(family)
   expect_equal(result, "binomial")
 })
 
 test_that("get_laplace_family returns negbin for negbin family", {
   family <- ratiod_negbin_negbin()
-  result <- ratiod:::get_laplace_family(family)
+  result <- numdenom:::get_laplace_family(family)
   expect_equal(result, "negbin")
 })
 
 test_that("get_laplace_family returns poisson for poisson_gamma family", {
   family <- ratiod_poisson_gamma()
-  result <- ratiod:::get_laplace_family(family)
+  result <- numdenom:::get_laplace_family(family)
   expect_equal(result, "poisson")
 })
 
@@ -30,7 +30,7 @@ test_that("get_laplace_family errors on unsupported family", {
   class(mock_family) <- "ratiod_family"
 
   expect_error(
-    ratiod:::get_laplace_family(mock_family),
+    numdenom:::get_laplace_family(mock_family),
     "Unsupported family for Laplace backend"
   )
 })
@@ -49,7 +49,7 @@ test_that("extract_re_for_laplace with no random effects", {
   )
 
   f <- ratiod_formula(count | effort ~ x, data = df)
-  re_info <- ratiod:::extract_re_for_laplace(f)
+  re_info <- numdenom:::extract_re_for_laplace(f)
 
   expect_equal(re_info$n_groups, 0L)
   expect_equal(re_info$n_re_terms, 0L)
@@ -69,7 +69,7 @@ test_that("extract_re_for_laplace with single RE term", {
   )
 
   f <- ratiod_formula(count | effort ~ x + (1 | site), data = df)
-  re_info <- ratiod:::extract_re_for_laplace(f)
+  re_info <- numdenom:::extract_re_for_laplace(f)
 
   expect_equal(re_info$n_groups, 3L)
   expect_equal(re_info$n_re_terms, 1L)
@@ -91,7 +91,7 @@ test_that("extract_re_for_laplace with slopes warns", {
   f <- ratiod_formula(count | effort ~ x + (x | site), data = df)
 
   expect_warning(
-    re_info <- ratiod:::extract_re_for_laplace(f),
+    re_info <- numdenom:::extract_re_for_laplace(f),
     "Random slopes not yet fully supported"
   )
 
@@ -110,7 +110,7 @@ test_that("extract_re_for_laplace with multiple RE terms", {
   )
 
   f <- ratiod_formula(count | effort ~ x + (1 | site) + (1 | year), data = df)
-  re_info <- ratiod:::extract_re_for_laplace(f)
+  re_info <- numdenom:::extract_re_for_laplace(f)
 
   expect_equal(re_info$n_re_terms, 2L)
   expect_equal(re_info$total_groups, 5L)  # 3 sites + 2 years
@@ -123,9 +123,9 @@ test_that("extract_re_for_laplace with multiple RE terms", {
 # ---------------------------------------------------------------------------
 
 test_that("can_use_laplace_backend returns TRUE for all families", {
-  expect_true(ratiod:::can_use_laplace_backend(ratiod_binomial()))
-  expect_true(ratiod:::can_use_laplace_backend(ratiod_negbin_negbin()))
-  expect_true(ratiod:::can_use_laplace_backend(ratiod_poisson_gamma()))
+  expect_true(numdenom:::can_use_laplace_backend(ratiod_binomial()))
+  expect_true(numdenom:::can_use_laplace_backend(ratiod_negbin_negbin()))
+  expect_true(numdenom:::can_use_laplace_backend(ratiod_poisson_gamma()))
 })
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ test_that("prepare_spatial_for_laplace extracts adjacency structure", {
   # Need a formula for prepare_spatial_for_laplace
   formula <- ratiod_formula(count | effort ~ 1, data = df)
 
-  result <- ratiod:::prepare_spatial_for_laplace(spatial, df, formula)
+  result <- numdenom:::prepare_spatial_for_laplace(spatial, df, formula)
 
   expect_equal(result$n_units, n_sites)
   expect_equal(length(result$group_idx), n)
@@ -166,7 +166,7 @@ test_that("prepare_spatial_for_laplace errors without group_var", {
   formula <- list()
 
   expect_error(
-    ratiod:::prepare_spatial_for_laplace(spatial, df, formula),
+    numdenom:::prepare_spatial_for_laplace(spatial, df, formula),
     "group_var"
   )
 })
@@ -180,7 +180,7 @@ test_that("prepare_spatial_for_laplace errors when group_var not in data", {
   formula <- list()
 
   expect_error(
-    ratiod:::prepare_spatial_for_laplace(spatial, df, formula),
+    numdenom:::prepare_spatial_for_laplace(spatial, df, formula),
     "not found in data"
   )
 })
@@ -191,7 +191,7 @@ test_that("prepare_spatial_for_laplace errors without adjacency matrix", {
   formula <- list()
 
   expect_error(
-    ratiod:::prepare_spatial_for_laplace(spatial, df, formula),
+    numdenom:::prepare_spatial_for_laplace(spatial, df, formula),
     "adj_matrix"
   )
 })
@@ -210,7 +210,7 @@ test_that("compute_hessian_at_mode returns symmetric matrix", {
   n_re_groups <- 2L
   mode <- c(0.5, -0.2, 0.1, -0.1)  # 2 fixed + 2 RE
 
-  result <- ratiod:::compute_hessian_at_mode(
+  result <- numdenom:::compute_hessian_at_mode(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -239,7 +239,7 @@ test_that("compute_hessian_at_mode works for negbin family", {
   n_re_groups <- 0L
   mode <- c(2.0, 0.5)
 
-  result <- ratiod:::compute_hessian_at_mode(
+  result <- numdenom:::compute_hessian_at_mode(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -265,7 +265,7 @@ test_that("compute_hessian_at_mode works for poisson family", {
   n_re_groups <- 0L
   mode <- c(2.3, 0.1)
 
-  result <- ratiod:::compute_hessian_at_mode(
+  result <- numdenom:::compute_hessian_at_mode(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -314,7 +314,7 @@ test_that("convert_laplace_to_ratiod_fit creates valid ratiod_fit", {
     group_var = NULL
   )
 
-  fit <- ratiod:::convert_laplace_to_ratiod_fit(
+  fit <- numdenom:::convert_laplace_to_ratiod_fit(
     samples = samples,
     result = result,
     formula = formula,
@@ -362,7 +362,7 @@ test_that("convert_laplace_to_ratiod_fit handles random effects", {
     group_var = "site"
   )
 
-  fit <- ratiod:::convert_laplace_to_ratiod_fit(
+  fit <- numdenom:::convert_laplace_to_ratiod_fit(
     samples = samples,
     result = result,
     formula = formula,
@@ -402,7 +402,7 @@ test_that("compute_hessian_spatial returns correct dimensions", {
   n_x <- p + n_re_groups + n_spatial_units
   mode <- rnorm(n_x)
 
-  result <- ratiod:::compute_hessian_spatial(
+  result <- numdenom:::compute_hessian_spatial(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -465,7 +465,7 @@ test_that("convert_laplace_spatial_to_ratiod_fit creates valid fit", {
     group_idx = as.integer(df$site)
   )
 
-  fit <- ratiod:::convert_laplace_spatial_to_ratiod_fit(
+  fit <- numdenom:::convert_laplace_spatial_to_ratiod_fit(
     samples = samples,
     result = result,
     formula = formula,

@@ -403,7 +403,7 @@ test_that("aggregate_by_group uses geometric mean", {
   )
   data <- data.frame(obs = 1:2, group = c("A", "A"))
 
-  result <- ratiod:::aggregate_by_group(draws, data, "group")
+  result <- numdenom:::aggregate_by_group(draws, data, "group")
 
   # Geometric mean of 2 and 8 = sqrt(16) = 4
   expect_equal(ncol(result), 1)
@@ -493,7 +493,7 @@ test_that("aggregate_by_group handles single observation per group", {
   draws <- matrix(c(2, 8), nrow = 1, ncol = 2)
   data <- data.frame(obs = 1:2, group = c("A", "B"))
 
-  result <- ratiod:::aggregate_by_group(draws, data, "group")
+  result <- numdenom:::aggregate_by_group(draws, data, "group")
 
   expect_equal(ncol(result), 2)
   expect_equal(as.numeric(result[1, 1]), 2)

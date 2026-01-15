@@ -5,7 +5,7 @@
 test_that("extract_coords works with x/y columns", {
   df <- data.frame(x = 1:5, y = 6:10, value = rnorm(5))
 
-  result <- ratiod:::extract_coords(df)
+  result <- numdenom:::extract_coords(df)
 
   expect_equal(result$x, 1:5)
   expect_equal(result$y, 6:10)
@@ -14,7 +14,7 @@ test_that("extract_coords works with x/y columns", {
 test_that("extract_coords works with lon/lat columns", {
   df <- data.frame(lon = c(-122, -121, -120), lat = c(37, 38, 39), value = 1:3)
 
-  result <- ratiod:::extract_coords(df)
+  result <- numdenom:::extract_coords(df)
 
   expect_equal(result$x, c(-122, -121, -120))
   expect_equal(result$y, c(37, 38, 39))
@@ -23,7 +23,7 @@ test_that("extract_coords works with lon/lat columns", {
 test_that("extract_coords works with longitude/latitude columns", {
   df <- data.frame(longitude = c(10, 20), latitude = c(50, 60), val = c(1, 2))
 
-  result <- ratiod:::extract_coords(df)
+  result <- numdenom:::extract_coords(df)
 
   expect_equal(result$x, c(10, 20))
   expect_equal(result$y, c(50, 60))
@@ -32,7 +32,7 @@ test_that("extract_coords works with longitude/latitude columns", {
 test_that("extract_coords works with Easting/Northing columns", {
   df <- data.frame(Easting = c(100, 200), Northing = c(300, 400))
 
-  result <- ratiod:::extract_coords(df)
+  result <- numdenom:::extract_coords(df)
 
   expect_equal(result$x, c(100, 200))
   expect_equal(result$y, c(300, 400))
@@ -41,7 +41,7 @@ test_that("extract_coords works with Easting/Northing columns", {
 test_that("extract_coords works with matrix input", {
   mat <- matrix(c(1, 2, 3, 4, 5, 6), nrow = 3, ncol = 2)
 
-  result <- ratiod:::extract_coords(mat)
+  result <- numdenom:::extract_coords(mat)
 
   expect_equal(result$x, 1:3)
   expect_equal(result$y, 4:6)
@@ -51,7 +51,7 @@ test_that("extract_coords errors on unrecognized columns", {
   df <- data.frame(a = 1:3, b = letters[1:3], c = 4:6)
 
   expect_error(
-    ratiod:::extract_coords(df),
+    numdenom:::extract_coords(df),
     "Cannot identify coordinate columns"
   )
 })
@@ -64,7 +64,7 @@ test_that("can_use_stars detects gridded data", {
     value = rnorm(9)
   )
 
-  result <- ratiod:::can_use_stars(plot_data)
+  result <- numdenom:::can_use_stars(plot_data)
   expect_true(result)
 })
 
@@ -76,7 +76,7 @@ test_that("can_use_stars detects irregular data", {
     value = rnorm(5)
   )
 
-  result <- ratiod:::can_use_stars(plot_data)
+  result <- numdenom:::can_use_stars(plot_data)
   expect_false(result)
 })
 
@@ -93,7 +93,7 @@ test_that("extract_coords_from_fit returns NULL when no coords", {
   )
   class(fit) <- "ratiod_fit"
 
-  result <- ratiod:::extract_coords_from_fit(fit)
+  result <- numdenom:::extract_coords_from_fit(fit)
   # When data doesn't have x/y columns and fewer than 2 numeric columns, should return NULL
   expect_null(result)
 })
@@ -105,7 +105,7 @@ test_that("extract_coords_from_fit extracts from fit$coords", {
   )
   class(fit) <- "ratiod_fit"
 
-  result <- ratiod:::extract_coords_from_fit(fit)
+  result <- numdenom:::extract_coords_from_fit(fit)
 
   expect_equal(result$x, 1:5)
   expect_equal(result$y, 6:10)
@@ -118,7 +118,7 @@ test_that("extract_coords_from_fit extracts from data", {
   )
   class(fit) <- "ratiod_fit"
 
-  result <- ratiod:::extract_coords_from_fit(fit)
+  result <- numdenom:::extract_coords_from_fit(fit)
 
   expect_equal(result$x, 1:5)
   expect_equal(result$y, 6:10)
@@ -164,7 +164,7 @@ test_that("plot_map works with data frame and coords", {
 test_that("get_palette_scale returns viridis scale", {
   skip_if_not_installed("ggplot2")
 
-  scale <- ratiod:::get_palette_scale("viridis", "transparent", "Value")
+  scale <- numdenom:::get_palette_scale("viridis", "transparent", "Value")
   # Scale objects have class ggproto/Scale
   expect_true(inherits(scale, "ggproto") || inherits(scale, "Scale"))
 })
@@ -172,7 +172,7 @@ test_that("get_palette_scale returns viridis scale", {
 test_that("get_palette_scale works with custom colors", {
   skip_if_not_installed("ggplot2")
 
-  scale <- ratiod:::get_palette_scale(c("red", "white", "blue"),
+  scale <- numdenom:::get_palette_scale(c("red", "white", "blue"),
                                       "transparent", "Value")
   expect_true(inherits(scale, "ggproto") || inherits(scale, "Scale"))
 })
@@ -183,7 +183,7 @@ test_that("prepare_map_data_from_df works with mean column", {
   df <- data.frame(mean = 1:5, sd = 0.1)
   coords <- data.frame(x = 1:5, y = 6:10)
 
-  result <- ratiod:::prepare_map_data_from_df(df, coords, "ratio", "mean")
+  result <- numdenom:::prepare_map_data_from_df(df, coords, "ratio", "mean")
 
   expect_equal(nrow(result), 5)
   expect_true("value" %in% names(result))
@@ -195,7 +195,7 @@ test_that("prepare_map_data_from_df handles uncertainty", {
   df <- data.frame(q2.5 = 1:5, q97.5 = 6:10)
   coords <- data.frame(x = 1:5, y = 1:5)
 
-  result <- ratiod:::prepare_map_data_from_df(df, coords, "uncertainty", "mean")
+  result <- numdenom:::prepare_map_data_from_df(df, coords, "uncertainty", "mean")
 
   # CI width = 6:10 - 1:5 = c(5, 5, 5, 5, 5)
   expect_equal(result$value, rep(5, 5))
@@ -206,7 +206,7 @@ test_that("prepare_map_data_from_df errors on missing columns", {
   coords <- data.frame(x = 1:5, y = 1:5)
 
   expect_error(
-    ratiod:::prepare_map_data_from_df(df, coords, "ratio", "mean"),
+    numdenom:::prepare_map_data_from_df(df, coords, "ratio", "mean"),
     "Cannot find appropriate column"
   )
 })

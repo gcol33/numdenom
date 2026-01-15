@@ -102,7 +102,7 @@ test_that("average_predictions works on log scale for ratios", {
   )
   weights <- c(0.5, 0.5)
 
-  result <- ratiod:::average_predictions(predictions, weights, "ratio", summary = FALSE)
+  result <- numdenom:::average_predictions(predictions, weights, "ratio", summary = FALSE)
 
   # Geometric mean: sqrt(2*8)=4, sqrt(4*16)=8
   expect_equal(result[1, 1], 4, tolerance = 0.001)
@@ -116,7 +116,7 @@ test_that("average_predictions works with summary=TRUE", {
   )
   weights <- c(0.6, 0.4)
 
-  result <- ratiod:::average_predictions(predictions, weights, "numerator", summary = TRUE)
+  result <- numdenom:::average_predictions(predictions, weights, "numerator", summary = TRUE)
 
   expect_true(is.data.frame(result))
   expect_true("mean" %in% names(result))
@@ -134,7 +134,7 @@ test_that("get_predictions errors on missing prediction data", {
   )
 
   expect_error(
-    ratiod:::get_predictions(mock_model, NULL, "ratio", FALSE),
+    numdenom:::get_predictions(mock_model, NULL, "ratio", FALSE),
     "Cannot extract"
   )
 })
@@ -178,7 +178,7 @@ test_that("get_predictions extracts ratio from draws$ratio", {
     class = "ratiod_fit"
   )
 
-  result <- ratiod:::get_predictions(mock_model, NULL, "ratio", FALSE)
+  result <- numdenom:::get_predictions(mock_model, NULL, "ratio", FALSE)
   expect_equal(result, mock_model$draws$ratio)
 })
 
@@ -193,7 +193,7 @@ test_that("get_predictions computes ratio from eta", {
     class = "ratiod_fit"
   )
 
-  result <- ratiod:::get_predictions(mock_model, NULL, "ratio", FALSE)
+  result <- numdenom:::get_predictions(mock_model, NULL, "ratio", FALSE)
   # ratio = exp(eta_num - eta_denom) = eta_num / eta_denom on exp scale
   expected <- exp(mock_model$draws$eta_num - mock_model$draws$eta_denom)
   expect_equal(result, expected)
@@ -209,7 +209,7 @@ test_that("get_predictions extracts numerator from mu_num", {
     class = "ratiod_fit"
   )
 
-  result <- ratiod:::get_predictions(mock_model, NULL, "numerator", FALSE)
+  result <- numdenom:::get_predictions(mock_model, NULL, "numerator", FALSE)
   expect_equal(result, mock_model$draws$mu_num)
 })
 
@@ -223,7 +223,7 @@ test_that("get_predictions extracts numerator from eta_num when mu_num is missin
     class = "ratiod_fit"
   )
 
-  result <- ratiod:::get_predictions(mock_model, NULL, "numerator", FALSE)
+  result <- numdenom:::get_predictions(mock_model, NULL, "numerator", FALSE)
   expect_equal(result, exp(mock_model$draws$eta_num))
 })
 
@@ -237,7 +237,7 @@ test_that("get_predictions extracts denominator from mu_denom", {
     class = "ratiod_fit"
   )
 
-  result <- ratiod:::get_predictions(mock_model, NULL, "denominator", FALSE)
+  result <- numdenom:::get_predictions(mock_model, NULL, "denominator", FALSE)
   expect_equal(result, mock_model$draws$mu_denom)
 })
 
@@ -251,7 +251,7 @@ test_that("get_predictions extracts denominator from eta_denom when mu_denom is 
     class = "ratiod_fit"
   )
 
-  result <- ratiod:::get_predictions(mock_model, NULL, "denominator", FALSE)
+  result <- numdenom:::get_predictions(mock_model, NULL, "denominator", FALSE)
   expect_equal(result, exp(mock_model$draws$eta_denom))
 })
 
@@ -267,7 +267,7 @@ test_that("get_predictions errors for numerator when both mu_num and eta_num are
   )
 
   expect_error(
-    ratiod:::get_predictions(mock_model, NULL, "numerator", FALSE),
+    numdenom:::get_predictions(mock_model, NULL, "numerator", FALSE),
     "Cannot extract"
   )
 })
@@ -284,7 +284,7 @@ test_that("get_predictions errors for denominator when both mu_denom and eta_den
   )
 
   expect_error(
-    ratiod:::get_predictions(mock_model, NULL, "denominator", FALSE),
+    numdenom:::get_predictions(mock_model, NULL, "denominator", FALSE),
     "Cannot extract"
   )
 })
@@ -297,7 +297,7 @@ test_that("average_predictions works for denominator", {
   )
   weights <- c(0.5, 0.5)
 
-  result <- ratiod:::average_predictions(predictions, weights, "denominator", summary = FALSE)
+  result <- numdenom:::average_predictions(predictions, weights, "denominator", summary = FALSE)
 
   # Arithmetic mean: (10+30)/2=20, (20+40)/2=30
   expect_equal(result[1, 1], 20, tolerance = 0.001)

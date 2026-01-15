@@ -121,7 +121,7 @@ test_that("HMC backend works for negbin_negbin model", {
   q_init <- c(rep(0.0, 4), log(5), log(5))  # Initialize phi at 5
 
   # Use cpp_hmc_fit with bundled list arguments
-  fit <- ratiod:::cpp_hmc_fit(
+  fit <- numdenom:::cpp_hmc_fit(
     q_init = q_init,
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
@@ -177,7 +177,7 @@ test_that("HMC backend works for poisson_gamma model", {
   q_init <- c(rep(0.0, 4), log(3))
 
   # Use cpp_hmc_fit with bundled list arguments
-  fit <- ratiod:::cpp_hmc_fit(
+  fit <- numdenom:::cpp_hmc_fit(
     q_init = q_init,
     y_num = as.integer(y_num),
     y_denom = as.integer(rep(1, N)),  # placeholder

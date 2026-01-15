@@ -114,7 +114,7 @@ test_that("HMC backend runs for binomial model", {
 
   X <- cbind(1, x)
 
-  result <- ratiod:::cpp_hmc_fit(
+  result <- numdenom:::cpp_hmc_fit(
     q_init = rep(0, 3),  # 2 beta_num + 1 beta_denom
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -167,7 +167,7 @@ test_that("HMC backend runs for negbin model", {
 
   X <- cbind(1, x)
 
-  result <- ratiod:::cpp_hmc_fit(
+  result <- numdenom:::cpp_hmc_fit(
     q_init = rep(0, 6),  # 2 + 2 fixed + 2 log_phi
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
@@ -215,7 +215,7 @@ test_that("HMC backend runs with random effects", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_sigma_re + 10 RE = 14
-  result <- ratiod:::cpp_hmc_fit(
+  result <- numdenom:::cpp_hmc_fit(
     q_init = rep(0, 14),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -306,7 +306,7 @@ test_that("HMC backend runs with ICAR spatial effects", {
   )
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 16 spatial = 20
-  result <- ratiod:::cpp_hmc_fit(
+  result <- numdenom:::cpp_hmc_fit(
     q_init = rep(0, 20),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -353,7 +353,7 @@ test_that("HMC backend runs multiple chains in parallel", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom = 3
-  result <- ratiod:::cpp_hmc_fit(
+  result <- numdenom:::cpp_hmc_fit(
     q_init = rep(0, 3),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -388,7 +388,7 @@ test_that("HMC backend runs multiple chains in parallel", {
 
 
 test_that("cpp_get_max_threads returns positive integer", {
-  n_threads <- ratiod:::cpp_get_max_threads()
+  n_threads <- numdenom:::cpp_get_max_threads()
   expect_true(is.numeric(n_threads))
   expect_true(n_threads >= 1)
 })

@@ -52,7 +52,7 @@ test_that("nested RE produces correct number of groups", {
   )
 
   f <- ratiod_formula(y | n ~ (1 | site/plot), data = df)
-  re_info <- ratiod:::extract_re_for_hmc(f)
+  re_info <- numdenom:::extract_re_for_hmc(f)
 
   expect_equal(re_info$n_re_terms, 2)
   expect_equal(re_info$re_terms[[1]]$n_groups, 5)
@@ -110,7 +110,7 @@ test_that("extract_re_for_hmc handles nested RE", {
   )
 
   f <- ratiod_formula(y | n ~ (1 | site/plot), data = df)
-  re_info <- ratiod:::extract_re_for_hmc(f)
+  re_info <- numdenom:::extract_re_for_hmc(f)
 
   expect_equal(re_info$n_re_terms, 2)
   expect_equal(re_info$total_groups, 25)  # 5 + 20
@@ -132,7 +132,7 @@ test_that("prepare_hmc_data includes nested RE info", {
   f <- ratiod_formula(y | n ~ (1 | site/plot), data = df)
   family <- ratiod_binomial()
 
-  hmc_data <- ratiod:::prepare_hmc_data(f, df, family, "binomial")
+  hmc_data <- numdenom:::prepare_hmc_data(f, df, family, "binomial")
 
   expect_equal(hmc_data$n_re_terms, 2)
   expect_equal(hmc_data$total_re_groups, 25)

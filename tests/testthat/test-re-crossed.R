@@ -31,7 +31,7 @@ test_that("extract_re_for_hmc handles multiple RE terms", {
   )
 
   f <- ratiod_formula(y | n ~ x + (1 | site) + (1 | year), data = df)
-  re_info <- ratiod:::extract_re_for_hmc(f)
+  re_info <- numdenom:::extract_re_for_hmc(f)
 
   # Should have multi-term structure
 
@@ -59,7 +59,7 @@ test_that("extract_re_for_laplace handles multiple RE terms", {
   )
 
   f <- ratiod_formula(y | n ~ x + (1 | site) + (1 | year), data = df)
-  re_info <- ratiod:::extract_re_for_laplace(f)
+  re_info <- numdenom:::extract_re_for_laplace(f)
 
   expect_equal(re_info$n_re_terms, 2)
   expect_equal(re_info$total_groups, 15)
@@ -76,7 +76,7 @@ test_that("extract_re_from_data (PG) handles multiple RE terms", {
   )
 
   f <- ratiod_formula(y | n ~ x + (1 | site) + (1 | year), data = df)
-  re_info <- ratiod:::extract_re_from_data(f, df)
+  re_info <- numdenom:::extract_re_from_data(f, df)
 
   expect_equal(re_info$n_re_terms, 2)
   expect_equal(re_info$total_groups, 15)
@@ -92,7 +92,7 @@ test_that("single RE term still works with new structure", {
   )
 
   f <- ratiod_formula(y | n ~ x + (1 | site), data = df)
-  re_info <- ratiod:::extract_re_for_hmc(f)
+  re_info <- numdenom:::extract_re_for_hmc(f)
 
   expect_equal(re_info$n_re_terms, 1)
   expect_equal(re_info$n_groups, 10)
@@ -110,7 +110,7 @@ test_that("random slopes are detected in RE structure", {
   )
 
   f <- ratiod_formula(y | n ~ x + (1 + x | site), data = df)
-  re_info <- ratiod:::extract_re_for_hmc(f)
+  re_info <- numdenom:::extract_re_for_hmc(f)
 
   # Should detect slopes
   expect_true(re_info$has_slopes)
@@ -166,7 +166,7 @@ test_that("three crossed RE terms work", {
   )
 
   f <- ratiod_formula(y | n ~ x + (1 | site) + (1 | year) + (1 | observer), data = df)
-  re_info <- ratiod:::extract_re_for_hmc(f)
+  re_info <- numdenom:::extract_re_for_hmc(f)
 
   expect_equal(re_info$n_re_terms, 3)
   expect_equal(re_info$total_groups, 19)  # 10 + 5 + 4
@@ -186,7 +186,7 @@ test_that("no RE returns correct empty structure", {
   )
 
   f <- ratiod_formula(y | n ~ x, data = df)
-  re_info <- ratiod:::extract_re_for_hmc(f)
+  re_info <- numdenom:::extract_re_for_hmc(f)
 
   expect_equal(re_info$n_re_terms, 0)
   expect_equal(re_info$n_groups, 0)
@@ -206,7 +206,7 @@ test_that("prepare_hmc_data includes multi-term RE info", {
   f <- ratiod_formula(y | n ~ x + (1 | site) + (1 | year), data = df)
   family <- ratiod_binomial()
 
-  hmc_data <- ratiod:::prepare_hmc_data(f, df, family, "binomial")
+  hmc_data <- numdenom:::prepare_hmc_data(f, df, family, "binomial")
 
   expect_equal(hmc_data$n_re_terms, 2)
   expect_equal(hmc_data$total_re_groups, 15)

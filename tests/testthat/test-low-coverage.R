@@ -154,15 +154,15 @@ test_that("get_predictions handles different types", {
   class(mock_model) <- "ratiod_fit"
 
   # Type ratio with ratio available
-  pred <- ratiod:::get_predictions(mock_model, NULL, "ratio", FALSE)
+  pred <- numdenom:::get_predictions(mock_model, NULL, "ratio", FALSE)
   expect_equal(dim(pred), c(5, 4))
 
   # Type numerator
-  pred_num <- ratiod:::get_predictions(mock_model, NULL, "numerator", FALSE)
+  pred_num <- numdenom:::get_predictions(mock_model, NULL, "numerator", FALSE)
   expect_equal(dim(pred_num), c(5, 4))
 
   # Type denominator
-  pred_denom <- ratiod:::get_predictions(mock_model, NULL, "denominator", FALSE)
+  pred_denom <- numdenom:::get_predictions(mock_model, NULL, "denominator", FALSE)
   expect_equal(dim(pred_denom), c(5, 4))
 })
 
@@ -176,12 +176,12 @@ test_that("get_predictions falls back to eta when mu is NULL", {
   class(mock_model) <- "ratiod_fit"
 
   # Type numerator - should use exp(eta_num)
-  pred_num <- ratiod:::get_predictions(mock_model, NULL, "numerator", FALSE)
+  pred_num <- numdenom:::get_predictions(mock_model, NULL, "numerator", FALSE)
   expect_equal(dim(pred_num), c(5, 4))
   expect_equal(pred_num[1, 1], exp(0.5))
 
   # Type denominator - should use exp(eta_denom)
-  pred_denom <- ratiod:::get_predictions(mock_model, NULL, "denominator", FALSE)
+  pred_denom <- numdenom:::get_predictions(mock_model, NULL, "denominator", FALSE)
   expect_equal(dim(pred_denom), c(5, 4))
   expect_equal(pred_denom[1, 1], exp(0.3))
 })
@@ -191,7 +191,7 @@ test_that("get_predictions errors when unable to extract", {
   class(mock_model) <- "ratiod_fit"
 
   expect_error(
-    ratiod:::get_predictions(mock_model, NULL, "numerator", FALSE),
+    numdenom:::get_predictions(mock_model, NULL, "numerator", FALSE),
     "Cannot extract"
   )
 })
@@ -203,7 +203,7 @@ test_that("average_predictions works for ratio type", {
   weights <- c(0.5, 0.5)
 
   # Ratio averaging on log scale
-  avg <- ratiod:::average_predictions(predictions, weights, "ratio", summary = FALSE)
+  avg <- numdenom:::average_predictions(predictions, weights, "ratio", summary = FALSE)
   # exp(0.5*log(2) + 0.5*log(4)) = exp(0.5*0.693 + 0.5*1.386) = exp(1.0397) ~ 2.83
   expect_true(all(abs(avg - sqrt(2 * 4)) < 0.01))  # Geometric mean
 })
@@ -214,7 +214,7 @@ test_that("average_predictions works for numerator type with summary", {
   predictions <- list(pred1, pred2)
   weights <- c(0.5, 0.5)
 
-  avg <- ratiod:::average_predictions(predictions, weights, "numerator", summary = TRUE)
+  avg <- numdenom:::average_predictions(predictions, weights, "numerator", summary = TRUE)
   expect_true(is.data.frame(avg))
   expect_true("mean" %in% names(avg))
   expect_true("sd" %in% names(avg))
@@ -234,7 +234,7 @@ test_that("compute_hessian_at_mode works for binomial", {
   n_re_groups <- 0
   mode <- c(0.5, 0.1)  # Two beta parameters
 
-  hess <- ratiod:::compute_hessian_at_mode(
+  hess <- numdenom:::compute_hessian_at_mode(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -260,7 +260,7 @@ test_that("compute_hessian_at_mode works for negbin", {
   n_re_groups <- 0
   mode <- c(2.0, 0.5)
 
-  hess <- ratiod:::compute_hessian_at_mode(
+  hess <- numdenom:::compute_hessian_at_mode(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -284,7 +284,7 @@ test_that("compute_hessian_at_mode works for poisson", {
   n_re_groups <- 0
   mode <- c(1.5, 0.3)
 
-  hess <- ratiod:::compute_hessian_at_mode(
+  hess <- numdenom:::compute_hessian_at_mode(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -308,7 +308,7 @@ test_that("compute_hessian_at_mode handles random effects", {
   n_re_groups <- 2
   mode <- c(0.5, 0.1, 0.2, -0.1)  # 2 beta + 2 RE
 
-  hess <- ratiod:::compute_hessian_at_mode(
+  hess <- numdenom:::compute_hessian_at_mode(
     y = y,
     n_trials = n_trials,
     X = X,
@@ -383,7 +383,7 @@ test_that("prior_pc creates valid prior", {
 
 test_that("validate_prior rejects non-prior objects", {
   expect_error(
-    ratiod:::validate_prior(list(x = 1), "test"),
+    numdenom:::validate_prior(list(x = 1), "test"),
     "must be a prior object"
   )
 })

@@ -102,7 +102,7 @@ test_that("aggregate_by_group computes geometric mean", {
   draws <- matrix(c(rep(2, 10), rep(8, 10)), nrow = 10, ncol = 2)
   data <- data.frame(obs = 1:2, group = c("A", "A"))
 
-  result <- ratiod:::aggregate_by_group(draws, data, "group")
+  result <- numdenom:::aggregate_by_group(draws, data, "group")
 
   expect_equal(ncol(result), 1)
   # Geometric mean of 2 and 8 = sqrt(16) = 4
@@ -113,7 +113,7 @@ test_that("aggregate_by_group handles multiple groups", {
   draws <- matrix(c(rep(1, 10), rep(4, 10), rep(9, 10)), nrow = 10, ncol = 3)
   data <- data.frame(obs = 1:3, group = c("A", "A", "B"))
 
-  result <- ratiod:::aggregate_by_group(draws, data, "group")
+  result <- numdenom:::aggregate_by_group(draws, data, "group")
 
   expect_equal(ncol(result), 2)  # 2 groups
 })
@@ -123,7 +123,7 @@ test_that("aggregate_by_group errors on missing variable", {
   data <- data.frame(obs = 1:2, x = c("a", "b"))
 
   expect_error(
-    ratiod:::aggregate_by_group(draws, data, "nonexistent"),
+    numdenom:::aggregate_by_group(draws, data, "nonexistent"),
     "not found"
   )
 })

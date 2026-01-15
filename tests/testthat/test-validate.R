@@ -101,7 +101,7 @@ test_that("average_predictions works on log scale for ratios", {
   )
   weights <- c(0.5, 0.5)
 
-  result <- ratiod:::average_predictions(predictions, weights, type = "ratio", summary = FALSE)
+  result <- numdenom:::average_predictions(predictions, weights, type = "ratio", summary = FALSE)
 
   # Geometric mean of 2 and 8 with equal weights = 4
   expect_equal(result[1, 1], 4, tolerance = 0.001)
@@ -115,7 +115,7 @@ test_that("average_predictions works for numerator/denominator", {
   )
   weights <- c(0.5, 0.5)
 
-  result <- ratiod:::average_predictions(predictions, weights, type = "numerator", summary = FALSE)
+  result <- numdenom:::average_predictions(predictions, weights, type = "numerator", summary = FALSE)
 
   # Arithmetic mean of 2 and 8 with equal weights = 5
   expect_equal(result[1, 1], 5, tolerance = 0.001)
@@ -129,7 +129,7 @@ test_that("average_predictions returns summary when requested", {
   )
   weights <- c(0.6, 0.4)
 
-  result <- ratiod:::average_predictions(predictions, weights, type = "numerator", summary = TRUE)
+  result <- numdenom:::average_predictions(predictions, weights, type = "numerator", summary = TRUE)
 
   expect_true(is.data.frame(result))
   expect_true("mean" %in% names(result))

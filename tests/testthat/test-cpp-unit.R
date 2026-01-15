@@ -13,12 +13,12 @@ test_that("leapfrog preserves Hamiltonian for quadratic potential", {
   q <- c(1.0, 0.5, -0.3)
   p <- c(0.2, -0.4, 0.6)
 
-  H_initial <- ratiod:::cpp_test_hamiltonian(q, p)
+  H_initial <- numdenom:::cpp_test_hamiltonian(q, p)
 
   # Small step size, many steps for accuracy
-  result <- ratiod:::cpp_test_leapfrog(q, p, epsilon = 0.01, L = 100)
+  result <- numdenom:::cpp_test_leapfrog(q, p, epsilon = 0.01, L = 100)
 
-  H_final <- ratiod:::cpp_test_hamiltonian(result$q, result$p)
+  H_final <- numdenom:::cpp_test_hamiltonian(result$q, result$p)
 
   # Hamiltonian should be conserved to within numerical precision
 
@@ -30,10 +30,10 @@ test_that("leapfrog is reversible", {
   p <- c(0.3, 0.7)
 
   # Forward integration
-  fwd <- ratiod:::cpp_test_leapfrog(q, p, epsilon = 0.1, L = 10)
+  fwd <- numdenom:::cpp_test_leapfrog(q, p, epsilon = 0.1, L = 10)
 
   # Backward integration (negate momentum, integrate, negate again)
-  bwd <- ratiod:::cpp_test_leapfrog(fwd$q, -fwd$p, epsilon = 0.1, L = 10)
+  bwd <- numdenom:::cpp_test_leapfrog(fwd$q, -fwd$p, epsilon = 0.1, L = 10)
 
   # Should return to starting point
   expect_equal(bwd$q, q, tolerance = 1e-10)
@@ -47,7 +47,7 @@ test_that("leapfrog with zero steps returns input",
 
   # L=0 should be a no-op (though our implementation uses L-1 full steps)
   # Actually with L=1, we do: half momentum, full position, half momentum
-  result <- ratiod:::cpp_test_leapfrog(q, p, epsilon = 0.01, L = 1)
+  result <- numdenom:::cpp_test_leapfrog(q, p, epsilon = 0.01, L = 1)
 
   # With L=1, we still do one leapfrog step
   expect_true(TRUE)  # Just check it doesn't error
@@ -61,7 +61,7 @@ test_that("Hamiltonian is sum of potential and kinetic energy", {
   q <- c(2.0, 3.0)
   p <- c(1.0, 1.0)
 
-  H <- ratiod:::cpp_test_hamiltonian(q, p)
+  H <- numdenom:::cpp_test_hamiltonian(q, p)
 
   # U(q) = 0.5 * (4 + 9) = 6.5
   # K(p) = 0.5 * (1 + 1) = 1.0
@@ -73,7 +73,7 @@ test_that("Hamiltonian is zero at origin with zero momentum", {
   q <- c(0.0, 0.0, 0.0)
   p <- c(0.0, 0.0, 0.0)
 
-  H <- ratiod:::cpp_test_hamiltonian(q, p)
+  H <- numdenom:::cpp_test_hamiltonian(q, p)
   expect_equal(H, 0.0)
 })
 
@@ -83,13 +83,13 @@ test_that("Hamiltonian is zero at origin with zero momentum", {
 
 test_that("log_sum_exp is correct for simple cases", {
   # log(exp(1) + exp(2)) = log(e + e^2) ≈ 2.313
-  result <- ratiod:::cpp_test_log_sum_exp(c(1, 2))
+  result <- numdenom:::cpp_test_log_sum_exp(c(1, 2))
   expect_equal(result, log(exp(1) + exp(2)), tolerance = 1e-10)
 })
 test_that("log_sum_exp handles large values without overflow", {
   # Values that would overflow if we computed exp() directly
   large_vals <- c(700, 701, 702)
-  result <- ratiod:::cpp_test_log_sum_exp(large_vals)
+  result <- numdenom:::cpp_test_log_sum_exp(large_vals)
 
   # log(exp(700) + exp(701) + exp(702)) = 702 + log(exp(-2) + exp(-1) + 1)
   expected <- 702 + log(exp(-2) + exp(-1) + 1)
@@ -97,13 +97,13 @@ test_that("log_sum_exp handles large values without overflow", {
 })
 
 test_that("log_sum_exp handles negative values", {
-  result <- ratiod:::cpp_test_log_sum_exp(c(-1000, -999, -998))
+  result <- numdenom:::cpp_test_log_sum_exp(c(-1000, -999, -998))
   expected <- -998 + log(exp(-2) + exp(-1) + 1)
   expect_equal(result, expected, tolerance = 1e-10)
 })
 
 test_that("log_sum_exp of single value returns that value", {
-  expect_equal(ratiod:::cpp_test_log_sum_exp(5.0), 5.0)
+  expect_equal(numdenom:::cpp_test_log_sum_exp(5.0), 5.0)
 })
 
 # ---------------------------------------------------------------------------
@@ -112,27 +112,27 @@ test_that("log_sum_exp of single value returns that value", {
 
 test_that("softmax sums to 1", {
   x <- c(1, 2, 3, 4)
-  result <- ratiod:::cpp_test_softmax(x)
+  result <- numdenom:::cpp_test_softmax(x)
   expect_equal(sum(result), 1.0, tolerance = 1e-10)
 })
 
 test_that("softmax preserves ordering", {
   x <- c(1, 3, 2)
-  result <- ratiod:::cpp_test_softmax(x)
+  result <- numdenom:::cpp_test_softmax(x)
   expect_true(result[2] > result[3])
   expect_true(result[3] > result[1])
 })
 
 test_that("softmax is shift-invariant", {
   x <- c(1, 2, 3)
-  result1 <- ratiod:::cpp_test_softmax(x)
-  result2 <- ratiod:::cpp_test_softmax(x + 1000)
+  result1 <- numdenom:::cpp_test_softmax(x)
+  result2 <- numdenom:::cpp_test_softmax(x + 1000)
   expect_equal(result1, result2, tolerance = 1e-10)
 })
 
 test_that("softmax of equal values gives uniform", {
   x <- c(5, 5, 5, 5)
-  result <- ratiod:::cpp_test_softmax(x)
+  result <- numdenom:::cpp_test_softmax(x)
   expect_equal(result, rep(0.25, 4), tolerance = 1e-10)
 })
 
@@ -141,27 +141,27 @@ test_that("softmax of equal values gives uniform", {
 # ---------------------------------------------------------------------------
 
 test_that("inv_logit of 0 is 0.5", {
-  result <- ratiod:::cpp_test_inv_logit(0)
+  result <- numdenom:::cpp_test_inv_logit(0)
   expect_equal(result, 0.5)
 })
 
 test_that("inv_logit is bounded (0, 1)", {
   # Use moderate values to avoid numerical precision at extremes
   x <- c(-10, -5, -1, 0, 1, 5, 10)
-  result <- ratiod:::cpp_test_inv_logit(x)
+  result <- numdenom:::cpp_test_inv_logit(x)
   expect_true(all(result > 0))
   expect_true(all(result < 1))
 })
 
 test_that("inv_logit is monotonic", {
   x <- seq(-5, 5, by = 0.5)
-  result <- ratiod:::cpp_test_inv_logit(x)
+  result <- numdenom:::cpp_test_inv_logit(x)
   expect_true(all(diff(result) > 0))
 })
 
 test_that("inv_logit is symmetric around 0.5", {
   x <- c(-2, 2)
-  result <- ratiod:::cpp_test_inv_logit(x)
+  result <- numdenom:::cpp_test_inv_logit(x)
   expect_equal(result[1] + result[2], 1.0, tolerance = 1e-10)
 })
 
@@ -172,17 +172,17 @@ test_that("inv_logit is symmetric around 0.5", {
 test_that("lgamma matches R's lgamma", {
   x_vals <- c(0.5, 1, 2, 5, 10, 100)
   for (x in x_vals) {
-    expect_equal(ratiod:::cpp_test_lgamma(x), lgamma(x), tolerance = 1e-10)
+    expect_equal(numdenom:::cpp_test_lgamma(x), lgamma(x), tolerance = 1e-10)
   }
 })
 
 test_that("lgamma(1) = 0", {
-  expect_equal(ratiod:::cpp_test_lgamma(1), 0)
+  expect_equal(numdenom:::cpp_test_lgamma(1), 0)
 })
 
 test_that("lgamma(n) = log((n-1)!) for integers", {
-  expect_equal(ratiod:::cpp_test_lgamma(5), log(factorial(4)), tolerance = 1e-10)
-  expect_equal(ratiod:::cpp_test_lgamma(10), log(factorial(9)), tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_lgamma(5), log(factorial(4)), tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_lgamma(10), log(factorial(9)), tolerance = 1e-10)
 })
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ test_that("poisson_loglik matches dpois", {
   y <- as.integer(c(0, 1, 2, 5, 10))
   lambda <- c(1, 2, 3, 4, 5)
 
-  cpp_ll <- ratiod:::cpp_test_poisson_loglik(y, lambda)
+  cpp_ll <- numdenom:::cpp_test_poisson_loglik(y, lambda)
   r_ll <- sum(dpois(y, lambda, log = TRUE))
 
   expect_equal(cpp_ll, r_ll, tolerance = 1e-10)
@@ -203,7 +203,7 @@ test_that("poisson_loglik returns -Inf for impossible observations", {
   y <- as.integer(c(5))
   lambda <- c(0)  # y > 0 but lambda = 0 is impossible
 
-  result <- ratiod:::cpp_test_poisson_loglik(y, lambda)
+  result <- numdenom:::cpp_test_poisson_loglik(y, lambda)
   expect_equal(result, -Inf)
 })
 
@@ -216,7 +216,7 @@ test_that("binomial_loglik matches dbinom", {
   n <- as.integer(c(10, 10, 10))
   p <- c(0.3, 0.5, 0.7)
 
-  cpp_ll <- ratiod:::cpp_test_binomial_loglik(y, n, p)
+  cpp_ll <- numdenom:::cpp_test_binomial_loglik(y, n, p)
   r_ll <- sum(dbinom(y, n, p, log = TRUE))
 
   expect_equal(cpp_ll, r_ll, tolerance = 1e-10)
@@ -227,7 +227,7 @@ test_that("binomial_loglik handles edge probabilities", {
   n <- as.integer(c(10, 10))
 
   # p=0 with y=0 is valid, p=1 with y=n is valid
-  expect_true(is.finite(ratiod:::cpp_test_binomial_loglik(
+  expect_true(is.finite(numdenom:::cpp_test_binomial_loglik(
     as.integer(0), as.integer(10), 0.0001
   )))
 })
@@ -241,7 +241,7 @@ test_that("negbin_loglik matches dnbinom", {
   mu <- c(3, 3, 3, 3)
   phi <- 2.0  # size parameter
 
-  cpp_ll <- ratiod:::cpp_test_negbin_loglik(y, mu, phi)
+  cpp_ll <- numdenom:::cpp_test_negbin_loglik(y, mu, phi)
   r_ll <- sum(dnbinom(y, size = phi, mu = mu, log = TRUE))
 
   expect_equal(cpp_ll, r_ll, tolerance = 1e-10)
@@ -252,7 +252,7 @@ test_that("negbin_loglik handles large phi (approaches Poisson)", {
   mu <- c(5, 10, 15)
   phi <- 1000  # Large phi -> Poisson
 
-  cpp_ll <- ratiod:::cpp_test_negbin_loglik(y, mu, phi)
+  cpp_ll <- numdenom:::cpp_test_negbin_loglik(y, mu, phi)
   poisson_ll <- sum(dpois(y, mu, log = TRUE))
 
   # Should be close to Poisson for large phi
@@ -268,7 +268,7 @@ test_that("normal_loglik matches dnorm", {
   mu <- c(2.0, 2.0, 2.0, 2.0)
   sigma <- 0.5
 
-  cpp_ll <- ratiod:::cpp_test_normal_loglik(y, mu, sigma)
+  cpp_ll <- numdenom:::cpp_test_normal_loglik(y, mu, sigma)
   r_ll <- sum(dnorm(y, mu, sigma, log = TRUE))
 
   expect_equal(cpp_ll, r_ll, tolerance = 1e-10)
@@ -278,8 +278,8 @@ test_that("normal_loglik peaks at y = mu", {
   mu <- 5.0
   sigma <- 1.0
 
-  ll_at_mu <- ratiod:::cpp_test_normal_loglik(mu, mu, sigma)
-  ll_away <- ratiod:::cpp_test_normal_loglik(mu + 1, mu, sigma)
+  ll_at_mu <- numdenom:::cpp_test_normal_loglik(mu, mu, sigma)
+  ll_away <- numdenom:::cpp_test_normal_loglik(mu + 1, mu, sigma)
 
   expect_true(ll_at_mu > ll_away)
 })
@@ -290,13 +290,13 @@ test_that("normal_loglik peaks at y = mu", {
 
 test_that("cholesky of identity is identity", {
   I <- diag(3)
-  L <- ratiod:::cpp_test_cholesky(I)
+  L <- numdenom:::cpp_test_cholesky(I)
   expect_equal(as.matrix(L), I, tolerance = 1e-10)
 })
 
 test_that("cholesky satisfies L %*% t(L) = A", {
   A <- matrix(c(4, 2, 2, 3), nrow = 2)
-  L <- ratiod:::cpp_test_cholesky(A)
+  L <- numdenom:::cpp_test_cholesky(A)
 
   reconstructed <- L %*% t(L)
   expect_equal(as.matrix(reconstructed), A, tolerance = 1e-10)
@@ -304,7 +304,7 @@ test_that("cholesky satisfies L %*% t(L) = A", {
 
 test_that("cholesky is lower triangular", {
   A <- matrix(c(4, 2, 1, 2, 5, 3, 1, 3, 6), nrow = 3)
-  L <- ratiod:::cpp_test_cholesky(A)
+  L <- numdenom:::cpp_test_cholesky(A)
 
   # Upper triangle (excluding diagonal) should be zero
   expect_true(all(L[upper.tri(L)] == 0))
@@ -318,7 +318,7 @@ test_that("matvec matches R's %*%", {
   A <- matrix(c(1, 2, 3, 4, 5, 6), nrow = 2, ncol = 3)
   x <- c(1, 2, 3)
 
-  cpp_result <- ratiod:::cpp_test_matvec(A, x)
+  cpp_result <- numdenom:::cpp_test_matvec(A, x)
   r_result <- as.vector(A %*% x)
 
   expect_equal(cpp_result, r_result, tolerance = 1e-10)
@@ -328,7 +328,7 @@ test_that("matvec with identity matrix returns input", {
   I <- diag(4)
   x <- c(1, 2, 3, 4)
 
-  result <- ratiod:::cpp_test_matvec(I, x)
+  result <- numdenom:::cpp_test_matvec(I, x)
   expect_equal(result, x, tolerance = 1e-10)
 })
 
@@ -336,7 +336,7 @@ test_that("matvec with zero matrix returns zeros", {
   Z <- matrix(0, nrow = 3, ncol = 4)
   x <- c(1, 2, 3, 4)
 
-  result <- ratiod:::cpp_test_matvec(Z, x)
+  result <- numdenom:::cpp_test_matvec(Z, x)
   expect_equal(result, rep(0, 3), tolerance = 1e-10)
 })
 
@@ -346,7 +346,7 @@ test_that("matvec with zero matrix returns zeros", {
 
 test_that("autodiff gradient of sum(x^2) is 2*x", {
   x <- c(1.0, 2.0, 3.0, -1.5)
-  result <- ratiod:::cpp_test_autodiff_gradient(x)
+  result <- numdenom:::cpp_test_autodiff_gradient(x)
 
   # f(x) = sum(x^2) = 1 + 4 + 9 + 2.25 = 16.25
 
@@ -359,7 +359,7 @@ test_that("autodiff gradient of sum(x^2) is 2*x", {
 
 test_that("autodiff handles zero gradient correctly", {
   x <- c(0.0, 0.0)
-  result <- ratiod:::cpp_test_autodiff_gradient(x)
+  result <- numdenom:::cpp_test_autodiff_gradient(x)
 
   expect_equal(result$value, 0.0)
   expect_equal(result$gradient, c(0.0, 0.0), tolerance = 1e-10)
@@ -369,7 +369,7 @@ test_that("autodiff chain rule works for exp(x^2)", {
   test_vals <- c(0.0, 0.5, 1.0, -0.5, -1.0)  # Keep values small to avoid overflow
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_exp_chain(x)
+    result <- numdenom:::cpp_test_autodiff_exp_chain(x)
 
     # Value should be exp(x^2)
     expect_equal(result$value, exp(x^2), tolerance = 1e-10)
@@ -383,7 +383,7 @@ test_that("autodiff Poisson log-likelihood gradient is correct", {
   y <- as.integer(c(0, 1, 3, 5, 10))
   eta <- c(-0.5, 0.0, 0.5, 1.0, 2.0)
 
-  result <- ratiod:::cpp_test_autodiff_log_likelihood(y, eta)
+  result <- numdenom:::cpp_test_autodiff_log_likelihood(y, eta)
 
   # Gradient should be y - exp(eta)
   expect_equal(result$gradient, result$expected_gradient, tolerance = 1e-10)
@@ -397,7 +397,7 @@ test_that("autodiff log-likelihood value is correct", {
   y <- as.integer(c(2, 3, 5))
   eta <- c(0.5, 1.0, 1.5)
 
-  result <- ratiod:::cpp_test_autodiff_log_likelihood(y, eta)
+  result <- numdenom:::cpp_test_autodiff_log_likelihood(y, eta)
 
   # ll = sum(y * eta - exp(eta))
   expected_ll <- sum(y * eta - exp(eta))
@@ -413,7 +413,7 @@ test_that("autodiff division gradients are correct", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_autodiff_division(tc$a, tc$b)
+    result <- numdenom:::cpp_test_autodiff_division(tc$a, tc$b)
 
     # Value should be a/b
     expect_equal(result$value, tc$a / tc$b, tolerance = 1e-10)
@@ -428,7 +428,7 @@ test_that("autodiff lgamma gradient matches digamma", {
   test_vals <- c(0.5, 1.0, 2.0, 5.0, 10.0)
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_lgamma(x)
+    result <- numdenom:::cpp_test_autodiff_lgamma(x)
 
     # Value should be lgamma(x)
     expect_equal(result$value, lgamma(x), tolerance = 1e-10)
@@ -441,7 +441,7 @@ test_that("autodiff lgamma gradient matches digamma", {
 test_that("autodiff handles extreme values without overflow", {
   # Large values that might cause numerical issues
   x <- c(10.0, 20.0, 50.0)
-  result <- ratiod:::cpp_test_autodiff_gradient(x)
+  result <- numdenom:::cpp_test_autodiff_gradient(x)
 
   expect_true(is.finite(result$value))
   expect_true(all(is.finite(result$gradient)))
@@ -450,7 +450,7 @@ test_that("autodiff handles extreme values without overflow", {
 test_that("autodiff gradient accumulates correctly for shared variables", {
   # x appears twice in f(x) = x^2, gradient should be 2x
   x <- 3.0
-  result <- ratiod:::cpp_test_autodiff_gradient(x)
+  result <- numdenom:::cpp_test_autodiff_gradient(x)
 
   expect_equal(result$gradient, 6.0, tolerance = 1e-10)
 })
@@ -459,7 +459,7 @@ test_that("autodiff softplus value and gradient are correct", {
   test_vals <- c(-5.0, -1.0, 0.0, 1.0, 5.0)
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_softplus(x)
+    result <- numdenom:::cpp_test_autodiff_softplus(x)
 
     # Value should be log(1 + exp(x))
     expected_val <- log(1 + exp(x))
@@ -472,12 +472,12 @@ test_that("autodiff softplus value and gradient are correct", {
 
 test_that("autodiff softplus handles extreme values", {
   # Large positive: softplus(x) ≈ x, gradient ≈ 1
-  result_large <- ratiod:::cpp_test_autodiff_softplus(50.0)
+  result_large <- numdenom:::cpp_test_autodiff_softplus(50.0)
   expect_equal(result_large$value, 50.0, tolerance = 1e-6)
   expect_equal(result_large$gradient, 1.0, tolerance = 1e-10)
 
   # Large negative: softplus(x) ≈ 0, gradient ≈ 0
-  result_small <- ratiod:::cpp_test_autodiff_softplus(-50.0)
+  result_small <- numdenom:::cpp_test_autodiff_softplus(-50.0)
   expect_equal(result_small$value, 0.0, tolerance = 1e-6)
   expect_equal(result_small$gradient, 0.0, tolerance = 1e-10)
 })
@@ -486,7 +486,7 @@ test_that("autodiff inv_logit value and gradient are correct", {
   test_vals <- c(-3.0, -1.0, 0.0, 1.0, 3.0)
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_inv_logit(x)
+    result <- numdenom:::cpp_test_autodiff_inv_logit(x)
 
     # Value should be sigmoid(x) = 1/(1+exp(-x))
     expected_val <- 1 / (1 + exp(-x))
@@ -498,7 +498,7 @@ test_that("autodiff inv_logit value and gradient are correct", {
 })
 
 test_that("autodiff inv_logit(0) = 0.5 with correct gradient", {
-  result <- ratiod:::cpp_test_autodiff_inv_logit(0.0)
+  result <- numdenom:::cpp_test_autodiff_inv_logit(0.0)
 
   expect_equal(result$value, 0.5, tolerance = 1e-10)
   # Gradient at 0: 0.5 * 0.5 = 0.25
@@ -513,7 +513,7 @@ test_that("autodiff log value and gradient are correct", {
   test_vals <- c(0.5, 1.0, 2.0, 5.0, 10.0)
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_log(x)
+    result <- numdenom:::cpp_test_autodiff_log(x)
     expect_equal(result$value, log(x), tolerance = 1e-10)
     expect_equal(result$gradient, result$expected_gradient, tolerance = 1e-10)
   }
@@ -523,7 +523,7 @@ test_that("autodiff sqrt value and gradient are correct", {
   test_vals <- c(0.25, 1.0, 4.0, 9.0, 16.0)
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_sqrt(x)
+    result <- numdenom:::cpp_test_autodiff_sqrt(x)
     expect_equal(result$value, sqrt(x), tolerance = 1e-10)
     expect_equal(result$gradient, result$expected_gradient, tolerance = 1e-10)
   }
@@ -538,7 +538,7 @@ test_that("autodiff pow value and gradient are correct", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_autodiff_pow(tc$x, tc$p)
+    result <- numdenom:::cpp_test_autodiff_pow(tc$x, tc$p)
     expect_equal(result$value, tc$x^tc$p, tolerance = 1e-10)
     expect_equal(result$gradient, result$expected_gradient, tolerance = 1e-8)
   }
@@ -548,7 +548,7 @@ test_that("autodiff log1p value and gradient are correct", {
   test_vals <- c(0.0, 0.5, 1.0, 5.0, 10.0)
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_log1p(x)
+    result <- numdenom:::cpp_test_autodiff_log1p(x)
     expect_equal(result$value, log1p(x), tolerance = 1e-10)
     expect_equal(result$gradient, result$expected_gradient, tolerance = 1e-10)
   }
@@ -563,7 +563,7 @@ test_that("autodiff log_sum_exp value and gradients are correct", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_autodiff_log_sum_exp(tc$a, tc$b)
+    result <- numdenom:::cpp_test_autodiff_log_sum_exp(tc$a, tc$b)
 
     # Value should match log(exp(a) + exp(b))
     expected_val <- log(exp(tc$a - max(tc$a, tc$b)) + exp(tc$b - max(tc$a, tc$b))) + max(tc$a, tc$b)
@@ -579,7 +579,7 @@ test_that("autodiff logit value and gradient are correct", {
   test_vals <- c(0.1, 0.3, 0.5, 0.7, 0.9)
 
   for (x in test_vals) {
-    result <- ratiod:::cpp_test_autodiff_logit(x)
+    result <- numdenom:::cpp_test_autodiff_logit(x)
 
     # Value should be log(x/(1-x))
     expect_equal(result$value, log(x / (1 - x)), tolerance = 1e-10)
@@ -594,7 +594,7 @@ test_that("autodiff negbin log-likelihood gradients are correct", {
   mu <- c(3.0, 4.0, 6.0)
   phi <- 2.0
 
-  result <- ratiod:::cpp_test_autodiff_negbin_loglik(y, mu, phi)
+  result <- numdenom:::cpp_test_autodiff_negbin_loglik(y, mu, phi)
 
   # Check gradients are finite and non-zero
   expect_true(all(is.finite(result$gradient_mu)))
@@ -605,11 +605,11 @@ test_that("autodiff negbin log-likelihood gradients are correct", {
   for (i in seq_along(mu)) {
     mu_plus <- mu
     mu_plus[i] <- mu[i] + eps
-    result_plus <- ratiod:::cpp_test_autodiff_negbin_loglik(y, mu_plus, phi)
+    result_plus <- numdenom:::cpp_test_autodiff_negbin_loglik(y, mu_plus, phi)
 
     mu_minus <- mu
     mu_minus[i] <- mu[i] - eps
-    result_minus <- ratiod:::cpp_test_autodiff_negbin_loglik(y, mu_minus, phi)
+    result_minus <- numdenom:::cpp_test_autodiff_negbin_loglik(y, mu_minus, phi)
 
     fd_grad <- (result_plus$value - result_minus$value) / (2 * eps)
     expect_equal(result$gradient_mu[i], fd_grad, tolerance = 1e-4)
@@ -622,14 +622,14 @@ test_that("autodiff negbin log-likelihood gradients are correct", {
 
 test_that("cpp_rpg1 returns correct length", {
   z <- c(0.0, 1.0, -1.0, 2.0)
-  result <- ratiod:::cpp_rpg1(z)
+  result <- numdenom:::cpp_rpg1(z)
   expect_length(result, length(z))
 })
 
 test_that("cpp_rpg1 returns positive values", {
   set.seed(123)
   z <- rnorm(100)
-  result <- ratiod:::cpp_rpg1(z)
+  result <- numdenom:::cpp_rpg1(z)
   expect_true(all(result > 0))
 })
 
@@ -637,7 +637,7 @@ test_that("cpp_rpg1 mean approximates E[PG(1,z)] = tanh(z/2)/(2z)", {
   set.seed(42)
   z <- 1.0
   n <- 1000
-  samples <- replicate(n, ratiod:::cpp_rpg1(z))
+  samples <- replicate(n, numdenom:::cpp_rpg1(z))
 
   # E[PG(1,z)] = tanh(z/2) / (2z) for z != 0
   expected_mean <- tanh(z / 2) / (2 * z)
@@ -650,7 +650,7 @@ test_that("cpp_rpg handles vector inputs", {
   b <- as.integer(c(1, 2, 3, 4))
   z <- c(0.5, 1.0, 1.5, 2.0)
 
-  result <- ratiod:::cpp_rpg(b, z)
+  result <- numdenom:::cpp_rpg(b, z)
   expect_length(result, length(b))
   expect_true(all(result > 0))
 })
@@ -659,10 +659,10 @@ test_that("cpp_rpg with b=1 matches cpp_rpg1",
 {
   set.seed(123)
   z <- c(0.5, 1.0, 2.0)
-  result1 <- ratiod:::cpp_rpg(as.integer(rep(1, 3)), z)
+  result1 <- numdenom:::cpp_rpg(as.integer(rep(1, 3)), z)
 
   set.seed(123)
-  result2 <- ratiod:::cpp_rpg1(z)
+  result2 <- numdenom:::cpp_rpg1(z)
 
   expect_equal(result1, result2)
 })
@@ -682,7 +682,7 @@ test_that("laplace binomial log-likelihood is correct", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_laplace_binomial(tc$y, tc$n, tc$eta)
+    result <- numdenom:::cpp_test_laplace_binomial(tc$y, tc$n, tc$eta)
 
     # Log-likelihood should be finite
     expect_true(is.finite(result$log_lik))
@@ -700,13 +700,13 @@ test_that("laplace binomial log-likelihood is correct", {
 
 test_that("laplace binomial handles extreme eta values", {
   # Large positive eta (p ≈ 1)
-  result_pos <- ratiod:::cpp_test_laplace_binomial(9L, 10L, 10.0)
+  result_pos <- numdenom:::cpp_test_laplace_binomial(9L, 10L, 10.0)
   expect_true(is.finite(result_pos$log_lik))
   expect_true(is.finite(result_pos$gradient))
   expect_true(is.finite(result_pos$neg_hessian))
 
   # Large negative eta (p ≈ 0)
-  result_neg <- ratiod:::cpp_test_laplace_binomial(1L, 10L, -10.0)
+  result_neg <- numdenom:::cpp_test_laplace_binomial(1L, 10L, -10.0)
   expect_true(is.finite(result_neg$log_lik))
   expect_true(is.finite(result_neg$gradient))
   expect_true(is.finite(result_neg$neg_hessian))
@@ -722,7 +722,7 @@ test_that("laplace negbin log-likelihood is correct", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_laplace_negbin(tc$y, tc$eta, tc$phi)
+    result <- numdenom:::cpp_test_laplace_negbin(tc$y, tc$eta, tc$phi)
 
     # Log-likelihood should match R's dnbinom
     mu <- exp(tc$eta)
@@ -741,9 +741,9 @@ test_that("laplace negbin gradient matches finite differences", {
   phi <- 2.0
   eps <- 1e-5
 
-  result <- ratiod:::cpp_test_laplace_negbin(y, eta, phi)
-  result_plus <- ratiod:::cpp_test_laplace_negbin(y, eta + eps, phi)
-  result_minus <- ratiod:::cpp_test_laplace_negbin(y, eta - eps, phi)
+  result <- numdenom:::cpp_test_laplace_negbin(y, eta, phi)
+  result_plus <- numdenom:::cpp_test_laplace_negbin(y, eta + eps, phi)
+  result_minus <- numdenom:::cpp_test_laplace_negbin(y, eta - eps, phi)
 
   fd_grad <- (result_plus$log_lik - result_minus$log_lik) / (2 * eps)
   expect_equal(result$gradient, fd_grad, tolerance = 1e-4)
@@ -758,7 +758,7 @@ test_that("laplace poisson log-likelihood is correct", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_laplace_poisson(tc$y, tc$eta)
+    result <- numdenom:::cpp_test_laplace_poisson(tc$y, tc$eta)
 
     # Log-likelihood should match R's dpois
     lambda <- exp(tc$eta)
@@ -779,9 +779,9 @@ test_that("laplace poisson gradient matches finite differences", {
   eta <- 1.8
   eps <- 1e-5
 
-  result <- ratiod:::cpp_test_laplace_poisson(y, eta)
-  result_plus <- ratiod:::cpp_test_laplace_poisson(y, eta + eps)
-  result_minus <- ratiod:::cpp_test_laplace_poisson(y, eta - eps)
+  result <- numdenom:::cpp_test_laplace_poisson(y, eta)
+  result_plus <- numdenom:::cpp_test_laplace_poisson(y, eta + eps)
+  result_minus <- numdenom:::cpp_test_laplace_poisson(y, eta - eps)
 
   fd_grad <- (result_plus$log_lik - result_minus$log_lik) / (2 * eps)
   expect_equal(result$gradient, fd_grad, tolerance = 1e-4)
@@ -800,7 +800,7 @@ test_that("pg update_beta returns correct length", {
   re_contrib <- rep(0, n)
   prior_sd <- 10.0
 
-  result <- ratiod:::cpp_test_pg_update_beta(kappa, omega, X, re_contrib, prior_sd)
+  result <- numdenom:::cpp_test_pg_update_beta(kappa, omega, X, re_contrib, prior_sd)
   expect_length(result, p)
 })
 
@@ -814,7 +814,7 @@ test_that("pg update_beta returns finite values", {
   re_contrib <- rnorm(n, sd = 0.5)
   prior_sd <- 5.0
 
-  result <- ratiod:::cpp_test_pg_update_beta(kappa, omega, X, re_contrib, prior_sd)
+  result <- numdenom:::cpp_test_pg_update_beta(kappa, omega, X, re_contrib, prior_sd)
   expect_true(all(is.finite(result)))
 })
 
@@ -829,7 +829,7 @@ test_that("pg update_re returns correct length", {
   group <- as.integer(sample(1:n_groups, n, replace = TRUE))
   sigma_re <- 1.0
 
-  result <- ratiod:::cpp_test_pg_update_re(kappa, omega, X_beta, group, n_groups, sigma_re)
+  result <- numdenom:::cpp_test_pg_update_re(kappa, omega, X_beta, group, n_groups, sigma_re)
   expect_length(result, n_groups)
 })
 
@@ -844,7 +844,7 @@ test_that("pg update_re returns finite values", {
   group <- as.integer(sample(1:n_groups, n, replace = TRUE))
   sigma_re <- 2.0
 
-  result <- ratiod:::cpp_test_pg_update_re(kappa, omega, X_beta, group, n_groups, sigma_re)
+  result <- numdenom:::cpp_test_pg_update_re(kappa, omega, X_beta, group, n_groups, sigma_re)
   expect_true(all(is.finite(result)))
 })
 
@@ -853,7 +853,7 @@ test_that("pg update_sigma_re returns positive value", {
   re <- rnorm(10, sd = 1.5)
   scale <- 2.5
 
-  result <- ratiod:::cpp_test_pg_update_sigma_re(re, scale)
+  result <- numdenom:::cpp_test_pg_update_sigma_re(re, scale)
   expect_true(result > 0)
 })
 
@@ -862,11 +862,11 @@ test_that("pg update_sigma_re is roughly proportional to RE standard deviation",
 
   # Small RE variance
   re_small <- rnorm(20, sd = 0.5)
-  result_small <- ratiod:::cpp_test_pg_update_sigma_re(re_small, 2.5)
+  result_small <- numdenom:::cpp_test_pg_update_sigma_re(re_small, 2.5)
 
   # Large RE variance
   re_large <- rnorm(20, sd = 3.0)
-  result_large <- ratiod:::cpp_test_pg_update_sigma_re(re_large, 2.5)
+  result_large <- numdenom:::cpp_test_pg_update_sigma_re(re_large, 2.5)
 
   # Larger RE should generally produce larger sigma estimate
   # (stochastic so we just check they're both positive)
@@ -882,7 +882,7 @@ test_that("dot_product matches sum(x*y)", {
   x <- c(1, 2, 3, 4, 5)
   y <- c(2, 3, 4, 5, 6)
 
-  result <- ratiod:::cpp_test_dot_product(x, y)
+  result <- numdenom:::cpp_test_dot_product(x, y)
   expect_equal(result, sum(x * y), tolerance = 1e-10)
 })
 
@@ -891,20 +891,20 @@ test_that("dot_product handles unrolled loop correctly", {
   for (n in c(1, 2, 3, 4, 5, 7, 8, 15, 16, 17)) {
     x <- rnorm(n)
     y <- rnorm(n)
-    result <- ratiod:::cpp_test_dot_product(x, y)
+    result <- numdenom:::cpp_test_dot_product(x, y)
     expect_equal(result, sum(x * y), tolerance = 1e-10)
   }
 })
 
 test_that("norm_squared matches sum(x^2)", {
   x <- c(3, 4, 0, -2)
-  result <- ratiod:::cpp_test_norm_squared(x)
+  result <- numdenom:::cpp_test_norm_squared(x)
   expect_equal(result, sum(x^2), tolerance = 1e-10)
 })
 
 test_that("vector_sum matches sum()", {
   x <- c(1, 2, 3, -4, 5.5, -0.5)
-  result <- ratiod:::cpp_test_vector_sum(x)
+  result <- numdenom:::cpp_test_vector_sum(x)
   expect_equal(result, sum(x), tolerance = 1e-10)
 })
 
@@ -913,7 +913,7 @@ test_that("axpy computes y = a*x + y correctly", {
   x <- c(1, 2, 3)
   y <- c(10, 20, 30)
 
-  result <- ratiod:::cpp_test_axpy(a, x, y)
+  result <- numdenom:::cpp_test_axpy(a, x, y)
   expected <- a * x + y
   expect_equal(result, expected, tolerance = 1e-10)
 })
@@ -922,7 +922,7 @@ test_that("scale computes x = a*x correctly", {
   a <- 3.0
   x <- c(1, 2, 3, 4)
 
-  result <- ratiod:::cpp_test_scale(a, x)
+  result <- numdenom:::cpp_test_scale(a, x)
   expect_equal(result, a * x, tolerance = 1e-10)
 })
 
@@ -931,7 +931,7 @@ test_that("linalg_matvec matches X %*% beta", {
   X <- matrix(rnorm(20), nrow = 5, ncol = 4)
   beta <- rnorm(4)
 
-  result <- ratiod:::cpp_test_linalg_matvec(X, beta)
+  result <- numdenom:::cpp_test_linalg_matvec(X, beta)
   expected <- as.vector(X %*% beta)
   expect_equal(result, expected, tolerance = 1e-10)
 })
@@ -942,7 +942,7 @@ test_that("linalg_matvec_add computes y + X*beta correctly", {
   beta <- rnorm(4)
   y_init <- c(1, 2, 3)
 
-  result <- ratiod:::cpp_test_linalg_matvec_add(X, beta, y_init)
+  result <- numdenom:::cpp_test_linalg_matvec_add(X, beta, y_init)
   expected <- y_init + as.vector(X %*% beta)
   expect_equal(result, expected, tolerance = 1e-10)
 })
@@ -952,7 +952,7 @@ test_that("linalg_matvec_transpose matches t(X) %*% x", {
   X <- matrix(rnorm(20), nrow = 5, ncol = 4)
   x <- rnorm(5)
 
-  result <- ratiod:::cpp_test_linalg_matvec_transpose(X, x)
+  result <- numdenom:::cpp_test_linalg_matvec_transpose(X, x)
   expected <- as.vector(t(X) %*% x)
   expect_equal(result, expected, tolerance = 1e-10)
 })
@@ -967,7 +967,7 @@ col_idx <- c(1L, 0L, 2L, 1L, 3L, 2L)  # 0-based neighbors
 
   x <- c(1, 2, 4, 8)
 
-  result <- ratiod:::cpp_test_sparse_laplacian_quadform(row_ptr, col_idx, x)
+  result <- numdenom:::cpp_test_sparse_laplacian_quadform(row_ptr, col_idx, x)
 
   # x'Lx = sum over edges (x_i - x_j)^2
   # Edge (0,1): (1-2)^2 = 1
@@ -980,38 +980,38 @@ col_idx <- c(1L, 0L, 2L, 1L, 3L, 2L)  # 0-based neighbors
 test_that("linalg_log_sum_exp is numerically stable", {
   # Normal case
   expect_equal(
-    ratiod:::cpp_test_linalg_log_sum_exp(1.0, 2.0),
+    numdenom:::cpp_test_linalg_log_sum_exp(1.0, 2.0),
     log(exp(1) + exp(2)),
     tolerance = 1e-10
   )
 
   # Large values that would overflow
-  result <- ratiod:::cpp_test_linalg_log_sum_exp(700, 701)
+  result <- numdenom:::cpp_test_linalg_log_sum_exp(700, 701)
   expected <- 701 + log(exp(-1) + 1)
   expect_equal(result, expected, tolerance = 1e-10)
 
   # Negative values
-  result <- ratiod:::cpp_test_linalg_log_sum_exp(-100, -99)
+  result <- numdenom:::cpp_test_linalg_log_sum_exp(-100, -99)
   expected <- -99 + log(exp(-1) + 1)
   expect_equal(result, expected, tolerance = 1e-10)
 })
 
 test_that("linalg_log_sum_exp_vec handles vectors", {
   x <- c(1, 2, 3)
-  result <- ratiod:::cpp_test_linalg_log_sum_exp_vec(x)
+  result <- numdenom:::cpp_test_linalg_log_sum_exp_vec(x)
   expected <- log(sum(exp(x)))
   expect_equal(result, expected, tolerance = 1e-10)
 
   # Large values
   x_large <- c(700, 701, 702)
-  result_large <- ratiod:::cpp_test_linalg_log_sum_exp_vec(x_large)
+  result_large <- numdenom:::cpp_test_linalg_log_sum_exp_vec(x_large)
   expected_large <- 702 + log(exp(-2) + exp(-1) + 1)
   expect_equal(result_large, expected_large, tolerance = 1e-10)
 })
 
 test_that("softmax_inplace produces valid probabilities", {
   x <- c(1, 2, 3, 4)
-  result <- ratiod:::cpp_test_softmax_inplace(x)
+  result <- numdenom:::cpp_test_softmax_inplace(x)
 
   expect_equal(sum(result), 1.0, tolerance = 1e-10)
   expect_true(all(result > 0))
@@ -1028,7 +1028,7 @@ test_that("compute_linear_predictors works correctly", {
   beta_num <- rnorm(3)
   beta_denom <- rnorm(2)
 
-  result <- ratiod:::cpp_test_compute_linear_predictors(
+  result <- numdenom:::cpp_test_compute_linear_predictors(
     X_num, beta_num, X_denom, beta_denom, 1L
   )
 
@@ -1044,7 +1044,7 @@ test_that("rw1_quadratic_form computes sum of squared differences", {
   phi <- c(1, 2, 5, 7, 8)
 
   # Non-cyclic: sum((phi[t+1] - phi[t])^2) for t=1..T-1
-  result <- ratiod:::cpp_test_rw1_quadratic_form(phi, FALSE)
+  result <- numdenom:::cpp_test_rw1_quadratic_form(phi, FALSE)
   expected <- (2-1)^2 + (5-2)^2 + (7-5)^2 + (8-7)^2
   expect_equal(result, expected, tolerance = 1e-10)
 })
@@ -1053,7 +1053,7 @@ test_that("rw1_quadratic_form handles cyclic case", {
   phi <- c(1, 2, 5, 7, 8)
 
   # Cyclic: adds (phi[1] - phi[T])^2
-  result <- ratiod:::cpp_test_rw1_quadratic_form(phi, TRUE)
+  result <- numdenom:::cpp_test_rw1_quadratic_form(phi, TRUE)
   expected <- (2-1)^2 + (5-2)^2 + (7-5)^2 + (8-7)^2 + (1-8)^2
   expect_equal(result, expected, tolerance = 1e-10)
 })
@@ -1062,7 +1062,7 @@ test_that("rw2_quadratic_form computes sum of squared second differences", {
   phi <- c(1, 3, 4, 6, 10)
 
   # Non-cyclic: sum((phi[t] - 2*phi[t+1] + phi[t+2])^2)
-  result <- ratiod:::cpp_test_rw2_quadratic_form(phi, FALSE)
+  result <- numdenom:::cpp_test_rw2_quadratic_form(phi, FALSE)
   d1 <- 1 - 2*3 + 4   # = -1
   d2 <- 3 - 2*4 + 6   # = 1
   d3 <- 4 - 2*6 + 10  # = 2
@@ -1071,8 +1071,8 @@ test_that("rw2_quadratic_form computes sum of squared second differences", {
 })
 
 test_that("rw2_quadratic_form returns 0 for T < 3", {
-  expect_equal(ratiod:::cpp_test_rw2_quadratic_form(c(1, 2), FALSE), 0)
-  expect_equal(ratiod:::cpp_test_rw2_quadratic_form(c(1), FALSE), 0)
+  expect_equal(numdenom:::cpp_test_rw2_quadratic_form(c(1, 2), FALSE), 0)
+  expect_equal(numdenom:::cpp_test_rw2_quadratic_form(c(1), FALSE), 0)
 })
 
 test_that("ar1_log_density is finite for valid inputs", {
@@ -1080,7 +1080,7 @@ test_that("ar1_log_density is finite for valid inputs", {
   rho <- 0.7
   tau <- 2.0
 
-  result <- ratiod:::cpp_test_ar1_log_density(phi, rho, tau)
+  result <- numdenom:::cpp_test_ar1_log_density(phi, rho, tau)
   expect_true(is.finite(result))
   expect_true(result < 0)  # Log-density should be negative
 })
@@ -1092,7 +1092,7 @@ test_that("ar1_log_density matches manual computation", {
   tau <- 2.0
   sigma2 <- 1.0 / tau
 
-  result <- ratiod:::cpp_test_ar1_log_density(phi, rho, tau)
+  result <- numdenom:::cpp_test_ar1_log_density(phi, rho, tau)
 
   # Manual computation
   T <- length(phi)
@@ -1113,7 +1113,7 @@ test_that("temporal_log_prior RW1 matches manual computation", {
   phi <- c(1, 2, 4)
   tau <- 2.0
 
-  result <- ratiod:::cpp_test_temporal_log_prior(phi, "rw1", tau, 0, FALSE)
+  result <- numdenom:::cpp_test_temporal_log_prior(phi, "rw1", tau, 0, FALSE)
 
   # Manual: 0.5 * rank * log(tau) - 0.5 * tau * quad
   quad <- (2-1)^2 + (4-2)^2  # = 1 + 4 = 5
@@ -1125,12 +1125,12 @@ test_that("temporal_log_prior RW1 matches manual computation", {
 test_that("sum_to_zero_penalty penalizes sum != 0", {
   # Centered phi
   phi_centered <- c(-1, 0, 1)
-  result_centered <- ratiod:::cpp_test_sum_to_zero_penalty(phi_centered, 0.001)
+  result_centered <- numdenom:::cpp_test_sum_to_zero_penalty(phi_centered, 0.001)
   expect_equal(result_centered, 0.0, tolerance = 1e-10)
 
   # Non-centered phi
   phi_noncentered <- c(1, 2, 3)  # sum = 6
-  result_noncentered <- ratiod:::cpp_test_sum_to_zero_penalty(phi_noncentered, 0.001)
+  result_noncentered <- numdenom:::cpp_test_sum_to_zero_penalty(phi_noncentered, 0.001)
   expected <- -0.5 * 0.001 * 36
   expect_equal(result_noncentered, expected, tolerance = 1e-10)
 })
@@ -1141,43 +1141,43 @@ test_that("sum_to_zero_penalty penalizes sum != 0", {
 
 test_that("log1pexp is numerically stable", {
   # Normal values
-  expect_equal(ratiod:::cpp_test_log1pexp(0), log(2), tolerance = 1e-10)
-  expect_equal(ratiod:::cpp_test_log1pexp(1), log(1 + exp(1)), tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log1pexp(0), log(2), tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log1pexp(1), log(1 + exp(1)), tolerance = 1e-10)
 
   # Large positive (should return x)
-  expect_equal(ratiod:::cpp_test_log1pexp(50), 50, tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log1pexp(50), 50, tolerance = 1e-10)
 
   # Large negative (should return exp(x))
-  expect_equal(ratiod:::cpp_test_log1pexp(-20), exp(-20), tolerance = 1e-15)
+  expect_equal(numdenom:::cpp_test_log1pexp(-20), exp(-20), tolerance = 1e-15)
 })
 
 test_that("zi_logistic matches plogis", {
   test_vals <- c(-5, -1, 0, 1, 5)
   for (x in test_vals) {
-    expect_equal(ratiod:::cpp_test_zi_logistic(x), plogis(x), tolerance = 1e-10)
+    expect_equal(numdenom:::cpp_test_zi_logistic(x), plogis(x), tolerance = 1e-10)
   }
 })
 
 test_that("log_logistic is numerically stable", {
   # log(sigmoid(x))
-  expect_equal(ratiod:::cpp_test_log_logistic(0), log(0.5), tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log_logistic(0), log(0.5), tolerance = 1e-10)
 
   # Large positive: log(sigmoid(x)) ≈ 0
-  expect_equal(ratiod:::cpp_test_log_logistic(50), 0, tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log_logistic(50), 0, tolerance = 1e-10)
 
   # Large negative: log(sigmoid(x)) ≈ x
-  expect_equal(ratiod:::cpp_test_log_logistic(-50), -50, tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log_logistic(-50), -50, tolerance = 1e-10)
 })
 
 test_that("log1m_logistic is numerically stable", {
   # log(1 - sigmoid(x)) = log(sigmoid(-x))
-  expect_equal(ratiod:::cpp_test_log1m_logistic(0), log(0.5), tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log1m_logistic(0), log(0.5), tolerance = 1e-10)
 
   # Large positive: log(1-sigmoid(x)) ≈ -x
-  expect_equal(ratiod:::cpp_test_log1m_logistic(50), -50, tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log1m_logistic(50), -50, tolerance = 1e-10)
 
   # Large negative: log(1-sigmoid(x)) ≈ 0
-  expect_equal(ratiod:::cpp_test_log1m_logistic(-50), 0, tolerance = 1e-10)
+  expect_equal(numdenom:::cpp_test_log1m_logistic(-50), 0, tolerance = 1e-10)
 })
 
 test_that("zi_poisson_lpmf matches dpois", {
@@ -1188,7 +1188,7 @@ test_that("zi_poisson_lpmf matches dpois", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_zi_poisson_lpmf(tc$y, tc$mu)
+    result <- numdenom:::cpp_test_zi_poisson_lpmf(tc$y, tc$mu)
     expected <- dpois(tc$y, tc$mu, log = TRUE)
     expect_equal(result, expected, tolerance = 1e-10)
   }
@@ -1202,7 +1202,7 @@ test_that("zi_negbin_lpmf matches dnbinom", {
   )
 
   for (tc in test_cases) {
-    result <- ratiod:::cpp_test_zi_negbin_lpmf(tc$y, tc$mu, tc$phi)
+    result <- numdenom:::cpp_test_zi_negbin_lpmf(tc$y, tc$mu, tc$phi)
     expected <- dnbinom(tc$y, size = tc$phi, mu = tc$mu, log = TRUE)
     expect_equal(result, expected, tolerance = 1e-8)
   }
@@ -1213,7 +1213,7 @@ test_that("zi_poisson_lpmf_logit handles y=0 correctly", {
   logit_zi <- 0.5
   zi <- plogis(logit_zi)
 
-  result <- ratiod:::cpp_test_zi_poisson_lpmf_logit(0L, mu, logit_zi)
+  result <- numdenom:::cpp_test_zi_poisson_lpmf_logit(0L, mu, logit_zi)
 
   # P(Y=0) = zi + (1-zi)*exp(-mu)
   expected <- log(zi + (1 - zi) * exp(-mu))
@@ -1225,7 +1225,7 @@ test_that("zi_poisson_lpmf_logit handles y>0 correctly", {
   logit_zi <- -0.5
   zi <- plogis(logit_zi)
 
-  result <- ratiod:::cpp_test_zi_poisson_lpmf_logit(5L, mu, logit_zi)
+  result <- numdenom:::cpp_test_zi_poisson_lpmf_logit(5L, mu, logit_zi)
 
   # P(Y=y) = (1-zi) * Poisson(y|mu)
   expected <- log(1 - zi) + dpois(5, mu, log = TRUE)
@@ -1236,7 +1236,7 @@ test_that("truncated_poisson_lpmf is correct for y>0", {
   mu <- 3.0
 
   for (y in 1:10) {
-    result <- ratiod:::cpp_test_truncated_poisson_lpmf(y, mu)
+    result <- numdenom:::cpp_test_truncated_poisson_lpmf(y, mu)
     # P(Y=y|Y>0) = Poisson(y) / (1 - exp(-mu))
     expected <- dpois(y, mu, log = TRUE) - log(1 - exp(-mu))
     expect_equal(result, expected, tolerance = 1e-10)
@@ -1246,7 +1246,7 @@ test_that("truncated_poisson_lpmf is correct for y>0", {
 test_that("hurdle_poisson_lpmf_logit handles y=0 correctly", {
   logit_theta <- 0.5
 
-  result <- ratiod:::cpp_test_hurdle_poisson_lpmf_logit(0L, 3.0, logit_theta)
+  result <- numdenom:::cpp_test_hurdle_poisson_lpmf_logit(0L, 3.0, logit_theta)
   # P(Y=0) = 1 - theta
   expected <- log(1 - plogis(logit_theta))
   expect_equal(result, expected, tolerance = 1e-10)
@@ -1258,7 +1258,7 @@ test_that("hurdle_poisson_lpmf_logit handles y>0 correctly", {
   theta <- plogis(logit_theta)
 
   for (y in 1:5) {
-    result <- ratiod:::cpp_test_hurdle_poisson_lpmf_logit(as.integer(y), mu, logit_theta)
+    result <- numdenom:::cpp_test_hurdle_poisson_lpmf_logit(as.integer(y), mu, logit_theta)
     # P(Y=y) = theta * truncated_poisson(y)
     trunc_lpmf <- dpois(y, mu, log = TRUE) - log(1 - exp(-mu))
     expected <- log(theta) + trunc_lpmf
@@ -1272,18 +1272,18 @@ test_that("zi_log_likelihood dispatches correctly", {
   logit_zi <- 0.5
 
   # None: should return standard negbin
-  result_none <- ratiod:::cpp_test_zi_log_likelihood(5L, mu, phi, logit_zi, "none")
+  result_none <- numdenom:::cpp_test_zi_log_likelihood(5L, mu, phi, logit_zi, "none")
   expected_none <- dnbinom(5, size = phi, mu = mu, log = TRUE)
   expect_equal(result_none, expected_none, tolerance = 1e-8)
 
   # ZI Poisson
-  result_zip <- ratiod:::cpp_test_zi_log_likelihood(0L, mu, 0, logit_zi, "zi_poisson")
-  expected_zip <- ratiod:::cpp_test_zi_poisson_lpmf_logit(0L, mu, logit_zi)
+  result_zip <- numdenom:::cpp_test_zi_log_likelihood(0L, mu, 0, logit_zi, "zi_poisson")
+  expected_zip <- numdenom:::cpp_test_zi_poisson_lpmf_logit(0L, mu, logit_zi)
   expect_equal(result_zip, expected_zip, tolerance = 1e-10)
 
   # Hurdle Poisson
-  result_hp <- ratiod:::cpp_test_zi_log_likelihood(3L, mu, 0, logit_zi, "hurdle_poisson")
-  expected_hp <- ratiod:::cpp_test_hurdle_poisson_lpmf_logit(3L, mu, logit_zi)
+  result_hp <- numdenom:::cpp_test_zi_log_likelihood(3L, mu, 0, logit_zi, "hurdle_poisson")
+  expected_hp <- numdenom:::cpp_test_hurdle_poisson_lpmf_logit(3L, mu, logit_zi)
   expect_equal(result_hp, expected_hp, tolerance = 1e-10)
 })
 
@@ -1293,11 +1293,11 @@ test_that("zi_poisson_grad_logit_zi matches finite differences", {
   eps <- 1e-5
 
   for (y in c(0L, 1L, 5L)) {
-    grad <- ratiod:::cpp_test_zi_poisson_grad_logit_zi(y, mu, logit_zi)
+    grad <- numdenom:::cpp_test_zi_poisson_grad_logit_zi(y, mu, logit_zi)
 
     # Finite difference
-    f_plus <- ratiod:::cpp_test_zi_poisson_lpmf_logit(y, mu, logit_zi + eps)
-    f_minus <- ratiod:::cpp_test_zi_poisson_lpmf_logit(y, mu, logit_zi - eps)
+    f_plus <- numdenom:::cpp_test_zi_poisson_lpmf_logit(y, mu, logit_zi + eps)
+    f_minus <- numdenom:::cpp_test_zi_poisson_lpmf_logit(y, mu, logit_zi - eps)
     fd_grad <- (f_plus - f_minus) / (2 * eps)
 
     expect_equal(grad, fd_grad, tolerance = 1e-4)
@@ -1310,11 +1310,11 @@ test_that("hurdle_grad_logit_theta matches finite differences", {
   mu <- 3.0
 
   for (y in c(0L, 1L, 5L)) {
-    grad <- ratiod:::cpp_test_hurdle_grad_logit_theta(y, logit_theta)
+    grad <- numdenom:::cpp_test_hurdle_grad_logit_theta(y, logit_theta)
 
     # Finite difference
-    f_plus <- ratiod:::cpp_test_hurdle_poisson_lpmf_logit(y, mu, logit_theta + eps)
-    f_minus <- ratiod:::cpp_test_hurdle_poisson_lpmf_logit(y, mu, logit_theta - eps)
+    f_plus <- numdenom:::cpp_test_hurdle_poisson_lpmf_logit(y, mu, logit_theta + eps)
+    f_minus <- numdenom:::cpp_test_hurdle_poisson_lpmf_logit(y, mu, logit_theta - eps)
     fd_grad <- (f_plus - f_minus) / (2 * eps)
 
     expect_equal(grad, fd_grad, tolerance = 1e-4)
@@ -1326,7 +1326,7 @@ test_that("hurdle_grad_logit_theta matches finite differences", {
 # ---------------------------------------------------------------------------
 
 test_that("OpenMP max threads is at least 1", {
-  max_threads <- ratiod:::cpp_test_get_max_threads()
+  max_threads <- numdenom:::cpp_test_get_max_threads()
   expect_true(max_threads >= 1)
 })
 
@@ -1338,7 +1338,7 @@ test_that("parallel dot products produce correct results", {
   y <- rnorm(p)
 
   for (n_threads in c(1, 2, 4)) {
-    result <- ratiod:::cpp_test_parallel_dot_products(X, y, n_threads)
+    result <- numdenom:::cpp_test_parallel_dot_products(X, y, n_threads)
 
     # Verify individual dot products
     expected_results <- as.vector(X %*% y)
@@ -1359,7 +1359,7 @@ test_that("parallel likelihood reduction is correct", {
   expected_ll <- sum(dpois(y, mu, log = TRUE))
 
   for (n_threads in c(1, 2, 4)) {
-    result <- ratiod:::cpp_test_parallel_likelihood(y, mu, n_threads)
+    result <- numdenom:::cpp_test_parallel_likelihood(y, mu, n_threads)
     expect_equal(result$log_lik, expected_ll, tolerance = 1e-8)
   }
 })
@@ -1368,10 +1368,10 @@ test_that("parallel independent computations are thread-safe", {
   n <- 1000
 
   # Run with different thread counts and verify determinism
-  results_1t <- ratiod:::cpp_test_parallel_independent(n, 1L)
+  results_1t <- numdenom:::cpp_test_parallel_independent(n, 1L)
 
   for (n_threads in c(2, 4)) {
-    results_mt <- ratiod:::cpp_test_parallel_independent(n, n_threads)
+    results_mt <- numdenom:::cpp_test_parallel_independent(n, n_threads)
 
     # Results should be identical regardless of thread count
     expect_equal(results_1t, results_mt, tolerance = 1e-10)
@@ -1386,12 +1386,12 @@ test_that("compute_linear_predictors is consistent across thread counts", {
   beta_num <- rnorm(3)
   beta_denom <- rnorm(2)
 
-  result_1t <- ratiod:::cpp_test_compute_linear_predictors(
+  result_1t <- numdenom:::cpp_test_compute_linear_predictors(
     X_num, beta_num, X_denom, beta_denom, 1L
   )
 
   for (n_threads in c(2, 4)) {
-    result_mt <- ratiod:::cpp_test_compute_linear_predictors(
+    result_mt <- numdenom:::cpp_test_compute_linear_predictors(
       X_num, beta_num, X_denom, beta_denom, n_threads
     )
 

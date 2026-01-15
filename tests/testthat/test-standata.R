@@ -4,16 +4,16 @@ test_that("validate_response accepts valid count data", {
   # Non-negative integers for Poisson/NegBin/Binomial
   valid_counts <- c(0L, 1L, 5L, 10L, 100L)
 
-  expect_silent(ratiod:::validate_response(valid_counts, "poisson", "test"))
-  expect_silent(ratiod:::validate_response(valid_counts, "neg_binomial_2", "test"))
-  expect_silent(ratiod:::validate_response(valid_counts, "binomial", "test"))
+  expect_silent(numdenom:::validate_response(valid_counts, "poisson", "test"))
+  expect_silent(numdenom:::validate_response(valid_counts, "neg_binomial_2", "test"))
+  expect_silent(numdenom:::validate_response(valid_counts, "binomial", "test"))
 })
 
 test_that("validate_response rejects negative counts", {
   invalid_counts <- c(-1, 0, 5, 10)
 
   expect_error(
-    ratiod:::validate_response(invalid_counts, "poisson", "numerator"),
+    numdenom:::validate_response(invalid_counts, "poisson", "numerator"),
     "non-negative"
   )
 })
@@ -22,7 +22,7 @@ test_that("validate_response rejects non-integer counts", {
   non_integers <- c(0.5, 1.2, 3.7)
 
   expect_error(
-    ratiod:::validate_response(non_integers, "poisson", "numerator"),
+    numdenom:::validate_response(non_integers, "poisson", "numerator"),
     "integer counts"
   )
 })
@@ -30,32 +30,32 @@ test_that("validate_response rejects non-integer counts", {
 test_that("validate_response accepts valid gamma data", {
   valid_gamma <- c(0.1, 1.5, 2.3, 10.0)
 
-  expect_silent(ratiod:::validate_response(valid_gamma, "gamma", "denominator"))
+  expect_silent(numdenom:::validate_response(valid_gamma, "gamma", "denominator"))
 })
 
 test_that("validate_response rejects non-positive gamma data", {
   invalid_gamma <- c(0, 1.5, 2.3)
 
   expect_error(
-    ratiod:::validate_response(invalid_gamma, "gamma", "denominator"),
+    numdenom:::validate_response(invalid_gamma, "gamma", "denominator"),
     "positive"
   )
 
   # Negative values
   expect_error(
-    ratiod:::validate_response(c(-1, 1, 2), "gamma", "denominator"),
+    numdenom:::validate_response(c(-1, 1, 2), "gamma", "denominator"),
     "positive"
   )
 })
 
 test_that("validate_response rejects non-numeric data", {
   expect_error(
-    ratiod:::validate_response(c("a", "b", "c"), "poisson", "test"),
+    numdenom:::validate_response(c("a", "b", "c"), "poisson", "test"),
     "numeric"
   )
 
   expect_error(
-    ratiod:::validate_response(c("x", "y"), "gamma", "test"),
+    numdenom:::validate_response(c("x", "y"), "gamma", "test"),
     "numeric"
   )
 })
@@ -69,7 +69,7 @@ test_that("build_re_structure handles no random effects", {
   )
 
   df <- data.frame(y = 1:10, x = rnorm(10))
-  result <- ratiod:::build_re_structure(formula_obj, df)
+  result <- numdenom:::build_re_structure(formula_obj, df)
 
   expect_equal(result$n_groups, 0L)
   expect_equal(result$n_total, 0L)
@@ -103,7 +103,7 @@ test_that("build_re_structure handles single random effect", {
     site = factor(rep(1:n_groups, each = n_per_group))
   )
 
-  result <- ratiod:::build_re_structure(formula_obj, df)
+  result <- numdenom:::build_re_structure(formula_obj, df)
 
   expect_equal(result$n_groups, 1)
   expect_equal(result$n_total, n_groups)
@@ -115,7 +115,7 @@ test_that("build_re_structure handles single random effect", {
 
 test_that("build_spatial_structure handles no spatial", {
   df <- data.frame(y = 1:10)
-  result <- ratiod:::build_spatial_structure(NULL, df)
+  result <- numdenom:::build_spatial_structure(NULL, df)
 
   expect_equal(result$use_spatial, 0L)
   expect_equal(result$n_spatial, 0L)
@@ -137,7 +137,7 @@ test_that("build_spatial_structure works with adjacency matrix", {
   )
 
   df <- data.frame(y = 1:4)
-  result <- ratiod:::build_spatial_structure(spatial, df)
+  result <- numdenom:::build_spatial_structure(spatial, df)
 
   expect_equal(result$use_spatial, 1L)
   expect_equal(result$n_spatial, 4)
@@ -162,7 +162,7 @@ test_that("build_spatial_structure handles group-level spatial", {
     region = factor(rep(c("A", "B", "C"), each = 3))
   )
 
-  result <- ratiod:::build_spatial_structure(spatial, df)
+  result <- numdenom:::build_spatial_structure(spatial, df)
 
   expect_equal(result$use_spatial, 1L)
   expect_equal(result$n_spatial, 3)
@@ -186,7 +186,7 @@ test_that("build_spatial_structure errors with missing group_var", {
   df <- data.frame(y = 1:4)
 
   expect_error(
-    ratiod:::build_spatial_structure(spatial, df),
+    numdenom:::build_spatial_structure(spatial, df),
     "group_var"
   )
 })
@@ -208,7 +208,7 @@ test_that("make_standata works for negbin model", {
   )
 
   family <- ratiod_negbin_negbin()
-  standata <- ratiod:::make_standata(formula_obj, family, df)
+  standata <- numdenom:::make_standata(formula_obj, family, df)
 
   expect_true(is.list(standata))
   expect_equal(standata$N, 30)
@@ -235,7 +235,7 @@ test_that("make_standata works for binomial model", {
   )
 
   family <- ratiod_binomial()
-  standata <- ratiod:::make_standata(formula_obj, family, df)
+  standata <- numdenom:::make_standata(formula_obj, family, df)
 
   expect_true(is.list(standata))
   expect_equal(standata$N, 25)
@@ -260,7 +260,7 @@ test_that("make_standata rejects binomial with y_num > y_denom", {
   family <- ratiod_binomial()
 
   expect_error(
-    ratiod:::make_standata(formula_obj, family, df),
+    numdenom:::make_standata(formula_obj, family, df),
     "cannot exceed"
   )
 })
@@ -281,7 +281,7 @@ test_that("make_standata works for poisson_gamma model", {
   )
 
   family <- ratiod_poisson_gamma()
-  standata <- ratiod:::make_standata(formula_obj, family, df)
+  standata <- numdenom:::make_standata(formula_obj, family, df)
 
   expect_true(is.list(standata))
   expect_equal(standata$N, 20)
@@ -318,7 +318,7 @@ test_that("build_re_structure handles numerator-only random effects", {
     site = factor(rep(1:n_groups, each = n_per_group))
   )
 
-  result <- ratiod:::build_re_structure(formula_obj, df)
+  result <- numdenom:::build_re_structure(formula_obj, df)
 
   expect_equal(result$n_groups, 1)
   expect_equal(result$n_total, n_groups)
@@ -349,7 +349,7 @@ test_that("build_re_structure handles denominator-only random effects", {
     site = factor(rep(1:n_groups, each = n_per_group))
   )
 
-  result <- ratiod:::build_re_structure(formula_obj, df)
+  result <- numdenom:::build_re_structure(formula_obj, df)
 
   expect_equal(result$n_groups, 1)
   expect_equal(result$n_total, n_groups)
@@ -389,7 +389,7 @@ test_that("build_re_structure handles multiple RE groups", {
     year = factor(rep(1:n_year, 4))
   )
 
-  result <- ratiod:::build_re_structure(formula_obj, df)
+  result <- numdenom:::build_re_structure(formula_obj, df)
 
   expect_equal(result$n_groups, 2)
   expect_equal(result$n_total, n_site + n_year)
@@ -428,7 +428,7 @@ test_that("build_re_structure skips denom RE when already in numerator", {
     site = factor(rep(1:n_groups, each = 5))
   )
 
-  result <- ratiod:::build_re_structure(formula_obj, df)
+  result <- numdenom:::build_re_structure(formula_obj, df)
 
   # Should only include site once, from numerator
   expect_equal(result$n_groups, 1)
@@ -468,7 +468,7 @@ test_that("make_standata with spatial structure", {
   )
 
   family <- ratiod_poisson_gamma()
-  standata <- ratiod:::make_standata(formula_obj, family, df, spatial = spatial)
+  standata <- numdenom:::make_standata(formula_obj, family, df, spatial = spatial)
 
   expect_equal(standata$use_spatial, 1L)
   expect_equal(standata$n_spatial, n_sites)
@@ -498,7 +498,7 @@ test_that("make_standata with custom priors", {
     phi = prior_pc(U = 3.0, alpha = 0.1)
   )
 
-  standata <- ratiod:::make_standata(formula_obj, family, df, priors = custom_priors)
+  standata <- numdenom:::make_standata(formula_obj, family, df, priors = custom_priors)
 
   # Check that priors are passed through - values depend on internal conversion
   expect_true(!is.null(standata$prior_sigma_U) || !is.null(standata$N))
