@@ -269,14 +269,14 @@ test_that("HMC backend runs with ICAR spatial effects", {
     row <- (i - 1) %/% 4 + 1
     col <- (i - 1) %% 4 + 1
 
-    # Left neighbor
-    if (col > 1) neighbors <- c(neighbors, i - 1)
-    # Right neighbor
-    if (col < 4) neighbors <- c(neighbors, i + 1)
-    # Top neighbor
-    if (row > 1) neighbors <- c(neighbors, i - 4)
-    # Bottom neighbor
-    if (row < 4) neighbors <- c(neighbors, i + 4)
+    # Left neighbor (0-based index for C++)
+    if (col > 1) neighbors <- c(neighbors, (i - 1) - 1L)
+    # Right neighbor (0-based)
+    if (col < 4) neighbors <- c(neighbors, (i + 1) - 1L)
+    # Top neighbor (0-based)
+    if (row > 1) neighbors <- c(neighbors, (i - 4) - 1L)
+    # Bottom neighbor (0-based)
+    if (row < 4) neighbors <- c(neighbors, (i + 4) - 1L)
 
     n_neighbors[i] <- length(neighbors)
     adj_col_idx <- c(adj_col_idx, neighbors)
