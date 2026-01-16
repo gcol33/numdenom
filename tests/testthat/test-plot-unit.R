@@ -3,7 +3,7 @@
 # Ensure we can access functions via namespace
 get_fn <- function(name) {
   tryCatch(
-    get(name, envir = asNamespace("ratiod")),
+    get(name, envir = asNamespace("numdenom")),
     error = function(e) NULL
   )
 }
@@ -98,7 +98,7 @@ test_that("grep_params matches patterns", {
 
 # Test ratiod_diag_colors exists
 test_that("ratiod_diag_colors is defined", {
-  expect_true(exists("ratiod_diag_colors", where = asNamespace("ratiod")))
+  expect_true(exists("ratiod_diag_colors", where = asNamespace("numdenom")))
   colors <- numdenom:::ratiod_diag_colors
   expect_true(is.list(colors))
   expect_true("good" %in% names(colors))

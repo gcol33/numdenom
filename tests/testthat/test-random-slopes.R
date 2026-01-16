@@ -202,7 +202,7 @@ test_that("clean_slope_names produces expected output", {
 
 test_that("random slopes model compiles and runs without error", {
   skip_on_cran()
-  skip_if_not_installed("ratiod")
+  skip_if_not_installed("numdenom")
 
   set.seed(42)
   n_sites <- 5
@@ -260,7 +260,7 @@ test_that("random slopes model compiles and runs without error", {
 
 test_that("correlated random slopes model runs without error", {
   skip_on_cran()
-  skip_if_not_installed("ratiod")
+  skip_if_not_installed("numdenom")
   skip_if_not_installed("MASS")
 
   set.seed(42)

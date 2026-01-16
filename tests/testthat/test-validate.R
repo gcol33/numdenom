@@ -202,7 +202,7 @@ test_that("pp_check_single requires bayesplot", {
   skip_if_not_installed("bayesplot")
 
   # This is an internal function - just verify it exists
-  expect_true(exists("pp_check_single", where = asNamespace("ratiod"), mode = "function"))
+  expect_true(exists("pp_check_single", where = asNamespace("numdenom"), mode = "function"))
 })
 
 # ---------------------------------------------------------------------------

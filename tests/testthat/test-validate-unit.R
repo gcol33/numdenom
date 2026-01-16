@@ -141,12 +141,12 @@ test_that("get_predictions errors on missing prediction data", {
 
 # Test compute_model_weights catches LOO errors
 test_that("compute_model_weights function exists", {
-  expect_true(exists("compute_model_weights", where = asNamespace("ratiod")))
+  expect_true(exists("compute_model_weights", where = asNamespace("numdenom")))
 })
 
 # Test pp_check_single (internal)
 test_that("pp_check_single function exists", {
-  expect_true(exists("pp_check_single", where = asNamespace("ratiod")))
+  expect_true(exists("pp_check_single", where = asNamespace("numdenom")))
 })
 
 # Test print.ratiod_average with matrix predictions
