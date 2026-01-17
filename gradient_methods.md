@@ -78,11 +78,9 @@ RE (4):         NONE, intercept, slopes, crossed
 | **Total** | 40 | | **35/40** |
 
 ### Known Issues
-- **GP spatial has intermittent crash** (rows 7, 8, 18, 27, 38) - heisenbug with longer chains
-  - Short chains (iter ≤ 10) work reliably
-  - Longer chains may crash depending on random state
-  - **Recommendation**: Use ICAR/BYM2 spatial effects instead (fully stable, 13-22x faster than Stan)
-- GP uses numerical gradients (~0.6x vs Stan) - autodiff heisenbug deferred
+- GP uses numerical gradients (~0.6x vs Stan) - autodiff not yet implemented for GP
+  - **Recommendation**: Use ICAR/BYM2 spatial effects instead (13-22x faster than Stan)
+- ~~GP spatial heisenbug~~ - **FIXED** (added LLT error check + diagonal jitter in `hmc_gp.h`)
 
 ---
 

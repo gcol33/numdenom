@@ -259,7 +259,23 @@ double gp_nngp_log_lik(
     // This replaces hand-rolled Cholesky which had optimizer-related bugs on Windows
     Eigen::MatrixXd C_sub = C_mat.topLeftCorner(n_neighbors, n_neighbors);
     Eigen::VectorXd c_sub = c_vec.head(n_neighbors);
+
+    // Add small jitter to diagonal for numerical stability
+    // This prevents ill-conditioning when phi is very small or sigma2 is near zero
+    for (int j = 0; j < n_neighbors; j++) {
+      C_sub(j, j) += 1e-8;
+    }
+
     Eigen::LLT<Eigen::MatrixXd> llt(C_sub);
+
+    // Check if decomposition succeeded - this is the heisenbug fix!
+    // Without this check, LLT silently returns garbage/NaN for ill-conditioned matrices,
+    // causing unpredictable crashes that depend on parameter values during HMC exploration
+    if (llt.info() != Eigen::Success) {
+      // Matrix not positive definite - return -INFINITY to reject this parameter state
+      return -INFINITY;
+    }
+
     alpha.head(n_neighbors) = llt.solve(c_sub);
 
     // Conditional mean and variance
