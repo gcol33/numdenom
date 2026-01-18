@@ -110,7 +110,8 @@ fit_hmc <- function(formula,
     spatial_info <- list(type = gp_info$gp_type, n_units = hmc_data$N,
                          group = seq_len(hmc_data$N), adj_row_ptr = integer(1),
                          adj_col_idx = integer(0), n_neighbors = integer(0),
-                         bym2_scale = 1.0)
+                         bym2_scale = 1.0,
+                         hsgp_m = gp_info$hsgp_m)  # HSGP: basis functions per dim
   } else {
     gp_info <- NULL
     spatial_info <- prepare_spatial_for_hmc(spatial, data, hmc_data$N)
@@ -228,7 +229,10 @@ fit_hmc <- function(formula,
       sigma2_prior_U = priors$gp_sigma2_prior_U %||% 1.0,
       sigma2_prior_alpha = priors$gp_sigma2_prior_alpha %||% 0.01,
       phi_prior_lower = priors$gp_phi_prior_lower %||% 0.01,
-      phi_prior_upper = priors$gp_phi_prior_upper %||% 100.0
+      phi_prior_upper = priors$gp_phi_prior_upper %||% 100.0,
+      # HSGP parameters
+      hsgp_m = as.integer(gp_info$hsgp_m %||% 8L),
+      hsgp_c = gp_info$hsgp_c %||% 1.5
     )
 
     # Bundle multiscale GP parameters
@@ -1205,6 +1209,10 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
     n_params <- n_params + 2 + spatial_info$n_units
   } else if (spatial_info$type == "multiscale_gp") {
     n_params <- n_params + 4 + 2 * spatial_info$n_units
+  } else if (spatial_info$type == "hsgp") {
+    # HSGP: 2 hyperparams (log_sigma2, log_lengthscale) + m^2 basis coefficients
+    hsgp_m <- spatial_info$hsgp_m %||% 8L
+    n_params <- n_params + 2 + hsgp_m * hsgp_m
   }
 
   # Temporal
@@ -1757,7 +1765,8 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
 is_gp_spatial <- function(spatial) {
   if (is.null(spatial)) return(FALSE)
   inherits(spatial, "ratiod_gp") ||
-    inherits(spatial, "ratiod_multiscale")
+    inherits(spatial, "ratiod_multiscale") ||
+    inherits(spatial, "ratiod_hsgp")
 }
 
 #' Check if temporal specification is multiscale
@@ -1789,6 +1798,43 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       cov_type = "exponential",
       nu = 1.5,
       shared = TRUE
+    ))
+  }
+
+  # Handle HSGP specially (no neighbor computation needed)
+  if (inherits(gp, "ratiod_hsgp")) {
+    validated <- validate_hsgp(gp, data)
+    coords_mat <- validated$coords_matrix
+    coords_flat <- as.vector(t(coords_mat))
+
+    return(list(
+      gp_type = "hsgp",
+      coords = coords_flat,
+      hsgp_m = as.integer(gp$m),
+      hsgp_c = gp$c,
+      shared = gp$shared,
+      # Empty placeholders for standard GP fields
+      nn_idx = integer(0),
+      nn_dist = numeric(0),
+      nn_order = integer(0),
+      nn_order_inv = integer(0),
+      nn = 0L,
+      nn_idx_local = integer(0),
+      nn_dist_local = numeric(0),
+      nn_order_local = integer(0),
+      nn_order_inv_local = integer(0),
+      nn_local = 0L,
+      nn_idx_regional = integer(0),
+      nn_dist_regional = numeric(0),
+      nn_order_regional = integer(0),
+      nn_order_inv_regional = integer(0),
+      nn_regional = 0L,
+      range_local_lower = 0,
+      range_local_upper = 1,
+      range_regional_lower = 1,
+      range_regional_upper = 10,
+      cov_type = "exponential",
+      nu = 1.5
     ))
   }
 

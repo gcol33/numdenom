@@ -16,6 +16,7 @@
 #include "hmc_temporal_multiscale.h"
 #include "hmc_latent.h"
 #include "hmc_spatiotemporal.h"
+#include "hmc_hsgp.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -39,7 +40,7 @@ using ratiod_spatiotemporal::NonsepType;
 // =====================================================================
 
 enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA };
-enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP };
+enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP, HSGP };
 
 // Model data container with spatial support
 struct ModelData {
@@ -135,6 +136,12 @@ struct ModelData {
   double ms_sigma2_seasonal_prior_alpha;
   double ms_sigma2_short_prior_U;
   double ms_sigma2_short_prior_alpha;
+
+  // HSGP (Hilbert Space GP) structure
+  ratiod_hsgp::HSGPData hsgp_data;
+  bool has_hsgp;
+  int hsgp_m_per_dim;                  // Basis functions per dimension
+  double hsgp_boundary_factor;         // Boundary factor (c)
 
   // RSR (Restricted Spatial Regression) structure
   bool has_rsr;
@@ -255,6 +262,11 @@ struct ParamLayout {
   int seasonal_start, seasonal_end;     // Seasonal effects (period)
   int short_term_start, short_term_end; // Short-term effects (n_times)
 
+  // HSGP parameters
+  int log_sigma2_hsgp_idx;              // Log spatial variance
+  int log_lengthscale_hsgp_idx;         // Log lengthscale
+  int hsgp_beta_start, hsgp_beta_end;   // HSGP basis coefficients (m^2)
+
   // Latent factor parameters
   int log_sigma_latent_start, log_sigma_latent_end;  // Log sigma per factor
   int latent_factor_start, latent_factor_end;        // Factor scores (N x K)
@@ -276,6 +288,7 @@ struct ParamLayout {
   bool is_bym2;
   bool is_gp;
   bool is_multiscale_gp;
+  bool is_hsgp;
   bool has_temporal;
   bool is_ar1;
   bool has_multiscale_temporal;
