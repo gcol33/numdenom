@@ -254,7 +254,8 @@ fit_hmc <- function(formula,
       sigma2_local_prior_U = priors$ms_sigma2_local_prior_U %||% 1.0,
       sigma2_local_prior_alpha = priors$ms_sigma2_local_prior_alpha %||% 0.01,
       sigma2_regional_prior_U = priors$ms_sigma2_regional_prior_U %||% 1.0,
-      sigma2_regional_prior_alpha = priors$ms_sigma2_regional_prior_alpha %||% 0.01
+      sigma2_regional_prior_alpha = priors$ms_sigma2_regional_prior_alpha %||% 0.01,
+      sampler = gp_info$sampler %||% "noncentered"
     )
 
     # Bundle multiscale temporal parameters
@@ -1879,7 +1880,8 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       # Common params
       cov_type = gp$cov,
       nu = gp$nu,
-      shared = gp$shared
+      shared = gp$shared,
+      sampler = gp$sampler %||% "noncentered"
     )
   } else {
     # Single-scale GP

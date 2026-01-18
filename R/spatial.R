@@ -950,9 +950,12 @@ spatial_multiscale <- function(coords,
                                nn_local = 10,
                                nn_regional = 30,
                                shared = TRUE,
-                               scale = TRUE) {
+                               scale = TRUE,
+                               sampler = c("auto", "noncentered", "centered",
+                                          "interweaved", "adaptive", "riemannian", "lbfgs")) {
 
   cov <- match.arg(cov)
+  sampler <- match.arg(sampler)
 
   # Parse coordinate specification
   if (inherits(coords, "formula")) {
@@ -1021,6 +1024,7 @@ spatial_multiscale <- function(coords,
       nn_regional = as.integer(nn_regional),
       shared = shared,
       scale = scale,
+      sampler = sampler,
       # Filled in during validation
       n_obs = NULL,
       n_spatial = NULL,

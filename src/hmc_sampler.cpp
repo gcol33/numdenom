@@ -2463,6 +2463,18 @@ HMCResultCpp run_hmc_chain_cpp(
   WelfordStats mass_stats(n_params);
   bool use_mass_matrix = false;
 
+  // L-BFGS mass matrix adaptation
+  bool use_lbfgs = data.has_multiscale_gp &&
+                   data.multiscale_gp_data.sampler == ratiod_gp::MSGPSampler::LBFGS;
+  ratiod_gp::LBFGSState lbfgs_state;
+  std::vector<double> q_prev, grad_prev;
+  bool lbfgs_initialized = false;
+  if (use_lbfgs) {
+    lbfgs_state = ratiod_gp::LBFGSState(10, n_params);
+    q_prev.resize(n_params);
+    grad_prev.resize(n_params);
+  }
+
   // Warmup windows for mass matrix adaptation
   // Window 1 (0 to 50%): collect samples with identity mass
   // Window 2 (50% to 75%): use estimated mass, continue adapting
@@ -2496,48 +2508,118 @@ HMCResultCpp run_hmc_chain_cpp(
       da = DualAveraging(epsilon, n_params);
     }
 
-    // Sample momentum (scaled by sqrt of mass matrix)
-    // p ~ N(0, M) where M = diag(1/var), so p_i = z_i * sqrt(1/var_i)
+    // Sample momentum and compute kinetic energy
     std::vector<double> p(n_params);
-    for (int i = 0; i < n_params; i++) {
-      p[i] = normal(rng) * sqrt_mass_diag[i];
-    }
-
-    // Current Hamiltonian with mass matrix
-    // K = 0.5 * p' * M^{-1} * p = 0.5 * sum(p[i]^2 * inv_mass[i])
     double kinetic_current = 0.0;
-    for (int i = 0; i < n_params; i++) {
-      kinetic_current += p[i] * p[i] * inv_mass[i];
-    }
-    kinetic_current *= 0.5;
-    double H_current = -log_prob_current + kinetic_current;
+    double H_current;
 
-    // Leapfrog integration (with or without mass matrix)
+    if (use_lbfgs && lbfgs_initialized && lbfgs_state.d == n_params) {
+      // L-BFGS: Sample p ~ N(0, B) where B ≈ 1/gamma * I
+      std::vector<double> sqrt_diag = lbfgs_state.get_sqrt_B_diag();
+      if ((int)sqrt_diag.size() == n_params) {
+        for (int i = 0; i < n_params; i++) {
+          p[i] = normal(rng) * sqrt_diag[i];
+        }
+        kinetic_current = lbfgs_state.kinetic_energy(p);
+        H_current = -log_prob_current + kinetic_current;
+      } else {
+        // Fallback to standard sampling
+        for (int i = 0; i < n_params; i++) {
+          p[i] = normal(rng) * sqrt_mass_diag[i];
+        }
+        for (int i = 0; i < n_params; i++) {
+          kinetic_current += p[i] * p[i] * inv_mass[i];
+        }
+        kinetic_current *= 0.5;
+        H_current = -log_prob_current + kinetic_current;
+      }
+    } else {
+      // Standard: p ~ N(0, M) where M = diag(1/var)
+      for (int i = 0; i < n_params; i++) {
+        p[i] = normal(rng) * sqrt_mass_diag[i];
+      }
+      for (int i = 0; i < n_params; i++) {
+        kinetic_current += p[i] * p[i] * inv_mass[i];
+      }
+      kinetic_current *= 0.5;
+      H_current = -log_prob_current + kinetic_current;
+    }
+
+    // Leapfrog integration
     std::vector<double> q_prop = q;
     std::vector<double> p_prop = p;
     bool divergent = false;
 
-    for (int l = 0; l < L; l++) {
-      LeapfrogResult lf;
-      if (use_mass_matrix) {
-        lf = leapfrog_step_mass(q_prop, p_prop, epsilon, inv_mass, data, layout);
-      } else {
-        lf = leapfrog_step(q_prop, p_prop, epsilon, data, layout);
+    if (use_lbfgs && lbfgs_initialized && lbfgs_state.d == n_params) {
+      // L-BFGS leapfrog: position update uses H*p instead of p
+      std::vector<double> grad(n_params);
+      compute_gradient(q_prop, data, layout, grad);
+
+      for (int l = 0; l < L; l++) {
+        // Half step in momentum
+        for (int i = 0; i < n_params; i++) {
+          p_prop[i] += 0.5 * epsilon * grad[i];
+        }
+
+        // Full step in position: q += epsilon * H * p
+        std::vector<double> Hp(n_params);
+        lbfgs_state.multiply_H(p_prop, Hp);
+        for (int i = 0; i < n_params; i++) {
+          q_prop[i] += epsilon * Hp[i];
+          if (!std::isfinite(q_prop[i])) {
+            divergent = true;
+            break;
+          }
+        }
+        if (divergent) break;
+
+        // Recompute gradient at new position
+        compute_gradient(q_prop, data, layout, grad);
+
+        // Half step in momentum
+        for (int i = 0; i < n_params; i++) {
+          p_prop[i] += 0.5 * epsilon * grad[i];
+        }
+
+        // Check for divergence
+        for (int i = 0; i < n_params; i++) {
+          if (!std::isfinite(p_prop[i]) || std::abs(p_prop[i]) > 1e10) {
+            divergent = true;
+            break;
+          }
+        }
+        if (divergent) break;
       }
-      q_prop = lf.q;
-      p_prop = lf.p;
-      if (lf.divergent) {
-        divergent = true;
-        break;
+    } else {
+      // Standard leapfrog
+      for (int l = 0; l < L; l++) {
+        LeapfrogResult lf;
+        if (use_mass_matrix) {
+          lf = leapfrog_step_mass(q_prop, p_prop, epsilon, inv_mass, data, layout);
+        } else {
+          lf = leapfrog_step(q_prop, p_prop, epsilon, data, layout);
+        }
+        q_prop = lf.q;
+        p_prop = lf.p;
+        if (lf.divergent) {
+          divergent = true;
+          break;
+        }
       }
     }
 
+    // Compute proposed Hamiltonian
     double log_prob_prop = compute_log_post(q_prop, data, layout);
     double kinetic_prop = 0.0;
-    for (int i = 0; i < n_params; i++) {
-      kinetic_prop += p_prop[i] * p_prop[i] * inv_mass[i];
+
+    if (use_lbfgs && lbfgs_initialized && lbfgs_state.d == n_params) {
+      kinetic_prop = lbfgs_state.kinetic_energy(p_prop);
+    } else {
+      for (int i = 0; i < n_params; i++) {
+        kinetic_prop += p_prop[i] * p_prop[i] * inv_mass[i];
+      }
+      kinetic_prop *= 0.5;
     }
-    kinetic_prop *= 0.5;
     double H_prop = -log_prob_prop + kinetic_prop;
 
     // Metropolis accept/reject
@@ -2557,6 +2639,33 @@ HMCResultCpp run_hmc_chain_cpp(
       epsilon = da.update(alpha);
       // Collect samples for mass matrix estimation
       mass_stats.update(q);
+    }
+
+    // L-BFGS update: collect (s, y) pairs from accepted samples
+    if (use_lbfgs) {
+      std::vector<double> grad_current(n_params);
+      compute_gradient(q, data, layout, grad_current);
+
+      if (!lbfgs_initialized) {
+        // Initialize with first position and gradient
+        q_prev = q;
+        grad_prev = grad_current;
+        lbfgs_initialized = true;
+      } else if (accepted) {
+        // Compute differences
+        std::vector<double> s(n_params), y(n_params);
+        for (int i = 0; i < n_params; i++) {
+          s[i] = q[i] - q_prev[i];
+          y[i] = grad_current[i] - grad_prev[i];
+        }
+
+        // Add pair to L-BFGS (will be skipped if curvature condition not met)
+        lbfgs_state.add_pair(s, y);
+
+        // Update previous values
+        q_prev = q;
+        grad_prev = grad_current;
+      }
     }
 
     // Store sample
@@ -3233,6 +3342,7 @@ Rcpp::List cpp_hmc_fit_gp(
   double ms_sigma2_local_prior_alpha = Rcpp::as<double>(ms_gp_params["sigma2_local_prior_alpha"]);
   double ms_sigma2_regional_prior_U = Rcpp::as<double>(ms_gp_params["sigma2_regional_prior_U"]);
   double ms_sigma2_regional_prior_alpha = Rcpp::as<double>(ms_gp_params["sigma2_regional_prior_alpha"]);
+  std::string msgp_sampler_str = Rcpp::as<std::string>(ms_gp_params["sampler"]);
 
   // Extract multiscale temporal parameters - eager copy
   std::string ms_temporal_type_str = Rcpp::as<std::string>(ms_temporal_params["type"]);
@@ -3394,6 +3504,7 @@ Rcpp::List cpp_hmc_fit_gp(
     data.multiscale_gp_data.cov_type = cov_type;
     data.multiscale_gp_data.nu = nu;
     data.multiscale_gp_data.shared = gp_shared;
+    data.multiscale_gp_data.sampler = ratiod_gp::parse_msgp_sampler(msgp_sampler_str);
 
     data.ms_sigma2_local_prior_U = ms_sigma2_local_prior_U;
     data.ms_sigma2_local_prior_alpha = ms_sigma2_local_prior_alpha;
