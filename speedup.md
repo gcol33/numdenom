@@ -106,7 +106,7 @@ double d12 = std::sqrt(dx * dx + dy * dy);
 - Flattened to 1D vector with `aperm(arr, c(3, 2, 1))` for C++ row-major access
 - C++ accesses as `gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2]`
 
-**Effort:** 2 hours | **Impact:** ~10-15% speedup expected
+**Effort:** 2 hours | **Impact:** +1.5% actual (see speedup_benchmarks.md)
 
 ---
 
