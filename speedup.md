@@ -376,7 +376,7 @@ Phase 5: Hand-coded gradients for GP/MSGP (final ~25x target)
 ```
 
 **Why this order?**
-1. Autodiff improvements benefit 38 model configurations, not just GP
+1. Autodiff improvements benefit 54 model configurations, not just GP
 2. Hand-coded gradients are error-prone; optimized autodiff serves as reference
 3. Each phase provides measurable speedup and validates the approach
 

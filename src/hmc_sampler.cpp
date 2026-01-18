@@ -1398,8 +1398,11 @@ double compute_log_post(
 // =====================================================================
 
 bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layout) {
-  // Only for simple models without complex structure
-  return (data.model_type == ModelType::POISSON_GAMMA &&
+  // Hand-coded gradients for basic models (all 3 families) without complex structure
+  bool is_basic_family = (data.model_type == ModelType::POISSON_GAMMA ||
+                          data.model_type == ModelType::NEGBIN_NEGBIN ||
+                          data.model_type == ModelType::BINOMIAL);
+  return (is_basic_family &&
           !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
           !layout.has_spatial && !layout.has_temporal &&
           !layout.has_zi && !layout.has_re_slopes &&
@@ -1431,9 +1434,14 @@ void compute_gradient_analytical(
   }
 
   double phi_num = 1.0, log_phi_num = 0.0;
+  double phi_denom = 1.0, log_phi_denom = 0.0;
   if (layout.has_phi_num) {
     log_phi_num = params[layout.log_phi_num_idx];
     phi_num = std::exp(log_phi_num);
+  }
+  if (layout.has_phi_denom) {
+    log_phi_denom = params[layout.log_phi_denom_idx];
+    phi_denom = std::exp(log_phi_denom);
   }
 
   // ============ Prior gradients (cheap) ============
@@ -1457,11 +1465,15 @@ void compute_gradient_analytical(
     grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
   }
 
-  // phi_num: Gamma(2, 0.1) prior (via log transform)
+  // phi priors: Gamma(shape, rate) via log transform
   // d/d(log_phi) = (shape-1) - rate*phi + 1 (Jacobian)
   if (layout.has_phi_num) {
     grad[layout.log_phi_num_idx] = (data.phi_prior_shape - 1.0)
                                    - data.phi_prior_rate * phi_num + 1.0;
+  }
+  if (layout.has_phi_denom) {
+    grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - 1.0)
+                                     - data.phi_prior_rate * phi_denom + 1.0;
   }
 
   // RE prior: N(0, sigma_re^2)
@@ -1484,14 +1496,16 @@ void compute_gradient_analytical(
   // Accumulators for beta gradients (will be added via X' * residual)
   std::vector<double> grad_beta_num(data.p_num, 0.0);
   std::vector<double> grad_beta_denom(data.p_denom, 0.0);
-  double grad_phi_lik = 0.0;
+  double grad_phi_num_lik = 0.0;
+  double grad_phi_denom_lik = 0.0;
 
   #ifdef _OPENMP
   #pragma omp parallel
   {
     std::vector<double> local_grad_beta_num(data.p_num, 0.0);
     std::vector<double> local_grad_beta_denom(data.p_denom, 0.0);
-    double local_grad_phi = 0.0;
+    double local_grad_phi_num = 0.0;
+    double local_grad_phi_denom = 0.0;
     std::vector<double> local_grad_re(layout.has_re ? data.n_re_groups : 0, 0.0);
 
     #pragma omp for schedule(static)
@@ -1510,18 +1524,69 @@ void compute_gradient_analytical(
       if (layout.has_re && data.re_group[i] > 0) {
         re_idx = data.re_group[i] - 1;
         eta_num += re[re_idx];
-        eta_denom += re[re_idx];
+        // For BINOMIAL, RE only affects numerator (logit of probability)
+        if (data.model_type != ModelType::BINOMIAL) {
+          eta_denom += re[re_idx];
+        }
       }
 
-      double mu_num = std::exp(eta_num);
-      double mu_denom = std::exp(eta_denom);
+      double resid_num = 0.0;
+      double resid_denom = 0.0;
+      double grad_phi_num_i = 0.0;
+      double grad_phi_denom_i = 0.0;
 
-      // Poisson residual: d(LL)/d(eta_num) = y - mu
-      double resid_num = data.y_num[i] - mu_num;
+      if (data.model_type == ModelType::BINOMIAL) {
+        // ---- BINOMIAL ----
+        // p = inv_logit(eta_num), LL = y*log(p) + (n-y)*log(1-p)
+        // d(LL)/d(eta) = y - n*p
+        double p = 1.0 / (1.0 + std::exp(-eta_num));
+        int n_trials = data.y_denom[i];
+        resid_num = data.y_num[i] - n_trials * p;
+        // No denominator contribution for binomial
 
-      // Gamma residual: d(LL)/d(eta_denom) = phi * (y/mu - 1)
-      double y_denom = data.y_denom_cont[i];
-      double resid_denom = phi_num * (y_denom / mu_denom - 1.0);
+      } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+        // ---- NEGBIN_NEGBIN ----
+        // NB(y, mu, phi): mu = exp(eta), var = mu + mu^2/phi
+        // d(LL)/d(eta) = y - mu*(y+phi)/(mu+phi)
+        double mu_num = std::exp(eta_num);
+        double mu_denom = std::exp(eta_denom);
+        int y_num_i = data.y_num[i];
+        int y_denom_i = data.y_denom[i];
+
+        // Numerator NegBin gradient
+        double denom_num = mu_num + phi_num;
+        resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num;
+
+        // Denominator NegBin gradient
+        double denom_d = mu_denom + phi_denom;
+        resid_denom = y_denom_i - mu_denom * (y_denom_i + phi_denom) / denom_d;
+
+        // Phi gradients for NegBin:
+        // d(LL)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + (mu-y)/(mu+phi)
+        grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
+                         + std::log(phi_num / denom_num)
+                         + (mu_num - y_num_i) / denom_num;
+        grad_phi_denom_i = R::digamma(y_denom_i + phi_denom) - R::digamma(phi_denom)
+                           + std::log(phi_denom / denom_d)
+                           + (mu_denom - y_denom_i) / denom_d;
+
+      } else {
+        // ---- POISSON_GAMMA ----
+        // Numerator: Poisson(y | mu), d(LL)/d(eta) = y - mu
+        double mu_num = std::exp(eta_num);
+        double mu_denom = std::exp(eta_denom);
+        resid_num = data.y_num[i] - mu_num;
+
+        // Denominator: Gamma(y | shape=phi, rate=phi/mu)
+        // d(LL)/d(eta_denom) = phi * (y/mu - 1)
+        double y_denom_i = data.y_denom_cont[i];
+        resid_denom = phi_num * (y_denom_i / mu_denom - 1.0);
+
+        // Phi gradient from Gamma likelihood
+        double rate = phi_num / mu_denom;
+        grad_phi_num_i = std::log(rate) + 1.0 + std::log(y_denom_i)
+                         - R::digamma(phi_num) - rate * y_denom_i / phi_num;
+      }
 
       // Accumulate beta gradients: grad += X[i,:] * resid
       for (int j = 0; j < data.p_num; j++) {
@@ -1531,32 +1596,37 @@ void compute_gradient_analytical(
         grad_beta_num[j] += data.X_num_flat[i * data.p_num + j] * resid_num;
         #endif
       }
-      for (int j = 0; j < data.p_denom; j++) {
-        #ifdef _OPENMP
-        local_grad_beta_denom[j] += data.X_denom_flat[i * data.p_denom + j] * resid_denom;
-        #else
-        grad_beta_denom[j] += data.X_denom_flat[i * data.p_denom + j] * resid_denom;
-        #endif
+      // For BINOMIAL, beta_denom doesn't affect likelihood
+      if (data.model_type != ModelType::BINOMIAL) {
+        for (int j = 0; j < data.p_denom; j++) {
+          #ifdef _OPENMP
+          local_grad_beta_denom[j] += data.X_denom_flat[i * data.p_denom + j] * resid_denom;
+          #else
+          grad_beta_denom[j] += data.X_denom_flat[i * data.p_denom + j] * resid_denom;
+          #endif
+        }
       }
 
-      // Accumulate RE gradient (shared between num and denom)
+      // Accumulate RE gradient
       if (re_idx >= 0) {
+        double re_grad_i = resid_num;
+        if (data.model_type != ModelType::BINOMIAL) {
+          re_grad_i += resid_denom;  // Shared RE affects both processes
+        }
         #ifdef _OPENMP
-        local_grad_re[re_idx] += resid_num + resid_denom;
+        local_grad_re[re_idx] += re_grad_i;
         #else
-        grad[layout.re_start + re_idx] += resid_num + resid_denom;
+        grad[layout.re_start + re_idx] += re_grad_i;
         #endif
       }
 
-      // Phi gradient from Gamma likelihood
-      // d(LL)/d(phi) = log(phi/mu) + 1 - digamma(phi) + digamma(phi) contribution...
-      // Simplified: d(LL)/d(log_phi) = phi * [log(phi*y/mu) - y/mu + 1 - digamma(phi) + log(phi)]
-      // This is complex, use numerical for phi for now
-      double rate = phi_num / mu_denom;
+      // Accumulate phi gradients
       #ifdef _OPENMP
-      local_grad_phi += std::log(rate) + 1.0 + std::log(y_denom) - R::digamma(phi_num) - rate * y_denom / phi_num;
+      local_grad_phi_num += grad_phi_num_i;
+      local_grad_phi_denom += grad_phi_denom_i;
       #else
-      grad_phi_lik += std::log(rate) + 1.0 + std::log(y_denom) - R::digamma(phi_num) - rate * y_denom / phi_num;
+      grad_phi_num_lik += grad_phi_num_i;
+      grad_phi_denom_lik += grad_phi_denom_i;
       #endif
     }
 
@@ -1570,7 +1640,8 @@ void compute_gradient_analytical(
       for (int j = 0; j < data.p_denom; j++) {
         grad_beta_denom[j] += local_grad_beta_denom[j];
       }
-      grad_phi_lik += local_grad_phi;
+      grad_phi_num_lik += local_grad_phi_num;
+      grad_phi_denom_lik += local_grad_phi_denom;
       for (int g = 0; g < (int)local_grad_re.size(); g++) {
         grad[layout.re_start + g] += local_grad_re[g];
       }
@@ -1586,9 +1657,12 @@ void compute_gradient_analytical(
     grad[layout.beta_denom_start + j] += grad_beta_denom[j];
   }
 
-  // Phi gradient (Jacobian already included in prior gradient)
+  // Phi gradients (with Jacobian for log transform)
   if (layout.has_phi_num) {
-    grad[layout.log_phi_num_idx] += phi_num * grad_phi_lik;
+    grad[layout.log_phi_num_idx] += phi_num * grad_phi_num_lik;
+  }
+  if (layout.has_phi_denom) {
+    grad[layout.log_phi_denom_idx] += phi_denom * grad_phi_denom_lik;
   }
 }
 

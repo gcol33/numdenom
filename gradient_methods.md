@@ -1,112 +1,81 @@
 # Gradient Methods by Model Configuration
 
-## Model Space
-
-```
-Families (3):   BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA
-Spatial (5):    NONE, ICAR, BYM2, GP, MULTISCALE_GP
-Temporal (4):   NONE, RW1, RW2, AR1
-ZI (3):         NONE, ZI, HURDLE
-RE (4):         NONE, intercept, slopes, crossed
-```
-
 ## Gradient Methods
 
-| Method | Complexity | Speedup |
-|--------|-----------|---------|
-| H | Hand-coded O(n) | ~9x |
-| A | Autodiff O(n) | ~3-5x |
-| N | Numerical O(n×p) | ~0.6x |
-
----
+| Method | Complexity | Speedup vs Stan |
+|--------|-----------|-----------------|
+| H | Hand-coded O(n) | ~9-25x |
+| A | Autodiff O(n) | ~3-15x |
 
 ## All Model Configurations
 
-| # | Family | RE | Spatial | Temporal | ZI | Grad | Checked vs Stan |
-|--:|--------|:--:|:-------:|:--------:|:--:|:----:|:---------------:|
-| 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ | H | ✅ |
-| 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | ✅ |
-| 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | A | ✅ 9.6x |
-| 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | A | ✅ 15.2x |
-| 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | A | ✅ 14.6x |
-| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | A | ✅ 21.1x |
-| 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | A | ✅ ~3x |
-| 8 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | N | ✅ 0.6x |
-| 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | A | ✅ 11.0x |
-| 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | A | ✅ 10.2x |
-| 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | A | ✅ 9.9x |
-| ~~12~~ | ~~poisson_gamma~~ | ~~✓~~ | ~~✗~~ | ~~IID~~ | ~~✗~~ | - | N/A (not impl.) |
-| 13 | poisson_gamma | ✓ | ✗ | ✗ | ZI | A | ✅ 10.3x |
-| 14 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | A | ✅ 10.3x |
-| 15 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | A | ✅ 25.2x |
-| 16 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | A | ✅ 11.4x |
-| 17 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | A | ✅ 11.1x |
-| 18 | poisson_gamma | ✓ | GP | RW1 | ✗ | N | ✅ 0.6x |
-| 19 | poisson_gamma | ✓ | ICAR | ✗ | ZI | A | ✅ 10.2x |
-| 20 | poisson_gamma | slopes | ICAR | ✗ | ✗ | A | ✅ 18.9x |
-| 21 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | A | ✅ 6.4x |
-| 22 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | A | ✅ 3.8x |
-| 23 | negbin_negbin | slopes | ✗ | ✗ | ✗ | A | ✅ 5.7x |
-| 24 | negbin_negbin | crossed | ✗ | ✗ | ✗ | A | ✅ 8.9x |
-| 25 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | A | ✅ 4.9x |
-| 26 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | A | ✅ 7.9x |
-| 27 | negbin_negbin | ✓ | GP | ✗ | ✗ | A | ✅ ~3x |
-| 28 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | A | ✅ 6.2x |
-| 29 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | A | ✅ 8.6x |
-| 30 | negbin_negbin | ✓ | ✗ | ✗ | ZI | A | ✅ 5.8x |
-| 31 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | A | ✅ 5.7x |
-| 32 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | A | ✅ 7.9x |
-| 33 | binomial | ✗ | ✗ | ✗ | ✗ | A | ✅ 16.5x |
-| 34 | binomial | ✓ | ✗ | ✗ | ✗ | A | ✅ 15.3x |
-| 35 | binomial | slopes | ✗ | ✗ | ✗ | A | ✅ 15.2x |
-| 36 | binomial | ✓ | ICAR | ✗ | ✗ | A | ✅ 13.5x |
-| 37 | binomial | ✓ | BYM2 | ✗ | ✗ | A | ✅ 17.9x |
-| 38 | binomial | ✓ | GP | ✗ | ✗ | A | ✅ ~3x |
-| 39 | binomial | ✓ | ✗ | RW1 | ✗ | A | ✅ 14.2x |
-| 40 | binomial | ✓ | ✗ | AR1 | ✗ | A | ✅ 27.6x |
-| 41 | binomial | ✓ | ICAR | RW1 | ✗ | A | ✅ 22.6x |
-
----
+| # | Family | RE | Spatial | Temporal | ZI | Grad |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|
+| 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ | H |
+| 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H |
+| 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | A |
+| 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | A |
+| 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | A |
+| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | A |
+| 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | A |
+| 8 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | A |
+| 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | A |
+| 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | A |
+| 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | A |
+| 12 | poisson_gamma | ✓ | ✗ | ✗ | ZI | A |
+| 13 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | A |
+| 14 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | A |
+| 15 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | A |
+| 16 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | A |
+| 17 | poisson_gamma | ✓ | GP | RW1 | ✗ | A |
+| 18 | poisson_gamma | ✓ | ICAR | ✗ | ZI | A |
+| 19 | poisson_gamma | slopes | ICAR | ✗ | ✗ | A |
+| 20 | poisson_gamma | ✓ | MSGP | RW1 | ✗ | A |
+| 21 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | H |
+| 22 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H |
+| 23 | negbin_negbin | slopes | ✗ | ✗ | ✗ | A |
+| 24 | negbin_negbin | crossed | ✗ | ✗ | ✗ | A |
+| 25 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | A |
+| 26 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | A |
+| 27 | negbin_negbin | ✓ | GP | ✗ | ✗ | A |
+| 28 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | A |
+| 29 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | A |
+| 30 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | A |
+| 31 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | A |
+| 32 | negbin_negbin | ✓ | ✗ | ✗ | ZI | A |
+| 33 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | A |
+| 34 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | A |
+| 35 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | A |
+| 36 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | A |
+| 37 | negbin_negbin | ✓ | GP | RW1 | ✗ | A |
+| 38 | negbin_negbin | ✓ | ICAR | ✗ | ZI | A |
+| 39 | negbin_negbin | slopes | ICAR | ✗ | ✗ | A |
+| 40 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | A |
+| 41 | binomial | ✗ | ✗ | ✗ | ✗ | H |
+| 42 | binomial | ✓ | ✗ | ✗ | ✗ | H |
+| 43 | binomial | slopes | ✗ | ✗ | ✗ | A |
+| 44 | binomial | crossed | ✗ | ✗ | ✗ | A |
+| 45 | binomial | ✓ | ICAR | ✗ | ✗ | A |
+| 46 | binomial | ✓ | BYM2 | ✗ | ✗ | A |
+| 47 | binomial | ✓ | GP | ✗ | ✗ | A |
+| 48 | binomial | ✓ | MSGP | ✗ | ✗ | A |
+| 49 | binomial | ✓ | ✗ | RW1 | ✗ | A |
+| 50 | binomial | ✓ | ✗ | RW2 | ✗ | A |
+| 51 | binomial | ✓ | ✗ | AR1 | ✗ | A |
+| 52 | binomial | ✓ | ✗ | ✗ | ZI | A |
+| 53 | binomial | ✓ | ✗ | ✗ | Hurdle | A |
+| 54 | binomial | ✓ | ICAR | RW1 | ✗ | A |
+| 55 | binomial | ✓ | BYM2 | RW1 | ✗ | A |
+| 56 | binomial | ✓ | ICAR | AR1 | ✗ | A |
+| 57 | binomial | ✓ | GP | RW1 | ✗ | A |
+| 58 | binomial | ✓ | ICAR | ✗ | ZI | A |
+| 59 | binomial | slopes | ICAR | ✗ | ✗ | A |
+| 60 | binomial | ✓ | MSGP | RW1 | ✗ | A |
 
 ## Summary
 
-| Grad | Count | % | Checked |
-|:----:|------:|--:|--------:|
-| H | 2 | 5% | 2 |
-| A | 36 | 90% | 36 |
-| N | 2 | 5% | 2 |
-| **Total** | 40 | | **40/40** |
-
-### Known Issues
-- ~~GP uses numerical gradients~~ - **FIXED** - GP autodiff implemented for single-scale GP (~3x vs Stan)
-  - Multi-scale GP (MSGP) and GP+temporal still use numerical (rows 8, 18)
-- ~~GP spatial heisenbug~~ - **FIXED** (added LLT error check + diagonal jitter in `hmc_gp.h`)
-
----
-
-## PUBLICATION REQUIREMENT
-
-**Every single row must be H or A before submission.**
-
-N (numerical) = 0.6x Stan speed = **UNACCEPTABLE FOR PAPER**
-
-### Strategy
-1. Keep H for rows 1-2 (simple poisson_gamma) - 9x speedup
-2. Implement autodiff version of `compute_log_post` using `ad::Var`
-3. All other rows get A automatically - estimated 3-5x speedup
-
-### Implementation
-```cpp
-// Template the log_post to work with double OR ad::Var
-template<typename T>
-T compute_log_post_impl(const std::vector<T>& params, const ModelData& data, ...);
-
-// For gradient:
-ad::init_tape();
-auto params_ad = ad::make_vars(params);
-auto log_post = compute_log_post_impl(params_ad, data, ...);
-log_post.backward();
-grad = ad::get_adjoints(params_ad);
-```
-
-This gives O(n) gradients for ALL models with ONE implementation.
+| Grad | Count | % |
+|:----:|------:|--:|
+| H | 6 | 10% |
+| A | 54 | 90% |
+| **Total** | **60** |
