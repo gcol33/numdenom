@@ -222,6 +222,7 @@ fit_hmc <- function(formula,
       nn_dist = gp_info$nn_dist,
       nn_order = as.integer(gp_info$nn_order),
       nn_order_inv = as.integer(gp_info$nn_order_inv),
+      nn_neighbor_dist = gp_info$nn_neighbor_dist,  # Phase 1.3: cached pairwise distances
       nn = as.integer(gp_info$nn),
       cov_type = gp_info$cov_type,
       nu = gp_info$nu %||% 1.5,  # Default nu for non-Matern covariances
@@ -242,11 +243,13 @@ fit_hmc <- function(formula,
       nn_order_local = as.integer(gp_info$nn_order_local),
       nn_order_inv_local = as.integer(gp_info$nn_order_inv_local),
       nn_local = as.integer(gp_info$nn_local),
+      nn_neighbor_dist_local = gp_info$nn_neighbor_dist_local,  # Phase 1.3
       nn_idx_regional = as.integer(gp_info$nn_idx_regional),
       nn_dist_regional = gp_info$nn_dist_regional,
       nn_order_regional = as.integer(gp_info$nn_order_regional),
       nn_order_inv_regional = as.integer(gp_info$nn_order_inv_regional),
       nn_regional = as.integer(gp_info$nn_regional),
+      nn_neighbor_dist_regional = gp_info$nn_neighbor_dist_regional,  # Phase 1.3
       range_local_lower = gp_info$range_local_lower,
       range_local_upper = gp_info$range_local_upper,
       range_regional_lower = gp_info$range_regional_lower,
@@ -1795,10 +1798,28 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_dist = numeric(0),
       nn_order = integer(0),
       nn_order_inv = integer(0),
+      nn_neighbor_dist = numeric(0),  # Phase 1.3
       nn = 0L,
+      nn_idx_local = integer(0),
+      nn_dist_local = numeric(0),
+      nn_order_local = integer(0),
+      nn_order_inv_local = integer(0),
+      nn_local = 0L,
+      nn_neighbor_dist_local = numeric(0),  # Phase 1.3
+      nn_idx_regional = integer(0),
+      nn_dist_regional = numeric(0),
+      nn_order_regional = integer(0),
+      nn_order_inv_regional = integer(0),
+      nn_regional = 0L,
+      nn_neighbor_dist_regional = numeric(0),  # Phase 1.3
+      range_local_lower = 0,
+      range_local_upper = 1,
+      range_regional_lower = 1,
+      range_regional_upper = 10,
       cov_type = "exponential",
       nu = 1.5,
-      shared = TRUE
+      shared = TRUE,
+      sampler = "noncentered"
     ))
   }
 
@@ -1819,23 +1840,27 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_dist = numeric(0),
       nn_order = integer(0),
       nn_order_inv = integer(0),
+      nn_neighbor_dist = numeric(0),  # Phase 1.3
       nn = 0L,
       nn_idx_local = integer(0),
       nn_dist_local = numeric(0),
       nn_order_local = integer(0),
       nn_order_inv_local = integer(0),
       nn_local = 0L,
+      nn_neighbor_dist_local = numeric(0),  # Phase 1.3
       nn_idx_regional = integer(0),
       nn_dist_regional = numeric(0),
       nn_order_regional = integer(0),
       nn_order_inv_regional = integer(0),
       nn_regional = 0L,
+      nn_neighbor_dist_regional = numeric(0),  # Phase 1.3
       range_local_lower = 0,
       range_local_upper = 1,
       range_regional_lower = 1,
       range_regional_upper = 10,
       cov_type = "exponential",
-      nu = 1.5
+      nu = 1.5,
+      sampler = "noncentered"
     ))
   }
 
@@ -1851,6 +1876,10 @@ prepare_gp_for_hmc <- function(gp, data, N) {
     local_info <- validated$neighbor_info_local
     regional_info <- validated$neighbor_info_regional
 
+    # Phase 1.3: Flatten nn_neighbor_dist arrays for C++ row-major access
+    nn_neighbor_dist_local_flat <- as.vector(aperm(local_info$nn_neighbor_dist, c(3, 2, 1)))
+    nn_neighbor_dist_regional_flat <- as.vector(aperm(regional_info$nn_neighbor_dist, c(3, 2, 1)))
+
     list(
       gp_type = "multiscale_gp",
       coords = coords_flat,
@@ -1859,6 +1888,7 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_dist = numeric(0),
       nn_order = integer(0),
       nn_order_inv = integer(0),
+      nn_neighbor_dist = numeric(0),  # Phase 1.3
       nn = 0L,
       # Local scale
       nn_idx_local = as.integer(as.vector(t(local_info$nn_idx))),
@@ -1866,12 +1896,14 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_order_local = as.integer(local_info$nn_order),
       nn_order_inv_local = as.integer(local_info$nn_order_inv),
       nn_local = as.integer(gp$nn_local),
+      nn_neighbor_dist_local = nn_neighbor_dist_local_flat,  # Phase 1.3
       # Regional scale
       nn_idx_regional = as.integer(as.vector(t(regional_info$nn_idx))),
       nn_dist_regional = as.vector(t(regional_info$nn_dist)),
       nn_order_regional = as.integer(regional_info$nn_order),
       nn_order_inv_regional = as.integer(regional_info$nn_order_inv),
       nn_regional = as.integer(gp$nn_regional),
+      nn_neighbor_dist_regional = nn_neighbor_dist_regional_flat,  # Phase 1.3
       # Range constraints
       range_local_lower = gp$range_local[1],
       range_local_upper = gp$range_local[2],
@@ -1887,6 +1919,10 @@ prepare_gp_for_hmc <- function(gp, data, N) {
     # Single-scale GP
     nn_info <- validated$neighbor_info
 
+    # Phase 1.3: Flatten nn_neighbor_dist from N x k x k for C++ row-major access
+    # C++ accesses as: i * nn * nn + j1 * nn + j2 (i slowest, j2 fastest)
+    nn_neighbor_dist_flat <- as.vector(aperm(nn_info$nn_neighbor_dist, c(3, 2, 1)))
+
     list(
       gp_type = "gp",
       coords = coords_flat,
@@ -1894,6 +1930,7 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_dist = as.vector(t(nn_info$nn_dist)),
       nn_order = as.integer(nn_info$nn_order),
       nn_order_inv = as.integer(nn_info$nn_order_inv),
+      nn_neighbor_dist = nn_neighbor_dist_flat,  # Phase 1.3: cached pairwise distances
       nn = as.integer(gp$nn),
       # Multi-scale params (not used for single-scale)
       nn_idx_local = integer(0),
@@ -1901,11 +1938,13 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_order_local = integer(0),
       nn_order_inv_local = integer(0),
       nn_local = 0L,
+      nn_neighbor_dist_local = numeric(0),  # Phase 1.3
       nn_idx_regional = integer(0),
       nn_dist_regional = numeric(0),
       nn_order_regional = integer(0),
       nn_order_inv_regional = integer(0),
       nn_regional = 0L,
+      nn_neighbor_dist_regional = numeric(0),  # Phase 1.3
       range_local_lower = 0,
       range_local_upper = 1,
       range_regional_lower = 1,

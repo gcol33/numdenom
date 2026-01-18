@@ -1476,6 +1476,9 @@ compute_nngp_neighbors <- function(coords, k) {
   nn_idx <- matrix(0L, nrow = N, ncol = k)
   nn_dist <- matrix(Inf, nrow = N, ncol = k)
 
+  # Phase 1.3: Precompute pairwise distances among neighbors
+  nn_neighbor_dist <- array(0, dim = c(N, k, k))
+
   for (i in 2:N) {
     # Only consider previous observations (in ordering) as potential neighbors
     n_candidates <- min(i - 1, k)
@@ -1497,12 +1500,32 @@ compute_nngp_neighbors <- function(coords, k) {
         nn_idx[i, ] <- nn_order
         nn_dist[i, ] <- dists[nn_order]
       }
+
+      # Phase 1.3: Compute pairwise distances among neighbors
+      n_neighbors <- sum(nn_idx[i, ] > 0)
+      if (n_neighbors > 1) {
+        neighbor_indices <- nn_idx[i, 1:n_neighbors]
+        neighbor_coords <- coords_ordered[neighbor_indices, , drop = FALSE]
+        for (j1 in 1:n_neighbors) {
+          for (j2 in 1:n_neighbors) {
+            if (j1 == j2) {
+              nn_neighbor_dist[i, j1, j2] <- 0
+            } else {
+              nn_neighbor_dist[i, j1, j2] <- sqrt(
+                (neighbor_coords[j1, 1] - neighbor_coords[j2, 1])^2 +
+                (neighbor_coords[j1, 2] - neighbor_coords[j2, 2])^2
+              )
+            }
+          }
+        }
+      }
     }
   }
 
   list(
     nn_idx = nn_idx,
     nn_dist = nn_dist,
+    nn_neighbor_dist = nn_neighbor_dist,  # Phase 1.3: cached pairwise distances
     nn_order = order_idx,
     nn_order_inv = order(order_idx),  # Inverse permutation
     k = k

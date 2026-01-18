@@ -4023,6 +4023,7 @@ Rcpp::List cpp_hmc_fit_gp(
   std::vector<double> nn_dist_vec = Rcpp::as<std::vector<double>>(gp_params["nn_dist"]);
   std::vector<int> nn_order_vec = Rcpp::as<std::vector<int>>(gp_params["nn_order"]);
   std::vector<int> nn_order_inv_vec = Rcpp::as<std::vector<int>>(gp_params["nn_order_inv"]);
+  std::vector<double> nn_neighbor_dist_vec = Rcpp::as<std::vector<double>>(gp_params["nn_neighbor_dist"]);  // Phase 1.3
 
   int nn = Rcpp::as<int>(gp_params["nn"]);
   std::string cov_type_str = Rcpp::as<std::string>(gp_params["cov_type"]);
@@ -4047,6 +4048,8 @@ Rcpp::List cpp_hmc_fit_gp(
   std::vector<int> nn_order_regional_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_order_regional"]);
   std::vector<int> nn_order_inv_regional_vec = Rcpp::as<std::vector<int>>(ms_gp_params["nn_order_inv_regional"]);
   int nn_regional = Rcpp::as<int>(ms_gp_params["nn_regional"]);
+  std::vector<double> nn_neighbor_dist_local_vec = Rcpp::as<std::vector<double>>(ms_gp_params["nn_neighbor_dist_local"]);  // Phase 1.3
+  std::vector<double> nn_neighbor_dist_regional_vec = Rcpp::as<std::vector<double>>(ms_gp_params["nn_neighbor_dist_regional"]);  // Phase 1.3
   double range_local_lower = Rcpp::as<double>(ms_gp_params["range_local_lower"]);
   double range_local_upper = Rcpp::as<double>(ms_gp_params["range_local_upper"]);
   double range_regional_lower = Rcpp::as<double>(ms_gp_params["range_regional_lower"]);
@@ -4153,6 +4156,7 @@ Rcpp::List cpp_hmc_fit_gp(
     data.gp_data.coords = coords_vec;  // Already std::vector from eager copy
     data.gp_data.nn_idx = nn_idx_vec;
     data.gp_data.nn_dist = nn_dist_vec;
+    data.gp_data.nn_neighbor_dist = nn_neighbor_dist_vec;  // Phase 1.3: cached pairwise distances
     // Convert from R's 1-based to C++'s 0-based indexing
     data.gp_data.nn_order.resize(nn_order_vec.size());
     for (size_t i = 0; i < nn_order_vec.size(); i++) {
@@ -4193,6 +4197,7 @@ Rcpp::List cpp_hmc_fit_gp(
     for (size_t i = 0; i < nn_order_inv_local_vec.size(); i++) {
       data.multiscale_gp_data.nn_order_inv_local[i] = nn_order_inv_local_vec[i] - 1;
     }
+    data.multiscale_gp_data.nn_neighbor_dist_local = nn_neighbor_dist_local_vec;  // Phase 1.3
 
     // Regional scale - use pre-copied std::vectors
     data.multiscale_gp_data.nn_regional = nn_regional;
@@ -4207,6 +4212,7 @@ Rcpp::List cpp_hmc_fit_gp(
     for (size_t i = 0; i < nn_order_inv_regional_vec.size(); i++) {
       data.multiscale_gp_data.nn_order_inv_regional[i] = nn_order_inv_regional_vec[i] - 1;
     }
+    data.multiscale_gp_data.nn_neighbor_dist_regional = nn_neighbor_dist_regional_vec;  // Phase 1.3
 
     // Range constraints
     data.multiscale_gp_data.range_local_lower = range_local_lower;
