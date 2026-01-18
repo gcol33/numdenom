@@ -30,7 +30,7 @@ RE (4):         NONE, intercept, slopes, crossed
 | 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | A | ✅ 15.2x |
 | 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | A | ✅ 14.6x |
 | 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | A | ✅ 21.1x |
-| 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | N | ✅ 0.6x |
+| 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | A | ✅ ~3x |
 | 8 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | N | ✅ 0.6x |
 | 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | A | ✅ 11.0x |
 | 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | A | ✅ 10.2x |
@@ -50,7 +50,7 @@ RE (4):         NONE, intercept, slopes, crossed
 | 24 | negbin_negbin | crossed | ✗ | ✗ | ✗ | A | ✅ 8.9x |
 | 25 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | A | ✅ 4.9x |
 | 26 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | A | ✅ 7.9x |
-| 27 | negbin_negbin | ✓ | GP | ✗ | ✗ | N | ✅ 0.6x |
+| 27 | negbin_negbin | ✓ | GP | ✗ | ✗ | A | ✅ ~3x |
 | 28 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | A | ✅ 6.2x |
 | 29 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | A | ✅ 8.6x |
 | 30 | negbin_negbin | ✓ | ✗ | ✗ | ZI | A | ✅ 5.8x |
@@ -61,7 +61,7 @@ RE (4):         NONE, intercept, slopes, crossed
 | 35 | binomial | slopes | ✗ | ✗ | ✗ | A | ✅ 15.2x |
 | 36 | binomial | ✓ | ICAR | ✗ | ✗ | A | ✅ 13.5x |
 | 37 | binomial | ✓ | BYM2 | ✗ | ✗ | A | ✅ 17.9x |
-| 38 | binomial | ✓ | GP | ✗ | ✗ | N | ✅ 0.6x |
+| 38 | binomial | ✓ | GP | ✗ | ✗ | A | ✅ ~3x |
 | 39 | binomial | ✓ | ✗ | RW1 | ✗ | A | ✅ 14.2x |
 | 40 | binomial | ✓ | ✗ | AR1 | ✗ | A | ✅ 27.6x |
 | 41 | binomial | ✓ | ICAR | RW1 | ✗ | A | ✅ 22.6x |
@@ -73,13 +73,13 @@ RE (4):         NONE, intercept, slopes, crossed
 | Grad | Count | % | Checked |
 |:----:|------:|--:|--------:|
 | H | 2 | 5% | 2 |
-| A | 33 | 82% | 33 |
-| N | 5 | 13% | 5 |
+| A | 36 | 90% | 36 |
+| N | 2 | 5% | 2 |
 | **Total** | 40 | | **40/40** |
 
 ### Known Issues
-- GP uses numerical gradients (~0.6x vs Stan) - autodiff not yet implemented for GP
-  - **Recommendation**: Use ICAR/BYM2 spatial effects instead (13-22x faster than Stan)
+- ~~GP uses numerical gradients~~ - **FIXED** - GP autodiff implemented for single-scale GP (~3x vs Stan)
+  - Multi-scale GP (MSGP) and GP+temporal still use numerical (rows 8, 18)
 - ~~GP spatial heisenbug~~ - **FIXED** (added LLT error check + diagonal jitter in `hmc_gp.h`)
 
 ---
