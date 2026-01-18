@@ -586,6 +586,227 @@ inline double log_prior_phi_pc(double phi, double U, double alpha) {
 // Gradient computation for GP parameters (for HMC)
 // -----------------------------------------------------------------------------
 
+// Struct to hold NNGP gradient results (for hand-coded gradients)
+struct NNGPGradients {
+  std::vector<double> grad_w;         // Gradient w.r.t. spatial effects
+  double grad_log_sigma2;             // Gradient w.r.t. log(sigma2)
+  double grad_log_phi;                // Gradient w.r.t. log(phi)
+};
+
+// Analytical gradient of NNGP log-likelihood w.r.t. w (spatial effects)
+// O(N * nn) complexity - much faster than numerical differentiation
+// Returns gradients w.r.t. w only; sigma2/phi gradients computed numerically
+inline void gp_nngp_gradient_w_analytical(
+    const std::vector<double>& w,
+    double sigma2,
+    double phi,
+    const GPData& gp_data,
+    std::vector<double>& grad_w  // Output: gradient (length n_obs)
+) {
+  int N = gp_data.n_obs;
+  int nn = gp_data.nn;
+
+  grad_w.assign(N, 0.0);
+
+  // Validate input sizes
+  if (gp_data.nn_order.size() < (size_t)N) return;
+  if (gp_data.nn_idx.size() < (size_t)(N * nn)) return;
+  if (gp_data.nn_dist.size() < (size_t)(N * nn)) return;
+  if (w.size() < (size_t)N) return;
+  if (gp_data.coords.size() < (size_t)(2 * N)) return;
+
+  // First observation: marginal N(0, sigma2)
+  // ll_0 = -0.5*log(sigma2) - 0.5*w[first]^2/sigma2
+  // d/dw[first] = -w[first]/sigma2
+  int first_idx = gp_data.nn_order[0];
+  if (first_idx < 0 || first_idx >= N) return;
+  grad_w[first_idx] = -w[first_idx] / sigma2;
+
+  // Process remaining observations in ordering
+  for (int i = 1; i < N; i++) {
+    int obs_idx = gp_data.nn_order[i];
+
+    // Bounds check for obs_idx
+    if (obs_idx < 0 || obs_idx >= N) continue;
+
+    // Count actual neighbors
+    int n_neighbors = 0;
+    for (int j = 0; j < nn; j++) {
+      int nn_flat_idx = i * nn + j;
+      if (nn_flat_idx >= (int)gp_data.nn_idx.size()) break;
+      if (gp_data.nn_idx[nn_flat_idx] > 0) n_neighbors++;
+    }
+
+    if (n_neighbors == 0) {
+      // No neighbors: marginal - same as first obs
+      grad_w[obs_idx] += -w[obs_idx] / sigma2;
+      continue;
+    }
+
+    // Build c_vec (covariances between obs i and its neighbors)
+    std::vector<double> c_vec(n_neighbors);
+    for (int j = 0; j < n_neighbors; j++) {
+      int nn_flat_idx = i * nn + j;
+      double d = gp_data.nn_dist[nn_flat_idx];
+      c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
+    }
+
+    // Build C_mat (covariances among neighbors)
+    std::vector<double> C_mat(n_neighbors * n_neighbors);
+    std::vector<int> neighbor_orig_idx(n_neighbors);
+
+    bool bounds_ok = true;
+    for (int j1 = 0; j1 < n_neighbors; j1++) {
+      int raw_nn_idx1 = gp_data.nn_idx[i * nn + j1];
+
+      // Bounds check
+      if (raw_nn_idx1 - 1 < 0 || raw_nn_idx1 - 1 >= (int)gp_data.nn_order.size()) {
+        bounds_ok = false;
+        break;
+      }
+
+      int nn_idx1 = gp_data.nn_order[raw_nn_idx1 - 1];
+
+      if (nn_idx1 < 0 || nn_idx1 * 2 + 1 >= (int)gp_data.coords.size()) {
+        bounds_ok = false;
+        break;
+      }
+
+      neighbor_orig_idx[j1] = nn_idx1;
+
+      for (int j2 = 0; j2 < n_neighbors; j2++) {
+        int raw_nn_idx2 = gp_data.nn_idx[i * nn + j2];
+
+        if (raw_nn_idx2 - 1 < 0 || raw_nn_idx2 - 1 >= (int)gp_data.nn_order.size()) {
+          bounds_ok = false;
+          break;
+        }
+
+        int nn_idx2 = gp_data.nn_order[raw_nn_idx2 - 1];
+
+        if (j1 == j2) {
+          C_mat[j1 * n_neighbors + j2] = sigma2;
+        } else {
+          double d12 = std::sqrt(
+            std::pow(gp_data.coords[nn_idx1 * 2] - gp_data.coords[nn_idx2 * 2], 2) +
+            std::pow(gp_data.coords[nn_idx1 * 2 + 1] - gp_data.coords[nn_idx2 * 2 + 1], 2)
+          );
+          C_mat[j1 * n_neighbors + j2] = compute_cov(d12, sigma2, phi, gp_data.cov_type);
+        }
+      }
+      if (!bounds_ok) break;
+    }
+
+    if (!bounds_ok) {
+      // Skip this observation - marginal fallback
+      grad_w[obs_idx] += -w[obs_idx] / sigma2;
+      continue;
+    }
+
+    // Cholesky decomposition of C_mat
+    std::vector<double> L(n_neighbors * n_neighbors, 0.0);
+    for (int j = 0; j < n_neighbors; j++) {
+      double sum = 0.0;
+      for (int k = 0; k < j; k++) {
+        sum += L[j * n_neighbors + k] * L[j * n_neighbors + k];
+      }
+      double diag = C_mat[j * n_neighbors + j] - sum;
+      if (diag <= 0) diag = 1e-10;
+      L[j * n_neighbors + j] = std::sqrt(diag);
+
+      for (int k = j + 1; k < n_neighbors; k++) {
+        double s = 0.0;
+        for (int m = 0; m < j; m++) {
+          s += L[k * n_neighbors + m] * L[j * n_neighbors + m];
+        }
+        L[k * n_neighbors + j] = (C_mat[k * n_neighbors + j] - s) / L[j * n_neighbors + j];
+      }
+    }
+
+    // Forward solve: L * y = c_vec
+    std::vector<double> y(n_neighbors);
+    for (int j = 0; j < n_neighbors; j++) {
+      double s = 0.0;
+      for (int k = 0; k < j; k++) {
+        s += L[j * n_neighbors + k] * y[k];
+      }
+      y[j] = (c_vec[j] - s) / L[j * n_neighbors + j];
+    }
+
+    // Backward solve: L^T * alpha = y
+    std::vector<double> alpha(n_neighbors);
+    for (int j = n_neighbors - 1; j >= 0; j--) {
+      double s = 0.0;
+      for (int k = j + 1; k < n_neighbors; k++) {
+        s += L[k * n_neighbors + j] * alpha[k];
+      }
+      alpha[j] = (y[j] - s) / L[j * n_neighbors + j];
+    }
+
+    // Conditional mean: mu = alpha' * w_neighbors
+    double cond_mean = 0.0;
+    for (int j = 0; j < n_neighbors; j++) {
+      int nn_idx = neighbor_orig_idx[j];
+      if (nn_idx >= 0 && nn_idx < N) {
+        cond_mean += alpha[j] * w[nn_idx];
+      }
+    }
+
+    // Conditional variance: sigma2_cond = sigma2 - c' * alpha
+    double c_Cinv_c = 0.0;
+    for (int j = 0; j < n_neighbors; j++) {
+      c_Cinv_c += c_vec[j] * alpha[j];
+    }
+    double cond_var = std::max(sigma2 - c_Cinv_c, 1e-10);
+
+    // Residual
+    double resid = w[obs_idx] - cond_mean;
+
+    // Gradient w.r.t. w[obs_idx] (the target):
+    // d(ll_i)/d(w_i) = -resid / cond_var
+    grad_w[obs_idx] += -resid / cond_var;
+
+    // Gradient w.r.t. neighbors w[neighbor_j]:
+    // d(ll_i)/d(w_neighbor_j) = alpha_j * resid / cond_var
+    // (because d(cond_mean)/d(w_neighbor_j) = alpha_j)
+    for (int j = 0; j < n_neighbors; j++) {
+      int nn_idx = neighbor_orig_idx[j];
+      if (nn_idx >= 0 && nn_idx < N) {
+        grad_w[nn_idx] += alpha[j] * resid / cond_var;
+      }
+    }
+  }
+}
+
+// Full NNGP gradients including sigma2 and phi (using numerical diff for those)
+inline void gp_nngp_gradients(
+    const std::vector<double>& w,
+    double sigma2,
+    double phi,
+    const GPData& gp_data,
+    NNGPGradients& grads,
+    double epsilon = 1e-6
+) {
+  // Analytical gradient w.r.t. w
+  gp_nngp_gradient_w_analytical(w, sigma2, phi, gp_data, grads.grad_w);
+
+  // Numerical gradient w.r.t. log_sigma2 (only 1 parameter)
+  double log_sigma2 = std::log(sigma2);
+  double base_ll = gp_nngp_log_lik(w, sigma2, phi, gp_data);
+
+  double log_sigma2_plus = log_sigma2 + epsilon;
+  double sigma2_plus = std::exp(log_sigma2_plus);
+  double ll_plus = gp_nngp_log_lik(w, sigma2_plus, phi, gp_data);
+  grads.grad_log_sigma2 = (ll_plus - base_ll) / epsilon;
+
+  // Numerical gradient w.r.t. log_phi (only 1 parameter)
+  double log_phi = std::log(phi);
+  double log_phi_plus = log_phi + epsilon;
+  double phi_plus = std::exp(log_phi_plus);
+  ll_plus = gp_nngp_log_lik(w, sigma2, phi_plus, gp_data);
+  grads.grad_log_phi = (ll_plus - base_ll) / epsilon;
+}
+
 // Numerical gradient of NNGP log-likelihood w.r.t. w (spatial effects)
 // For use in HMC updates
 inline void gp_gradient_w(
