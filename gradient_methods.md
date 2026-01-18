@@ -15,13 +15,13 @@
 | 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H |
 | 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | A |
 | 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | A |
-| 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | A |
+| 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | H |
 | 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | A |
 | 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | A |
 | 8 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | A |
-| 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | A |
-| 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | A |
-| 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | A |
+| 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H |
+| 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | H |
+| 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H |
 | 12 | poisson_gamma | ✓ | ✗ | ✗ | ZI | A |
 | 13 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | A |
 | 14 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | A |
@@ -35,13 +35,13 @@
 | 22 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H |
 | 23 | negbin_negbin | slopes | ✗ | ✗ | ✗ | A |
 | 24 | negbin_negbin | crossed | ✗ | ✗ | ✗ | A |
-| 25 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | A |
+| 25 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | H |
 | 26 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | A |
 | 27 | negbin_negbin | ✓ | GP | ✗ | ✗ | A |
 | 28 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | A |
-| 29 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | A |
-| 30 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | A |
-| 31 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | A |
+| 29 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | H |
+| 30 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | H |
+| 31 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | H |
 | 32 | negbin_negbin | ✓ | ✗ | ✗ | ZI | A |
 | 33 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | A |
 | 34 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | A |
@@ -55,13 +55,13 @@
 | 42 | binomial | ✓ | ✗ | ✗ | ✗ | H |
 | 43 | binomial | slopes | ✗ | ✗ | ✗ | A |
 | 44 | binomial | crossed | ✗ | ✗ | ✗ | A |
-| 45 | binomial | ✓ | ICAR | ✗ | ✗ | A |
+| 45 | binomial | ✓ | ICAR | ✗ | ✗ | H |
 | 46 | binomial | ✓ | BYM2 | ✗ | ✗ | A |
 | 47 | binomial | ✓ | GP | ✗ | ✗ | A |
 | 48 | binomial | ✓ | MSGP | ✗ | ✗ | A |
-| 49 | binomial | ✓ | ✗ | RW1 | ✗ | A |
-| 50 | binomial | ✓ | ✗ | RW2 | ✗ | A |
-| 51 | binomial | ✓ | ✗ | AR1 | ✗ | A |
+| 49 | binomial | ✓ | ✗ | RW1 | ✗ | H |
+| 50 | binomial | ✓ | ✗ | RW2 | ✗ | H |
+| 51 | binomial | ✓ | ✗ | AR1 | ✗ | H |
 | 52 | binomial | ✓ | ✗ | ✗ | ZI | A |
 | 53 | binomial | ✓ | ✗ | ✗ | Hurdle | A |
 | 54 | binomial | ✓ | ICAR | RW1 | ✗ | A |
@@ -76,6 +76,6 @@
 
 | Grad | Count | % |
 |:----:|------:|--:|
-| H | 6 | 10% |
-| A | 54 | 90% |
+| H | 18 | 30% |
+| A | 42 | 70% |
 | **Total** | **60** |
