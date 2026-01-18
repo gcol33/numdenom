@@ -8,6 +8,7 @@
 #include "autodiff.h"
 #include "autodiff_utils.h"
 #include "hmc_gp_autodiff.h"
+#include "hmc_temporal_autodiff.h"
 #include <Rcpp.h>
 
 // Include log_post_impl.h AFTER hmc_sampler.h so types are defined
@@ -1880,6 +1881,463 @@ void compute_gradient_gp_autodiff(
 }
 
 // =====================================================================
+// Multi-scale GP gradient (autodiff, ~3x faster than numerical)
+// =====================================================================
+
+void compute_gradient_msgp_autodiff(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad
+) {
+    using namespace ratiod::ad;
+    using namespace ratiod::math;
+
+    // Initialize autodiff tape
+    init_tape();
+
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    // Create autodiff variables from all parameters
+    std::vector<Var> params_ad = make_vars(params);
+
+    Var log_post = Var(0.0);
+
+    // =========================================================================
+    // Fixed effects priors: N(0, sigma_beta^2)
+    // =========================================================================
+    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
+    for (int j = 0; j < data.p_num; j++) {
+        Var beta = params_ad[layout.beta_num_start + j];
+        log_post = log_post - Var(0.5 * tau_beta) * beta * beta;
+    }
+    for (int j = 0; j < data.p_denom; j++) {
+        Var beta = params_ad[layout.beta_denom_start + j];
+        log_post = log_post - Var(0.5 * tau_beta) * beta * beta;
+    }
+
+    // =========================================================================
+    // Random effects priors (if present)
+    // =========================================================================
+    Var sigma_re = Var(1.0);
+    if (layout.has_re && data.n_re_groups > 0) {
+        Var log_sigma_re = params_ad[layout.log_sigma_re_idx];
+        sigma_re = safe_exp(log_sigma_re);
+
+        // Half-Cauchy prior on sigma_re
+        Var ratio = sigma_re / Var(data.sigma_re_scale);
+        log_post = log_post - safe_log(Var(1.0) + ratio * ratio);
+        log_post = log_post + log_sigma_re;  // Jacobian
+
+        // N(0, sigma_re^2) prior on RE
+        Var tau_re = Var(1.0) / (sigma_re * sigma_re + Var(1e-10));
+        for (int g = 0; g < data.n_re_groups; g++) {
+            Var re_g = params_ad[layout.re_start + g];
+            log_post = log_post - Var(0.5) * tau_re * re_g * re_g;
+            log_post = log_post + Var(0.5) * safe_log(tau_re);
+        }
+    }
+
+    // =========================================================================
+    // Overdispersion priors (Gamma)
+    // =========================================================================
+    Var phi_num = Var(1.0);
+    Var phi_denom = Var(1.0);
+
+    if (layout.has_phi_num) {
+        Var log_phi = params_ad[layout.log_phi_num_idx];
+        phi_num = safe_exp(log_phi);
+        log_post = log_post + Var(data.phi_prior_shape - 1.0) * log_phi
+                            - Var(data.phi_prior_rate) * phi_num
+                            + log_phi;  // Jacobian
+    }
+    if (layout.has_phi_denom) {
+        Var log_phi = params_ad[layout.log_phi_denom_idx];
+        phi_denom = safe_exp(log_phi);
+        log_post = log_post + Var(data.phi_prior_shape - 1.0) * log_phi
+                            - Var(data.phi_prior_rate) * phi_denom
+                            + log_phi;
+    }
+
+    // =========================================================================
+    // Multi-scale GP priors and NNGP likelihoods
+    // =========================================================================
+    int N_gp = data.multiscale_gp_data.n_obs;
+
+    // Local scale parameters
+    Var log_sigma2_local = params_ad[layout.log_sigma2_gp_local_idx];
+    Var log_phi_local = params_ad[layout.log_phi_gp_local_idx];
+    Var sigma2_local = safe_exp(log_sigma2_local);
+    Var phi_local = safe_exp(log_phi_local);
+
+    // Regional scale parameters
+    Var log_sigma2_regional = params_ad[layout.log_sigma2_gp_regional_idx];
+    Var log_phi_regional = params_ad[layout.log_phi_gp_regional_idx];
+    Var sigma2_regional = safe_exp(log_sigma2_regional);
+    Var phi_regional = safe_exp(log_phi_regional);
+
+    // PC priors on variances
+    log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+        sigma2_local, data.ms_sigma2_local_prior_U, data.ms_sigma2_local_prior_alpha);
+    log_post = log_post + log_sigma2_local;  // Jacobian
+
+    log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+        sigma2_regional, data.ms_sigma2_regional_prior_U, data.ms_sigma2_regional_prior_alpha);
+    log_post = log_post + log_sigma2_regional;  // Jacobian
+
+    // Range priors (uniform within bounds) - check bounds, return -inf if violated
+    double phi_local_val = get_value(phi_local);
+    double phi_regional_val = get_value(phi_regional);
+    if (phi_local_val < data.multiscale_gp_data.range_local_lower ||
+        phi_local_val > data.multiscale_gp_data.range_local_upper ||
+        phi_regional_val < data.multiscale_gp_data.range_regional_lower ||
+        phi_regional_val > data.multiscale_gp_data.range_regional_upper) {
+        // Out of bounds - return zero gradients (log_post = -inf)
+        clear_tape();
+        return;
+    }
+    log_post = log_post + log_phi_local;    // Jacobian
+    log_post = log_post + log_phi_regional; // Jacobian
+
+    // Extract GP spatial effects
+    std::vector<Var> w_local_ad(N_gp);
+    std::vector<Var> w_regional_ad(N_gp);
+    for (int i = 0; i < N_gp; i++) {
+        w_local_ad[i] = params_ad[layout.gp_local_start + i];
+        w_regional_ad[i] = params_ad[layout.gp_regional_start + i];
+    }
+
+    // NNGP log-likelihood for each scale using templated function
+    Var msgp_ll = ratiod_gp::multiscale_gp_log_lik_t(
+        w_local_ad, w_regional_ad,
+        sigma2_local, phi_local,
+        sigma2_regional, phi_regional,
+        data.multiscale_gp_data);
+    log_post = log_post + msgp_ll;
+
+    // =========================================================================
+    // Data likelihood
+    // =========================================================================
+    std::vector<Var> beta_num_ad(data.p_num);
+    std::vector<Var> beta_denom_ad(data.p_denom);
+    for (int j = 0; j < data.p_num; j++) {
+        beta_num_ad[j] = params_ad[layout.beta_num_start + j];
+    }
+    for (int j = 0; j < data.p_denom; j++) {
+        beta_denom_ad[j] = params_ad[layout.beta_denom_start + j];
+    }
+
+    for (int i = 0; i < data.N; i++) {
+        // Linear predictors
+        Var eta_num = Var(0.0);
+        Var eta_denom = Var(0.0);
+
+        for (int j = 0; j < data.p_num; j++) {
+            eta_num = eta_num + Var(data.X_num_flat[i * data.p_num + j]) * beta_num_ad[j];
+        }
+        for (int j = 0; j < data.p_denom; j++) {
+            eta_denom = eta_denom + Var(data.X_denom_flat[i * data.p_denom + j]) * beta_denom_ad[j];
+        }
+
+        // Add random effects (shared)
+        if (layout.has_re && data.re_group[i] > 0) {
+            int g = data.re_group[i] - 1;
+            Var re_g = params_ad[layout.re_start + g];
+            eta_num = eta_num + re_g;
+            eta_denom = eta_denom + re_g;
+        }
+
+        // Add multi-scale GP spatial effect
+        Var ms_spatial = w_local_ad[i] + w_regional_ad[i];
+        if (data.multiscale_gp_data.shared) {
+            eta_num = eta_num + ms_spatial;
+            eta_denom = eta_denom + ms_spatial;
+        } else {
+            eta_num = eta_num + ms_spatial;
+        }
+
+        // Compute likelihood based on model type
+        Var ll_i = Var(0.0);
+
+        if (data.model_type == ModelType::BINOMIAL) {
+            Var p = inv_logit(eta_num);
+            ll_i = ratiod::math::log_lik_binomial(data.y_num[i], data.y_denom[i], p);
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            Var mu_num = safe_exp(eta_num);
+            Var mu_denom = safe_exp(eta_denom);
+            ll_i = ratiod::math::log_lik_negbin(data.y_num[i], mu_num, phi_num) +
+                   ratiod::math::log_lik_negbin(data.y_denom[i], mu_denom, phi_denom);
+        } else {  // POISSON_GAMMA
+            Var mu_num = safe_exp(eta_num);
+            Var mu_denom = safe_exp(eta_denom);
+            ll_i = ratiod::math::log_lik_poisson(data.y_num[i], mu_num) +
+                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+        }
+
+        log_post = log_post + ll_i;
+    }
+
+    // Backward pass
+    log_post.backward();
+
+    // Extract gradients
+    grad = get_adjoints(params_ad);
+
+    // Clean up tape
+    clear_tape();
+}
+
+// =====================================================================
+// GP + Temporal gradient (autodiff, combines GP and temporal effects)
+// =====================================================================
+
+void compute_gradient_gp_temporal_autodiff(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad
+) {
+    using namespace ratiod::ad;
+    using namespace ratiod::math;
+
+    // Initialize autodiff tape
+    init_tape();
+
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    // Create autodiff variables from all parameters
+    std::vector<Var> params_ad = make_vars(params);
+
+    Var log_post = Var(0.0);
+
+    // =========================================================================
+    // Fixed effects priors: N(0, sigma_beta^2)
+    // =========================================================================
+    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
+    for (int j = 0; j < data.p_num; j++) {
+        Var beta = params_ad[layout.beta_num_start + j];
+        log_post = log_post - Var(0.5 * tau_beta) * beta * beta;
+    }
+    for (int j = 0; j < data.p_denom; j++) {
+        Var beta = params_ad[layout.beta_denom_start + j];
+        log_post = log_post - Var(0.5 * tau_beta) * beta * beta;
+    }
+
+    // =========================================================================
+    // Random effects priors (if present)
+    // =========================================================================
+    Var sigma_re = Var(1.0);
+    if (layout.has_re && data.n_re_groups > 0) {
+        Var log_sigma_re = params_ad[layout.log_sigma_re_idx];
+        sigma_re = safe_exp(log_sigma_re);
+
+        // Half-Cauchy prior on sigma_re
+        Var ratio = sigma_re / Var(data.sigma_re_scale);
+        log_post = log_post - safe_log(Var(1.0) + ratio * ratio);
+        log_post = log_post + log_sigma_re;  // Jacobian
+
+        // N(0, sigma_re^2) prior on RE
+        Var tau_re = Var(1.0) / (sigma_re * sigma_re + Var(1e-10));
+        for (int g = 0; g < data.n_re_groups; g++) {
+            Var re_g = params_ad[layout.re_start + g];
+            log_post = log_post - Var(0.5) * tau_re * re_g * re_g;
+            log_post = log_post + Var(0.5) * safe_log(tau_re);
+        }
+    }
+
+    // =========================================================================
+    // Overdispersion priors (Gamma)
+    // =========================================================================
+    Var phi_num = Var(1.0);
+    Var phi_denom = Var(1.0);
+
+    if (layout.has_phi_num) {
+        Var log_phi = params_ad[layout.log_phi_num_idx];
+        phi_num = safe_exp(log_phi);
+        log_post = log_post + Var(data.phi_prior_shape - 1.0) * log_phi
+                            - Var(data.phi_prior_rate) * phi_num
+                            + log_phi;  // Jacobian
+    }
+    if (layout.has_phi_denom) {
+        Var log_phi = params_ad[layout.log_phi_denom_idx];
+        phi_denom = safe_exp(log_phi);
+        log_post = log_post + Var(data.phi_prior_shape - 1.0) * log_phi
+                            - Var(data.phi_prior_rate) * phi_denom
+                            + log_phi;
+    }
+
+    // =========================================================================
+    // Temporal priors
+    // =========================================================================
+    Var tau_temporal = Var(1.0);
+    Var rho_ar1 = Var(0.0);
+    std::vector<std::vector<Var>> phi_temporal_ad;  // [group][time]
+
+    if (layout.has_temporal) {
+        Var log_tau_temporal = params_ad[layout.log_tau_temporal_idx];
+        tau_temporal = safe_exp(log_tau_temporal);
+
+        // tau ~ Gamma(shape, rate) with Jacobian
+        log_post = log_post + Var(data.tau_temporal_shape - 1.0) * log_tau_temporal
+                            - Var(data.tau_temporal_rate) * tau_temporal
+                            + log_tau_temporal;
+
+        // AR1: also estimate rho
+        if (layout.is_ar1) {
+            Var logit_rho = params_ad[layout.logit_rho_ar1_idx];
+            rho_ar1 = Var(1.0) / (Var(1.0) + safe_exp(-logit_rho));
+
+            // rho ~ Uniform(-1, 1) Jacobian
+            log_post = log_post + safe_log(rho_ar1 + Var(1.0)) + safe_log(Var(1.0) - rho_ar1);
+        }
+
+        // Extract temporal effects for each group
+        int T = data.n_times;
+        phi_temporal_ad.resize(data.n_temporal_groups);
+        for (int g = 0; g < data.n_temporal_groups; g++) {
+            phi_temporal_ad[g].resize(T);
+            for (int t = 0; t < T; t++) {
+                phi_temporal_ad[g][t] = params_ad[layout.temporal_start + g * T + t];
+            }
+
+            // Temporal prior
+            Var temporal_prior = ratiod_temporal::temporal_log_prior_t(
+                phi_temporal_ad[g], data.temporal_type, tau_temporal, rho_ar1, data.temporal_cyclic);
+            log_post = log_post + temporal_prior;
+        }
+    }
+
+    // =========================================================================
+    // GP priors and NNGP likelihood
+    // =========================================================================
+    std::vector<Var> gp_w_ad;
+    Var sigma2_gp = Var(1.0);
+    Var phi_gp = Var(0.1);
+
+    if (layout.is_gp && data.has_gp) {
+        Var log_sigma2_gp = params_ad[layout.log_sigma2_gp_idx];
+        Var log_phi_gp = params_ad[layout.log_phi_gp_idx];
+        sigma2_gp = safe_exp(log_sigma2_gp);
+        phi_gp = safe_exp(log_phi_gp);
+
+        // PC prior on sigma2 (penalizes large variance)
+        log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+            sigma2_gp, data.gp_sigma2_prior_U, data.gp_sigma2_prior_alpha);
+        log_post = log_post + log_sigma2_gp;  // Jacobian
+
+        // Uniform prior on phi within bounds
+        log_post = log_post + ratiod_gp::log_prior_phi_uniform_t(
+            phi_gp, data.gp_phi_prior_lower, data.gp_phi_prior_upper);
+        log_post = log_post + log_phi_gp;  // Jacobian
+
+        // Extract GP spatial effects
+        int N_gp = data.gp_data.n_obs;
+        gp_w_ad.resize(N_gp);
+        for (int i = 0; i < N_gp; i++) {
+            gp_w_ad[i] = params_ad[layout.gp_w_start + i];
+        }
+
+        // NNGP log-likelihood using templated function
+        Var gp_ll = ratiod_gp::gp_nngp_log_lik_t(gp_w_ad, sigma2_gp, phi_gp, data.gp_data);
+        log_post = log_post + gp_ll;
+    }
+
+    // =========================================================================
+    // Data likelihood
+    // =========================================================================
+    std::vector<Var> beta_num_ad(data.p_num);
+    std::vector<Var> beta_denom_ad(data.p_denom);
+    for (int j = 0; j < data.p_num; j++) {
+        beta_num_ad[j] = params_ad[layout.beta_num_start + j];
+    }
+    for (int j = 0; j < data.p_denom; j++) {
+        beta_denom_ad[j] = params_ad[layout.beta_denom_start + j];
+    }
+
+    int T = data.n_times;
+
+    for (int i = 0; i < data.N; i++) {
+        // Linear predictors
+        Var eta_num = Var(0.0);
+        Var eta_denom = Var(0.0);
+
+        for (int j = 0; j < data.p_num; j++) {
+            eta_num = eta_num + Var(data.X_num_flat[i * data.p_num + j]) * beta_num_ad[j];
+        }
+        for (int j = 0; j < data.p_denom; j++) {
+            eta_denom = eta_denom + Var(data.X_denom_flat[i * data.p_denom + j]) * beta_denom_ad[j];
+        }
+
+        // Add random effects (shared)
+        if (layout.has_re && data.re_group[i] > 0) {
+            int g = data.re_group[i] - 1;
+            Var re_g = params_ad[layout.re_start + g];
+            eta_num = eta_num + re_g;
+            eta_denom = eta_denom + re_g;
+        }
+
+        // Add temporal effect
+        if (layout.has_temporal && !data.temporal_time_idx.empty() &&
+            i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+            int t = data.temporal_time_idx[i] - 1;  // 0-based
+            int g = data.temporal_group_idx[i] - 1; // 0-based
+            if (g >= 0 && g < (int)phi_temporal_ad.size() &&
+                t >= 0 && t < (int)phi_temporal_ad[g].size()) {
+                Var temporal_effect = phi_temporal_ad[g][t];
+                if (data.temporal_shared) {
+                    eta_num = eta_num + temporal_effect;
+                    eta_denom = eta_denom + temporal_effect;
+                } else {
+                    eta_num = eta_num + temporal_effect;
+                }
+            }
+        }
+
+        // Add GP spatial effect
+        if (layout.is_gp && data.has_gp && !gp_w_ad.empty()) {
+            Var gp_effect = gp_w_ad[i];
+            if (data.gp_data.shared) {
+                eta_num = eta_num + gp_effect;
+                eta_denom = eta_denom + gp_effect;
+            } else {
+                eta_num = eta_num + gp_effect;
+            }
+        }
+
+        // Compute likelihood based on model type
+        Var ll_i = Var(0.0);
+
+        if (data.model_type == ModelType::BINOMIAL) {
+            Var p = inv_logit(eta_num);
+            ll_i = ratiod::math::log_lik_binomial(data.y_num[i], data.y_denom[i], p);
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            Var mu_num = safe_exp(eta_num);
+            Var mu_denom = safe_exp(eta_denom);
+            ll_i = ratiod::math::log_lik_negbin(data.y_num[i], mu_num, phi_num) +
+                   ratiod::math::log_lik_negbin(data.y_denom[i], mu_denom, phi_denom);
+        } else {  // POISSON_GAMMA
+            Var mu_num = safe_exp(eta_num);
+            Var mu_denom = safe_exp(eta_denom);
+            ll_i = ratiod::math::log_lik_poisson(data.y_num[i], mu_num) +
+                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+        }
+
+        log_post = log_post + ll_i;
+    }
+
+    // Backward pass
+    log_post.backward();
+
+    // Extract gradients
+    grad = get_adjoints(params_ad);
+
+    // Clean up tape
+    clear_tape();
+}
+
+// =====================================================================
 // HSGP gradient (O(N*M^2) - analytical, ~50x faster than numerical)
 // =====================================================================
 
@@ -2096,9 +2554,12 @@ void compute_gradient(
     } else if (layout.is_gp && data.has_gp && !layout.has_temporal) {
         // Single-scale GP (without temporal) uses autodiff (~3x speedup)
         compute_gradient_gp_autodiff(params, data, layout, grad);
-    } else if (layout.is_gp || layout.is_multiscale_gp) {
-        // Multi-scale GP or GP+temporal: fall back to numerical (TODO: implement autodiff)
-        compute_gradient_numerical(params, data, layout, grad);
+    } else if (layout.is_multiscale_gp && data.has_multiscale_gp) {
+        // Multi-scale GP uses autodiff (~3x speedup)
+        compute_gradient_msgp_autodiff(params, data, layout, grad);
+    } else if (layout.is_gp && layout.has_temporal) {
+        // GP+temporal uses autodiff (~3x speedup)
+        compute_gradient_gp_temporal_autodiff(params, data, layout, grad);
     } else {
         // Use autodiff for all other models (fast, 3-5x)
         compute_gradient_autodiff(params, data, layout, grad);
@@ -2463,12 +2924,14 @@ HMCResultCpp run_hmc_chain_cpp(
   WelfordStats mass_stats(n_params);
   bool use_mass_matrix = false;
 
-  // L-BFGS mass matrix adaptation
+  // L-BFGS mass matrix adaptation (warmup-only)
+  // Uses L-BFGS to learn curvature during warmup, then switches to standard HMC
   bool use_lbfgs = data.has_multiscale_gp &&
                    data.multiscale_gp_data.sampler == ratiod_gp::MSGPSampler::LBFGS;
   ratiod_gp::LBFGSState lbfgs_state;
   std::vector<double> q_prev, grad_prev;
   bool lbfgs_initialized = false;
+  bool lbfgs_warmup_done = false;  // After warmup, use standard HMC
   if (use_lbfgs) {
     lbfgs_state = ratiod_gp::LBFGSState(10, n_params);
     q_prev.resize(n_params);
@@ -2508,13 +2971,30 @@ HMCResultCpp run_hmc_chain_cpp(
       da = DualAveraging(epsilon, n_params);
     }
 
+    // L-BFGS: transition from L-BFGS to standard HMC at end of warmup
+    // Extract diagonal mass matrix from learned curvature
+    if (use_lbfgs && !lbfgs_warmup_done && iter == n_warmup - 1 && lbfgs_initialized) {
+      // Use gamma from L-BFGS as uniform scaling for mass matrix
+      // gamma = (s^T y) / (y^T y) approximates average inverse Hessian scaling
+      double gamma = lbfgs_state.gamma;
+      if (gamma > 0.01 && gamma < 100.0) {
+        // Set inv_mass = gamma * I (larger gamma = larger variance = larger step in that direction)
+        for (int i = 0; i < n_params; i++) {
+          inv_mass[i] = gamma;
+          sqrt_mass_diag[i] = 1.0 / std::sqrt(gamma);
+        }
+        use_mass_matrix = true;
+      }
+      lbfgs_warmup_done = true;
+    }
+
     // Sample momentum and compute kinetic energy
     std::vector<double> p(n_params);
     double kinetic_current = 0.0;
     double H_current;
 
-    if (use_lbfgs && lbfgs_initialized && lbfgs_state.d == n_params) {
-      // L-BFGS: Sample p ~ N(0, B) where B ≈ 1/gamma * I
+    if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
+      // L-BFGS: Sample p ~ N(0, B) where B ≈ 1/gamma * I (warmup only)
       std::vector<double> sqrt_diag = lbfgs_state.get_sqrt_B_diag();
       if ((int)sqrt_diag.size() == n_params) {
         for (int i = 0; i < n_params; i++) {
@@ -2550,8 +3030,8 @@ HMCResultCpp run_hmc_chain_cpp(
     std::vector<double> p_prop = p;
     bool divergent = false;
 
-    if (use_lbfgs && lbfgs_initialized && lbfgs_state.d == n_params) {
-      // L-BFGS leapfrog: position update uses H*p instead of p
+    if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
+      // L-BFGS leapfrog: position update uses H*p instead of p (warmup only)
       std::vector<double> grad(n_params);
       compute_gradient(q_prop, data, layout, grad);
 
@@ -2612,7 +3092,7 @@ HMCResultCpp run_hmc_chain_cpp(
     double log_prob_prop = compute_log_post(q_prop, data, layout);
     double kinetic_prop = 0.0;
 
-    if (use_lbfgs && lbfgs_initialized && lbfgs_state.d == n_params) {
+    if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
       kinetic_prop = lbfgs_state.kinetic_energy(p_prop);
     } else {
       for (int i = 0; i < n_params; i++) {
@@ -2641,8 +3121,8 @@ HMCResultCpp run_hmc_chain_cpp(
       mass_stats.update(q);
     }
 
-    // L-BFGS update: collect (s, y) pairs from accepted samples
-    if (use_lbfgs) {
+    // L-BFGS update: collect (s, y) pairs from accepted samples (warmup only)
+    if (use_lbfgs && !lbfgs_warmup_done) {
       std::vector<double> grad_current(n_params);
       compute_gradient(q, data, layout, grad_current);
 
@@ -2746,9 +3226,8 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   // chains sequentially for models that require autodiff gradients
   // Single-scale GP (without temporal) now uses autodiff, so can't parallelize
   bool can_parallelize = can_use_analytical_gradient(data, layout) ||
-                         layout.is_multiscale_gp ||  // Multi-scale GP uses numerical
-                         (layout.is_gp && layout.has_temporal) ||  // GP+temporal uses numerical
                          layout.is_hsgp;  // HSGP uses hand-coded gradients
+  // Note: MSGP and GP+temporal now use autodiff so cannot parallelize
 
 #ifdef _OPENMP
   if (can_parallelize && n_chains > 1) {
