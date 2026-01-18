@@ -1402,9 +1402,19 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
   bool is_basic_family = (data.model_type == ModelType::POISSON_GAMMA ||
                           data.model_type == ModelType::NEGBIN_NEGBIN ||
                           data.model_type == ModelType::BINOMIAL);
+
+  // Temporal is OK if no spatial/spatiotemporal (temporal-only models)
+  bool temporal_ok = !layout.has_temporal ||
+                     (layout.has_temporal && !layout.has_spatial && !layout.has_spatiotemporal);
+
+  // Spatial is OK if ICAR or BYM2 without temporal (spatial-only models)
+  bool spatial_ok = !layout.has_spatial ||
+                    (layout.has_spatial && !layout.has_temporal &&
+                     (data.spatial_type == SpatialType::ICAR || data.spatial_type == SpatialType::BYM2));
+
   return (is_basic_family &&
           !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
-          !layout.has_spatial && !layout.has_temporal &&
+          temporal_ok && spatial_ok &&
           !layout.has_zi && !layout.has_re_slopes &&
           !layout.has_latent && !layout.has_spatiotemporal &&
           !layout.has_multiscale_temporal &&
@@ -1491,6 +1501,83 @@ void compute_gradient_analytical(
     grad[layout.log_sigma_re_idx] += re_prior_grad_sigma;
   }
 
+  // ============ Temporal prior gradients ============
+  double log_tau_temporal = 0.0, tau_temporal = 1.0;
+  double logit_rho_ar1 = 0.0, rho_ar1 = 0.5;
+  int T_len = 0;
+  const double* phi_temporal = nullptr;
+  std::vector<double> grad_temporal_lik;  // Likelihood contribution
+
+  if (layout.has_temporal) {
+    log_tau_temporal = params[layout.log_tau_temporal_idx];
+    tau_temporal = std::exp(log_tau_temporal);
+    T_len = layout.temporal_end - layout.temporal_start;
+    phi_temporal = &params[layout.temporal_start];
+    grad_temporal_lik.assign(T_len, 0.0);
+
+    // tau prior: Gamma(shape, rate) via log transform
+    // d/d(log_tau) = (shape-1) - rate*tau + 1 (Jacobian)
+    grad[layout.log_tau_temporal_idx] = (data.tau_temporal_shape - 1.0)
+                                        - data.tau_temporal_rate * tau_temporal + 1.0;
+
+    // AR1: extract rho and add prior
+    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
+      logit_rho_ar1 = params[layout.logit_rho_ar1_idx];
+      rho_ar1 = 1.0 / (1.0 + std::exp(-logit_rho_ar1));
+      // Beta(2,2) prior on rho: d/d(rho) = (2-1)/(rho) - (2-1)/(1-rho) = (1-2*rho)/(rho*(1-rho))
+      // With logit transform Jacobian: grad = 1 - 2*rho
+      grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+    }
+  }
+
+  // ============ Spatial prior gradients (ICAR and BYM2) ============
+  double log_tau_spatial = 0.0, tau_spatial = 1.0;
+  double log_sigma_bym2 = 0.0, sigma_bym2 = 1.0;
+  double logit_rho_bym2 = 0.0, rho_bym2 = 0.5;
+  int n_spatial = 0;
+  const double* phi_spatial = nullptr;
+  const double* theta_bym2 = nullptr;
+  std::vector<double> grad_spatial_lik;  // Likelihood contribution
+
+  if (layout.has_spatial) {
+    n_spatial = data.n_spatial_units;
+    phi_spatial = &params[layout.spatial_start];
+    grad_spatial_lik.assign(n_spatial, 0.0);
+
+    if (data.spatial_type == SpatialType::BYM2) {
+      // BYM2: extract sigma, rho, theta
+      log_sigma_bym2 = params[layout.log_sigma_bym2_idx];
+      sigma_bym2 = std::exp(log_sigma_bym2);
+      logit_rho_bym2 = params[layout.logit_rho_bym2_idx];
+      rho_bym2 = 1.0 / (1.0 + std::exp(-logit_rho_bym2));
+      theta_bym2 = &params[layout.theta_bym2_start];
+
+      // Half-Cauchy prior on sigma: d/d(log_sigma) = -2*(sigma/scale)^2/(1+(sigma/scale)^2) + 1
+      double ratio_s = sigma_bym2 / data.sigma_re_scale;
+      double ratio_s_sq = ratio_s * ratio_s;
+      grad[layout.log_sigma_bym2_idx] = -2.0 * ratio_s_sq / (1.0 + ratio_s_sq) + 1.0;
+
+      // Beta(0.5, 0.5) prior on rho: d/d(logit_rho) = -0.5/(rho) + 0.5/(1-rho) + Jacobian
+      // = -0.5*(1-2*rho)/(rho*(1-rho)) + rho*(1-rho) (Jacobian)
+      // Simplifies to: -(0.5-rho) + rho*(1-rho) = rho - 0.5 + rho - rho^2 = 2*rho - 0.5 - rho^2
+      grad[layout.logit_rho_bym2_idx] = -0.5 / rho_bym2 + 0.5 / (1.0 - rho_bym2);
+      grad[layout.logit_rho_bym2_idx] += 1.0;  // Jacobian d(rho)/d(logit_rho) = rho*(1-rho), but we want grad wrt logit
+
+      // Initialize theta gradients (N(0,1) prior: d/d(theta) = -theta)
+      for (int s = 0; s < n_spatial; s++) {
+        grad[layout.theta_bym2_start + s] = -theta_bym2[s];
+      }
+    } else {
+      // ICAR: extract tau
+      log_tau_spatial = params[layout.log_tau_spatial_idx];
+      tau_spatial = std::exp(log_tau_spatial);
+
+      // Gamma prior on tau via log transform
+      grad[layout.log_tau_spatial_idx] = (data.tau_spatial_shape - 1.0)
+                                         - data.tau_spatial_rate * tau_spatial + 1.0;
+    }
+  }
+
   // ============ Likelihood gradients (O(n)) ============
 
   // Accumulators for beta gradients (will be added via X' * residual)
@@ -1527,6 +1614,43 @@ void compute_gradient_analytical(
         // For BINOMIAL, RE only affects numerator (logit of probability)
         if (data.model_type != ModelType::BINOMIAL) {
           eta_denom += re[re_idx];
+        }
+      }
+
+      // Add temporal effect if present
+      int t_idx = -1;
+      if (layout.has_temporal && !data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
+        t_idx = data.temporal_time_idx[i] - 1;
+        double temporal_effect = phi_temporal[t_idx];
+        eta_num += temporal_effect;
+        if (data.model_type != ModelType::BINOMIAL) {
+          eta_denom += temporal_effect;
+        }
+      }
+
+      // Add spatial effect if present
+      int s_idx = -1;
+      double d_spatial_d_phi = 0.0;  // Derivative of spatial_effect wrt phi_spatial
+      double d_spatial_d_theta = 0.0;  // Derivative of spatial_effect wrt theta_bym2
+      if (layout.has_spatial && !data.spatial_group.empty() && data.spatial_group[i] > 0) {
+        s_idx = data.spatial_group[i] - 1;
+        double spatial_effect;
+        if (data.spatial_type == SpatialType::BYM2) {
+          // BYM2: spatial_effect = sigma * (sqrt(rho) * scaled_phi + sqrt(1-rho) * theta)
+          double scaled_phi = phi_spatial[s_idx] * data.bym2_scale_factor;
+          double sqrt_rho = std::sqrt(rho_bym2);
+          double sqrt_1m_rho = std::sqrt(1.0 - rho_bym2);
+          spatial_effect = sigma_bym2 * (sqrt_rho * scaled_phi + sqrt_1m_rho * theta_bym2[s_idx]);
+          d_spatial_d_phi = sigma_bym2 * sqrt_rho * data.bym2_scale_factor;
+          d_spatial_d_theta = sigma_bym2 * sqrt_1m_rho;
+        } else {
+          // ICAR: spatial_effect = phi_spatial
+          spatial_effect = phi_spatial[s_idx];
+          d_spatial_d_phi = 1.0;
+        }
+        eta_num += spatial_effect;
+        if (data.model_type != ModelType::BINOMIAL) {
+          eta_denom += spatial_effect;
         }
       }
 
@@ -1620,6 +1744,45 @@ void compute_gradient_analytical(
         #endif
       }
 
+      // Accumulate temporal gradient (from likelihood)
+      if (t_idx >= 0) {
+        double temp_grad_i = resid_num;
+        if (data.model_type != ModelType::BINOMIAL) {
+          temp_grad_i += resid_denom;
+        }
+        #ifdef _OPENMP
+        #pragma omp atomic
+        grad_temporal_lik[t_idx] += temp_grad_i;
+        #else
+        grad_temporal_lik[t_idx] += temp_grad_i;
+        #endif
+      }
+
+      // Accumulate spatial gradient (from likelihood)
+      if (s_idx >= 0) {
+        double lik_grad = resid_num;
+        if (data.model_type != ModelType::BINOMIAL) {
+          lik_grad += resid_denom;
+        }
+        // For ICAR: grad_spatial[s] += lik_grad (d_spatial_d_phi = 1)
+        // For BYM2: grad_phi[s] += lik_grad * d_spatial_d_phi, grad_theta[s] += lik_grad * d_spatial_d_theta
+        #ifdef _OPENMP
+        #pragma omp atomic
+        grad_spatial_lik[s_idx] += lik_grad * d_spatial_d_phi;
+        #else
+        grad_spatial_lik[s_idx] += lik_grad * d_spatial_d_phi;
+        #endif
+
+        if (data.spatial_type == SpatialType::BYM2) {
+          #ifdef _OPENMP
+          #pragma omp atomic
+          grad[layout.theta_bym2_start + s_idx] += lik_grad * d_spatial_d_theta;
+          #else
+          grad[layout.theta_bym2_start + s_idx] += lik_grad * d_spatial_d_theta;
+          #endif
+        }
+      }
+
       // Accumulate phi gradients
       #ifdef _OPENMP
       local_grad_phi_num += grad_phi_num_i;
@@ -1663,6 +1826,171 @@ void compute_gradient_analytical(
   }
   if (layout.has_phi_denom) {
     grad[layout.log_phi_denom_idx] += phi_denom * grad_phi_denom_lik;
+  }
+
+  // ============ Temporal GMRF prior gradients ============
+  if (layout.has_temporal && T_len > 0) {
+    // Initialize temporal gradients with likelihood contribution
+    for (int t = 0; t < T_len; t++) {
+      grad[layout.temporal_start + t] = grad_temporal_lik[t];
+    }
+
+    if (data.temporal_type == TemporalType::RW1) {
+      // RW1: -0.5 * tau * sum((phi[t] - phi[t-1])^2)
+      // d/d(phi[t]) = tau * (phi[t-1] - phi[t]) + tau * (phi[t+1] - phi[t]) (interior)
+      double quad_form = 0.0;
+      for (int t = 0; t < T_len; t++) {
+        double grad_t = 0.0;
+        if (t > 0) {
+          grad_t += tau_temporal * (phi_temporal[t - 1] - phi_temporal[t]);
+          quad_form += (phi_temporal[t] - phi_temporal[t - 1]) * (phi_temporal[t] - phi_temporal[t - 1]);
+        }
+        if (t < T_len - 1) {
+          grad_t += tau_temporal * (phi_temporal[t + 1] - phi_temporal[t]);
+        }
+        grad[layout.temporal_start + t] += grad_t;
+      }
+      // tau gradient: 0.5*(T-1)*log(tau) - 0.5*tau*quad => d/d(log_tau) = 0.5*(T-1) - 0.5*tau*quad
+      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * quad_form;
+
+    } else if (data.temporal_type == TemporalType::RW2) {
+      // RW2: second-order differences
+      double quad_form = 0.0;
+      for (int t = 0; t < T_len; t++) {
+        double grad_t = 0.0;
+        if (t >= 2) {
+          double d2 = phi_temporal[t - 2] - 2.0 * phi_temporal[t - 1] + phi_temporal[t];
+          grad_t -= tau_temporal * d2;  // coefficient of phi[t] in (phi[t-2] - 2*phi[t-1] + phi[t])^2 is +1
+        }
+        if (t >= 1 && t < T_len - 1) {
+          double d2 = phi_temporal[t - 1] - 2.0 * phi_temporal[t] + phi_temporal[t + 1];
+          grad_t += 2.0 * tau_temporal * d2;  // coefficient of phi[t] is -2
+        }
+        if (t < T_len - 2) {
+          double d2 = phi_temporal[t] - 2.0 * phi_temporal[t + 1] + phi_temporal[t + 2];
+          grad_t -= tau_temporal * d2;  // coefficient of phi[t] is +1
+        }
+        grad[layout.temporal_start + t] += grad_t;
+      }
+      // Compute quadratic form for tau gradient
+      for (int t = 2; t < T_len; t++) {
+        double d2 = phi_temporal[t - 2] - 2.0 * phi_temporal[t - 1] + phi_temporal[t];
+        quad_form += d2 * d2;
+      }
+      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * quad_form;
+
+    } else if (data.temporal_type == TemporalType::AR1) {
+      // AR1: phi[0] ~ N(0, 1/(tau*(1-rho^2))), phi[t] | phi[t-1] ~ N(rho*phi[t-1], 1/tau)
+      double one_minus_rho2 = 1.0 - rho_ar1 * rho_ar1;
+
+      // Gradient for phi[0]: d/d(phi[0]) = -tau*(1-rho^2)*phi[0] + tau*rho*(phi[1] - rho*phi[0])
+      grad[layout.temporal_start] += -tau_temporal * one_minus_rho2 * phi_temporal[0];
+      if (T_len > 1) {
+        grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
+      }
+
+      // Gradient for phi[t], t > 0
+      double quad_form = one_minus_rho2 * phi_temporal[0] * phi_temporal[0];
+      for (int t = 1; t < T_len; t++) {
+        double resid = phi_temporal[t] - rho_ar1 * phi_temporal[t - 1];
+        quad_form += resid * resid;
+        double grad_t = -tau_temporal * resid;
+        if (t < T_len - 1) {
+          double resid_next = phi_temporal[t + 1] - rho_ar1 * phi_temporal[t];
+          grad_t += tau_temporal * rho_ar1 * resid_next;
+        }
+        grad[layout.temporal_start + t] += grad_t;
+      }
+
+      // tau gradient: 0.5*T*log(tau) + 0.5*log(1-rho^2) - 0.5*tau*quad
+      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * quad_form;
+
+      // rho gradient
+      if (layout.logit_rho_ar1_idx >= 0) {
+        double grad_rho = -rho_ar1 / one_minus_rho2;  // From 0.5*log(1-rho^2)
+        grad_rho += tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];  // From first term
+        for (int t = 1; t < T_len; t++) {
+          double resid = phi_temporal[t] - rho_ar1 * phi_temporal[t - 1];
+          grad_rho += tau_temporal * resid * phi_temporal[t - 1];
+        }
+        // Chain rule: d/d(logit_rho) = d/d(rho) * d(rho)/d(logit_rho) = grad_rho * rho * (1 - rho)
+        grad[layout.logit_rho_ar1_idx] += grad_rho * rho_ar1 * (1.0 - rho_ar1);
+      }
+    }
+  }
+
+  // ============ Spatial GMRF prior gradients (ICAR and BYM2) ============
+  if (layout.has_spatial && n_spatial > 0) {
+    // Add likelihood contribution to phi_spatial gradients
+    for (int s = 0; s < n_spatial; s++) {
+      grad[layout.spatial_start + s] = grad_spatial_lik[s];
+    }
+
+    // ICAR prior: -0.5 * tau * phi' * Q * phi where Q_ij = n_neighbors[i] if i=j, -1 if i~j
+    // d/d(phi[i]) = -tau * (n_neighbors[i]*phi[i] - sum_{j~i} phi[j])
+    double icar_quad = 0.0;
+    for (int i = 0; i < n_spatial; i++) {
+      double Qphi_i = data.n_neighbors[i] * phi_spatial[i];
+      int row_start = data.adj_row_ptr[i];
+      int row_end = data.adj_row_ptr[i + 1];
+      for (int k = row_start; k < row_end; k++) {
+        int j = data.adj_col_idx[k];
+        Qphi_i -= phi_spatial[j];
+        if (j > i) {
+          double diff = phi_spatial[i] - phi_spatial[j];
+          icar_quad += diff * diff;
+        }
+      }
+
+      if (data.spatial_type == SpatialType::BYM2) {
+        // For BYM2, ICAR prior has no tau scaling (it's absorbed into sigma/rho)
+        grad[layout.spatial_start + i] += -Qphi_i;
+      } else {
+        // For plain ICAR
+        grad[layout.spatial_start + i] += -tau_spatial * Qphi_i;
+      }
+    }
+
+    if (data.spatial_type == SpatialType::BYM2) {
+      // BYM2: additional gradients for sigma and rho from likelihood
+      // spatial_effect = sigma * (sqrt(rho) * scale * phi + sqrt(1-rho) * theta)
+      // d(spatial_effect)/d(sigma) = spatial_effect / sigma
+      // d(spatial_effect)/d(rho) = sigma * (0.5/sqrt(rho) * scale * phi - 0.5/sqrt(1-rho) * theta)
+
+      double sqrt_rho = std::sqrt(rho_bym2);
+      double sqrt_1m_rho = std::sqrt(1.0 - rho_bym2);
+      double grad_sigma_lik = 0.0;
+      double grad_rho_lik = 0.0;
+
+      for (int s = 0; s < n_spatial; s++) {
+        double scaled_phi = phi_spatial[s] * data.bym2_scale_factor;
+        // The likelihood gradient flows through the spatial effect
+        // We already accumulated theta gradients in the loop, but need sigma and rho gradients
+        double lik_grad_s = grad_spatial_lik[s] / (sigma_bym2 * sqrt_rho * data.bym2_scale_factor);  // This is the likelihood contribution per unit of phi
+
+        // Actually, let me reconsider. grad_spatial_lik[s] already has d(LL)/d(spatial_effect) * d(spatial_effect)/d(phi)
+        // What I need is d(LL)/d(spatial_effect) which is grad_spatial_lik[s] / d_spatial_d_phi
+        double d_LL_d_spatial = grad_spatial_lik[s] / (sigma_bym2 * sqrt_rho * data.bym2_scale_factor);
+
+        // d(spatial_effect)/d(log_sigma) = spatial_effect (chain rule for log transform)
+        double spatial_eff = sigma_bym2 * (sqrt_rho * scaled_phi + sqrt_1m_rho * theta_bym2[s]);
+        grad_sigma_lik += d_LL_d_spatial * spatial_eff;
+
+        // d(spatial_effect)/d(logit_rho) = d(spatial)/d(rho) * d(rho)/d(logit_rho)
+        // d(spatial)/d(rho) = sigma * (0.5/sqrt(rho) * scale * phi - 0.5/sqrt(1-rho) * theta)
+        double d_spatial_d_rho = sigma_bym2 * (0.5 / sqrt_rho * scaled_phi - 0.5 / sqrt_1m_rho * theta_bym2[s]);
+        grad_rho_lik += d_LL_d_spatial * d_spatial_d_rho * rho_bym2 * (1.0 - rho_bym2);
+      }
+
+      grad[layout.log_sigma_bym2_idx] += grad_sigma_lik;
+      grad[layout.logit_rho_bym2_idx] += grad_rho_lik;
+
+    } else {
+      // Plain ICAR: tau gradient
+      // log_post = 0.5*(n-1)*log(tau) - 0.5*tau*quad + const
+      // d/d(log_tau) = 0.5*(n-1) - 0.5*tau*quad
+      grad[layout.log_tau_spatial_idx] += 0.5 * (n_spatial - 1) - 0.5 * tau_spatial * icar_quad;
+    }
   }
 }
 

@@ -16,7 +16,7 @@
 | 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | A |
 | 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | A |
 | 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | H |
-| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | A |
+| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | H |
 | 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | A |
 | 8 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | A |
 | 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H |
@@ -36,7 +36,7 @@
 | 23 | negbin_negbin | slopes | ✗ | ✗ | ✗ | A |
 | 24 | negbin_negbin | crossed | ✗ | ✗ | ✗ | A |
 | 25 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | H |
-| 26 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | A |
+| 26 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | H |
 | 27 | negbin_negbin | ✓ | GP | ✗ | ✗ | A |
 | 28 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | A |
 | 29 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | H |
@@ -56,7 +56,7 @@
 | 43 | binomial | slopes | ✗ | ✗ | ✗ | A |
 | 44 | binomial | crossed | ✗ | ✗ | ✗ | A |
 | 45 | binomial | ✓ | ICAR | ✗ | ✗ | H |
-| 46 | binomial | ✓ | BYM2 | ✗ | ✗ | A |
+| 46 | binomial | ✓ | BYM2 | ✗ | ✗ | H |
 | 47 | binomial | ✓ | GP | ✗ | ✗ | A |
 | 48 | binomial | ✓ | MSGP | ✗ | ✗ | A |
 | 49 | binomial | ✓ | ✗ | RW1 | ✗ | H |
@@ -76,6 +76,6 @@
 
 | Grad | Count | % |
 |:----:|------:|--:|
-| H | 18 | 30% |
-| A | 42 | 70% |
+| H | 21 | 35% |
+| A | 39 | 65% |
 | **Total** | **60** |
