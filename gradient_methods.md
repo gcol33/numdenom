@@ -22,8 +22,8 @@
 | 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H |
 | 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | H |
 | 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H |
-| 12 | poisson_gamma | ✓ | ✗ | ✗ | ZI | A |
-| 13 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | A |
+| 12 | poisson_gamma | ✓ | ✗ | ✗ | ZI | H |
+| 13 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H |
 | 14 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | A |
 | 15 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | A |
 | 16 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | A |
@@ -42,8 +42,8 @@
 | 29 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | H |
 | 30 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | H |
 | 31 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | H |
-| 32 | negbin_negbin | ✓ | ✗ | ✗ | ZI | A |
-| 33 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | A |
+| 32 | negbin_negbin | ✓ | ✗ | ✗ | ZI | H |
+| 33 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | H |
 | 34 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | A |
 | 35 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | A |
 | 36 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | A |
@@ -76,6 +76,6 @@
 
 | Grad | Count | % |
 |:----:|------:|--:|
-| H | 21 | 35% |
-| A | 39 | 65% |
+| H | 25 | 42% |
+| A | 35 | 58% |
 | **Total** | **60** |

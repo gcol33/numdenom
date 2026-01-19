@@ -1,8 +1,8 @@
 # Hand-Coded Gradient Implementation Plan
 
 ## Current Status
-- **Completed**: 21/60 configurations (35%) have H gradients
-- **Remaining**: 39/60 configurations (65%) use autodiff (A)
+- **Completed**: 25/60 configurations (42%) have H gradients
+- **Remaining**: 35/60 configurations (58%) use autodiff (A)
 
 ## Completed (H)
 | # | Family | RE | Spatial | Temporal | ZI |
@@ -12,11 +12,15 @@
 | 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ |
 | 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ |
 | 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ |
+| 12 | poisson_gamma | ✓ | ✗ | ✗ | ZI |
+| 13 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle |
 | 21 | negbin_negbin | ✗ | ✗ | ✗ | ✗ |
 | 22 | negbin_negbin | ✓ | ✗ | ✗ | ✗ |
 | 29 | negbin_negbin | ✓ | ✗ | RW1 | ✗ |
 | 30 | negbin_negbin | ✓ | ✗ | RW2 | ✗ |
 | 31 | negbin_negbin | ✓ | ✗ | AR1 | ✗ |
+| 32 | negbin_negbin | ✓ | ✗ | ✗ | ZI |
+| 33 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle |
 | 41 | binomial | ✗ | ✗ | ✗ | ✗ |
 | 42 | binomial | ✓ | ✗ | ✗ | ✗ |
 | 49 | binomial | ✓ | ✗ | RW1 | ✗ |
@@ -67,16 +71,18 @@ BYM2 = ICAR + IID with mixing parameter.
 | 26 | negbin_negbin | ✓ | BYM2 |
 | 46 | binomial | ✓ | BYM2 |
 
-## Phase 4: Zero-Inflation (Medium)
+## Phase 4: Zero-Inflation (Medium) - DONE
 
-| # | Family | RE | ZI |
-|--:|--------|:--:|:--:|
-| 12 | poisson_gamma | ✓ | ZI |
-| 13 | poisson_gamma | ✓ | Hurdle |
-| 32 | negbin_negbin | ✓ | ZI |
-| 33 | negbin_negbin | ✓ | Hurdle |
-| 52 | binomial | ✓ | ZI |
-| 53 | binomial | ✓ | Hurdle |
+| # | Family | RE | ZI | Status |
+|--:|--------|:--:|:--:|:------:|
+| 12 | poisson_gamma | ✓ | ZI | ✅ H |
+| 13 | poisson_gamma | ✓ | Hurdle | ✅ H |
+| 32 | negbin_negbin | ✓ | ZI | ✅ H |
+| 33 | negbin_negbin | ✓ | Hurdle | ✅ H |
+| 52 | binomial | ✓ | ZI | A (uses ratiod_zibinomial) |
+| 53 | binomial | ✓ | Hurdle | A (uses ratiod_hurdle_binomial) |
+
+**Note**: Binomial ZI/Hurdle (rows 52, 53) use separate family classes (`ratiod_zibinomial()`, `ratiod_hurdle_binomial()`) rather than the `zi=` parameter, so they remain autodiff.
 
 ## Phase 5: Spatial + Temporal (Medium-Hard)
 | # | Family | Spatial | Temporal |
@@ -108,7 +114,7 @@ GP has O(n²/n³) - autodiff is appropriate.
 2. ✅ Phase 1: Temporal (9 configs) - DONE
 3. ✅ Phase 2: ICAR (3 configs) - DONE
 4. ✅ Phase 3: BYM2 (3 configs) - DONE
-5. ⬜ Phase 4: ZI/Hurdle (6 configs) - START HERE
+5. ✅ Phase 4: ZI/Hurdle (4/6 configs) - DONE (binomial ZI uses separate family classes, kept A)
 6. ⬜ Phase 5: Spatial+Temporal (9 configs)
 7. ⬜ Phase 6: Slopes (3 configs)
 8. ⬜ Phase 7: Crossed (3 configs)

@@ -1412,10 +1412,15 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
                     (layout.has_spatial && !layout.has_temporal &&
                      (data.spatial_type == SpatialType::ICAR || data.spatial_type == SpatialType::BYM2));
 
+  // ZI is OK for basic models without spatial/temporal (ZI-only models)
+  bool zi_ok = !layout.has_zi ||
+               (layout.has_zi && !layout.has_spatial && !layout.has_temporal &&
+                data.model_type != ModelType::BINOMIAL);  // ZI not for binomial
+
   return (is_basic_family &&
           !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
-          temporal_ok && spatial_ok &&
-          !layout.has_zi && !layout.has_re_slopes &&
+          temporal_ok && spatial_ok && zi_ok &&
+          !layout.has_re_slopes &&
           !layout.has_latent && !layout.has_spatiotemporal &&
           !layout.has_multiscale_temporal &&
           data.n_re_terms <= 1);  // Single or no RE term
@@ -1578,6 +1583,22 @@ void compute_gradient_analytical(
     }
   }
 
+  // ============ Zero-inflation prior gradients ============
+  const double* beta_zi = nullptr;
+  std::vector<double> grad_beta_zi;
+  double tau_zi = 1.0;
+
+  if (layout.has_zi && data.p_zi > 0) {
+    beta_zi = &params[layout.beta_zi_start];
+    tau_zi = 1.0 / (data.zi_prior_sd * data.zi_prior_sd + 1e-10);
+    grad_beta_zi.assign(data.p_zi, 0.0);
+
+    // N(0, zi_prior_sd^2) prior on ZI coefficients
+    for (int j = 0; j < data.p_zi; j++) {
+      grad[layout.beta_zi_start + j] = -tau_zi * beta_zi[j];
+    }
+  }
+
   // ============ Likelihood gradients (O(n)) ============
 
   // Accumulators for beta gradients (will be added via X' * residual)
@@ -1658,6 +1679,16 @@ void compute_gradient_analytical(
       double resid_denom = 0.0;
       double grad_phi_num_i = 0.0;
       double grad_phi_denom_i = 0.0;
+      double grad_logit_zi_i = 0.0;  // Gradient w.r.t. logit_zi for this obs
+
+      // Compute ZI linear predictor if applicable
+      double logit_zi = 0.0;
+      double zi_prob = 0.0;
+      if (layout.has_zi && data.p_zi > 0) {
+        logit_zi = ratiod_linalg::dot_product(
+            &data.X_zi_flat[i * data.p_zi], beta_zi, data.p_zi);
+        zi_prob = 1.0 / (1.0 + std::exp(-logit_zi));
+      }
 
       if (data.model_type == ModelType::BINOMIAL) {
         // ---- BINOMIAL ----
@@ -1667,49 +1698,141 @@ void compute_gradient_analytical(
         int n_trials = data.y_denom[i];
         resid_num = data.y_num[i] - n_trials * p;
         // No denominator contribution for binomial
+        // Note: ZI for binomial is not supported in H gradients
 
       } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
         // ---- NEGBIN_NEGBIN ----
-        // NB(y, mu, phi): mu = exp(eta), var = mu + mu^2/phi
-        // d(LL)/d(eta) = y - mu*(y+phi)/(mu+phi)
         double mu_num = std::exp(eta_num);
         double mu_denom = std::exp(eta_denom);
         int y_num_i = data.y_num[i];
         int y_denom_i = data.y_denom[i];
 
-        // Numerator NegBin gradient
-        double denom_num = mu_num + phi_num;
-        resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num;
-
-        // Denominator NegBin gradient
+        // Denominator NegBin gradient (always standard, not ZI)
         double denom_d = mu_denom + phi_denom;
         resid_denom = y_denom_i - mu_denom * (y_denom_i + phi_denom) / denom_d;
-
-        // Phi gradients for NegBin:
-        // d(LL)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + (mu-y)/(mu+phi)
-        grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
-                         + std::log(phi_num / denom_num)
-                         + (mu_num - y_num_i) / denom_num;
         grad_phi_denom_i = R::digamma(y_denom_i + phi_denom) - R::digamma(phi_denom)
                            + std::log(phi_denom / denom_d)
                            + (mu_denom - y_denom_i) / denom_d;
 
+        // Numerator with ZI handling
+        if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::ZI_NEGBIN) {
+          // ZI-NegBin numerator
+          double p0_nb = std::pow(phi_num / (phi_num + mu_num), phi_num);
+
+          if (y_num_i == 0) {
+            // P(Y=0) = zi + (1-zi)*p0_nb
+            double p0 = zi_prob + (1.0 - zi_prob) * p0_nb;
+            // d(LL)/d(mu) = (1-zi) * d(p0_nb)/d(mu) / p0
+            // d(p0_nb)/d(mu) = phi * (phi/(phi+mu))^phi * (-1/(phi+mu)) = -phi * p0_nb / (phi+mu)
+            double d_p0_nb_d_mu = -phi_num * p0_nb / (phi_num + mu_num);
+            resid_num = (1.0 - zi_prob) * d_p0_nb_d_mu * mu_num / p0;
+            // Gradient w.r.t. logit_zi
+            grad_logit_zi_i = zi_prob * (1.0 - zi_prob) * (1.0 - p0_nb) / p0;
+            // phi gradient for ZI-NegBin at y=0 (complex, using approximation)
+            grad_phi_num_i = (1.0 - zi_prob) * p0_nb * (std::log(phi_num / (phi_num + mu_num)) + mu_num / (phi_num + mu_num)) / p0;
+          } else {
+            // P(Y=y) = (1-zi) * NB(y|mu,phi)
+            double denom_num = mu_num + phi_num;
+            resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num;
+            grad_logit_zi_i = -zi_prob;  // d/d(logit_zi) log(1-zi) = -zi
+            grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
+                             + std::log(phi_num / denom_num)
+                             + (mu_num - y_num_i) / denom_num;
+          }
+        } else if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::HURDLE_NEGBIN) {
+          // Hurdle-NegBin numerator
+          if (y_num_i == 0) {
+            // P(Y=0) = 1 - theta, where theta = sigmoid(logit_zi) here represents P(Y>0)
+            // Note: for hurdle, logit_zi parameterizes theta = P(Y>0), so zi_prob IS theta
+            resid_num = 0.0;  // No mu contribution when y=0
+            grad_logit_zi_i = -zi_prob;  // d/d(logit_theta) log(1-theta) = -theta
+            grad_phi_num_i = 0.0;
+          } else {
+            // P(Y=y|Y>0) * theta = theta * TruncNB(y|mu,phi)
+            double p0_nb = std::pow(phi_num / (phi_num + mu_num), phi_num);
+            double log_normalizer = std::log(1.0 - p0_nb);
+            double denom_num = mu_num + phi_num;
+            // Gradient from truncated NB: same as regular + correction for normalizer
+            // d(log_normalizer)/d(mu) = -d(p0_nb)/d(mu) / (1-p0_nb) = phi*p0_nb / ((phi+mu)*(1-p0_nb))
+            resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num
+                        + phi_num * p0_nb * mu_num / ((phi_num + mu_num) * (1.0 - p0_nb));
+            grad_logit_zi_i = 1.0 - zi_prob;  // d/d(logit_theta) log(theta) = 1-theta
+            grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
+                             + std::log(phi_num / denom_num)
+                             + (mu_num - y_num_i) / denom_num;
+            // Truncation correction for phi gradient
+            grad_phi_num_i += p0_nb * (std::log(phi_num / (phi_num + mu_num)) + mu_num / (phi_num + mu_num)) / (1.0 - p0_nb);
+          }
+        } else {
+          // Standard NegBin (no ZI)
+          double denom_num = mu_num + phi_num;
+          resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num;
+          grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
+                           + std::log(phi_num / denom_num)
+                           + (mu_num - y_num_i) / denom_num;
+        }
+
       } else {
         // ---- POISSON_GAMMA ----
-        // Numerator: Poisson(y | mu), d(LL)/d(eta) = y - mu
         double mu_num = std::exp(eta_num);
         double mu_denom = std::exp(eta_denom);
-        resid_num = data.y_num[i] - mu_num;
+        int y_num_i = data.y_num[i];
 
-        // Denominator: Gamma(y | shape=phi, rate=phi/mu)
-        // d(LL)/d(eta_denom) = phi * (y/mu - 1)
+        // Denominator: Gamma (always standard)
         double y_denom_i = data.y_denom_cont[i];
         resid_denom = phi_num * (y_denom_i / mu_denom - 1.0);
-
-        // Phi gradient from Gamma likelihood
         double rate = phi_num / mu_denom;
-        grad_phi_num_i = std::log(rate) + 1.0 + std::log(y_denom_i)
-                         - R::digamma(phi_num) - rate * y_denom_i / phi_num;
+        double grad_phi_gamma = std::log(rate) + 1.0 + std::log(y_denom_i)
+                                - R::digamma(phi_num) - rate * y_denom_i / phi_num;
+
+        // Numerator with ZI handling
+        if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::ZI_POISSON) {
+          // ZI-Poisson numerator
+          double exp_neg_mu = std::exp(-mu_num);
+
+          if (y_num_i == 0) {
+            // P(Y=0) = zi + (1-zi)*exp(-mu)
+            double p0 = zi_prob + (1.0 - zi_prob) * exp_neg_mu;
+            // d(LL)/d(eta) = d(LL)/d(mu) * mu = -(1-zi)*exp(-mu)*mu / p0
+            resid_num = -(1.0 - zi_prob) * exp_neg_mu * mu_num / p0;
+            grad_logit_zi_i = zi_prob * (1.0 - zi_prob) * (1.0 - exp_neg_mu) / p0;
+            grad_phi_num_i = grad_phi_gamma;  // Only gamma part
+          } else {
+            // P(Y=y) = (1-zi) * Poisson(y|mu)
+            resid_num = y_num_i - mu_num;
+            grad_logit_zi_i = -zi_prob;
+            grad_phi_num_i = grad_phi_gamma;
+          }
+        } else if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::HURDLE_POISSON) {
+          // Hurdle-Poisson numerator
+          if (y_num_i == 0) {
+            resid_num = 0.0;
+            grad_logit_zi_i = -zi_prob;  // zi_prob is theta here
+            grad_phi_num_i = grad_phi_gamma;
+          } else {
+            // Truncated Poisson: d(LL)/d(eta) = y - mu + mu*exp(-mu)/(1-exp(-mu))
+            double exp_neg_mu = std::exp(-mu_num);
+            resid_num = y_num_i - mu_num + mu_num * exp_neg_mu / (1.0 - exp_neg_mu);
+            grad_logit_zi_i = 1.0 - zi_prob;
+            grad_phi_num_i = grad_phi_gamma;
+          }
+        } else {
+          // Standard Poisson (no ZI)
+          resid_num = y_num_i - mu_num;
+          grad_phi_num_i = grad_phi_gamma;
+        }
+      }
+
+      // Accumulate ZI coefficient gradients
+      if (layout.has_zi && data.p_zi > 0) {
+        for (int j = 0; j < data.p_zi; j++) {
+          #ifdef _OPENMP
+          #pragma omp atomic
+          grad_beta_zi[j] += data.X_zi_flat[i * data.p_zi + j] * grad_logit_zi_i;
+          #else
+          grad_beta_zi[j] += data.X_zi_flat[i * data.p_zi + j] * grad_logit_zi_i;
+          #endif
+        }
       }
 
       // Accumulate beta gradients: grad += X[i,:] * resid
@@ -1826,6 +1949,13 @@ void compute_gradient_analytical(
   }
   if (layout.has_phi_denom) {
     grad[layout.log_phi_denom_idx] += phi_denom * grad_phi_denom_lik;
+  }
+
+  // ZI coefficient gradients (likelihood contribution)
+  if (layout.has_zi && data.p_zi > 0) {
+    for (int j = 0; j < data.p_zi; j++) {
+      grad[layout.beta_zi_start + j] += grad_beta_zi[j];
+    }
   }
 
   // ============ Temporal GMRF prior gradients ============
