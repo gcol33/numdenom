@@ -1,8 +1,8 @@
 # Hand-Coded Gradient Implementation Plan
 
 ## Current Status
-- **Completed**: 40/60 configurations (67%) have H gradients
-- **Remaining**: 20/60 configurations (33%) use autodiff (A)
+- **Completed**: 46/60 configurations (77%) have H gradients
+- **Remaining**: 14/60 configurations (23%) use autodiff (A)
 
 ## Completed (H)
 | # | Family | RE | Spatial | Temporal | ZI |
@@ -41,6 +41,12 @@
 | 54 | binomial | ✓ | ICAR | RW1 | ✗ |
 | 55 | binomial | ✓ | BYM2 | RW1 | ✗ |
 | 56 | binomial | ✓ | ICAR | AR1 | ✗ |
+| 18 | poisson_gamma | ✓ | ICAR | ✗ | ZI |
+| 38 | negbin_negbin | ✓ | ICAR | ✗ | ZI |
+| 58 | binomial | ✓ | ICAR | ✗ | ZI |
+| 19 | poisson_gamma | slopes | ICAR | ✗ | ✗ |
+| 39 | negbin_negbin | slopes | ICAR | ✗ | ✗ |
+| 59 | binomial | slopes | ICAR | ✗ | ✗ |
 
 ## Phase 1: Temporal Models (Easy)
 Temporal priors have simple O(T) gradients.
@@ -127,7 +133,36 @@ BYM2 = ICAR + IID with mixing parameter.
 
 **Note**: Crossed RE (multiple intercept-only terms like `(1|site) + (1|year)`) now use hand-coded gradients.
 
-## Phase 8: GP Models (Keep Autodiff)
+## Phase 8: Spatial + ZI (Medium) - DONE
+
+| # | Family | Spatial | ZI | Status |
+|--:|--------|:-------:|:--:|:------:|
+| 18 | poisson_gamma | ICAR | ZI | ✅ H |
+| 38 | negbin_negbin | ICAR | ZI | ✅ H |
+| 58 | binomial | ICAR | ZI | ✅ H |
+
+**Note**: Spatial+ZI uses the existing gradient components (ICAR/BYM2 + ZI) in combination.
+
+## Phase 9: Slopes + Spatial (Medium) - DONE
+
+| # | Family | RE | Spatial | Status |
+|--:|--------|:------:|:-------:|:------:|
+| 19 | poisson_gamma | slopes | ICAR | ✅ H |
+| 39 | negbin_negbin | slopes | ICAR | ✅ H |
+| 59 | binomial | slopes | ICAR | ✅ H |
+
+**Note**: Slopes+Spatial uses correlated/uncorrelated slope gradients with ICAR/BYM2 spatial.
+
+## Phase 10: Binomial ZI (Separate Families) - Not Yet Implemented
+
+| # | Family | ZI | Status |
+|--:|--------|:--:|:------:|
+| 52 | binomial | ZI | - (ratiod_zibinomial not in HMC backend) |
+| 53 | binomial | Hurdle | - (ratiod_hurdle_binomial not in HMC backend) |
+
+**Note**: These use separate family classes (`ratiod_zibinomial()`, `ratiod_hurdle_binomial()`) that require different likelihood functions and are not yet implemented in the HMC backend. The R family definitions exist but the C++ implementation is pending.
+
+## Phase 11: GP Models (Keep Autodiff)
 GP has O(n²/n³) - autodiff is appropriate.
 - Rows 7, 8, 17, 20, 27, 28, 37, 40, 47, 48, 57, 60
 
@@ -140,4 +175,7 @@ GP has O(n²/n³) - autodiff is appropriate.
 6. ✅ Phase 5: Spatial+Temporal (9 configs) - DONE
 7. ✅ Phase 6: Slopes (3 configs) - DONE (both correlated and uncorrelated)
 8. ✅ Phase 7: Crossed (3 configs) - DONE
-9. ⬜ Phase 8: GP (keep A) - appropriate for O(n²/n³) complexity
+9. ✅ Phase 8: Spatial+ZI (3 configs) - DONE
+10. ✅ Phase 9: Slopes+Spatial (3 configs) - DONE
+11. ⬜ Phase 10: Binomial ZI (not implemented) - separate family classes require full C++ implementation
+12. ⬜ Phase 11: GP (keep A) - appropriate for O(n²/n³) complexity

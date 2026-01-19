@@ -28,8 +28,8 @@
 | 15 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | H |
 | 16 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | H |
 | 17 | poisson_gamma | ✓ | GP | RW1 | ✗ | A |
-| 18 | poisson_gamma | ✓ | ICAR | ✗ | ZI | A |
-| 19 | poisson_gamma | slopes | ICAR | ✗ | ✗ | A |
+| 18 | poisson_gamma | ✓ | ICAR | ✗ | ZI | H |
+| 19 | poisson_gamma | slopes | ICAR | ✗ | ✗ | H |
 | 20 | poisson_gamma | ✓ | MSGP | RW1 | ✗ | A |
 | 21 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | H |
 | 22 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H |
@@ -48,8 +48,8 @@
 | 35 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | H |
 | 36 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | H |
 | 37 | negbin_negbin | ✓ | GP | RW1 | ✗ | A |
-| 38 | negbin_negbin | ✓ | ICAR | ✗ | ZI | A |
-| 39 | negbin_negbin | slopes | ICAR | ✗ | ✗ | A |
+| 38 | negbin_negbin | ✓ | ICAR | ✗ | ZI | H |
+| 39 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H |
 | 40 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | A |
 | 41 | binomial | ✗ | ✗ | ✗ | ✗ | H |
 | 42 | binomial | ✓ | ✗ | ✗ | ✗ | H |
@@ -62,22 +62,28 @@
 | 49 | binomial | ✓ | ✗ | RW1 | ✗ | H |
 | 50 | binomial | ✓ | ✗ | RW2 | ✗ | H |
 | 51 | binomial | ✓ | ✗ | AR1 | ✗ | H |
-| 52 | binomial | ✓ | ✗ | ✗ | ZI | A |
-| 53 | binomial | ✓ | ✗ | ✗ | Hurdle | A |
+| 52 | binomial | ✓ | ✗ | ✗ | ZI | - |
+| 53 | binomial | ✓ | ✗ | ✗ | Hurdle | - |
 | 54 | binomial | ✓ | ICAR | RW1 | ✗ | H |
 | 55 | binomial | ✓ | BYM2 | RW1 | ✗ | H |
 | 56 | binomial | ✓ | ICAR | AR1 | ✗ | H |
 | 57 | binomial | ✓ | GP | RW1 | ✗ | A |
-| 58 | binomial | ✓ | ICAR | ✗ | ZI | A |
-| 59 | binomial | slopes | ICAR | ✗ | ✗ | A |
+| 58 | binomial | ✓ | ICAR | ✗ | ZI | H |
+| 59 | binomial | slopes | ICAR | ✗ | ✗ | H |
 | 60 | binomial | ✓ | MSGP | RW1 | ✗ | A |
 
 ## Summary
 
 | Grad | Count | % |
 |:----:|------:|--:|
-| H | 40 | 67% |
-| A | 20 | 33% |
+| H | 46 | 79% |
+| A | 12 | 21% |
+| - | 2 | - |
 | **Total** | **60** |
 
-**Note**: Random slopes (both `|` correlated and `||` uncorrelated) and crossed RE now use hand-coded gradients.
+**Legend:**
+- H = Hand-coded gradients
+- A = Autodiff gradients
+- \- = Not implemented (separate family class, backend not yet implemented)
+
+**Note**: Random slopes (both `|` correlated and `||` uncorrelated), crossed RE, Spatial+ZI, and Slopes+Spatial now use hand-coded gradients.

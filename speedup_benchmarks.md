@@ -14,7 +14,8 @@ Tracking actual performance gains from speedup.md phases.
 | Model | Time (sec) | Samples/sec | Gradient Mode | Notes |
 |-------|-----------|-------------|---------------|-------|
 | Simple (no spatial) | 4.87 | 41.10 | H (hand-coded) | Fast |
-| GP | 75.28 | 2.66 | A (autodiff) | **Bottleneck: tape overhead** |
+| GP (autodiff) | 75.28 | 2.66 | A (autodiff) | Baseline |
+| GP (hand-coded) | **13.87** | **14.42** | H (hand-coded) | **5.4x speedup!** |
 | MSGP | 22.32 | 8.96 | H (hand-coded) | 3.4x faster than GP autodiff |
 
 ## Investigation Results (2026-01-19)
@@ -46,11 +47,12 @@ The GP autodiff is slow because:
 
 The only effective solution is **hand-coded GP gradients** (Phase 5.1):
 - MSGP already has hand-coded gradients: 22 sec vs 75 sec for autodiff
-- Target: GP hand-coded gradients should achieve similar ~3x improvement
-- Expected result: GP from 75 sec to ~25 sec
+- ✅ **GP hand-coded gradients implemented**: 75 sec → 14 sec (**5.4x speedup**)
+- Exceeds the expected ~3x improvement
 
-## Next Steps
+## Implementation Details
 
-1. Implement hand-coded NNGP gradients (`compute_gradient_gp_handcoded`)
-2. Keep autodiff as reference for validation
-3. Skip Phases 2-4, go directly to Phase 5
+Phase 5.1 implemented via `compute_gradient_gp_handcoded()`:
+1. Uses `gp_nngp_gradients()` for analytical NNGP prior gradients
+2. Hand-coded likelihood gradients for Binomial, NegBin, Poisson-Gamma
+3. Avoids all autodiff tape overhead
