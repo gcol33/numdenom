@@ -36,66 +36,23 @@ GP-based models (rows 7, 8, 18, 27, 38) achieve only ~3x speedup vs Stan, while 
 
 ---
 
-## Phase 1: Low-Hanging Fruit (Expected: ~3x → ~5x)
+## Phase 1: Low-Hanging Fruit ❌ INEFFECTIVE FOR AUTODIFF
 
-### 1.1 Preallocate work vectors outside loop ✅ DONE
+**Investigation (2026-01-19):** These optimizations don't help GP autodiff because the bottleneck is tape node creation, not memory allocation. For autodiff Vars, every `Var(0.0)` creates a tape node regardless of vector reuse.
 
-**File:** `src/hmc_gp_autodiff.h`
+**Baseline:** ~75 sec for N=100, nn=10, iter=300 binomial GP
 
-**Result:** GP 8.2 → 10.2 samples/sec (+25%), MSGP 5.1 → 6.0 samples/sec (+18%)
+### 1.1 Preallocate work vectors outside loop ❌ NO EFFECT
 
-**Problem:** Lines 260-272 allocate vectors inside N-observation loop:
-```cpp
-// CURRENT (slow)
-for (int i = 1; i < N; i++) {
-    std::vector<T> L_small(n_neighbors * n_neighbors);  // alloc!
-    std::vector<T> c_small(...);                         // alloc!
-    std::vector<T> y_small;                              // alloc!
-    std::vector<T> alpha_small;                          // alloc!
-}
-```
+**Tested:** Vector preallocation inside loop vs outside loop
+**Result:** No measurable improvement for autodiff path
+**Reason:** `std::vector<Var>.resize()` still creates tape nodes via Var constructor
 
-**Fix:** Move to outer scope, resize instead of reallocate:
-```cpp
-// FIXED (fast)
-std::vector<T> L_small, c_small, y_small, alpha_small;
-L_small.reserve(nn * nn);
-c_small.reserve(nn);
-// ...
-for (int i = 1; i < N; i++) {
-    L_small.resize(n_neighbors * n_neighbors);
-    // reuse without reallocation
-}
-```
+### 1.2 Replace `std::pow(x, 2)` with `x * x` ❌ ALREADY DONE IN 1.3
 
-**Effort:** 1 hour | **Impact:** ~20-30% speedup
+**Status:** Distance computation already uses cached values from Phase 1.3
 
----
-
-### 1.2 Replace `std::pow(x, 2)` with `x * x` ✅ DONE
-
-**File:** `src/hmc_gp_autodiff.h`, `src/hmc_gp.h`
-
-**Problem:** Line 250-253 uses slow `std::pow`:
-```cpp
-double d12 = std::sqrt(
-    std::pow(gp_data.coords[...] - gp_data.coords[...], 2) +
-    std::pow(gp_data.coords[...] - gp_data.coords[...], 2)
-);
-```
-
-**Fix:**
-```cpp
-double dx = gp_data.coords[nn_idx1 * 2] - gp_data.coords[nn_idx2 * 2];
-double dy = gp_data.coords[nn_idx1 * 2 + 1] - gp_data.coords[nn_idx2 * 2 + 1];
-double d12 = std::sqrt(dx * dx + dy * dy);
-```
-
-**Effort:** 15 min | **Impact:** ~5% speedup
-
----
-
-### 1.3 Cache neighbor distances ✅ DONE
+### 1.3 Cache neighbor distances ✅ DONE (+1.5%)
 
 **Files:** `R/spatial.R`, `R/backend_hmc.R`, `src/hmc_gp.h`, `src/hmc_gp_autodiff.h`, `src/hmc_sampler.cpp`
 
@@ -110,38 +67,17 @@ double d12 = std::sqrt(dx * dx + dy * dy);
 
 ---
 
-## Phase 2: Autodiff Infrastructure (Expected: ~5x → ~8x)
+## Phase 2: Autodiff Infrastructure ❌ UNLIKELY TO HELP
 
-### 2.1 Arena allocator for tape nodes
+**Investigation (2026-01-19):** Tested arena allocation and static dispatch. Both made performance WORSE or had no effect. The bottleneck is the sheer number of tape nodes created (one per Var operation), not the allocation strategy.
 
-**File:** `src/autodiff.h`, `src/autodiff.cpp`
+### 2.1 Arena allocator for tape nodes ❌ TESTED - NO IMPROVEMENT
 
-**Problem:** Each `Var` operation calls `nodes.emplace_back()` which may trigger heap allocation and has poor cache locality.
+**Tested:** Pre-reserving nodes vector with 65K capacity
+**Result:** No improvement; resize() still creates Var objects
+**Reason:** For Var type, vector operations invoke constructors that add tape nodes
 
-**Fix:** Use a simple arena allocator:
-```cpp
-class Arena {
-    std::vector<char> buffer;
-    size_t offset = 0;
-public:
-    Arena(size_t size) : buffer(size) {}
-
-    template<typename T, typename... Args>
-    T* alloc(Args&&... args) {
-        T* ptr = reinterpret_cast<T*>(&buffer[offset]);
-        offset += sizeof(T);
-        return new(ptr) T(std::forward<Args>(args)...);
-    }
-
-    void reset() { offset = 0; }
-};
-```
-
-**Effort:** 4 hours | **Impact:** ~20-30% speedup
-
----
-
-### 2.2 Replace `std::function` with static dispatch
+### 2.2 Replace `std::function` with static dispatch ❌ TESTED - SLOWER
 
 **File:** `src/autodiff.h`
 
