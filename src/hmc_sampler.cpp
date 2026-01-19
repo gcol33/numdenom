@@ -1432,7 +1432,8 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
           temporal_ok && spatial_ok && zi_ok && slopes_ok &&
           !layout.has_latent && !layout.has_spatiotemporal &&
           !layout.has_multiscale_temporal &&
-          data.n_re_terms <= 1);  // Single or no RE term
+          (data.n_re_terms <= 1 ||
+           (data.n_re_terms > 1 && !layout.has_re_slopes)));  // Crossed RE (intercept-only) is OK
 }
 
 void compute_gradient_analytical(
@@ -1718,15 +1719,33 @@ void compute_gradient_analytical(
       }
     }
   } else if (layout.has_re && !layout.has_re_slopes) {
-    // Simple intercept-only RE
-    for (int g = 0; g < data.n_re_groups; g++) {
-      double re_g = re[g];
-      grad[layout.re_start + g] = -tau_re * re_g;
-      // Contribution to sigma gradient: d/d(log_sigma) of -0.5*tau*re^2 + 0.5*log(tau)
-      // = tau*re^2 - 1 (after chain rule for log transform)
-      re_prior_grad_sigma += tau_re * re_g * re_g - 1.0;
+    // Intercept-only RE (single or crossed terms)
+    int n_terms = (data.n_re_terms > 1) ? data.n_re_terms : 1;
+
+    for (int t = 0; t < n_terms; t++) {
+      // Get term-specific parameters
+      int log_sigma_idx = (n_terms > 1) ? layout.log_sigma_re_multi[t] : layout.log_sigma_re_idx;
+      int re_start_t = (n_terms > 1) ? layout.re_start_multi[t] : layout.re_start;
+      int n_groups_t = (n_terms > 1) ? data.re_n_groups_multi[t] : data.n_re_groups;
+
+      double log_sigma_t = params[log_sigma_idx];
+      double sigma_t = std::exp(log_sigma_t);
+      double tau_t = 1.0 / (sigma_t * sigma_t + 1e-10);
+
+      // Half-Cauchy prior on sigma_t
+      double ratio_t = sigma_t / data.sigma_re_scale;
+      double ratio_t_sq = ratio_t * ratio_t;
+      grad[log_sigma_idx] = -2.0 * ratio_t_sq / (1.0 + ratio_t_sq) + 1.0;
+
+      // N(0, sigma_t^2) prior on each RE for this term
+      double sigma_grad_t = 0.0;
+      for (int g = 0; g < n_groups_t; g++) {
+        double re_g = params[re_start_t + g];
+        grad[re_start_t + g] = -tau_t * re_g;
+        sigma_grad_t += tau_t * re_g * re_g - 1.0;
+      }
+      grad[log_sigma_idx] += sigma_grad_t;
     }
-    grad[layout.log_sigma_re_idx] += re_prior_grad_sigma;
   }
 
   // ============ Temporal prior gradients ============
@@ -1856,6 +1875,8 @@ void compute_gradient_analytical(
       int re_group_idx = -1;
       int re_n_coefs_i = 1;
       std::vector<double> re_slope_x_i;  // Slope design values for this obs
+      std::vector<int> re_idx_multi;  // Group indices for each crossed RE term
+      int n_crossed_terms = 0;
       if (layout.has_re) {
         if (layout.has_re_slopes && n_re_terms_slopes > 0) {
           // Random slopes case: handle first term only (single RE term for H gradients)
@@ -1886,8 +1907,24 @@ void compute_gradient_analytical(
               eta_denom += re_contrib;
             }
           }
+        } else if (data.n_re_terms > 1) {
+          // Crossed RE (multiple intercept-only terms)
+          n_crossed_terms = data.n_re_terms;
+          re_idx_multi.resize(n_crossed_terms, -1);
+          for (int t = 0; t < n_crossed_terms; t++) {
+            int group_idx = data.re_group_multi[t][i];
+            if (group_idx > 0) {
+              int g = group_idx - 1;
+              re_idx_multi[t] = g;
+              double re_val = params[layout.re_start_multi[t] + g];
+              eta_num += re_val;
+              if (data.model_type != ModelType::BINOMIAL) {
+                eta_denom += re_val;
+              }
+            }
+          }
         } else if (data.re_group[i] > 0) {
-          // Simple intercept-only RE
+          // Simple intercept-only RE (single term)
           re_idx = data.re_group[i] - 1;
           eta_num += re[re_idx];
           if (data.model_type != ModelType::BINOMIAL) {
@@ -2141,8 +2178,24 @@ void compute_gradient_analytical(
           grad_re_slopes_lik[0][g * n_coefs + 1 + s] += slope_grad;
           #endif
         }
+      } else if (n_crossed_terms > 0) {
+        // Crossed RE (multiple intercept-only terms)
+        double re_grad_i = resid_num;
+        if (data.model_type != ModelType::BINOMIAL) {
+          re_grad_i += resid_denom;
+        }
+        for (int t = 0; t < n_crossed_terms; t++) {
+          if (re_idx_multi[t] >= 0) {
+            #ifdef _OPENMP
+            #pragma omp atomic
+            grad[layout.re_start_multi[t] + re_idx_multi[t]] += re_grad_i;
+            #else
+            grad[layout.re_start_multi[t] + re_idx_multi[t]] += re_grad_i;
+            #endif
+          }
+        }
       } else if (re_idx >= 0) {
-        // Simple intercept-only RE
+        // Simple intercept-only RE (single term)
         double re_grad_i = resid_num;
         if (data.model_type != ModelType::BINOMIAL) {
           re_grad_i += resid_denom;  // Shared RE affects both processes

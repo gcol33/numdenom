@@ -1,8 +1,8 @@
 # Hand-Coded Gradient Implementation Plan
 
 ## Current Status
-- **Completed**: 37/60 configurations (62%) have H gradients
-- **Remaining**: 23/60 configurations (38%) use autodiff (A)
+- **Completed**: 40/60 configurations (67%) have H gradients
+- **Remaining**: 20/60 configurations (33%) use autodiff (A)
 
 ## Completed (H)
 | # | Family | RE | Spatial | Temporal | ZI |
@@ -117,12 +117,15 @@ BYM2 = ICAR + IID with mixing parameter.
 
 **Note**: Both correlated (`|` syntax) and uncorrelated (`||` syntax) random slopes now use hand-coded gradients with Cholesky parameterization.
 
-## Phase 7: Crossed RE (Hard)
-| # | Family | RE |
-|--:|--------|:------:|
-| 4 | poisson_gamma | crossed |
-| 24 | negbin_negbin | crossed |
-| 44 | binomial | crossed |
+## Phase 7: Crossed RE (Hard) - DONE
+
+| # | Family | RE | Status |
+|--:|--------|:------:|:------:|
+| 4 | poisson_gamma | crossed | ✅ H |
+| 24 | negbin_negbin | crossed | ✅ H |
+| 44 | binomial | crossed | ✅ H |
+
+**Note**: Crossed RE (multiple intercept-only terms like `(1|site) + (1|year)`) now use hand-coded gradients.
 
 ## Phase 8: GP Models (Keep Autodiff)
 GP has O(n²/n³) - autodiff is appropriate.
@@ -136,5 +139,5 @@ GP has O(n²/n³) - autodiff is appropriate.
 5. ✅ Phase 4: ZI/Hurdle (4/6 configs) - DONE (binomial ZI uses separate family classes, kept A)
 6. ✅ Phase 5: Spatial+Temporal (9 configs) - DONE
 7. ✅ Phase 6: Slopes (3 configs) - DONE (both correlated and uncorrelated)
-8. ⬜ Phase 7: Crossed (3 configs)
-9. ⬜ Phase 8: GP (keep A)
+8. ✅ Phase 7: Crossed (3 configs) - DONE
+9. ⬜ Phase 8: GP (keep A) - appropriate for O(n²/n³) complexity
