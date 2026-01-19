@@ -1421,10 +1421,15 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
                (layout.has_zi && !layout.has_spatial && !layout.has_temporal &&
                 data.model_type != ModelType::BINOMIAL);  // ZI not for binomial
 
+  // Random slopes: only uncorrelated slopes are supported (|| syntax)
+  // Correlated slopes (| syntax) require complex Cholesky gradient, stay with autodiff
+  bool slopes_ok = !layout.has_re_slopes ||
+                   (layout.has_re_slopes && !layout.has_re_correlated_slopes &&
+                    !layout.has_spatial && !layout.has_temporal && !layout.has_zi);
+
   return (is_basic_family &&
           !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
-          temporal_ok && spatial_ok && zi_ok &&
-          !layout.has_re_slopes &&
+          temporal_ok && spatial_ok && zi_ok && slopes_ok &&
           !layout.has_latent && !layout.has_spatiotemporal &&
           !layout.has_multiscale_temporal &&
           data.n_re_terms <= 1);  // Single or no RE term
@@ -1499,7 +1504,46 @@ void compute_gradient_analytical(
   // d/d(re[g]) = -tau_re * re[g]
   // Also accumulates contribution to sigma_re gradient
   double re_prior_grad_sigma = 0.0;
-  if (layout.has_re) {
+  std::vector<std::vector<double>> grad_re_slopes_lik;  // [term][g*n_coefs+c] likelihood contributions
+  int n_re_terms_slopes = 0;
+
+  if (layout.has_re && layout.has_re_slopes && !layout.has_re_correlated_slopes) {
+    // ============ Uncorrelated random slopes prior gradients ============
+    // Each coefficient type c has independent N(0, sigma_c^2) prior
+    n_re_terms_slopes = data.n_re_terms;
+    grad_re_slopes_lik.resize(n_re_terms_slopes);
+
+    for (int t = 0; t < n_re_terms_slopes; t++) {
+      int n_groups = data.re_n_groups_multi[t];
+      int n_coefs = layout.re_n_coefs_multi[t];
+      int re_start_t = layout.re_start_multi[t];
+      grad_re_slopes_lik[t].assign(n_groups * n_coefs, 0.0);
+
+      // Extract sigma parameters and compute priors
+      for (int c = 0; c < n_coefs; c++) {
+        int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
+        double log_sigma_c = params[log_sigma_idx];
+        double sigma_c = std::exp(log_sigma_c);
+        double tau_c = 1.0 / (sigma_c * sigma_c + 1e-10);
+
+        // Half-Cauchy prior on sigma_c
+        double ratio_c = sigma_c / data.sigma_re_scale;
+        double ratio_c_sq = ratio_c * ratio_c;
+        grad[log_sigma_idx] = -2.0 * ratio_c_sq / (1.0 + ratio_c_sq) + 1.0;
+
+        // N(0, sigma_c^2) prior on each re_{g,c}
+        double sigma_grad_c = 0.0;
+        for (int g = 0; g < n_groups; g++) {
+          double re_gc = params[re_start_t + g * n_coefs + c];
+          grad[re_start_t + g * n_coefs + c] = -tau_c * re_gc;
+          // Contribution to sigma gradient
+          sigma_grad_c += tau_c * re_gc * re_gc - 1.0;
+        }
+        grad[log_sigma_idx] += sigma_grad_c;
+      }
+    }
+  } else if (layout.has_re && !layout.has_re_slopes) {
+    // Simple intercept-only RE
     for (int g = 0; g < data.n_re_groups; g++) {
       double re_g = re[g];
       grad[layout.re_start + g] = -tau_re * re_g;
@@ -1633,12 +1677,47 @@ void compute_gradient_analytical(
 
       // Add RE if present
       int re_idx = -1;
-      if (layout.has_re && data.re_group[i] > 0) {
-        re_idx = data.re_group[i] - 1;
-        eta_num += re[re_idx];
-        // For BINOMIAL, RE only affects numerator (logit of probability)
-        if (data.model_type != ModelType::BINOMIAL) {
-          eta_denom += re[re_idx];
+      int re_term_idx = -1;
+      int re_group_idx = -1;
+      int re_n_coefs_i = 1;
+      std::vector<double> re_slope_x_i;  // Slope design values for this obs
+      if (layout.has_re) {
+        if (layout.has_re_slopes && n_re_terms_slopes > 0) {
+          // Random slopes case: handle first term only (single RE term for H gradients)
+          re_term_idx = 0;
+          re_group_idx = data.re_group_multi[0][i];
+          if (re_group_idx > 0) {
+            int g = re_group_idx - 1;
+            re_n_coefs_i = layout.re_n_coefs_multi[0];
+            int re_base = layout.re_start_multi[0] + g * re_n_coefs_i;
+
+            // Intercept contribution
+            double re_contrib = params[re_base];
+
+            // Slope contributions
+            int n_slopes = re_n_coefs_i - 1;
+            re_slope_x_i.resize(n_slopes);
+            if (n_slopes > 0 && !data.re_slope_matrices[0].empty()) {
+              for (int s = 0; s < n_slopes; s++) {
+                double x_slope = data.re_slope_matrices[0][i * n_slopes + s];
+                re_slope_x_i[s] = x_slope;
+                double re_slope = params[re_base + 1 + s];
+                re_contrib += re_slope * x_slope;
+              }
+            }
+
+            eta_num += re_contrib;
+            if (data.model_type != ModelType::BINOMIAL) {
+              eta_denom += re_contrib;
+            }
+          }
+        } else if (data.re_group[i] > 0) {
+          // Simple intercept-only RE
+          re_idx = data.re_group[i] - 1;
+          eta_num += re[re_idx];
+          if (data.model_type != ModelType::BINOMIAL) {
+            eta_denom += re[re_idx];
+          }
         }
       }
 
@@ -1859,7 +1938,36 @@ void compute_gradient_analytical(
       }
 
       // Accumulate RE gradient
-      if (re_idx >= 0) {
+      if (layout.has_re_slopes && re_group_idx > 0) {
+        // Random slopes case: gradient for intercept and each slope
+        double re_grad_base = resid_num;
+        if (data.model_type != ModelType::BINOMIAL) {
+          re_grad_base += resid_denom;
+        }
+        int g = re_group_idx - 1;
+        int n_coefs = re_n_coefs_i;
+
+        // Intercept gradient: same as simple RE
+        #ifdef _OPENMP
+        #pragma omp atomic
+        grad_re_slopes_lik[0][g * n_coefs] += re_grad_base;
+        #else
+        grad_re_slopes_lik[0][g * n_coefs] += re_grad_base;
+        #endif
+
+        // Slope gradients: multiply by slope design value
+        int n_slopes = n_coefs - 1;
+        for (int s = 0; s < n_slopes; s++) {
+          double slope_grad = re_grad_base * re_slope_x_i[s];
+          #ifdef _OPENMP
+          #pragma omp atomic
+          grad_re_slopes_lik[0][g * n_coefs + 1 + s] += slope_grad;
+          #else
+          grad_re_slopes_lik[0][g * n_coefs + 1 + s] += slope_grad;
+          #endif
+        }
+      } else if (re_idx >= 0) {
+        // Simple intercept-only RE
         double re_grad_i = resid_num;
         if (data.model_type != ModelType::BINOMIAL) {
           re_grad_i += resid_denom;  // Shared RE affects both processes
@@ -1959,6 +2067,20 @@ void compute_gradient_analytical(
   if (layout.has_zi && data.p_zi > 0) {
     for (int j = 0; j < data.p_zi; j++) {
       grad[layout.beta_zi_start + j] += grad_beta_zi[j];
+    }
+  }
+
+  // Random slopes likelihood gradients
+  if (layout.has_re_slopes && n_re_terms_slopes > 0) {
+    for (int t = 0; t < n_re_terms_slopes; t++) {
+      int n_groups = data.re_n_groups_multi[t];
+      int n_coefs = layout.re_n_coefs_multi[t];
+      int re_start_t = layout.re_start_multi[t];
+      for (int g = 0; g < n_groups; g++) {
+        for (int c = 0; c < n_coefs; c++) {
+          grad[re_start_t + g * n_coefs + c] += grad_re_slopes_lik[t][g * n_coefs + c];
+        }
+      }
     }
   }
 
