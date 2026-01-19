@@ -24,9 +24,9 @@
 | 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H |
 | 12 | poisson_gamma | ✓ | ✗ | ✗ | ZI | H |
 | 13 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H |
-| 14 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | A |
-| 15 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | A |
-| 16 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | A |
+| 14 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H |
+| 15 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | H |
+| 16 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | H |
 | 17 | poisson_gamma | ✓ | GP | RW1 | ✗ | A |
 | 18 | poisson_gamma | ✓ | ICAR | ✗ | ZI | A |
 | 19 | poisson_gamma | slopes | ICAR | ✗ | ✗ | A |
@@ -44,9 +44,9 @@
 | 31 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | H |
 | 32 | negbin_negbin | ✓ | ✗ | ✗ | ZI | H |
 | 33 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | H |
-| 34 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | A |
-| 35 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | A |
-| 36 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | A |
+| 34 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H |
+| 35 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | H |
+| 36 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | H |
 | 37 | negbin_negbin | ✓ | GP | RW1 | ✗ | A |
 | 38 | negbin_negbin | ✓ | ICAR | ✗ | ZI | A |
 | 39 | negbin_negbin | slopes | ICAR | ✗ | ✗ | A |
@@ -64,9 +64,9 @@
 | 51 | binomial | ✓ | ✗ | AR1 | ✗ | H |
 | 52 | binomial | ✓ | ✗ | ✗ | ZI | A |
 | 53 | binomial | ✓ | ✗ | ✗ | Hurdle | A |
-| 54 | binomial | ✓ | ICAR | RW1 | ✗ | A |
-| 55 | binomial | ✓ | BYM2 | RW1 | ✗ | A |
-| 56 | binomial | ✓ | ICAR | AR1 | ✗ | A |
+| 54 | binomial | ✓ | ICAR | RW1 | ✗ | H |
+| 55 | binomial | ✓ | BYM2 | RW1 | ✗ | H |
+| 56 | binomial | ✓ | ICAR | AR1 | ✗ | H |
 | 57 | binomial | ✓ | GP | RW1 | ✗ | A |
 | 58 | binomial | ✓ | ICAR | ✗ | ZI | A |
 | 59 | binomial | slopes | ICAR | ✗ | ✗ | A |
@@ -76,6 +76,6 @@
 
 | Grad | Count | % |
 |:----:|------:|--:|
-| H | 25 | 42% |
-| A | 35 | 58% |
+| H | 34 | 57% |
+| A | 26 | 43% |
 | **Total** | **60** |

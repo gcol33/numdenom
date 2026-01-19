@@ -1403,14 +1403,18 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
                           data.model_type == ModelType::NEGBIN_NEGBIN ||
                           data.model_type == ModelType::BINOMIAL);
 
-  // Temporal is OK if no spatial/spatiotemporal (temporal-only models)
-  bool temporal_ok = !layout.has_temporal ||
-                     (layout.has_temporal && !layout.has_spatial && !layout.has_spatiotemporal);
+  // Check if spatial type is one we have hand-coded gradients for
+  bool spatial_is_icar_bym2 = (data.spatial_type == SpatialType::ICAR ||
+                               data.spatial_type == SpatialType::BYM2);
 
-  // Spatial is OK if ICAR or BYM2 without temporal (spatial-only models)
+  // Temporal is OK alone or combined with ICAR/BYM2 spatial (no spatiotemporal interaction)
+  bool temporal_ok = !layout.has_temporal ||
+                     (layout.has_temporal && !layout.has_spatiotemporal &&
+                      (!layout.has_spatial || spatial_is_icar_bym2));
+
+  // Spatial is OK for ICAR/BYM2 (alone or combined with temporal)
   bool spatial_ok = !layout.has_spatial ||
-                    (layout.has_spatial && !layout.has_temporal &&
-                     (data.spatial_type == SpatialType::ICAR || data.spatial_type == SpatialType::BYM2));
+                    (layout.has_spatial && spatial_is_icar_bym2 && !layout.has_spatiotemporal);
 
   // ZI is OK for basic models without spatial/temporal (ZI-only models)
   bool zi_ok = !layout.has_zi ||
