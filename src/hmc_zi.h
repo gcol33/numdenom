@@ -16,7 +16,9 @@ enum class ZIType {
   ZI_POISSON,     // Zero-inflated Poisson
   ZI_NEGBIN,      // Zero-inflated negative binomial
   HURDLE_POISSON, // Hurdle Poisson (truncated at zero)
-  HURDLE_NEGBIN   // Hurdle negative binomial
+  HURDLE_NEGBIN,  // Hurdle negative binomial
+  ZI_BINOMIAL,    // Zero-inflated binomial
+  HURDLE_BINOMIAL // Hurdle binomial
 };
 
 // Parse ZI type from string
@@ -31,6 +33,10 @@ inline ZIType parse_zi_type(const std::string& zi_type_str) {
     return ZIType::HURDLE_POISSON;
   } else if (zi_type_str == "hurdle_negbin") {
     return ZIType::HURDLE_NEGBIN;
+  } else if (zi_type_str == "zi_binomial") {
+    return ZIType::ZI_BINOMIAL;
+  } else if (zi_type_str == "hurdle_binomial") {
+    return ZIType::HURDLE_BINOMIAL;
   } else {
     return ZIType::NONE;
   }
@@ -91,6 +97,14 @@ inline double negbin_lpmf(int y, double mu, double phi) {
   double p = phi / (phi + mu);  // success probability
   return lgamma_fn(y + r) - lgamma_fn(r) - lfactorial(y) +
          r * std::log(p) + y * std::log(1 - p);
+}
+
+// Binomial log-PMF: y ~ Binomial(n, p)
+// p is success probability
+inline double binomial_lpmf(int y, int n, double p) {
+  if (p <= 0 || p >= 1 || y < 0 || y > n) return -1e10;
+  return lfactorial(n) - lfactorial(y) - lfactorial(n - y) +
+         y * std::log(p) + (n - y) * std::log(1.0 - p);
 }
 
 // ============================================================================
@@ -157,6 +171,24 @@ inline double zi_negbin_lpmf_logit(int y, double mu, double phi, double logit_zi
   }
 }
 
+// Zero-inflated binomial log-PMF (logit scale for zi)
+// y: successes, n: trials, p: success probability, logit_zi: logit of ZI prob
+inline double zi_binomial_lpmf_logit(int y, int n, double p, double logit_zi) {
+  if (y == 0) {
+    // log(P(Y=0)) = log(sigmoid(logit_zi) + sigmoid(-logit_zi) * (1-p)^n)
+    double log_zi = log_logistic(logit_zi);
+    double log_1m_zi = log1m_logistic(logit_zi);
+    double log_p0_count = n * std::log(1.0 - p);  // (1-p)^n
+
+    double a = log_zi;
+    double b = log_1m_zi + log_p0_count;
+    double max_ab = std::max(a, b);
+    return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
+  } else {
+    return log1m_logistic(logit_zi) + binomial_lpmf(y, n, p);
+  }
+}
+
 // ============================================================================
 // Hurdle likelihoods
 // ============================================================================
@@ -198,6 +230,28 @@ inline double hurdle_negbin_lpmf_logit(int y, double mu, double phi, double logi
     return log1m_logistic(logit_theta);
   } else {
     return log_logistic(logit_theta) + truncated_negbin_lpmf(y, mu, phi);
+  }
+}
+
+// Truncated binomial log-PMF (conditional on y > 0)
+// P(Y=y|Y>0) = Binomial(y|n,p) / (1 - (1-p)^n)
+inline double truncated_binomial_lpmf(int y, int n, double p) {
+  if (y <= 0) return -1e10;
+  double log_p_untrunc = binomial_lpmf(y, n, p);
+  double log_p_zero = n * std::log(1.0 - p);  // (1-p)^n
+  double log_normalizer = std::log(1.0 - std::exp(log_p_zero));
+  return log_p_untrunc - log_normalizer;
+}
+
+// Hurdle binomial log-PMF (logit scale for hurdle)
+// logit_theta: logit of P(Y > 0)
+inline double hurdle_binomial_lpmf_logit(int y, int n, double p, double logit_theta) {
+  if (y == 0) {
+    // P(Y=0) = 1 - theta = sigmoid(-logit_theta)
+    return log1m_logistic(logit_theta);
+  } else {
+    // P(Y=y|Y>0) * theta
+    return log_logistic(logit_theta) + truncated_binomial_lpmf(y, n, p);
   }
 }
 
@@ -282,6 +336,66 @@ inline double hurdle_grad_logit_theta(int y, double logit_theta) {
   } else {
     // d/d(logit_theta) log(theta) = 1-theta
     return 1.0 - theta;
+  }
+}
+
+// Gradient of ZI-binomial log-likelihood w.r.t. logit_zi
+inline double zi_binomial_grad_logit_zi(int y, int n, double p, double logit_zi) {
+  double zi = logistic(logit_zi);
+  double one_m_zi = 1.0 - zi;
+
+  if (y == 0) {
+    // d/d(logit_zi) log(zi + (1-zi)*(1-p)^n)
+    // = zi*(1-zi)*(1 - (1-p)^n) / [zi + (1-zi)*(1-p)^n]
+    double p0_binom = std::pow(1.0 - p, n);  // (1-p)^n
+    double p0 = zi + one_m_zi * p0_binom;
+    return zi * one_m_zi * (1.0 - p0_binom) / p0;
+  } else {
+    // d/d(logit_zi) log(1-zi) = -zi
+    return -zi;
+  }
+}
+
+// Gradient of ZI-binomial log-likelihood w.r.t. logit(p) (the success prob)
+// For binomial, we parameterize p via logit: p = sigmoid(eta)
+// d(LL)/d(eta) = d(LL)/d(p) * d(p)/d(eta) = d(LL)/d(p) * p*(1-p)
+inline double zi_binomial_grad_eta(int y, int n, double p, double logit_zi) {
+  double zi = logistic(logit_zi);
+  double one_m_zi = 1.0 - zi;
+
+  if (y == 0) {
+    // d/d(eta) log(zi + (1-zi)*(1-p)^n)
+    // (1-zi) * n * (1-p)^(n-1) * (-1) * p*(1-p) / [zi + (1-zi)*(1-p)^n]
+    // = -(1-zi) * n * p * (1-p)^(n-1) / [zi + (1-zi)*(1-p)^n]
+    double p0_binom = std::pow(1.0 - p, n);
+    double denom = zi + one_m_zi * p0_binom;
+    // Avoid division by zero
+    if (denom < 1e-12) denom = 1e-12;
+    return -one_m_zi * n * p * std::pow(1.0 - p, n - 1) / denom;
+  } else {
+    // d/d(eta) log(1-zi) + d/d(eta) binomial_lpmf
+    // = 0 + d/d(eta) [y*log(p) + (n-y)*log(1-p)]
+    // = y * (1-p) - (n-y) * p = y - n*p
+    return y - n * p;
+  }
+}
+
+// Gradient of hurdle-binomial log-likelihood w.r.t. logit(p)
+inline double hurdle_binomial_grad_eta(int y, int n, double p, double logit_theta) {
+  if (y == 0) {
+    // Zero part: no dependence on p
+    return 0.0;
+  } else {
+    // Truncated binomial: d/d(eta) [log(theta) + truncated_binomial_lpmf]
+    // truncated_binomial_lpmf = binomial_lpmf - log(1 - (1-p)^n)
+    // d/d(eta) binomial_lpmf = y - n*p
+    // d/d(eta) log(1 - (1-p)^n) = n*(1-p)^(n-1)*p*(1-p) / (1 - (1-p)^n)
+    //                          = n*p*(1-p)^(n-1) / (1 - (1-p)^n)
+    double p0 = std::pow(1.0 - p, n);
+    double normalizer = 1.0 - p0;
+    if (normalizer < 1e-12) normalizer = 1e-12;
+    double grad_normalizer = n * p * std::pow(1.0 - p, n - 1) / normalizer;
+    return (y - n * p) - grad_normalizer;
   }
 }
 

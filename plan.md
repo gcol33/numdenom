@@ -1,8 +1,8 @@
 # Hand-Coded Gradient Implementation Plan
 
 ## Current Status
-- **Completed**: 46/60 configurations (77%) have H gradients
-- **Remaining**: 14/60 configurations (23%) use autodiff (A)
+- **Completed**: 48/60 configurations (80%) have H gradients
+- **Remaining**: 12/60 configurations (20%) use autodiff (A)
 
 ## Completed (H)
 | # | Family | RE | Spatial | Temporal | ZI |
@@ -44,6 +44,8 @@
 | 18 | poisson_gamma | ✓ | ICAR | ✗ | ZI |
 | 38 | negbin_negbin | ✓ | ICAR | ✗ | ZI |
 | 58 | binomial | ✓ | ICAR | ✗ | ZI |
+| 52 | binomial | ✓ | ✗ | ✗ | ZI |
+| 53 | binomial | ✓ | ✗ | ✗ | Hurdle |
 | 19 | poisson_gamma | slopes | ICAR | ✗ | ✗ |
 | 39 | negbin_negbin | slopes | ICAR | ✗ | ✗ |
 | 59 | binomial | slopes | ICAR | ✗ | ✗ |
@@ -153,14 +155,14 @@ BYM2 = ICAR + IID with mixing parameter.
 
 **Note**: Slopes+Spatial uses correlated/uncorrelated slope gradients with ICAR/BYM2 spatial.
 
-## Phase 10: Binomial ZI (Separate Families) - Not Yet Implemented
+## Phase 10: Binomial ZI (Separate Families) - DONE
 
 | # | Family | ZI | Status |
 |--:|--------|:--:|:------:|
-| 52 | binomial | ZI | - (ratiod_zibinomial not in HMC backend) |
-| 53 | binomial | Hurdle | - (ratiod_hurdle_binomial not in HMC backend) |
+| 52 | binomial | ZI | ✅ H |
+| 53 | binomial | Hurdle | ✅ H |
 
-**Note**: These use separate family classes (`ratiod_zibinomial()`, `ratiod_hurdle_binomial()`) that require different likelihood functions and are not yet implemented in the HMC backend. The R family definitions exist but the C++ implementation is pending.
+**Note**: Binomial ZI/Hurdle families (`ratiod_zibinomial()`, `ratiod_hurdle_binomial()`) now use hand-coded gradients with full C++ implementation.
 
 ## Phase 11: GP Models (Keep Autodiff)
 GP has O(n²/n³) - autodiff is appropriate.
@@ -171,11 +173,11 @@ GP has O(n²/n³) - autodiff is appropriate.
 2. ✅ Phase 1: Temporal (9 configs) - DONE
 3. ✅ Phase 2: ICAR (3 configs) - DONE
 4. ✅ Phase 3: BYM2 (3 configs) - DONE
-5. ✅ Phase 4: ZI/Hurdle (4/6 configs) - DONE (binomial ZI uses separate family classes, kept A)
+5. ✅ Phase 4: ZI/Hurdle (4/6 configs) - DONE
 6. ✅ Phase 5: Spatial+Temporal (9 configs) - DONE
 7. ✅ Phase 6: Slopes (3 configs) - DONE (both correlated and uncorrelated)
 8. ✅ Phase 7: Crossed (3 configs) - DONE
 9. ✅ Phase 8: Spatial+ZI (3 configs) - DONE
 10. ✅ Phase 9: Slopes+Spatial (3 configs) - DONE
-11. ⬜ Phase 10: Binomial ZI (not implemented) - separate family classes require full C++ implementation
+11. ✅ Phase 10: Binomial ZI (2 configs) - DONE
 12. ⬜ Phase 11: GP (keep A) - appropriate for O(n²/n³) complexity

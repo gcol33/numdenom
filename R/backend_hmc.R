@@ -121,7 +121,25 @@ fit_hmc <- function(formula,
   temporal_info <- prepare_temporal_for_hmc(temporal, data, hmc_data$N)
 
   # Prepare zero-inflation structure
-  zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N)
+
+  # Check if family itself is ZI (ratiod_zibinomial, ratiod_hurdle_binomial)
+  # In this case, extract ZI info from family, not from zi= parameter
+  if (is.null(zi) && isTRUE(family$zero_inflated)) {
+    # Family-based ZI (binomial ZI/hurdle)
+    zi_type <- if (family$zi_type == "hurdle") {
+      "hurdle_binomial"
+    } else {
+      "zi_binomial"
+    }
+    zi_info <- list(
+      type = zi_type,
+      X_zi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only for now
+      p_zi = 1L,
+      coef_names = "(Intercept)_zi"
+    )
+  } else {
+    zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N)
+  }
 
   # Prepare latent factor structure
   latent_info <- prepare_latent_for_hmc(latent, hmc_data$N)
@@ -457,6 +475,9 @@ get_hmc_model_type <- function(family) {
   if (dist == "binomial") return("binomial")
   if (dist %in% c("negbin", "negative_binomial", "neg_binomial_2")) return("negbin_negbin")
   if (dist == "poisson") return("poisson_gamma")
+  # ZI-binomial and hurdle-binomial use binomial base with ZI flag
+
+  if (dist %in% c("zero_inflated_binomial", "hurdle_binomial")) return("binomial")
   stop("Unsupported family for HMC backend: ", dist)
 }
 

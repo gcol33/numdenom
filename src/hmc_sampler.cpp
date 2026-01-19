@@ -1355,7 +1355,20 @@ double compute_log_post(
     // Likelihood contribution
     double ll_i = 0.0;
     if (data.model_type == ModelType::BINOMIAL) {
-      ll_i = log_lik_binomial(data.y_num[i], data.y_denom[i], eta_num);
+      // Check for zero-inflation on binomial
+      if (layout.has_zi && (data.zi_type == ratiod_zi::ZIType::ZI_BINOMIAL ||
+                            data.zi_type == ratiod_zi::ZIType::HURDLE_BINOMIAL)) {
+        double p = 1.0 / (1.0 + std::exp(-eta_num));
+        int n_trials = data.y_denom[i];
+        int y = data.y_num[i];
+        if (data.zi_type == ratiod_zi::ZIType::ZI_BINOMIAL) {
+          ll_i = ratiod_zi::zi_binomial_lpmf_logit(y, n_trials, p, logit_zi);
+        } else {
+          ll_i = ratiod_zi::hurdle_binomial_lpmf_logit(y, n_trials, p, logit_zi);
+        }
+      } else {
+        ll_i = log_lik_binomial(data.y_num[i], data.y_denom[i], eta_num);
+      }
     } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
       double mu_num = std::exp(eta_num);
       double mu_denom = std::exp(eta_denom);
@@ -1993,9 +2006,46 @@ void compute_gradient_analytical(
         // d(LL)/d(eta) = y - n*p
         double p = 1.0 / (1.0 + std::exp(-eta_num));
         int n_trials = data.y_denom[i];
-        resid_num = data.y_num[i] - n_trials * p;
+        int y_num_i = data.y_num[i];
+
+        if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::ZI_BINOMIAL) {
+          // ZI-Binomial
+          if (y_num_i == 0) {
+            // P(Y=0) = zi + (1-zi)*(1-p)^n
+            double p0_binom = std::pow(1.0 - p, n_trials);  // (1-p)^n
+            double p0 = zi_prob + (1.0 - zi_prob) * p0_binom;
+            // d(LL)/d(eta) = (1-zi) * d((1-p)^n)/d(eta) / p0
+            // d((1-p)^n)/d(eta) = n * (1-p)^(n-1) * (-p*(1-p)) = -n*p*(1-p)^(n-1)
+            resid_num = -(1.0 - zi_prob) * n_trials * p * std::pow(1.0 - p, n_trials - 1) / p0;
+            // Gradient w.r.t. logit_zi
+            grad_logit_zi_i = zi_prob * (1.0 - zi_prob) * (1.0 - p0_binom) / p0;
+          } else {
+            // P(Y=y) = (1-zi) * Binomial(y|n,p)
+            resid_num = y_num_i - n_trials * p;
+            grad_logit_zi_i = -zi_prob;  // d/d(logit_zi) log(1-zi) = -zi
+          }
+        } else if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::HURDLE_BINOMIAL) {
+          // Hurdle-Binomial
+          if (y_num_i == 0) {
+            // P(Y=0) = 1 - theta
+            resid_num = 0.0;  // No p contribution when y=0
+            grad_logit_zi_i = -zi_prob;  // d/d(logit_theta) log(1-theta) = -theta
+          } else {
+            // P(Y=y|Y>0) * theta = theta * TruncBinomial(y|n,p)
+            double p0_binom = std::pow(1.0 - p, n_trials);
+            double normalizer = 1.0 - p0_binom;
+            if (normalizer < 1e-12) normalizer = 1e-12;
+            // Gradient from truncated binomial
+            // d(log_normalizer)/d(eta) = n*p*(1-p)^(n-1) / (1-(1-p)^n)
+            double grad_normalizer = n_trials * p * std::pow(1.0 - p, n_trials - 1) / normalizer;
+            resid_num = (y_num_i - n_trials * p) - grad_normalizer;
+            grad_logit_zi_i = 1.0 - zi_prob;  // d/d(logit_theta) log(theta) = 1-theta
+          }
+        } else {
+          // Standard binomial (no ZI)
+          resid_num = y_num_i - n_trials * p;
+        }
         // No denominator contribution for binomial
-        // Note: ZI for binomial is not supported in H gradients
 
       } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
         // ---- NEGBIN_NEGBIN ----
@@ -2797,6 +2847,358 @@ void compute_gradient_gp_handcoded(
                                  - y / mu_denom;
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             }
+        }
+    }
+}
+
+// =====================================================================
+// GP + Temporal gradient (hand-coded)
+// Combines GP spatial with temporal RW1/RW2/AR1
+// =====================================================================
+
+void compute_gradient_gp_temporal_handcoded(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad
+) {
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    const double* beta_num = &params[layout.beta_num_start];
+    const double* beta_denom = &params[layout.beta_denom_start];
+    double sigma_re = layout.has_re ? std::exp(params[layout.log_sigma_re_idx]) : 1.0;
+    const double* re = layout.has_re ? &params[layout.re_start] : nullptr;
+    double phi_num = layout.has_phi_num ? std::exp(params[layout.log_phi_num_idx]) : 1.0;
+    double phi_denom = layout.has_phi_denom ? std::exp(params[layout.log_phi_denom_idx]) : 1.0;
+
+    int N_gp = data.gp_data.n_obs;
+    double sigma2_gp = std::exp(params[layout.log_sigma2_gp_idx]);
+    double phi_gp = std::exp(params[layout.log_phi_gp_idx]);
+    std::vector<double> gp_w(N_gp);
+    for (int i = 0; i < N_gp; i++) gp_w[i] = params[layout.gp_w_start + i];
+
+    double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
+    int T_len = layout.temporal_end - layout.temporal_start;
+    const double* phi_temporal = &params[layout.temporal_start];
+    double rho_ar1 = (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
+        ? 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx])) : 0.5;
+
+    // Prior gradients
+    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
+    for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
+    for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
+
+    if (layout.has_re && data.n_re_groups > 0) {
+        double ratio = sigma_re / data.sigma_re_scale;
+        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+    }
+
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+
+    double rate_sigma = -std::log(data.gp_sigma2_prior_alpha) / data.gp_sigma2_prior_U;
+    grad[layout.log_sigma2_gp_idx] = -0.5 * rate_sigma * std::sqrt(sigma2_gp) + 0.5;
+    grad[layout.log_phi_gp_idx] = 1.0;
+    grad[layout.log_tau_temporal_idx] = (data.tau_temporal_shape - 1.0) - data.tau_temporal_rate * tau_temporal + 1.0;
+    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
+        grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+
+    // NNGP prior gradients
+    ratiod_gp::NNGPGradients nngp_grads;
+    ratiod_gp::gp_nngp_gradients(gp_w, sigma2_gp, phi_gp, data.gp_data, nngp_grads);
+    for (int i = 0; i < N_gp; i++) grad[layout.gp_w_start + i] += nngp_grads.grad_w[i];
+    grad[layout.log_sigma2_gp_idx] += nngp_grads.grad_log_sigma2;
+    grad[layout.log_phi_gp_idx] += nngp_grads.grad_log_phi;
+
+    // Likelihood
+    std::vector<double> grad_temporal_lik(T_len, 0.0);
+    for (int i = 0; i < data.N; i++) {
+        double eta_num = 0.0, eta_denom = 0.0;
+        for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
+        for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
+        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+        if (data.gp_data.shared) { eta_num += gp_w[i]; eta_denom += gp_w[i]; } else { eta_num += gp_w[i]; }
+
+        int t_idx = -1;
+        if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+            t_idx = data.temporal_time_idx[i] - 1;
+            if (t_idx >= 0 && t_idx < T_len) {
+                if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
+                else { eta_num += phi_temporal[t_idx]; }
+            }
+        }
+
+        double dLL_num = 0.0, dLL_denom = 0.0;
+        if (data.model_type == ModelType::BINOMIAL) {
+            double p = 1.0 / (1.0 + std::exp(-eta_num));
+            dLL_num = data.y_num[i] - data.y_denom[i] * p;
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
+            dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        }
+
+        for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] += dLL_num * data.X_num_flat[i * data.p_num + j];
+        for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] += dLL_denom * data.X_denom_flat[i * data.p_denom + j];
+        if (layout.has_re && data.re_group[i] > 0) grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
+        grad[layout.gp_w_start + i] += data.gp_data.shared ? (dLL_num + dLL_denom) : dLL_num;
+        if (t_idx >= 0 && t_idx < T_len) grad_temporal_lik[t_idx] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
+    }
+
+    // Temporal GMRF
+    for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
+    if (data.temporal_type == TemporalType::RW1) {
+        double qf = 0.0;
+        for (int t = 0; t < T_len; t++) {
+            double g = 0.0;
+            if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
+            if (t < T_len - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
+            grad[layout.temporal_start + t] += g;
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
+    } else if (data.temporal_type == TemporalType::RW2) {
+        double qf = 0.0;
+        for (int t = 0; t < T_len; t++) {
+            double g = 0.0;
+            if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
+            if (t >= 1 && t < T_len - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
+            if (t < T_len - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
+            grad[layout.temporal_start + t] += g;
+        }
+        for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
+        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
+    } else if (data.temporal_type == TemporalType::AR1) {
+        double omr2 = 1.0 - rho_ar1 * rho_ar1;
+        grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
+        if (T_len > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
+        double qf = omr2 * phi_temporal[0] * phi_temporal[0];
+        for (int t = 1; t < T_len; t++) {
+            double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
+            double g = -tau_temporal * r;
+            if (t < T_len - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
+            grad[layout.temporal_start + t] += g;
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * qf;
+        if (layout.logit_rho_ar1_idx >= 0) {
+            double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
+            for (int t = 1; t < T_len; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+            grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
+        }
+    }
+}
+
+// =====================================================================
+// Multi-scale GP + Temporal hand-coded gradients
+// Combines MSGP spatial gradients with temporal GMRF gradients
+// =====================================================================
+
+void compute_gradient_msgp_temporal_handcoded(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad
+) {
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    // Extract parameters
+    const double* beta_num = &params[layout.beta_num_start];
+    const double* beta_denom = &params[layout.beta_denom_start];
+    double sigma_re = layout.has_re ? std::exp(params[layout.log_sigma_re_idx]) : 1.0;
+    const double* re = layout.has_re ? &params[layout.re_start] : nullptr;
+    double phi_num = layout.has_phi_num ? std::exp(params[layout.log_phi_num_idx]) : 1.0;
+    double phi_denom = layout.has_phi_denom ? std::exp(params[layout.log_phi_denom_idx]) : 1.0;
+
+    // Multi-scale GP parameters
+    int N_gp = data.multiscale_gp_data.n_obs;
+    double sigma2_local = std::exp(params[layout.log_sigma2_gp_local_idx]);
+    double phi_local = std::exp(params[layout.log_phi_gp_local_idx]);
+    double sigma2_regional = std::exp(params[layout.log_sigma2_gp_regional_idx]);
+    double phi_regional = std::exp(params[layout.log_phi_gp_regional_idx]);
+
+    std::vector<double> w_local(N_gp), w_regional(N_gp);
+    for (int i = 0; i < N_gp; i++) {
+        w_local[i] = params[layout.gp_local_start + i];
+        w_regional[i] = params[layout.gp_regional_start + i];
+    }
+
+    // Temporal parameters
+    double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
+    int T_len = layout.temporal_end - layout.temporal_start;
+    const double* phi_temporal = &params[layout.temporal_start];
+    double rho_ar1 = (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
+        ? 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx])) : 0.5;
+
+    // Bounds check for phi
+    if (phi_local < data.multiscale_gp_data.range_local_lower ||
+        phi_local > data.multiscale_gp_data.range_local_upper ||
+        phi_regional < data.multiscale_gp_data.range_regional_lower ||
+        phi_regional > data.multiscale_gp_data.range_regional_upper) {
+        return;
+    }
+
+    // =========================================================================
+    // Prior gradients
+    // =========================================================================
+    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
+    for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
+    for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
+
+    if (layout.has_re && data.n_re_groups > 0) {
+        double ratio = sigma_re / data.sigma_re_scale;
+        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+    }
+
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+
+    // PC priors on MSGP variances
+    double rate_sigma_local = -std::log(data.ms_sigma2_local_prior_alpha) / data.ms_sigma2_local_prior_U;
+    grad[layout.log_sigma2_gp_local_idx] = -0.5 * rate_sigma_local * std::sqrt(sigma2_local) + 0.5;
+    double rate_sigma_regional = -std::log(data.ms_sigma2_regional_prior_alpha) / data.ms_sigma2_regional_prior_U;
+    grad[layout.log_sigma2_gp_regional_idx] = -0.5 * rate_sigma_regional * std::sqrt(sigma2_regional) + 0.5;
+    grad[layout.log_phi_gp_local_idx] = 1.0;
+    grad[layout.log_phi_gp_regional_idx] = 1.0;
+
+    // Temporal prior
+    grad[layout.log_tau_temporal_idx] = (data.tau_temporal_shape - 1.0) - data.tau_temporal_rate * tau_temporal + 1.0;
+    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
+        grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+
+    // =========================================================================
+    // NNGP prior gradients for multi-scale GP
+    // =========================================================================
+    GPData gp_local;
+    gp_local.n_obs = data.multiscale_gp_data.n_obs;
+    gp_local.nn = data.multiscale_gp_data.nn_local;
+    gp_local.coords = data.multiscale_gp_data.coords;
+    gp_local.nn_idx = data.multiscale_gp_data.nn_idx_local;
+    gp_local.nn_dist = data.multiscale_gp_data.nn_dist_local;
+    gp_local.nn_order = data.multiscale_gp_data.nn_order_local;
+    gp_local.nn_order_inv = data.multiscale_gp_data.nn_order_inv_local;
+    gp_local.cov_type = data.multiscale_gp_data.cov_type;
+
+    GPData gp_regional;
+    gp_regional.n_obs = data.multiscale_gp_data.n_obs;
+    gp_regional.nn = data.multiscale_gp_data.nn_regional;
+    gp_regional.coords = data.multiscale_gp_data.coords;
+    gp_regional.nn_idx = data.multiscale_gp_data.nn_idx_regional;
+    gp_regional.nn_dist = data.multiscale_gp_data.nn_dist_regional;
+    gp_regional.nn_order = data.multiscale_gp_data.nn_order_regional;
+    gp_regional.nn_order_inv = data.multiscale_gp_data.nn_order_inv_regional;
+    gp_regional.cov_type = data.multiscale_gp_data.cov_type;
+
+    ratiod_gp::NNGPGradients nngp_grads_local, nngp_grads_regional;
+    ratiod_gp::gp_nngp_gradients(w_local, sigma2_local, phi_local, gp_local, nngp_grads_local);
+    ratiod_gp::gp_nngp_gradients(w_regional, sigma2_regional, phi_regional, gp_regional, nngp_grads_regional);
+
+    for (int i = 0; i < N_gp; i++) {
+        grad[layout.gp_local_start + i] += nngp_grads_local.grad_w[i];
+        grad[layout.gp_regional_start + i] += nngp_grads_regional.grad_w[i];
+    }
+    grad[layout.log_sigma2_gp_local_idx] += nngp_grads_local.grad_log_sigma2;
+    grad[layout.log_phi_gp_local_idx] += nngp_grads_local.grad_log_phi;
+    grad[layout.log_sigma2_gp_regional_idx] += nngp_grads_regional.grad_log_sigma2;
+    grad[layout.log_phi_gp_regional_idx] += nngp_grads_regional.grad_log_phi;
+
+    // =========================================================================
+    // Likelihood loop
+    // =========================================================================
+    std::vector<double> grad_temporal_lik(T_len, 0.0);
+    for (int i = 0; i < data.N; i++) {
+        double eta_num = 0.0, eta_denom = 0.0;
+        for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
+        for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
+        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+
+        // Multi-scale GP spatial effect
+        double ms_spatial = w_local[i] + w_regional[i];
+        if (data.multiscale_gp_data.shared) { eta_num += ms_spatial; eta_denom += ms_spatial; }
+        else { eta_num += ms_spatial; }
+
+        int t_idx = -1;
+        if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+            t_idx = data.temporal_time_idx[i] - 1;
+            if (t_idx >= 0 && t_idx < T_len) {
+                if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
+                else { eta_num += phi_temporal[t_idx]; }
+            }
+        }
+
+        double dLL_num = 0.0, dLL_denom = 0.0;
+        if (data.model_type == ModelType::BINOMIAL) {
+            double p = 1.0 / (1.0 + std::exp(-eta_num));
+            dLL_num = data.y_num[i] - data.y_denom[i] * p;
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
+            dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        }
+
+        for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] += dLL_num * data.X_num_flat[i * data.p_num + j];
+        for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] += dLL_denom * data.X_denom_flat[i * data.p_denom + j];
+        if (layout.has_re && data.re_group[i] > 0) grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
+
+        double dLL_dspatial = data.multiscale_gp_data.shared ? (dLL_num + dLL_denom) : dLL_num;
+        grad[layout.gp_local_start + i] += dLL_dspatial;
+        grad[layout.gp_regional_start + i] += dLL_dspatial;
+
+        if (t_idx >= 0 && t_idx < T_len) grad_temporal_lik[t_idx] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
+    }
+
+    // =========================================================================
+    // Temporal GMRF gradients
+    // =========================================================================
+    for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
+    if (data.temporal_type == TemporalType::RW1) {
+        double qf = 0.0;
+        for (int t = 0; t < T_len; t++) {
+            double g = 0.0;
+            if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
+            if (t < T_len - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
+            grad[layout.temporal_start + t] += g;
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
+    } else if (data.temporal_type == TemporalType::RW2) {
+        double qf = 0.0;
+        for (int t = 0; t < T_len; t++) {
+            double g = 0.0;
+            if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
+            if (t >= 1 && t < T_len - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
+            if (t < T_len - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
+            grad[layout.temporal_start + t] += g;
+        }
+        for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
+        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
+    } else if (data.temporal_type == TemporalType::AR1) {
+        double omr2 = 1.0 - rho_ar1 * rho_ar1;
+        grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
+        if (T_len > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
+        double qf = omr2 * phi_temporal[0] * phi_temporal[0];
+        for (int t = 1; t < T_len; t++) {
+            double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
+            double g = -tau_temporal * r;
+            if (t < T_len - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
+            grad[layout.temporal_start + t] += g;
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * qf;
+        if (layout.logit_rho_ar1_idx >= 0) {
+            double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
+            for (int t = 1; t < T_len; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+            grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
         }
     }
 }
@@ -3900,12 +4302,15 @@ void compute_gradient(
     } else if (layout.is_gp && data.has_gp && !layout.has_temporal) {
         // Single-scale GP uses hand-coded gradients (~3x faster than autodiff)
         compute_gradient_gp_handcoded(params, data, layout, grad);
+    } else if (layout.is_multiscale_gp && data.has_multiscale_gp && layout.has_temporal) {
+        // Multi-scale GP + temporal uses hand-coded gradients
+        compute_gradient_msgp_temporal_handcoded(params, data, layout, grad);
     } else if (layout.is_multiscale_gp && data.has_multiscale_gp) {
         // Multi-scale GP uses hand-coded gradients (~2-3x faster than autodiff)
         compute_gradient_msgp_handcoded(params, data, layout, grad);
     } else if (layout.is_gp && layout.has_temporal) {
-        // GP+temporal uses autodiff (~3x speedup)
-        compute_gradient_gp_temporal_autodiff(params, data, layout, grad);
+        // GP+temporal uses hand-coded gradients
+        compute_gradient_gp_temporal_handcoded(params, data, layout, grad);
     } else {
         // Use autodiff for all other models (fast, 3-5x)
         compute_gradient_autodiff(params, data, layout, grad);
