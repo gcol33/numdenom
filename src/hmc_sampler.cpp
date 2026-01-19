@@ -1421,10 +1421,10 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
                (layout.has_zi && !layout.has_spatial && !layout.has_temporal &&
                 data.model_type != ModelType::BINOMIAL);  // ZI not for binomial
 
-  // Random slopes: only uncorrelated slopes are supported (|| syntax)
-  // Correlated slopes (| syntax) require complex Cholesky gradient, stay with autodiff
+  // Random slopes: both correlated (|) and uncorrelated (||) are supported
+  // But only without spatial/temporal/ZI complexity
   bool slopes_ok = !layout.has_re_slopes ||
-                   (layout.has_re_slopes && !layout.has_re_correlated_slopes &&
+                   (layout.has_re_slopes &&
                     !layout.has_spatial && !layout.has_temporal && !layout.has_zi);
 
   return (is_basic_family &&
@@ -1540,6 +1540,181 @@ void compute_gradient_analytical(
           sigma_grad_c += tau_c * re_gc * re_gc - 1.0;
         }
         grad[log_sigma_idx] += sigma_grad_c;
+      }
+    }
+  } else if (layout.has_re && layout.has_re_slopes && layout.has_re_correlated_slopes) {
+    // ============ Correlated random slopes prior gradients ============
+    // Multivariate normal with Sigma = diag(sigma) * L * L' * diag(sigma)
+    // where L is lower-triangular Cholesky factor with L[i,i] = sqrt(1 - sum_{j<i} L[i,j]^2)
+    // LKJ(eta=2) prior on correlation matrix
+    n_re_terms_slopes = data.n_re_terms;
+    grad_re_slopes_lik.resize(n_re_terms_slopes);
+
+    for (int t = 0; t < n_re_terms_slopes; t++) {
+      int n_groups = data.re_n_groups_multi[t];
+      int n_coefs = layout.re_n_coefs_multi[t];
+      int re_start_t = layout.re_start_multi[t];
+      bool is_correlated = layout.re_correlated_multi[t];
+      grad_re_slopes_lik[t].assign(n_groups * n_coefs, 0.0);
+
+      // Extract sigma parameters
+      std::vector<double> sigmas(n_coefs);
+      for (int c = 0; c < n_coefs; c++) {
+        int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
+        sigmas[c] = std::exp(params[log_sigma_idx]);
+
+        // Half-Cauchy prior on sigma_c: d/d(log_sigma) = -2*(sigma/scale)^2/(1+(sigma/scale)^2) + 1
+        double ratio_c = sigmas[c] / data.sigma_re_scale;
+        double ratio_c_sq = ratio_c * ratio_c;
+        grad[log_sigma_idx] = -2.0 * ratio_c_sq / (1.0 + ratio_c_sq) + 1.0;
+      }
+
+      if (is_correlated && n_coefs > 1) {
+        // Build Cholesky factor L
+        int chol_start = layout.chol_re_start_multi[t];
+        std::vector<double> L_flat(n_coefs * n_coefs, 0.0);
+
+        int chol_idx = 0;
+        for (int i = 0; i < n_coefs; i++) {
+          double row_sum_sq = 0.0;
+          for (int j = 0; j < i; j++) {
+            L_flat[i * n_coefs + j] = params[chol_start + chol_idx];
+            row_sum_sq += L_flat[i * n_coefs + j] * L_flat[i * n_coefs + j];
+            chol_idx++;
+          }
+          double diag_sq = 1.0 - row_sum_sq;
+          if (diag_sq < 1e-10) {
+            // Invalid state - gradients are undefined
+            return;
+          }
+          L_flat[i * n_coefs + i] = std::sqrt(diag_sq);
+        }
+
+        // LKJ(eta=2) prior gradient w.r.t. Cholesky elements
+        // LKJ contribution: sum_k (eta - 1 + (n-k-1)/2) * 2 * log(L[k,k])
+        // Jacobian contribution: sum_{k>0} (n - k) * log(L[k,k])
+        double eta = 2.0;
+        int n_chol = n_coefs * (n_coefs - 1) / 2;
+        std::vector<double> grad_chol(n_chol, 0.0);
+
+        // Gradient of LKJ + Jacobian w.r.t. L[i,j] (off-diagonal)
+        // d(log L[k,k])/d(L[i,j]) = -L[i,j] / L[i,i]^2 if i = k
+        for (int k = 1; k < n_coefs; k++) {
+          double L_kk = L_flat[k * n_coefs + k];
+          double coef_lkj = (eta - 1.0 + (n_coefs - k - 1) / 2.0) * 2.0;
+          double coef_jac = (n_coefs - k);
+          double coef_total = coef_lkj + coef_jac;
+
+          // d/d(L[k,j]) for j < k
+          int chol_base = k * (k - 1) / 2;
+          for (int j = 0; j < k; j++) {
+            double L_kj = L_flat[k * n_coefs + j];
+            // d(log L[k,k])/d(L[k,j]) = -L[k,j] / (L[k,k]^2)
+            grad_chol[chol_base + j] += coef_total * (-L_kj / (L_kk * L_kk));
+          }
+        }
+
+        // Accumulate RE prior gradients for all groups
+        // For each group g: z = L^{-1} * y where y[c] = re[c] / sigma[c]
+        // Prior contribution: -0.5 * ||z||^2
+        // Gradient w.r.t. re[c]: -w[c] / sigma[c] where w = L^{-T} * z
+        std::vector<double> sigma_grad_from_prior(n_coefs, 0.0);
+        std::vector<double> chol_grad_from_prior(n_chol, 0.0);
+
+        for (int g = 0; g < n_groups; g++) {
+          // Extract RE vector for this group
+          std::vector<double> re_g(n_coefs);
+          for (int c = 0; c < n_coefs; c++) {
+            re_g[c] = params[re_start_t + g * n_coefs + c];
+          }
+
+          // Compute y = diag(1/sigma) * re
+          std::vector<double> y(n_coefs);
+          for (int c = 0; c < n_coefs; c++) {
+            y[c] = re_g[c] / sigmas[c];
+          }
+
+          // Forward substitution: z = L^{-1} * y
+          std::vector<double> z(n_coefs);
+          for (int i = 0; i < n_coefs; i++) {
+            double sum = y[i];
+            for (int j = 0; j < i; j++) {
+              sum -= L_flat[i * n_coefs + j] * z[j];
+            }
+            z[i] = sum / L_flat[i * n_coefs + i];
+          }
+
+          // Backward substitution: w = L^{-T} * z
+          std::vector<double> w(n_coefs);
+          for (int i = n_coefs - 1; i >= 0; i--) {
+            double sum = z[i];
+            for (int j = i + 1; j < n_coefs; j++) {
+              sum -= L_flat[j * n_coefs + i] * w[j];
+            }
+            w[i] = sum / L_flat[i * n_coefs + i];
+          }
+
+          // RE gradients: d(prior)/d(re[c]) = -w[c] / sigma[c]
+          for (int c = 0; c < n_coefs; c++) {
+            grad[re_start_t + g * n_coefs + c] = -w[c] / sigmas[c];
+          }
+
+          // Sigma gradients from this group's prior contribution
+          // d(-0.5*||z||^2)/d(log_sigma[c]) uses chain rule
+          // d(y[c])/d(log_sigma[c]) = -re[c]/sigma[c] = -y[c]
+          // Result: d(||z||^2)/d(log_sigma[c]) = -2 * y[c] * w[c]
+          for (int c = 0; c < n_coefs; c++) {
+            sigma_grad_from_prior[c] += y[c] * w[c];
+          }
+
+          // Cholesky gradients from this group's prior contribution
+          // d(-0.5*||z||^2)/d(L[i,j]) = -z' * dz/d(L[i,j])
+          // Using chain rule: d(||z||^2)/d(L[i,j]) = -2 * w[i] * z[j] / L[i,i] for j < i
+          for (int i = 1; i < n_coefs; i++) {
+            double L_ii = L_flat[i * n_coefs + i];
+            int chol_base = i * (i - 1) / 2;
+            for (int j = 0; j < i; j++) {
+              chol_grad_from_prior[chol_base + j] += w[i] * z[j] / L_ii;
+            }
+          }
+        }
+
+        // Add sigma gradients from prior (with log-determinant contribution)
+        // Log-det: -0.5 * n_groups * (2*sum(log(sigma)) + 2*sum(log(L[k,k])))
+        // d/d(log_sigma[c]) of -n_groups * log(sigma[c]) = -n_groups
+        for (int c = 0; c < n_coefs; c++) {
+          int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
+          grad[log_sigma_idx] += sigma_grad_from_prior[c] - n_groups;
+        }
+
+        // Add Cholesky gradients from prior (with log-determinant contribution)
+        // d/d(L[k,j]) of -n_groups * log(L[k,k]) = n_groups * L[k,j] / L[k,k]^2
+        for (int k = 1; k < n_coefs; k++) {
+          double L_kk = L_flat[k * n_coefs + k];
+          int chol_base = k * (k - 1) / 2;
+          for (int j = 0; j < k; j++) {
+            double L_kj = L_flat[k * n_coefs + j];
+            chol_grad_from_prior[chol_base + j] += n_groups * L_kj / (L_kk * L_kk);
+          }
+        }
+
+        // Write Cholesky gradients
+        for (int idx = 0; idx < n_chol; idx++) {
+          grad[chol_start + idx] = grad_chol[idx] + chol_grad_from_prior[idx];
+        }
+      } else {
+        // Uncorrelated term within a mixed model (fallback)
+        for (int c = 0; c < n_coefs; c++) {
+          double tau_c = 1.0 / (sigmas[c] * sigmas[c] + 1e-10);
+          double sigma_grad_c = 0.0;
+          for (int g = 0; g < n_groups; g++) {
+            double re_gc = params[re_start_t + g * n_coefs + c];
+            grad[re_start_t + g * n_coefs + c] = -tau_c * re_gc;
+            sigma_grad_c += tau_c * re_gc * re_gc - 1.0;
+          }
+          int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
+          grad[log_sigma_idx] += sigma_grad_c;
+        }
       }
     }
   } else if (layout.has_re && !layout.has_re_slopes) {

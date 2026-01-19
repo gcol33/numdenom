@@ -1,7 +1,7 @@
 # Hand-Coded Gradient Implementation Plan
 
 ## Current Status
-- **Completed**: 37/60 configurations (62%) have H or H* gradients
+- **Completed**: 37/60 configurations (62%) have H gradients
 - **Remaining**: 23/60 configurations (38%) use autodiff (A)
 
 ## Completed (H)
@@ -107,15 +107,15 @@ BYM2 = ICAR + IID with mixing parameter.
 | 55 | binomial | BYM2 | RW1 | ✅ H |
 | 56 | binomial | ICAR | AR1 | ✅ H |
 
-## Phase 6: Random Slopes (Hard) - PARTIAL
+## Phase 6: Random Slopes (Hard) - DONE
 
 | # | Family | RE | Status |
 |--:|--------|:------:|:------:|
-| 3 | poisson_gamma | slopes | ✅ H* (uncorrelated) |
-| 23 | negbin_negbin | slopes | ✅ H* (uncorrelated) |
-| 43 | binomial | slopes | ✅ H* (uncorrelated) |
+| 3 | poisson_gamma | slopes | ✅ H |
+| 23 | negbin_negbin | slopes | ✅ H |
+| 43 | binomial | slopes | ✅ H |
 
-**Note**: H* means hand-coded for uncorrelated slopes (`||` syntax). Correlated slopes (`|` syntax) require complex Cholesky gradient computation and remain autodiff.
+**Note**: Both correlated (`|` syntax) and uncorrelated (`||` syntax) random slopes now use hand-coded gradients with Cholesky parameterization.
 
 ## Phase 7: Crossed RE (Hard)
 | # | Family | RE |
@@ -135,6 +135,6 @@ GP has O(n²/n³) - autodiff is appropriate.
 4. ✅ Phase 3: BYM2 (3 configs) - DONE
 5. ✅ Phase 4: ZI/Hurdle (4/6 configs) - DONE (binomial ZI uses separate family classes, kept A)
 6. ✅ Phase 5: Spatial+Temporal (9 configs) - DONE
-7. ✅ Phase 6: Slopes (3 configs) - PARTIAL (uncorrelated only, H*)
+7. ✅ Phase 6: Slopes (3 configs) - DONE (both correlated and uncorrelated)
 8. ⬜ Phase 7: Crossed (3 configs)
 9. ⬜ Phase 8: GP (keep A)

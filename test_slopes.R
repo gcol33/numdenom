@@ -1,7 +1,7 @@
-# test_slopes.R - Test H gradients for uncorrelated random slopes
+# test_slopes.R - Test H gradients for random slopes (both uncorrelated and correlated)
 devtools::load_all()
 
-cat("Testing H gradients for uncorrelated random slopes...\n\n")
+cat("Testing H gradients for random slopes...\n\n")
 
 passed <- 0
 failed <- 0
@@ -74,20 +74,48 @@ tryCatch({
   failed <<- failed + 1
 })
 
-# Test 4: Correlated slopes should use autodiff (| syntax)
-cat("\n--- Correlated slopes (should use autodiff) ---\n")
+# ============ CORRELATED SLOPES (| syntax) - now using H gradients ============
+cat("\n--- Correlated slopes (H gradients) ---\n")
+
+# Test 4: POISSON_GAMMA with correlated random slopes
 tryCatch({
   fit <- ratiod(y_num | y_denom ~ x + (1 + z | group), data = df,
                 family = ratiod_poisson_gamma(),
                 chains = 1, warmup = 30, iter = 60, refresh = 0)
-  cat("4. POISSON_GAMMA + correlated slopes (autodiff): PASS\n")
+  cat("4. POISSON_GAMMA + correlated slopes: PASS\n")
   passed <- passed + 1
 }, error = function(e) {
   cat("4. POISSON_GAMMA + correlated slopes: FAIL -", e$message, "\n")
   failed <<- failed + 1
 })
 
-cat(sprintf("\nResults: %d/4 passed\n", passed))
-if (passed >= 3) {
-  cat("Random slopes H gradient tests passed (uncorrelated)!\n")
+# Test 5: NEGBIN_NEGBIN with correlated random slopes
+tryCatch({
+  fit <- ratiod(y_num | y_denom ~ x + (1 + z | group), data = df_nb,
+                family = ratiod_negbin_negbin(),
+                chains = 1, warmup = 30, iter = 60, refresh = 0)
+  cat("5. NEGBIN_NEGBIN + correlated slopes: PASS\n")
+  passed <- passed + 1
+}, error = function(e) {
+  cat("5. NEGBIN_NEGBIN + correlated slopes: FAIL -", e$message, "\n")
+  failed <<- failed + 1
+})
+
+# Test 6: BINOMIAL with correlated random slopes
+tryCatch({
+  fit <- ratiod(y_num | n_trials ~ x + (1 + z | group), data = df_binom,
+                family = ratiod_binomial(),
+                chains = 1, warmup = 30, iter = 60, refresh = 0)
+  cat("6. BINOMIAL + correlated slopes: PASS\n")
+  passed <- passed + 1
+}, error = function(e) {
+  cat("6. BINOMIAL + correlated slopes: FAIL -", e$message, "\n")
+  failed <<- failed + 1
+})
+
+cat(sprintf("\nResults: %d/6 passed\n", passed))
+if (passed == 6) {
+  cat("\nAll random slopes H gradient tests passed!\n")
+} else if (passed >= 3) {
+  cat("\nUncorrelated slopes tests passed.\n")
 }
