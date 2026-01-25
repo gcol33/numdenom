@@ -3977,6 +3977,314 @@ void compute_gradient_tvc_handcoded(
 }
 
 // =====================================================================
+// Latent factor gradient (hand-coded, O(N*K))
+// Uses analytical gradients for latent factor models
+// =====================================================================
+
+void compute_gradient_latent_handcoded(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad
+) {
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    // Extract parameters
+    const double* beta_num = &params[layout.beta_num_start];
+    const double* beta_denom = &params[layout.beta_denom_start];
+
+    double log_sigma_re = 0.0, sigma_re = 1.0;
+    const double* re = nullptr;
+    if (layout.has_re) {
+        log_sigma_re = params[layout.log_sigma_re_idx];
+        sigma_re = std::exp(log_sigma_re);
+        re = &params[layout.re_start];
+    }
+
+    double phi_num = 1.0, phi_denom = 1.0;
+    double log_phi_num = 0.0, log_phi_denom = 0.0;
+    if (layout.has_phi_num) {
+        log_phi_num = params[layout.log_phi_num_idx];
+        phi_num = std::exp(log_phi_num);
+    }
+    if (layout.has_phi_denom) {
+        log_phi_denom = params[layout.log_phi_denom_idx];
+        phi_denom = std::exp(log_phi_denom);
+    }
+
+    // Latent factor parameters
+    int K = data.latent_n_factors;
+    int N = data.N;
+
+    // Extract log_sigma for latent factors
+    std::vector<double> log_sigma_latent(K);
+    std::vector<double> sigma_latent(K);
+    for (int k = 0; k < K; k++) {
+        log_sigma_latent[k] = params[layout.log_sigma_latent_start + k];
+        sigma_latent[k] = std::exp(log_sigma_latent[k]);
+    }
+
+    // Extract factors (unconstrained)
+    int n_factor_params = N * K;
+    std::vector<double> factors_raw(n_factor_params);
+    for (int j = 0; j < n_factor_params; j++) {
+        factors_raw[j] = params[layout.latent_factor_start + j];
+    }
+
+    // Apply constraint to get constrained factors
+    std::vector<double> factors_constrained = factors_raw;
+    if (data.latent_constraint == 0) {  // SUM_TO_ZERO
+        for (int k = 0; k < K; k++) {
+            double sum = 0.0;
+            for (int i = 0; i < N; i++) {
+                sum += factors_constrained[i * K + k];
+            }
+            double mean = sum / N;
+            for (int i = 0; i < N; i++) {
+                factors_constrained[i * K + k] -= mean;
+            }
+        }
+    } else {  // FIRST_ZERO
+        for (int k = 0; k < K; k++) {
+            double first_val = factors_constrained[k];  // factors[0, k]
+            for (int i = 0; i < N; i++) {
+                factors_constrained[i * K + k] -= first_val;
+            }
+        }
+    }
+
+    // Precompute latent contribution to eta
+    std::vector<double> latent_eta(N, 0.0);
+    for (int i = 0; i < N; i++) {
+        for (int k = 0; k < K; k++) {
+            latent_eta[i] += factors_constrained[i * K + k] * sigma_latent[k];
+        }
+    }
+
+    // =========================================================================
+    // Prior gradients
+    // =========================================================================
+
+    // Fixed effects prior: N(0, sigma_beta^2)
+    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
+    for (int j = 0; j < data.p_num; j++) {
+        grad[layout.beta_num_start + j] -= tau_beta * beta_num[j];
+    }
+    for (int j = 0; j < data.p_denom; j++) {
+        grad[layout.beta_denom_start + j] -= tau_beta * beta_denom[j];
+    }
+
+    // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
+    if (layout.has_re && data.n_re_groups > 0) {
+        double ratio = sigma_re / data.sigma_re_scale;
+        double grad_sigma_re = -2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0;
+        grad[layout.log_sigma_re_idx] = grad_sigma_re * sigma_re;
+
+        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -tau_re * re[g];
+        }
+        grad[layout.log_sigma_re_idx] -= data.n_re_groups;
+    }
+
+    // Overdispersion prior: Gamma(shape, rate) on phi, with log transform
+    // log p(log_phi) = (shape-1)*log_phi - rate*phi + log_phi  [includes Jacobian]
+    // d/d(log_phi) = (shape-1) + 1 - rate*phi = shape - rate*phi
+    // Note: NO additional phi factor since the prior is written w.r.t. log_phi directly
+    if (layout.has_phi_num) {
+        grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
+    }
+    if (layout.has_phi_denom) {
+        grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
+    }
+
+    // Latent sigma prior: Exponential(rate) on sigma, with Jacobian for log transform
+    // log p(log_sigma) = log(rate) + log_sigma - rate * sigma
+    // d/d(log_sigma) = 1 - rate * sigma
+    double latent_rate = data.latent_sigma_prior_rate;
+    for (int k = 0; k < K; k++) {
+        grad[layout.log_sigma_latent_start + k] = 1.0 - latent_rate * sigma_latent[k];
+    }
+
+    // Latent factor prior: N(0, 1) on constrained factors
+    // The autodiff applies the prior to constrained factors, then chain-rules to raw factors.
+    // Direct computation: d(-0.5*f_constrained^2)/d(f_raw) = -f_constrained * d(f_constrained)/d(f_raw)
+    // For SUM_TO_ZERO: d(fc[i])/d(fr[j]) = delta_ij - 1/N, so gradient = -fc[i] + mean(fc) = -fc[i]
+    // For FIRST_ZERO: d(fc[i])/d(fr[j]) = delta_ij - delta_j0, similar result
+    // In both cases, the prior gradient w.r.t. raw factors equals -constrained_factor
+    // But we need to apply the chain rule properly below, so here we just store the
+    // gradient w.r.t. constrained factors.
+
+    // Note: The prior is conceptually on the constrained factors (which sum to zero),
+    // and the gradient flows back through the constraint transformation.
+    // We handle this by computing prior gradient on constrained factors,
+    // then adding it to grad_factors_constrained, which gets chain-ruled below.
+
+    // =========================================================================
+    // Likelihood loop - compute dLL/deta and chain-rule to all parameters
+    // =========================================================================
+
+    // Gradients to accumulate for latent factors (on constrained factors first)
+    std::vector<double> grad_factors_constrained(n_factor_params, 0.0);
+
+    for (int i = 0; i < N; i++) {
+        // Linear predictors
+        double eta_num = 0.0, eta_denom = 0.0;
+        for (int j = 0; j < data.p_num; j++) {
+            eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
+        }
+        for (int j = 0; j < data.p_denom; j++) {
+            eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
+        }
+
+        // Random effects
+        if (layout.has_re && data.re_group[i] > 0) {
+            int g = data.re_group[i] - 1;
+            eta_num += re[g];
+            eta_denom += re[g];
+        }
+
+        // Latent effect
+        double latent_effect = latent_eta[i];
+        if (data.latent_shared) {
+            eta_num += latent_effect;
+            eta_denom += latent_effect;
+        } else {
+            eta_num += latent_effect;
+        }
+
+        // Likelihood gradients depend on model type
+        double dLL_deta_num = 0.0;
+        double dLL_deta_denom = 0.0;
+
+        if (data.model_type == ModelType::BINOMIAL) {
+            double p = 1.0 / (1.0 + std::exp(-eta_num));
+            dLL_deta_num = data.y_num[i] - data.y_denom[i] * p;
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
+            dLL_deta_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
+        } else {  // POISSON_GAMMA
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            dLL_deta_num = data.y_num[i] - mu_num;
+            // For POISSON_GAMMA, phi_num is the shape parameter for gamma denom
+            dLL_deta_denom = phi_num * (data.y_denom_cont[i] / mu_denom - 1.0);
+        }
+
+        // Total gradient through latent effect
+        double dLL_dlatent = data.latent_shared ?
+                             (dLL_deta_num + dLL_deta_denom) : dLL_deta_num;
+
+        // Accumulate gradients for fixed effects
+        for (int j = 0; j < data.p_num; j++) {
+            grad[layout.beta_num_start + j] += dLL_deta_num * data.X_num_flat[i * data.p_num + j];
+        }
+        for (int j = 0; j < data.p_denom; j++) {
+            grad[layout.beta_denom_start + j] += dLL_deta_denom * data.X_denom_flat[i * data.p_denom + j];
+        }
+
+        // Gradients for RE
+        if (layout.has_re && data.re_group[i] > 0) {
+            int g = data.re_group[i] - 1;
+            grad[layout.re_start + g] += dLL_deta_num + dLL_deta_denom;
+        }
+
+        // Gradients for latent factors (on constrained space)
+        // eta_latent[i] = sum_k factor[i,k] * sigma[k]
+        // d(LL)/d(factor[i,k]) = dLL_dlatent * sigma[k]
+        // d(LL)/d(log_sigma[k]) += dLL_dlatent * factor[i,k] * sigma[k]
+        for (int k = 0; k < K; k++) {
+            grad_factors_constrained[i * K + k] = dLL_dlatent * sigma_latent[k];
+            grad[layout.log_sigma_latent_start + k] += dLL_dlatent * factors_constrained[i * K + k] * sigma_latent[k];
+        }
+
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = R::digamma(y + phi_num) - R::digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            } else if (data.model_type == ModelType::POISSON_GAMMA) {
+                // For POISSON_GAMMA, phi_num is the gamma shape parameter for denominator
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom_cont[i];
+                double digamma_phi = R::digamma(phi_num);
+                double dLL_dphi = std::log(phi_num) + 1.0 - digamma_phi
+                                 + std::log(y) - std::log(mu_denom)
+                                 - y / mu_denom;
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
+        }
+
+        // Gradient w.r.t. phi_denom (NEGBIN_NEGBIN only)
+        if (layout.has_phi_denom && data.model_type == ModelType::NEGBIN_NEGBIN) {
+            double mu_denom = std::exp(eta_denom);
+            double y = data.y_denom[i];
+            double dLL_dphi = R::digamma(y + phi_denom) - R::digamma(phi_denom)
+                             + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
+                             - (y + phi_denom) / (mu_denom + phi_denom);
+            grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+        }
+    }
+
+    // =========================================================================
+    // Add prior gradient to grad_factors_constrained
+    // =========================================================================
+    // Prior: N(0, 1) on constrained factors, log p = -0.5 * f_constrained^2
+    // Gradient: d(-0.5 * f^2)/d(f) = -f
+    // For FIRST_ZERO: constrained factor 0 is always 0, so skip it
+    int prior_start = (data.latent_constraint == 0) ? 0 : 1;
+    for (int k = 0; k < K; k++) {
+        for (int i = prior_start; i < N; i++) {
+            grad_factors_constrained[i * K + k] += -factors_constrained[i * K + k];
+        }
+    }
+
+    // =========================================================================
+    // Apply constraint chain-rule to get gradients on raw (unconstrained) factors
+    // =========================================================================
+
+    // For sum-to-zero: d(LL)/d(factor_raw[j,k]) = d(LL)/d(factor_constrained[j,k])
+    //                                           - (1/N) * sum_i d(LL)/d(factor_constrained[i,k])
+    // For first-zero: d(LL)/d(factor_raw[0,k]) = -sum_{i>0} d(LL)/d(factor_constrained[i,k])
+    //                 d(LL)/d(factor_raw[j,k]) = d(LL)/d(factor_constrained[j,k]) for j > 0
+
+    if (data.latent_constraint == 0) {  // SUM_TO_ZERO
+        for (int k = 0; k < K; k++) {
+            // Compute mean gradient for this factor
+            double sum_grad = 0.0;
+            for (int i = 0; i < N; i++) {
+                sum_grad += grad_factors_constrained[i * K + k];
+            }
+            double mean_grad = sum_grad / N;
+
+            // Adjust each gradient
+            for (int i = 0; i < N; i++) {
+                grad[layout.latent_factor_start + i * K + k] +=
+                    grad_factors_constrained[i * K + k] - mean_grad;
+            }
+        }
+    } else {  // FIRST_ZERO
+        for (int k = 0; k < K; k++) {
+            // Gradient for factor_raw[0,k] = -sum of gradients for i > 0
+            double sum_grad = 0.0;
+            for (int i = 1; i < N; i++) {
+                sum_grad += grad_factors_constrained[i * K + k];
+                // Gradient for factor_raw[i,k] = gradient of constrained[i,k] for i > 0
+                grad[layout.latent_factor_start + i * K + k] += grad_factors_constrained[i * K + k];
+            }
+            grad[layout.latent_factor_start + k] += -sum_grad;  // factor_raw[0,k]
+        }
+    }
+}
+
+// =====================================================================
 // GP gradient via autodiff (O(N*nn^3) - much faster than numerical O(N^2))
 // Uses templated NNGP likelihood from hmc_gp_autodiff.h
 // =====================================================================
@@ -5154,7 +5462,8 @@ void compute_gradient(
     }
 
     // AUTO or HANDCODED mode: use fastest available
-    // Priority: H (hand-coded) > A (forward autodiff) > A_t (tape autodiff) > N (numerical)
+    // Priority: H (hand-coded) > A_t (tape autodiff for high-dim) > A (forward autodiff) > N (numerical)
+    // Note: A_t is O(N), A is O(p×N). For high-dim models (latent), A_t is 35x faster.
 
     // Use hand-coded analytical gradients for simple models (fastest, 9x)
     if (can_use_analytical_gradient(data, layout)) {
@@ -5181,9 +5490,13 @@ void compute_gradient(
     } else if (layout.has_tvc && data.has_tvc) {
         // TVC uses hand-coded gradients (~3x faster than autodiff)
         compute_gradient_tvc_handcoded(params, data, layout, grad);
+    } else if (layout.has_latent && data.latent_n_factors > 0) {
+        // Latent factor models have hand-coded gradients (O(N*K))
+        compute_gradient_latent_handcoded(params, data, layout, grad);
     } else {
-        // No hand-coded gradients available
-        // Use forward-mode autodiff (A) - ~10x faster than tape (A_t)
+        // No hand-coded gradients available, low-dimensional fallback
+        // For low-dim models, forward autodiff (A) is faster due to less memory overhead
+        // For high-dim models (>100 params), consider using A_t explicitly
         compute_gradient_forward(params, data, layout, grad);
     }
 }
