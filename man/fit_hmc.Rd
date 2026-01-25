@@ -20,7 +20,8 @@ fit_hmc(
   cores = NULL,
   L = 20,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  gradient_mode = "auto"
 )
 }
 \arguments{

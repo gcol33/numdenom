@@ -504,11 +504,16 @@ extract_random_effects <- function(rhs_text, data) {
     # Parse LHS terms using balanced parenthesis splitting
     lhs_terms <- split_re_lhs_terms(lhs)
 
-    # Determine if intercept is present (explicit "1" or implied by empty/intercept-only)
-    has_intercept <- "1" %in% lhs_terms || length(lhs_terms) == 0
+    # Determine if intercept is present
+    # Following lme4 convention: intercept is included by default UNLESS "0" is explicitly specified
+    # - (1 | g) -> intercept only
+    # - (x | g) -> intercept AND slope (implicit 1)
+    # - (1 + x | g) -> intercept AND slope (explicit 1)
+    # - (0 + x | g) -> slope only (explicit 0 suppresses intercept)
+    has_intercept <- !("0" %in% lhs_terms)
 
-    # Extract slope terms (everything that isn't "1")
-    slope_terms <- lhs_terms[lhs_terms != "1"]
+    # Extract slope terms (everything that isn't "1" or "0")
+    slope_terms <- lhs_terms[!lhs_terms %in% c("1", "0")]
 
     slope_vars_raw <- NULL
     slope_vars <- NULL

@@ -2,8 +2,8 @@
 // Spatial random effects for PG Gibbs sampler
 // Implements ICAR (Intrinsic CAR) and BYM2 priors
 
-#ifndef QUOTR_PG_SPATIAL_H
-#define QUOTR_PG_SPATIAL_H
+#ifndef RATIOD_PG_SPATIAL_H
+#define RATIOD_PG_SPATIAL_H
 
 #include <Rcpp.h>
 #include <vector>

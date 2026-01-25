@@ -220,23 +220,27 @@ inline void hsgp_compute_gradients(
         double S = spectral_density_se(omega_sq, sigma2, lengthscale);
         sqrt_S[j] = std::sqrt(S);
 
+        // Numerical safeguard: avoid division by very small sqrt_S
+        const double eps = 1e-10;
+        double sqrt_S_safe = std::max(sqrt_S[j], eps);
+
         // d(sqrt(S))/d(sigma2) = 0.5 / sqrt(S) * dS/d(sigma2) = 0.5 / sqrt(S) * S/sigma2
         //                      = 0.5 * sqrt(S) / sigma2
-        dsqrtS_dsigma2[j] = 0.5 * sqrt_S[j] / sigma2;
+        dsqrtS_dsigma2[j] = 0.5 * sqrt_S_safe / sigma2;
 
         // d(sqrt(S))/d(ell) = 0.5 / sqrt(S) * dS/d(ell)
         double dS_dell = dS_dlengthscale(omega_sq, sigma2, lengthscale);
-        dsqrtS_dlengthscale[j] = 0.5 * dS_dell / sqrt_S[j];
+        dsqrtS_dlengthscale[j] = 0.5 * dS_dell / sqrt_S_safe;
     }
 
     // Gradient w.r.t. beta: sum_i grad_f[i] * phi[i,j] * sqrt(S[j])
-    // Plus prior: -beta[j]
+    // NOTE: Prior contribution is handled by the caller, not here
     for (int j = 0; j < m_total; j++) {
         double grad_j = 0.0;
         for (int i = 0; i < data.n_obs; i++) {
             grad_j += grad_f[i] * data.phi_flat[i * m_total + j] * sqrt_S[j];
         }
-        grads.grad_beta[j] = grad_j - beta[j];  // Prior contribution
+        grads.grad_beta[j] = grad_j;  // Likelihood only, prior handled by caller
     }
 
     // Gradient w.r.t. log(sigma2):
@@ -252,14 +256,7 @@ inline void hsgp_compute_gradients(
         grad_sigma2 += grad_f[i] * df_dsigma2;
     }
     grads.grad_log_sigma2 = grad_sigma2 * sigma2;  // Chain rule
-
-    // Add prior contribution for sigma2: PC prior
-    // log p(sigma) = log(rate) - rate*sigma - log(2*sigma)
-    // d/d(sigma2) = d/d(sigma) * d(sigma)/d(sigma2) = (-rate - 1/sigma) / (2*sigma)
-    double sigma = std::sqrt(sigma2);
-    double rate_sigma = 4.6;  // P(sigma > 1) = 0.01
-    double grad_prior_sigma2 = (-rate_sigma - 1.0/sigma) / (2.0 * sigma);
-    grads.grad_log_sigma2 += grad_prior_sigma2 * sigma2;
+    // NOTE: Prior contribution is handled by the caller, not here
 
     // Gradient w.r.t. log(lengthscale):
     double grad_ell = 0.0;
@@ -271,12 +268,7 @@ inline void hsgp_compute_gradients(
         grad_ell += grad_f[i] * df_dell;
     }
     grads.grad_log_lengthscale = grad_ell * lengthscale;  // Chain rule
-
-    // Add prior contribution for lengthscale: LogNormal(0, 1)
-    // log p(ell) = -0.5 * log(ell)^2 - log(ell) (the -log(ell) is Jacobian)
-    // d/d(log_ell) = -log(ell) - 1
-    double log_ell = std::log(lengthscale);
-    grads.grad_log_lengthscale += -log_ell - 1.0;
+    // NOTE: Prior contribution is handled by the caller, not here
 }
 
 } // namespace ratiod_hsgp

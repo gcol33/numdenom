@@ -13,7 +13,8 @@ temporal_tvc(
 )
 }
 \arguments{
-\item{time_var}{Name of the time variable in data (character).}
+\item{time_var}{Name of the time variable in data. Can be a formula
+(e.g., \code{~ year}) or a character string (e.g., \code{"year"}).}
 
 \item{terms}{Which coefficients should vary over time. Options:
 \itemize{

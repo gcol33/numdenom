@@ -589,9 +589,18 @@ convert_pg_to_ratiod_fit <- function(fit_raw, formula, data, family,
 #' @return Logical indicating if PG backend can be used
 #' @keywords internal
 can_use_pg_backend <- function(family) {
-  # Check if this is a binomial family
-  # The family structure uses $numerator$distribution
-  isTRUE(family$numerator$distribution == "binomial")
+  # PG backend supports:
+  # 1. Binomial family (standard PG augmentation)
+  # 2. Negative binomial family (PG + CRT augmentation)
+  dist <- family$numerator$distribution
+
+  # Binomial family
+  if (isTRUE(dist == "binomial")) return(TRUE)
+
+  # Negative binomial family (NB2 parameterization)
+  if (isTRUE(dist == "neg_binomial_2")) return(TRUE)
+
+  FALSE
 }
 
 
@@ -1312,6 +1321,532 @@ convert_pg_rsr_to_ratiod_fit <- function(chain_results, formula, data, family,
       re_info = re_info,
       spatial_info = spatial_info,
       chain_results = chain_results
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
+  return(fit)
+}
+
+
+# =============================================================================
+# Negative Binomial PG+CRT Backend
+# =============================================================================
+
+#' Fit negative binomial model using Polya-Gamma + CRT Gibbs sampling
+#'
+#' @description
+#' Fast Gibbs sampling for negative binomial models using Polya-Gamma data
+#' augmentation for the logit component and Chinese Restaurant Table (CRT)
+#' augmentation for the dispersion parameter.
+#'
+#' @details
+#' The PG+CRT method (Zhou et al., 2012) enables efficient conjugate Gibbs
+#' sampling for negative binomial regression. This extends the standard PG
+#' augmentation to count data with overdispersion.
+#'
+#' **Model (NB2 parameterization):**
+#' - Y_i ~ NB(r, p_i)
+#' - E[Y_i] = r * p_i / (1 - p_i)
+#' - logit(p_i) = X_i * beta + Z_i * b
+#'
+#' **Augmentation scheme:**
+#' - omega_i ~ PG(y_i + r, eta_i) for the logit component
+#' - L_i ~ CRT(y_i, r) for the dispersion update
+#'
+#' @references
+#' Zhou, M., Li, L., Dunson, D., and Carin, L. (2012).
+#' "Lognormal and Gamma Mixed Negative Binomial Regression." ICML.
+#'
+#' @name pg_negbin_backend
+#' @keywords internal
+NULL
+
+
+#' Fit negative binomial model using PG+CRT Gibbs sampling
+#'
+#' @param formula A ratiod_formula object
+#' @param data Data frame
+#' @param family Must be ratiod_negbin_negbin() or similar NB family
+#' @param spatial Optional spatial structure
+#' @param iter Total iterations per chain
+#' @param warmup Warmup iterations per chain
+#' @param chains Number of chains
+#' @param thin Thinning interval
+#' @param cores Number of cores
+#' @param seed Random seed
+#' @param prior_beta_sd Prior SD for fixed effects
+#' @param prior_sigma_scale Half-Cauchy scale for RE SD
+#' @param prior_r_shape Gamma shape for dispersion prior
+#' @param prior_r_rate Gamma rate for dispersion prior
+#' @param r_init Initial dispersion value
+#' @param verbose Print progress
+#'
+#' @return A ratiod_fit object
+#' @keywords internal
+fit_pg_negbin <- function(formula,
+                          data,
+                          family,
+                          spatial = NULL,
+                          iter = 2000,
+                          warmup = floor(iter / 2),
+                          chains = 4,
+                          thin = 1,
+                          cores = NULL,
+                          seed = NULL,
+                          prior_beta_sd = 10,
+                          prior_sigma_scale = 2.5,
+                          prior_r_shape = 1,
+                          prior_r_rate = 0.1,
+                          r_init = 1.0,
+                          verbose = TRUE) {
+
+  # Set cores
+  if (is.null(cores)) {
+    cores <- cpp_pg_get_max_threads()
+  }
+
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
+  # Extract response (numerator counts)
+  y <- formula$numerator$response
+
+  # Design matrix
+  X <- formula$numerator$X
+
+  # Random effects
+  re_info <- extract_re_from_data(formula, data)
+
+  # Check for spatial
+  has_spatial <- !is.null(spatial)
+
+  n_iter <- as.integer(iter)
+  n_warmup <- as.integer(warmup)
+
+  # Run chains
+  chain_results <- vector("list", chains)
+
+  for (chain in seq_len(chains)) {
+    if (verbose && chains > 1) {
+      cat(sprintf("\n=== Chain %d/%d ===\n", chain, chains))
+    }
+
+    if (!is.null(seed)) {
+      set.seed(seed + chain - 1)
+    }
+
+    if (has_spatial) {
+      spatial_info <- prepare_spatial_for_pg(spatial, data, formula)
+
+      chain_results[[chain]] <- cpp_pg_negbin_gibbs_spatial(
+        y = as.integer(y),
+        X = X,
+        re_group = re_info$group_idx,
+        n_re_groups = re_info$n_groups,
+        spatial_group = spatial_info$group_idx,
+        n_spatial_units = spatial_info$n_units,
+        adj_list = spatial_info$adj_list,
+        n_neighbors = spatial_info$n_neighbors,
+        n_iter = n_iter,
+        n_warmup = n_warmup,
+        thin = as.integer(thin),
+        prior_beta_sd = prior_beta_sd,
+        prior_sigma_re_scale = prior_sigma_scale,
+        prior_tau_shape = 1,
+        prior_tau_rate = 0.01,
+        prior_r_shape = prior_r_shape,
+        prior_r_rate = prior_r_rate,
+        r_init = r_init,
+        store_eta = TRUE,
+        verbose = verbose,
+        n_threads = as.integer(cores)
+      )
+    } else {
+      chain_results[[chain]] <- cpp_pg_negbin_gibbs(
+        y = as.integer(y),
+        X = X,
+        group = re_info$group_idx,
+        n_groups = re_info$n_groups,
+        n_iter = n_iter,
+        n_warmup = n_warmup,
+        thin = as.integer(thin),
+        prior_beta_sd = prior_beta_sd,
+        prior_sigma_scale = prior_sigma_scale,
+        prior_r_shape = prior_r_shape,
+        prior_r_rate = prior_r_rate,
+        r_init = r_init,
+        store_eta = TRUE,
+        verbose = verbose,
+        n_threads = as.integer(cores)
+      )
+    }
+  }
+
+  # Convert to ratiod_fit
+  fit <- convert_pg_negbin_to_ratiod_fit(
+    fit_raw = chain_results,
+    formula = formula,
+    data = data,
+    family = family,
+    spatial = spatial,
+    X = X,
+    re_info = re_info,
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = chains
+  )
+
+  return(fit)
+}
+
+
+#' Fit two-process NB ratio model using PG+CRT Gibbs sampling
+#'
+#' @description
+#' Fits the ratiod_negbin_negbin() family using pure Gibbs sampling.
+#' Both numerator and denominator are NB distributed with shared random effects.
+#'
+#' @param formula A ratiod_formula object
+#' @param data Data frame
+#' @param family Must be ratiod_negbin_negbin()
+#' @param iter Total iterations
+#' @param warmup Warmup iterations
+#' @param chains Number of chains
+#' @param thin Thinning interval
+#' @param cores Number of cores
+#' @param seed Random seed
+#' @param prior_beta_sd Prior SD for fixed effects
+#' @param prior_sigma_scale Half-Cauchy scale for RE SD
+#' @param prior_r_shape Gamma shape for dispersion priors
+#' @param prior_r_rate Gamma rate for dispersion priors
+#' @param r_num_init Initial dispersion for numerator
+#' @param r_denom_init Initial dispersion for denominator
+#' @param verbose Print progress
+#'
+#' @return A ratiod_fit object
+#' @keywords internal
+fit_pg_negbin_negbin <- function(formula,
+                                  data,
+                                  family,
+                                  iter = 2000,
+                                  warmup = floor(iter / 2),
+                                  chains = 4,
+                                  thin = 1,
+                                  cores = NULL,
+                                  seed = NULL,
+                                  prior_beta_sd = 10,
+                                  prior_sigma_scale = 2.5,
+                                  prior_r_shape = 1,
+                                  prior_r_rate = 0.1,
+                                  r_num_init = 1.0,
+                                  r_denom_init = 1.0,
+                                  verbose = TRUE) {
+
+  if (is.null(cores)) {
+    cores <- cpp_pg_get_max_threads()
+  }
+
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
+  # Extract responses
+  y_num <- formula$numerator$response
+  y_denom <- formula$denominator$response
+
+  if (is.null(y_denom)) {
+    stop("NegBin-NegBin models require both numerator and denominator counts.")
+  }
+
+  # Design matrices
+  X_num <- formula$numerator$X
+  X_denom <- formula$denominator$X
+
+  # If denominator has no predictors, use intercept only
+  if (is.null(X_denom)) {
+    X_denom <- matrix(1, nrow = nrow(data), ncol = 1)
+    colnames(X_denom) <- "(Intercept)"
+  }
+
+  # Random effects
+  re_info <- extract_re_from_data(formula, data)
+
+  # Check for shared structure (default in numdenom)
+  shared <- is.null(formula$shared) || !isFALSE(formula$shared)
+
+  n_iter <- as.integer(iter)
+  n_warmup <- as.integer(warmup)
+
+  # Run chains
+  chain_results <- vector("list", chains)
+
+  for (chain in seq_len(chains)) {
+    if (verbose && chains > 1) {
+      cat(sprintf("\n=== Chain %d/%d ===\n", chain, chains))
+    }
+
+    if (!is.null(seed)) {
+      set.seed(seed + chain - 1)
+    }
+
+    chain_results[[chain]] <- cpp_pg_negbin_negbin_gibbs(
+      y_num = as.integer(y_num),
+      y_denom = as.integer(y_denom),
+      X_num = X_num,
+      X_denom = X_denom,
+      group = re_info$group_idx,
+      n_groups = re_info$n_groups,
+      n_iter = n_iter,
+      n_warmup = n_warmup,
+      thin = as.integer(thin),
+      prior_beta_sd = prior_beta_sd,
+      prior_sigma_scale = prior_sigma_scale,
+      prior_r_shape = prior_r_shape,
+      prior_r_rate = prior_r_rate,
+      r_num_init = r_num_init,
+      r_denom_init = r_denom_init,
+      shared = shared,
+      store_eta = TRUE,
+      verbose = verbose,
+      n_threads = as.integer(cores)
+    )
+  }
+
+  # Convert to ratiod_fit
+  fit <- convert_pg_negbin_negbin_to_ratiod_fit(
+    fit_raw = chain_results,
+    formula = formula,
+    data = data,
+    family = family,
+    X_num = X_num,
+    X_denom = X_denom,
+    re_info = re_info,
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = chains
+  )
+
+  return(fit)
+}
+
+
+#' Convert PG NegBin fit to ratiod_fit object
+#' @keywords internal
+convert_pg_negbin_to_ratiod_fit <- function(fit_raw, formula, data, family,
+                                             spatial, X, re_info, iter, warmup, thin,
+                                             chains = 1) {
+
+  n_chains <- length(fit_raw)
+  n_save_per_chain <- nrow(fit_raw[[1]]$beta)
+  n_save_total <- n_save_per_chain * n_chains
+  has_spatial <- !is.null(spatial)
+
+  # Parameter names
+  beta_names <- colnames(X)
+  if (is.null(beta_names)) {
+    beta_names <- paste0("beta[", seq_len(ncol(X)), "]")
+  }
+
+  # Count parameters
+  n_params <- ncol(fit_raw[[1]]$beta) + 1  # beta + r
+  if (re_info$n_groups > 0) n_params <- n_params + 1  # sigma_re
+  if (has_spatial) n_params <- n_params + 1  # tau
+
+  # Create 3D array for draws
+  draws_array <- array(NA_real_,
+                       dim = c(n_save_per_chain, n_chains, n_params))
+
+  # Build parameter names
+  param_names <- c(beta_names, "r")
+  if (re_info$n_groups > 0) {
+    param_names <- c(param_names, "sigma_re")
+  }
+  if (has_spatial) {
+    param_names <- c(param_names, "tau_spatial")
+  }
+
+  dimnames(draws_array) <- list(
+    iteration = seq_len(n_save_per_chain),
+    chain = seq_len(n_chains),
+    variable = param_names
+  )
+
+  # Fill draws
+  for (c in seq_len(n_chains)) {
+    chain_fit <- fit_raw[[c]]
+    col_idx <- 1
+
+    # Fixed effects
+    for (j in seq_len(ncol(chain_fit$beta))) {
+      draws_array[, c, col_idx] <- chain_fit$beta[, j]
+      col_idx <- col_idx + 1
+    }
+
+    # Dispersion
+    draws_array[, c, col_idx] <- chain_fit$r
+    col_idx <- col_idx + 1
+
+    # Sigma_re
+    if (re_info$n_groups > 0) {
+      draws_array[, c, col_idx] <- chain_fit$sigma_re
+      col_idx <- col_idx + 1
+    }
+
+    # Tau
+    if (has_spatial) {
+      draws_array[, c, col_idx] <- chain_fit$tau
+      col_idx <- col_idx + 1
+    }
+  }
+
+  # Combine internals
+  combined_beta <- do.call(rbind, lapply(fit_raw, `[[`, "beta"))
+  combined_re <- do.call(rbind, lapply(fit_raw, `[[`, "re"))
+  combined_eta <- do.call(rbind, lapply(fit_raw, `[[`, "eta"))
+  combined_spatial <- if (has_spatial) {
+    do.call(rbind, lapply(fit_raw, `[[`, "spatial"))
+  } else NULL
+
+  fit <- list(
+    draws = draws_array,
+    formula = formula,
+    data = data,
+    family = family,
+    spatial = spatial,
+    backend = "pg",
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = n_chains,
+    n_save = n_save_total,
+    n_save_per_chain = n_save_per_chain,
+    .internal = list(
+      eta = combined_eta,
+      beta = combined_beta,
+      re = combined_re,
+      spatial = combined_spatial,
+      X = X,
+      re_info = re_info,
+      chain_results = fit_raw
+    )
+  )
+
+  class(fit) <- "ratiod_fit"
+  return(fit)
+}
+
+
+#' Convert PG NegBin-NegBin fit to ratiod_fit object
+#' @keywords internal
+convert_pg_negbin_negbin_to_ratiod_fit <- function(fit_raw, formula, data, family,
+                                                    X_num, X_denom, re_info,
+                                                    iter, warmup, thin, chains = 1) {
+
+  n_chains <- length(fit_raw)
+  n_save_per_chain <- nrow(fit_raw[[1]]$beta_num)
+  n_save_total <- n_save_per_chain * n_chains
+
+  # Parameter names
+  p_num <- ncol(X_num)
+  p_denom <- ncol(X_denom)
+
+  beta_num_names <- colnames(X_num)
+  if (is.null(beta_num_names)) {
+    beta_num_names <- paste0("beta_num[", seq_len(p_num), "]")
+  } else {
+    beta_num_names <- paste0("num_", beta_num_names)
+  }
+
+  beta_denom_names <- colnames(X_denom)
+  if (is.null(beta_denom_names)) {
+    beta_denom_names <- paste0("beta_denom[", seq_len(p_denom), "]")
+  } else {
+    beta_denom_names <- paste0("denom_", beta_denom_names)
+  }
+
+  # Count parameters
+  n_params <- p_num + p_denom + 2  # betas + r_num + r_denom
+  if (re_info$n_groups > 0) n_params <- n_params + 1  # sigma_re
+
+  # Create 3D array
+  draws_array <- array(NA_real_,
+                       dim = c(n_save_per_chain, n_chains, n_params))
+
+  # Build parameter names
+  param_names <- c(beta_num_names, beta_denom_names, "r_num", "r_denom")
+  if (re_info$n_groups > 0) {
+    param_names <- c(param_names, "sigma_re")
+  }
+
+  dimnames(draws_array) <- list(
+    iteration = seq_len(n_save_per_chain),
+    chain = seq_len(n_chains),
+    variable = param_names
+  )
+
+  # Fill draws
+  for (c in seq_len(n_chains)) {
+    chain_fit <- fit_raw[[c]]
+    col_idx <- 1
+
+    # Numerator betas
+    for (j in seq_len(p_num)) {
+      draws_array[, c, col_idx] <- chain_fit$beta_num[, j]
+      col_idx <- col_idx + 1
+    }
+
+    # Denominator betas
+    for (j in seq_len(p_denom)) {
+      draws_array[, c, col_idx] <- chain_fit$beta_denom[, j]
+      col_idx <- col_idx + 1
+    }
+
+    # Dispersions
+    draws_array[, c, col_idx] <- chain_fit$r_num
+    col_idx <- col_idx + 1
+    draws_array[, c, col_idx] <- chain_fit$r_denom
+    col_idx <- col_idx + 1
+
+    # Sigma_re
+    if (re_info$n_groups > 0) {
+      draws_array[, c, col_idx] <- chain_fit$sigma_re
+      col_idx <- col_idx + 1
+    }
+  }
+
+  # Combine internals
+  combined_beta_num <- do.call(rbind, lapply(fit_raw, `[[`, "beta_num"))
+  combined_beta_denom <- do.call(rbind, lapply(fit_raw, `[[`, "beta_denom"))
+  combined_re <- do.call(rbind, lapply(fit_raw, `[[`, "re"))
+  combined_eta_num <- do.call(rbind, lapply(fit_raw, `[[`, "eta_num"))
+  combined_eta_denom <- do.call(rbind, lapply(fit_raw, `[[`, "eta_denom"))
+
+  fit <- list(
+    draws = draws_array,
+    formula = formula,
+    data = data,
+    family = family,
+    backend = "pg",
+    iter = iter,
+    warmup = warmup,
+    thin = thin,
+    chains = n_chains,
+    n_save = n_save_total,
+    n_save_per_chain = n_save_per_chain,
+    .internal = list(
+      eta_num = combined_eta_num,
+      eta_denom = combined_eta_denom,
+      beta_num = combined_beta_num,
+      beta_denom = combined_beta_denom,
+      re = combined_re,
+      X_num = X_num,
+      X_denom = X_denom,
+      re_info = re_info,
+      chain_results = fit_raw
     )
   )
 

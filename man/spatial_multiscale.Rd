@@ -14,7 +14,9 @@ spatial_multiscale(
   nn_local = 10,
   nn_regional = 30,
   shared = TRUE,
-  scale = TRUE
+  scale_coords = TRUE,
+  sampler = c("auto", "noncentered", "centered", "interweaved", "adaptive", "riemannian",
+    "lbfgs")
 )
 }
 \arguments{
@@ -41,7 +43,7 @@ Default: \code{c(1, 10)} (after scaling).}
 \item{shared}{Logical; if TRUE (default), spatial effects enter both
 numerator and denominator.}
 
-\item{scale}{Logical; if TRUE (default), coordinates are scaled to
+\item{scale_coords}{Logical; if TRUE (default), coordinates are scaled to
 unit variance before computing distances.}
 }
 \value{

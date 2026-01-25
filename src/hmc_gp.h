@@ -194,6 +194,62 @@ struct LBFGSState {
     }
 };
 
+// =============================================================================
+// GP Solver Configuration
+// =============================================================================
+
+enum class GPSolver {
+  AUTO,       // Auto-select based on problem size and GPU availability
+  CHOLESKY,   // Direct Cholesky (exact, O(k^3))
+  CG,         // Conjugate Gradient (iterative)
+  PCG,        // Preconditioned CG
+  GPU         // GPU-accelerated (CUDA or OpenCL)
+};
+
+struct GPSolverConfig {
+  GPSolver solver = GPSolver::AUTO;
+  double cg_tol = 1e-6;
+  int cg_maxiter = 100;
+  int n_obs = 0;  // For auto selection
+  bool gpu_available = false;  // Set by runtime check
+
+  // Select actual solver based on config, problem size, and GPU availability
+  GPSolver effective_solver() const {
+    // If explicitly set to non-auto, use that (with GPU fallback if unavailable)
+    if (solver == GPSolver::GPU) {
+      return gpu_available ? GPSolver::GPU : GPSolver::PCG;
+    }
+    if (solver != GPSolver::AUTO) {
+      return solver;
+    }
+
+    // Auto selection logic:
+    // - Small: Cholesky (exact, low overhead)
+    // - Medium: PCG (iterative, good balance)
+    // - Large with GPU: GPU (parallel batched Cholesky)
+    // - Large without GPU: CG (iterative)
+    if (n_obs < 2000) {
+      return GPSolver::CHOLESKY;
+    } else if (n_obs < 5000) {
+      return GPSolver::PCG;
+    } else if (gpu_available) {
+      return GPSolver::GPU;
+    } else {
+      return GPSolver::CG;
+    }
+  }
+};
+
+// Parse solver string from R
+inline GPSolver parse_gp_solver(const std::string& s) {
+  if (s == "auto") return GPSolver::AUTO;
+  if (s == "cholesky") return GPSolver::CHOLESKY;
+  if (s == "cg") return GPSolver::CG;
+  if (s == "pcg") return GPSolver::PCG;
+  if (s == "gpu") return GPSolver::GPU;
+  return GPSolver::AUTO;
+}
+
 // Single-scale GP data structure
 struct GPData {
   int n_obs;                          // Number of observations
@@ -211,6 +267,9 @@ struct GPData {
   CovType cov_type;
   double nu;                          // Matern smoothness (if applicable)
   bool shared;                        // Whether GP is shared between num/denom
+
+  // Solver configuration
+  GPSolverConfig solver_config;
 };
 
 // Multi-scale GP data structure
@@ -255,7 +314,7 @@ struct MultiscaleGPData {
 // w: spatial effect values at each location (length n_obs)
 // sigma2: spatial variance
 // phi: spatial range parameter
-double gp_nngp_log_lik(
+inline double gp_nngp_log_lik(
     const std::vector<double>& w,
     double sigma2,
     double phi,
@@ -531,6 +590,7 @@ inline double multiscale_gp_log_lik(
   gp_local.coords = ms_data.coords;
   gp_local.nn_idx = ms_data.nn_idx_local;
   gp_local.nn_dist = ms_data.nn_dist_local;
+  gp_local.nn_neighbor_dist = ms_data.nn_neighbor_dist_local;
   gp_local.nn_order = ms_data.nn_order_local;
   gp_local.nn_order_inv = ms_data.nn_order_inv_local;
   gp_local.cov_type = ms_data.cov_type;
@@ -541,6 +601,7 @@ inline double multiscale_gp_log_lik(
   gp_regional.coords = ms_data.coords;
   gp_regional.nn_idx = ms_data.nn_idx_regional;
   gp_regional.nn_dist = ms_data.nn_dist_regional;
+  gp_regional.nn_neighbor_dist = ms_data.nn_neighbor_dist_regional;
   gp_regional.nn_order = ms_data.nn_order_regional;
   gp_regional.nn_order_inv = ms_data.nn_order_inv_regional;
   gp_regional.cov_type = ms_data.cov_type;

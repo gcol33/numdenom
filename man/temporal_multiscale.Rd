@@ -14,7 +14,8 @@ temporal_multiscale(
 )
 }
 \arguments{
-\item{time_var}{Name of the time variable in data (character).}
+\item{time_var}{Name of the time variable in data. Can be a formula
+(e.g., \code{~ year}) or a character string (e.g., \code{"year"}).}
 
 \item{trend}{Type of trend component: \code{"rw2"} (default, smooth),
 \code{"rw1"} (less smooth), or \code{"none"}.}

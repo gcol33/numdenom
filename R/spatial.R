@@ -155,6 +155,16 @@ spatial_car <- function(adjacency, level = c("group", "obs"),
     rho_bounds <- compute_car_rho_bounds(adjacency)
   }
 
+  # Warning for non-shared spatial effects
+  if (!shared) {
+    warning(
+      "Non-shared spatial effects (shared = FALSE) may lead to confounded ratio estimates.\n",
+      "Consider whether spatial effects should be shared between\n",
+      "numerator and denominator to prevent spurious spatial patterns in ratios.",
+      call. = FALSE
+    )
+  }
+
   structure(
     list(
       type = if (proper) "car_proper" else "car",
@@ -318,6 +328,16 @@ spatial_bym2 <- function(adjacency, level = c("group", "obs"),
     scale_factor <- compute_bym2_scale(adjacency)
   }
 
+  # Warning for non-shared spatial effects
+  if (!shared) {
+    warning(
+      "Non-shared spatial effects (shared = FALSE) may lead to confounded ratio estimates.\n",
+      "Consider whether spatial effects should be shared between\n",
+      "numerator and denominator to prevent spurious spatial patterns in ratios.",
+      call. = FALSE
+    )
+  }
+
   structure(
     list(
       type = "bym2",
@@ -469,10 +489,27 @@ is_connected <- function(adjacency) {
 #'   Ignored for non-Matern covariance functions.
 #' @param nn Number of nearest neighbors for NNGP approximation. Default 15.
 #'   Larger values give better approximation but slower computation.
+#' @param solver Linear algebra solver for GP computations:
+#'   - `"auto"` (default): Automatically select based on problem size.
+#'     Uses Cholesky for N < 2000, CG for larger problems. Uses GPU if
+#'     available and N > 5000.
+#'   - `"cholesky"`: Direct Cholesky decomposition. Exact but O(N*k^3).
+#'     Best for smaller datasets or when high precision is critical.
+#'   - `"cg"`: Conjugate Gradient iterative solver. O(N*k^2*iter).
+#'     Better for large N (> 2000) with good preconditioning.
+#'   - `"pcg"`: Preconditioned CG with diagonal preconditioner.
+#'     Faster convergence than CG for ill-conditioned systems.
+#'   - `"gpu"`: GPU-accelerated batched Cholesky using CUDA (if available).
+#'     Requires numdenom to be compiled with GPU support. Falls back to PCG
+#'     if GPU is unavailable. Best for large datasets (N > 5000) with
+#'     CUDA-capable GPU. Use [gpu_available()] to check support.
+#' @param cg_tol Convergence tolerance for CG/PCG solvers. Default 1e-6.
+#'   Smaller values give more accurate solutions but slower convergence.
+#' @param cg_maxiter Maximum iterations for CG/PCG. Default 100.
 #' @param shared Logical; if TRUE (default), spatial effect enters both
 #'   numerator and denominator. Set to FALSE for process-specific spatial
 #'   effects (triggers warning about potential confounding).
-#' @param scale Logical; if TRUE (default), coordinates are scaled to
+#' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing distances.
 #'
 #' @return A `ratiod_gp` object
@@ -558,10 +595,25 @@ spatial_gp <- function(coords,
                        cov = c("exponential", "matern", "gaussian", "spherical"),
                        nu = 1.5,
                        nn = 15,
+                       solver = c("auto", "cholesky", "cg", "pcg", "gpu"),
+                       cg_tol = 1e-6,
+                       cg_maxiter = 100,
                        shared = TRUE,
-                       scale = TRUE) {
+                       scale_coords = TRUE) {
 
   cov <- match.arg(cov)
+  solver <- match.arg(solver)
+
+
+  # Check GPU availability if requested
+
+if (solver == "gpu" && !gpu_available()) {
+    warning("GPU solver requested but GPU support is not available. ",
+            "Falling back to PCG solver. ",
+            "To enable GPU support, reinstall numdenom with CUDA.",
+            call. = FALSE)
+    solver <- "pcg"
+  }
 
   # Parse coordinate specification
   if (inherits(coords, "formula")) {
@@ -590,6 +642,15 @@ spatial_gp <- function(coords,
   }
   nn <- as.integer(nn)
 
+  # Validate CG parameters
+  if (!is.numeric(cg_tol) || length(cg_tol) != 1 || cg_tol <= 0) {
+    stop("`cg_tol` must be a positive number", call. = FALSE)
+  }
+  if (!is.numeric(cg_maxiter) || length(cg_maxiter) != 1 || cg_maxiter < 1) {
+    stop("`cg_maxiter` must be a positive integer", call. = FALSE)
+  }
+  cg_maxiter <- as.integer(cg_maxiter)
+
   # Warning for non-shared spatial effects
   if (!shared) {
     warning(
@@ -607,8 +668,11 @@ spatial_gp <- function(coords,
       cov = cov,
       nu = if (cov == "matern") nu else NULL,
       nn = nn,
+      solver = solver,
+      cg_tol = cg_tol,
+      cg_maxiter = cg_maxiter,
       shared = shared,
-      scale = scale,
+      scale_coords = scale_coords,
       # Filled in during validation
       n_obs = NULL,
       n_spatial = NULL,
@@ -637,6 +701,18 @@ print.ratiod_gp <- function(x, ...) {
   }
   cat("Covariance:", cov_str, "\n")
   cat("Neighbors (NNGP):", x$nn, "\n")
+
+  # Solver info
+  solver_str <- switch(x$solver,
+    auto = "auto (Cholesky<2k, PCG<5k, GPU/CG for larger)",
+    cholesky = "Cholesky (exact, O(N*k^3))",
+    cg = sprintf("CG (iterative, tol=%.0e, maxiter=%d)", x$cg_tol, x$cg_maxiter),
+    pcg = sprintf("PCG (preconditioned, tol=%.0e, maxiter=%d)", x$cg_tol, x$cg_maxiter),
+    gpu = "GPU (CUDA/OpenCL batched Cholesky)",
+    x$solver
+  )
+  cat("Solver:", solver_str, "\n")
+
   cat("Shared:", if (x$shared) "Yes (enters both processes)" else "No", "\n")
 
   if (!is.null(x$n_obs)) {
@@ -669,7 +745,7 @@ print.ratiod_gp <- function(x, ...) {
 #' @param shared Logical; if TRUE (default), spatial effect enters both
 #'   numerator and denominator. Set to FALSE for process-specific spatial
 #'   effects (triggers warning about potential confounding).
-#' @param scale Logical; if TRUE (default), coordinates are scaled to
+#' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing basis functions.
 #'
 #' @return A `ratiod_hsgp` object
@@ -741,7 +817,7 @@ spatial_hsgp <- function(coords,
                          m = 8,
                          c = 1.5,
                          shared = TRUE,
-                         scale = TRUE) {
+                         scale_coords = TRUE) {
 
   # Parse coordinate specification
   if (inherits(coords, "formula")) {
@@ -785,7 +861,7 @@ spatial_hsgp <- function(coords,
       m = m,
       c = c,
       shared = shared,
-      scale = scale,
+      scale_coords = scale_coords,
       # Filled in during validation
       n_obs = NULL,
       coords_matrix = NULL
@@ -843,7 +919,7 @@ validate_hsgp <- function(spatial, data) {
   }
 
   # Scale if requested
-  if (spatial$scale) {
+  if (spatial$scale_coords) {
     coords <- scale(coords)
   }
 
@@ -879,7 +955,7 @@ validate_hsgp <- function(spatial, data) {
 #' @param nn_regional Number of nearest neighbors for regional scale. Default 30.
 #' @param shared Logical; if TRUE (default), spatial effects enter both
 #'   numerator and denominator.
-#' @param scale Logical; if TRUE (default), coordinates are scaled to
+#' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing distances.
 #'
 #' @return A `ratiod_multiscale` object
@@ -950,7 +1026,7 @@ spatial_multiscale <- function(coords,
                                nn_local = 10,
                                nn_regional = 30,
                                shared = TRUE,
-                               scale = TRUE,
+                               scale_coords = TRUE,
                                sampler = c("auto", "noncentered", "centered",
                                           "interweaved", "adaptive", "riemannian", "lbfgs")) {
 
@@ -1023,7 +1099,7 @@ spatial_multiscale <- function(coords,
       nn_local = as.integer(nn_local),
       nn_regional = as.integer(nn_regional),
       shared = shared,
-      scale = scale,
+      scale_coords = scale_coords,
       sampler = sampler,
       # Filled in during validation
       n_obs = NULL,
@@ -1106,7 +1182,7 @@ validate_gp <- function(gp, data) {
   }
 
   # Scale coordinates if requested
-  if (gp$scale) {
+  if (gp$scale_coords) {
     coords <- scale(coords)
   }
 
@@ -1157,7 +1233,7 @@ validate_gp <- function(gp, data) {
 #' @param shared Logical; if TRUE (default), SVC effects enter both
 #'   numerator and denominator. Set to FALSE for process-specific SVCs
 #'   (triggers warning about potential confounding).
-#' @param scale Logical; if TRUE (default), coordinates are scaled to
+#' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing distances.
 #'
 #' @return A `ratiod_svc` object
@@ -1237,7 +1313,7 @@ spatial_svc <- function(coords,
                         cov = c("exponential", "matern", "gaussian", "spherical"),
                         nn = 15,
                         shared = TRUE,
-                        scale = TRUE) {
+                        scale_coords = TRUE) {
 
   cov <- match.arg(cov)
 
@@ -1292,7 +1368,7 @@ spatial_svc <- function(coords,
       cov = cov,
       nn = nn,
       shared = shared,
-      scale = scale,
+      scale_coords = scale_coords,
       # Filled in during validation
       n_obs = NULL,
       n_svc = NULL,
@@ -1380,7 +1456,7 @@ validate_svc <- function(svc, data, X) {
   }
 
   # Scale coordinates if requested
-  if (svc$scale) {
+  if (svc$scale_coords) {
     coords <- scale(coords)
   }
 

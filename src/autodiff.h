@@ -72,26 +72,42 @@ inline void delete_tape(Tape* tape) {
   }
 }
 
+// Thread-local current tape pointer for Var(double) constructor
+// Set by TapeScope, used when creating Var from scalar
+inline Tape*& current_tape() {
+  static thread_local Tape* tape = nullptr;
+  return tape;
+}
+
 // RAII wrapper for tape management
+// Also sets thread-local current_tape for Var(double) constructor
 class TapeScope {
 public:
   Tape* tape;
+  Tape* prev_tape;  // Save previous tape for nested scopes
 
-  TapeScope() : tape(new Tape()) {}
-  ~TapeScope() { delete tape; }
+  TapeScope() : tape(new Tape()), prev_tape(current_tape()) {
+    current_tape() = tape;
+  }
+  ~TapeScope() {
+    current_tape() = prev_tape;  // Restore previous tape
+    delete tape;
+  }
 
   // Non-copyable
   TapeScope(const TapeScope&) = delete;
   TapeScope& operator=(const TapeScope&) = delete;
 
   // Movable
-  TapeScope(TapeScope&& other) noexcept : tape(other.tape) {
+  TapeScope(TapeScope&& other) noexcept : tape(other.tape), prev_tape(other.prev_tape) {
     other.tape = nullptr;
   }
   TapeScope& operator=(TapeScope&& other) noexcept {
     if (this != &other) {
+      current_tape() = prev_tape;
       delete tape;
       tape = other.tape;
+      prev_tape = other.prev_tape;
       other.tape = nullptr;
     }
     return *this;

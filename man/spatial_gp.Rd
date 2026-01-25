@@ -9,8 +9,11 @@ spatial_gp(
   cov = c("exponential", "matern", "gaussian", "spherical"),
   nu = 1.5,
   nn = 15,
+  solver = c("auto", "cholesky", "cg", "pcg", "gpu"),
+  cg_tol = 1e-06,
+  cg_maxiter = 100,
   shared = TRUE,
-  scale = TRUE
+  scale_coords = TRUE
 )
 }
 \arguments{
@@ -31,11 +34,33 @@ Ignored for non-Matern covariance functions.
 \item{nn}{Number of nearest neighbors for NNGP approximation. Default 15.
 Larger values give better approximation but slower computation.}
 
+\item{solver}{Linear algebra solver for GP computations:
+\itemize{
+\item \code{"auto"} (default): Automatically select based on problem size.
+Uses Cholesky for N < 2000, CG for larger problems. Uses GPU if
+available and N > 5000.
+\item \code{"cholesky"}: Direct Cholesky decomposition. Exact but O(N*k^3).
+Best for smaller datasets or when high precision is critical.
+\item \code{"cg"}: Conjugate Gradient iterative solver. O(N\emph{k^2}iter).
+Better for large N (> 2000) with good preconditioning.
+\item \code{"pcg"}: Preconditioned CG with diagonal preconditioner.
+Faster convergence than CG for ill-conditioned systems.
+\item \code{"gpu"}: GPU-accelerated batched Cholesky using CUDA (if available).
+Requires numdenom to be compiled with GPU support. Falls back to PCG
+if GPU is unavailable. Best for large datasets (N > 5000) with
+CUDA-capable GPU. Use \code{\link[=gpu_available]{gpu_available()}} to check support.
+}}
+
+\item{cg_tol}{Convergence tolerance for CG/PCG solvers. Default 1e-6.
+Smaller values give more accurate solutions but slower convergence.}
+
+\item{cg_maxiter}{Maximum iterations for CG/PCG. Default 100.}
+
 \item{shared}{Logical; if TRUE (default), spatial effect enters both
 numerator and denominator. Set to FALSE for process-specific spatial
 effects (triggers warning about potential confounding).}
 
-\item{scale}{Logical; if TRUE (default), coordinates are scaled to
+\item{scale_coords}{Logical; if TRUE (default), coordinates are scaled to
 unit variance before computing distances.}
 }
 \value{

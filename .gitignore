@@ -34,6 +34,36 @@ TODO_*.md
 ROADMAP.md
 MIGRATION.md
 cran-comments.md
-test_script.R
 .claude/
 CLAUDE.md
+
+# Dev scripts (ad-hoc testing/debugging)
+test_*.R
+debug_*.R
+bench_*.R
+clean_build.R
+build_and_test.R
+check_cols.R
+validate_*.R
+derive_*.py
+
+# Dev output files
+*.Rout
+build_log.txt
+test_*.txt
+nul
+
+# Benchmark results (keep scripts, ignore output)
+*_results.rds
+*_results_partial.rds
+*.png
+
+# Planning docs (info moved to CLAUDE.md)
+*_plan.md
+*_progress.md
+issues.md
+next_steps.md
+roadmap_v2.md
+
+# Reference/scratch directories
+gp_ref/

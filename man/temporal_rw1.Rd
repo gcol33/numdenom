@@ -7,7 +7,8 @@
 temporal_rw1(time_var, group_var = NULL, cyclic = FALSE, shared = TRUE)
 }
 \arguments{
-\item{time_var}{Name of the time variable in data (character).}
+\item{time_var}{Name of the time variable in data. Can be a formula
+(e.g., \code{~ year}) or a character string (e.g., \code{"year"}).}
 
 \item{group_var}{Optional name of grouping variable for panel data.
 If provided, separate random walks are estimated for each group.}

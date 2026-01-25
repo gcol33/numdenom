@@ -11,11 +11,12 @@ temporal_gp(
   period = NULL,
   group_var = NULL,
   shared = TRUE,
-  scale = TRUE
+  scale_coords = TRUE
 )
 }
 \arguments{
-\item{time_var}{Name of the time variable in data (character). Should be
+\item{time_var}{Name of the time variable in data. Can be a formula
+(e.g., \code{~ year}) or a character string (e.g., \code{"year"}). Should be
 numeric (continuous time) or convertible to numeric.}
 
 \item{cov}{Covariance function: \code{"exponential"} (default, rough),
@@ -39,7 +40,7 @@ If provided, separate GPs are estimated for each group.}
 \item{shared}{Logical; if TRUE (default), temporal effect enters both
 numerator and denominator.}
 
-\item{scale}{Logical; if TRUE (default), time values are scaled to
+\item{scale_coords}{Logical; if TRUE (default), time values are scaled to
 unit variance before computing distances.}
 }
 \value{

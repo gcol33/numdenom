@@ -2,8 +2,8 @@
 // Progress reporting for long-running HMC/NUTS sampling
 // Provides real-time feedback without excessive overhead
 
-#ifndef QUOTR_HMC_PROGRESS_H
-#define QUOTR_HMC_PROGRESS_H
+#ifndef RATIOD_HMC_PROGRESS_H
+#define RATIOD_HMC_PROGRESS_H
 
 #include <Rcpp.h>
 #include <chrono>

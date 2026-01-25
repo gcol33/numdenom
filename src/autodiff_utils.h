@@ -1,5 +1,5 @@
 // autodiff_utils.h
-// Templated math functions that work with both double and ad::Var
+// Templated math functions that work with double, ad::Var (tape), and fwd::Dual (forward)
 // Enables single implementation of compute_log_post for both evaluation and gradient
 
 #ifndef RATIOD_AUTODIFF_UTILS_H
@@ -9,12 +9,13 @@
 #include <vector>
 #include <Rcpp.h>
 #include "autodiff.h"
+#include "autodiff_fwd.h"
 
 namespace ratiod {
 namespace math {
 
 // ============================================================================
-// Type traits to detect ad::Var
+// Type traits to detect ad::Var (tape-based) and fwd::Dual (forward-mode)
 // ============================================================================
 
 template<typename T>
@@ -23,13 +24,23 @@ struct is_ad_var : std::false_type {};
 template<>
 struct is_ad_var<ad::Var> : std::true_type {};
 
+template<typename T>
+struct is_fwd_dual : std::false_type {};
+
+template<>
+struct is_fwd_dual<fwd::Dual> : std::true_type {};
+
+// Helper: is either autodiff type
+template<typename T>
+struct is_autodiff : std::integral_constant<bool, is_ad_var<T>::value || is_fwd_dual<T>::value> {};
+
 // ============================================================================
 // Basic math functions - dispatch to std:: or ad::
 // ============================================================================
 
-// exp
+// exp - double version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, T>::type
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 safe_exp(T x) {
     constexpr double EXP_MAX = 700.0;
     constexpr double EXP_MIN = -700.0;
@@ -38,66 +49,115 @@ safe_exp(T x) {
     return std::exp(x);
 }
 
+// exp - ad::Var (tape) version
 template<typename T>
 inline typename std::enable_if<is_ad_var<T>::value, T>::type
 safe_exp(const T& x) {
-    // ad::exp already handles the tape recording
     return ad::exp(x);
 }
 
-// log
+// exp - fwd::Dual version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, T>::type
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+safe_exp(const T& x) {
+    constexpr double EXP_MAX = 700.0;
+    constexpr double EXP_MIN = -700.0;
+    double v = x.val;
+    if (v > EXP_MAX) v = EXP_MAX;
+    if (v < EXP_MIN) v = EXP_MIN;
+    double e = std::exp(v);
+    return fwd::Dual(e, e * x.grad);
+}
+
+// log - double version
+template<typename T>
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 safe_log(T x) {
     if (x <= 0.0) return -1e10;
     return std::log(x);
 }
 
+// log - ad::Var (tape) version
 template<typename T>
 inline typename std::enable_if<is_ad_var<T>::value, T>::type
 safe_log(const T& x) {
     return ad::log(x);
 }
 
-// sqrt
+// log - fwd::Dual version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, T>::type
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+safe_log(const T& x) {
+    if (x.val <= 0.0) return fwd::Dual(-1e10, 0.0);
+    return fwd::Dual(std::log(x.val), x.grad / x.val);
+}
+
+// sqrt - double version
+template<typename T>
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 safe_sqrt(T x) {
     if (x < 0.0) return 0.0;
     return std::sqrt(x);
 }
 
+// sqrt - ad::Var (tape) version
 template<typename T>
 inline typename std::enable_if<is_ad_var<T>::value, T>::type
 safe_sqrt(const T& x) {
     return ad::sqrt(x);
 }
 
-// lgamma (log of gamma function)
+// sqrt - fwd::Dual version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, T>::type
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+safe_sqrt(const T& x) {
+    if (x.val < 0.0) return fwd::Dual(0.0, 0.0);
+    double s = std::sqrt(x.val);
+    return fwd::Dual(s, 0.5 * x.grad / s);
+}
+
+// lgamma (log of gamma function) - double version
+template<typename T>
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 lgamma_fn(T x) {
     return R::lgammafn(x);
 }
 
+// lgamma - ad::Var (tape) version
 template<typename T>
 inline typename std::enable_if<is_ad_var<T>::value, T>::type
 lgamma_fn(const T& x) {
     return ad::lgamma(x);
 }
 
-// digamma (derivative of lgamma)
+// lgamma - fwd::Dual version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, T>::type
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+lgamma_fn(const T& x) {
+    // d(lgamma(x)) = digamma(x)
+    return fwd::Dual(R::lgammafn(x.val), R::digamma(x.val) * x.grad);
+}
+
+// digamma (derivative of lgamma) - double version
+template<typename T>
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 digamma_fn(T x) {
     return R::digamma(x);
 }
 
+// digamma - fwd::Dual version
+template<typename T>
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+digamma_fn(const T& x) {
+    // d(digamma(x)) = trigamma(x)
+    return fwd::Dual(R::digamma(x.val), R::trigamma(x.val) * x.grad);
+}
+
 // For ad::Var, digamma is handled internally by lgamma's backward pass
 
-// inv_logit (logistic function)
+// inv_logit (logistic function) - double version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, T>::type
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 inv_logit(T x) {
     if (x > 0) {
         double exp_neg_x = std::exp(-x);
@@ -108,39 +168,64 @@ inv_logit(T x) {
     }
 }
 
+// inv_logit - ad::Var (tape) version
 template<typename T>
 inline typename std::enable_if<is_ad_var<T>::value, T>::type
 inv_logit(const T& x) {
     return ad::inv_logit(x);
 }
 
-// log1p
+// inv_logit - fwd::Dual version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, T>::type
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+inv_logit(const T& x) {
+    return fwd::inv_logit(x);
+}
+
+// log1p - double version
+template<typename T>
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 log1p_fn(T x) {
     return std::log1p(x);
 }
 
+// log1p - ad::Var (tape) version
 template<typename T>
 inline typename std::enable_if<is_ad_var<T>::value, T>::type
 log1p_fn(const T& x) {
     return ad::log1p(x);
 }
 
+// log1p - fwd::Dual version
+template<typename T>
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+log1p_fn(const T& x) {
+    return fwd::log1p(x);
+}
+
 // ============================================================================
 // Value extraction (for getting double from T)
 // ============================================================================
 
+// double version
 template<typename T>
-inline typename std::enable_if<!is_ad_var<T>::value, double>::type
+inline typename std::enable_if<!is_autodiff<T>::value, double>::type
 get_value(const T& x) {
     return x;
 }
 
+// ad::Var (tape) version
 template<typename T>
 inline typename std::enable_if<is_ad_var<T>::value, double>::type
 get_value(const T& x) {
     return x.val();
+}
+
+// fwd::Dual version
+template<typename T>
+inline typename std::enable_if<is_fwd_dual<T>::value, double>::type
+get_value(const T& x) {
+    return x.val;
 }
 
 // ============================================================================
@@ -212,6 +297,155 @@ inline T log_lik_binomial(int y, int n, const T& p) {
     T log_lik = y * safe_log(p) + (n - y) * safe_log(T(1.0) - p);
     log_lik = log_lik + R::lchoose(n, y);  // constant
     return log_lik;
+}
+
+// ============================================================================
+// ZI/OI/Hurdle binomial log-likelihoods (templated)
+// ============================================================================
+
+// Zero-inflated binomial: P(Y=0) = zi + (1-zi) * Binom(0|n,p)
+template<typename T>
+inline T log_lik_zi_binomial(int y, int n, const T& p, const T& logit_zi) {
+    T log_zi = -safe_log(T(1.0) + safe_exp(-logit_zi));  // log(sigmoid(logit_zi))
+    T log_1m_zi = -safe_log(T(1.0) + safe_exp(logit_zi)); // log(1 - sigmoid(logit_zi))
+
+    if (y == 0) {
+        // log(zi + (1-zi) * (1-p)^n)
+        T log_binom_zero = n * safe_log(T(1.0) - p);
+        // log-sum-exp: log(exp(log_zi) + exp(log_1m_zi + log_binom_zero))
+        T a = log_zi;
+        T b = log_1m_zi + log_binom_zero;
+        T max_ab = (get_value(a) > get_value(b)) ? a : b;
+        return max_ab + safe_log(safe_exp(a - max_ab) + safe_exp(b - max_ab));
+    } else {
+        // log((1-zi) * Binom(y|n,p))
+        return log_1m_zi + log_lik_binomial(y, n, p);
+    }
+}
+
+// One-inflated binomial: P(Y=n) = oi + (1-oi) * Binom(n|n,p)
+template<typename T>
+inline T log_lik_oi_binomial(int y, int n, const T& p, const T& logit_oi) {
+    T log_oi = -safe_log(T(1.0) + safe_exp(-logit_oi));  // log(sigmoid(logit_oi))
+    T log_1m_oi = -safe_log(T(1.0) + safe_exp(logit_oi)); // log(1 - sigmoid(logit_oi))
+
+    if (y == n) {
+        // log(oi + (1-oi) * p^n)
+        T log_binom_n = n * safe_log(p);
+        T a = log_oi;
+        T b = log_1m_oi + log_binom_n;
+        T max_ab = (get_value(a) > get_value(b)) ? a : b;
+        return max_ab + safe_log(safe_exp(a - max_ab) + safe_exp(b - max_ab));
+    } else {
+        // log((1-oi) * Binom(y|n,p))
+        return log_1m_oi + log_lik_binomial(y, n, p);
+    }
+}
+
+// Zero-and-one inflated binomial (ZOIB)
+template<typename T>
+inline T log_lik_zoib(int y, int n, const T& p, const T& logit_zi, const T& logit_oi) {
+    T log_zi = -safe_log(T(1.0) + safe_exp(-logit_zi));
+    T log_1m_zi = -safe_log(T(1.0) + safe_exp(logit_zi));
+    T log_oi = -safe_log(T(1.0) + safe_exp(-logit_oi));
+    T log_1m_oi = -safe_log(T(1.0) + safe_exp(logit_oi));
+
+    if (y == 0) {
+        // P(Y=0) = zi + (1-zi) * (1-oi) * Binom(0|n,p)
+        T log_binom_zero = n * safe_log(T(1.0) - p);
+        T a = log_zi;
+        T b = log_1m_zi + log_1m_oi + log_binom_zero;
+        T max_ab = (get_value(a) > get_value(b)) ? a : b;
+        return max_ab + safe_log(safe_exp(a - max_ab) + safe_exp(b - max_ab));
+    } else if (y == n) {
+        // P(Y=n) = (1-zi) * (oi + (1-oi) * Binom(n|n,p))
+        T log_binom_n = n * safe_log(p);
+        T a = log_1m_zi + log_oi;
+        T b = log_1m_zi + log_1m_oi + log_binom_n;
+        T max_ab = (get_value(a) > get_value(b)) ? a : b;
+        return max_ab + safe_log(safe_exp(a - max_ab) + safe_exp(b - max_ab));
+    } else {
+        // P(Y=y) = (1-zi) * (1-oi) * Binom(y|n,p)
+        return log_1m_zi + log_1m_oi + log_lik_binomial(y, n, p);
+    }
+}
+
+// Hurdle binomial: separate zero vs non-zero
+template<typename T>
+inline T log_lik_hurdle_binomial(int y, int n, const T& p, const T& logit_theta) {
+    T log_theta = -safe_log(T(1.0) + safe_exp(-logit_theta));  // P(Y > 0)
+    T log_1m_theta = -safe_log(T(1.0) + safe_exp(logit_theta)); // P(Y = 0)
+
+    if (y == 0) {
+        return log_1m_theta;
+    } else {
+        // P(Y=y|Y>0) = Binom(y|n,p) / (1 - (1-p)^n)
+        T log_binom = log_lik_binomial(y, n, p);
+        T log_1m_zero = safe_log(T(1.0) - safe_exp(n * safe_log(T(1.0) - p)));
+        return log_theta + log_binom - log_1m_zero;
+    }
+}
+
+// ============================================================================
+// New family likelihoods: Gamma-Gamma, Lognormal, Beta-Binomial
+// ============================================================================
+
+// Gamma-Gamma: Both numerator and denominator are Gamma distributed
+// Using mean parameterization: mu = shape/rate, so rate = shape/mu
+template<typename T>
+inline T log_lik_gamma_gamma(double y_num, double y_denom,
+                             const T& mu_num, const T& mu_denom,
+                             const T& shape_num, const T& shape_denom) {
+    // Numerator: Gamma(y_num | shape_num, shape_num/mu_num)
+    T rate_num = shape_num / mu_num;
+    T ll_num = shape_num * safe_log(rate_num) + (shape_num - T(1.0)) * std::log(y_num)
+               - rate_num * y_num - lgamma_fn(shape_num);
+
+    // Denominator: Gamma(y_denom | shape_denom, shape_denom/mu_denom)
+    T rate_denom = shape_denom / mu_denom;
+    T ll_denom = shape_denom * safe_log(rate_denom) + (shape_denom - T(1.0)) * std::log(y_denom)
+                 - rate_denom * y_denom - lgamma_fn(shape_denom);
+
+    return ll_num + ll_denom;
+}
+
+// Lognormal: log(y) ~ Normal(mu, sigma^2)
+// Log-likelihood: -log(y) - log(sigma) - 0.5*log(2*pi) - 0.5*((log(y)-mu)/sigma)^2
+template<typename T>
+inline T log_lik_lognormal(double y, const T& mu, const T& sigma) {
+    double log_y = std::log(y);
+    T z = (log_y - mu) / sigma;
+    // Omitting constant -0.5*log(2*pi)
+    return -std::log(y) - safe_log(sigma) - T(0.5) * z * z;
+}
+
+// Lognormal-Lognormal: Both numerator and denominator are Lognormal
+template<typename T>
+inline T log_lik_lognormal_lognormal(double y_num, double y_denom,
+                                     const T& mu_num, const T& mu_denom,
+                                     const T& sigma_num, const T& sigma_denom) {
+    return log_lik_lognormal(y_num, mu_num, sigma_num) +
+           log_lik_lognormal(y_denom, mu_denom, sigma_denom);
+}
+
+// Beta-Binomial: y ~ BetaBinomial(n, alpha, beta)
+// Using mean-precision parameterization: mu = alpha/(alpha+beta), phi = alpha+beta
+// So alpha = mu*phi, beta = (1-mu)*phi
+template<typename T>
+inline T log_lik_beta_binomial(int y, int n, const T& mu, const T& phi) {
+    T alpha = mu * phi;
+    T beta = (T(1.0) - mu) * phi;
+
+    // log P(y|n,alpha,beta) = log(B(y+alpha, n-y+beta)) - log(B(alpha, beta)) + log(C(n,y))
+    // = lgamma(y+alpha) + lgamma(n-y+beta) - lgamma(n+alpha+beta)
+    //   - lgamma(alpha) - lgamma(beta) + lgamma(alpha+beta)
+    //   + lgamma(n+1) - lgamma(y+1) - lgamma(n-y+1)
+
+    T ll = lgamma_fn(T(y) + alpha) + lgamma_fn(T(n - y) + beta) - lgamma_fn(T(n) + alpha + beta);
+    ll = ll - lgamma_fn(alpha) - lgamma_fn(beta) + lgamma_fn(alpha + beta);
+    ll = ll + R::lchoose(n, y);  // constant w.r.t. parameters
+
+    return ll;
 }
 
 // ============================================================================

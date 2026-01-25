@@ -1,183 +1,119 @@
 # Hand-Coded Gradient Implementation Plan
 
-## Current Status
-- **Completed**: 48/60 configurations (80%) have H gradients
-- **Remaining**: 12/60 configurations (20%) use autodiff (A)
+## Gradient Progression Rule
 
-## Completed (H)
-| # | Family | RE | Spatial | Temporal | ZI |
-|--:|--------|:--:|:-------:|:--------:|:--:|
-| 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ |
-| 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ |
-| 9 | poisson_gamma | ✓ | ✗ | RW1 | ✗ |
-| 10 | poisson_gamma | ✓ | ✗ | RW2 | ✗ |
-| 11 | poisson_gamma | ✓ | ✗ | AR1 | ✗ |
-| 12 | poisson_gamma | ✓ | ✗ | ✗ | ZI |
-| 13 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle |
-| 21 | negbin_negbin | ✗ | ✗ | ✗ | ✗ |
-| 22 | negbin_negbin | ✓ | ✗ | ✗ | ✗ |
-| 29 | negbin_negbin | ✓ | ✗ | RW1 | ✗ |
-| 30 | negbin_negbin | ✓ | ✗ | RW2 | ✗ |
-| 31 | negbin_negbin | ✓ | ✗ | AR1 | ✗ |
-| 32 | negbin_negbin | ✓ | ✗ | ✗ | ZI |
-| 33 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle |
-| 41 | binomial | ✗ | ✗ | ✗ | ✗ |
-| 42 | binomial | ✓ | ✗ | ✗ | ✗ |
-| 49 | binomial | ✓ | ✗ | RW1 | ✗ |
-| 50 | binomial | ✓ | ✗ | RW2 | ✗ |
-| 51 | binomial | ✓ | ✗ | AR1 | ✗ |
-| 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ |
-| 25 | negbin_negbin | ✓ | ICAR | ✗ | ✗ |
-| 45 | binomial | ✓ | ICAR | ✗ | ✗ |
-| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ |
-| 26 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ |
-| 46 | binomial | ✓ | BYM2 | ✗ | ✗ |
-| 14 | poisson_gamma | ✓ | ICAR | RW1 | ✗ |
-| 15 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ |
-| 16 | poisson_gamma | ✓ | ICAR | AR1 | ✗ |
-| 34 | negbin_negbin | ✓ | ICAR | RW1 | ✗ |
-| 35 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ |
-| 36 | negbin_negbin | ✓ | ICAR | AR1 | ✗ |
-| 54 | binomial | ✓ | ICAR | RW1 | ✗ |
-| 55 | binomial | ✓ | BYM2 | RW1 | ✗ |
-| 56 | binomial | ✓ | ICAR | AR1 | ✗ |
-| 18 | poisson_gamma | ✓ | ICAR | ✗ | ZI |
-| 38 | negbin_negbin | ✓ | ICAR | ✗ | ZI |
-| 58 | binomial | ✓ | ICAR | ✗ | ZI |
-| 52 | binomial | ✓ | ✗ | ✗ | ZI |
-| 53 | binomial | ✓ | ✗ | ✗ | Hurdle |
-| 19 | poisson_gamma | slopes | ICAR | ✗ | ✗ |
-| 39 | negbin_negbin | slopes | ICAR | ✗ | ✗ |
-| 59 | binomial | slopes | ICAR | ✗ | ✗ |
+**Strict rule: N → A → H**
 
-## Phase 1: Temporal Models (Easy)
-Temporal priors have simple O(T) gradients.
+All gradient implementations must follow this progression:
+1. **N (Numerical)**: Initial implementation using finite differences
+2. **A (Autodiff)**: Add to templated `log_post_impl.h` for automatic differentiation
+3. **H (Hand-coded)**: Optimize with analytical gradients when A is validated
 
-| # | Family | RE | Temporal | Priority |
-|--:|--------|:--:|:--------:|:--------:|
-| 9 | poisson_gamma | ✓ | RW1 | High |
-| 10 | poisson_gamma | ✓ | RW2 | High |
-| 11 | poisson_gamma | ✓ | AR1 | High |
-| 29 | negbin_negbin | ✓ | RW1 | High |
-| 30 | negbin_negbin | ✓ | RW2 | High |
-| 31 | negbin_negbin | ✓ | AR1 | High |
-| 49 | binomial | ✓ | RW1 | High |
-| 50 | binomial | ✓ | RW2 | High |
-| 51 | binomial | ✓ | AR1 | High |
+Never skip from N directly to H. A serves as the validation reference.
 
-**Gradient formulas:**
-- RW1: `d/dφ[t] = τ * (φ[t-1] - 2*φ[t] + φ[t+1])` (interior)
-- RW2: second difference stencil
-- AR1: `d/dφ[t] = τ * (φ[t] - ρ*φ[t-1]) + ρ*τ*(φ[t+1] - ρ*φ[t])`
+---
 
-## Phase 2: ICAR Spatial (Medium)
-ICAR has O(edges) gradient via adjacency list.
+## Current Status by Feature
 
-| # | Family | RE | Spatial |
-|--:|--------|:--:|:-------:|
-| 5 | poisson_gamma | ✓ | ICAR |
-| 25 | negbin_negbin | ✓ | ICAR |
-| 45 | binomial | ✓ | ICAR |
+| Feature | C++ Header | N | A_t | H | Notes |
+|---------|-----------|:-:|:---:|:-:|-------|
+| Basic models | `hmc_sampler.cpp` | ✓ | ✓ | ✓ | Complete |
+| RE intercepts | `log_post_impl.h` | ✓ | ✓ | ✓ | Complete |
+| RE slopes | `hmc_sampler.cpp` | ✓ | ✗ | ✓ | Skipped A_t (verify!) |
+| Crossed RE | `hmc_sampler.cpp` | ✓ | ✗ | ✓ | Skipped A_t (verify!) |
+| ICAR spatial | `log_post_impl.h` | ✓ | ✓ | ✓ | Complete |
+| BYM2 spatial | `log_post_impl.h` | ✓ | ✓ | ✓ | Complete |
+| GP spatial | `hmc_gp.h` | ✓ | ✗ | ✓ | H has NNGP gradients |
+| MSGP spatial | `hmc_gp.h` | ✓ | ✗ | ✓ | Complete (multi-family) |
+| HSGP spatial | `hmc_hsgp.h` | ✓ | ✗ | ✓ | Complete (multi-family) |
+| SVC | `hmc_svc.h` + `hmc_svc_autodiff.h` | ✓ | ✓ | ✓ | **Complete** |
+| Temporal RW/AR | `log_post_impl.h` | ✓ | ✓ | ✓ | Complete |
+| Temporal GP | `hmc_temporal_gp.h` | ✓ | ✗ | ✓ | Complete |
+| TVC | `hmc_tvc.h` + `hmc_tvc_autodiff.h` + `hmc_tvc_grad.h` | ✓ | ✓ | ✓ | **Complete** |
+| Spatiotemporal | `hmc_spatiotemporal.h` | ✓ | ✗ | ✓ | Complete (Types I-IV) |
+| Latent factors | `hmc_latent.h` + `hmc_latent_autodiff.h` + `hmc_latent_grad.h` | ✓ | ✓ | ✓ | **Complete** |
+| ZI (count) | `hmc_zi.h` | ✓ | ✗ | ✓ | H implemented |
+| ZI binomial | `hmc_zi.h` | ✓ | ✗ | ✓ | H implemented |
+| OI binomial | `hmc_zi.h` | ✓ | ✗ | ✓ | Complete |
+| ZOIB | `hmc_zi.h` | ✓ | ✗ | ✓ | Complete |
 
-## Phase 3: BYM2 Spatial (Medium)
-BYM2 = ICAR + IID with mixing parameter.
+**Legend**: ✓ = implemented, ✗ = missing
 
-| # | Family | RE | Spatial |
-|--:|--------|:--:|:-------:|
-| 6 | poisson_gamma | ✓ | BYM2 |
-| 26 | negbin_negbin | ✓ | BYM2 |
-| 46 | binomial | ✓ | BYM2 |
+**SVC Implementation Details:**
+- `hmc_svc.h`: Core NNGP likelihood, `svc_nngp_gradients()` hand-coded
+- `hmc_svc_autodiff.h`: Templated `nngp_log_lik<T>()` for autodiff
+- `hmc_sampler.cpp`: `compute_gradient_svc_handcoded()` at line 3454
 
-## Phase 4: Zero-Inflation (Medium) - DONE
+**TVC Implementation Details:**
+- `hmc_tvc.h`: Core RW1/RW2/AR1/IID priors
+- `hmc_tvc_autodiff.h`: Templated priors for autodiff
+- `hmc_tvc_grad.h`: Analytical gradients `rw1_grad_w`, `rw2_grad_w`, `ar1_grad_w`
+- `hmc_sampler.cpp`: `compute_gradient_tvc_handcoded()` at line 3707
 
-| # | Family | RE | ZI | Status |
-|--:|--------|:--:|:--:|:------:|
-| 12 | poisson_gamma | ✓ | ZI | ✅ H |
-| 13 | poisson_gamma | ✓ | Hurdle | ✅ H |
-| 32 | negbin_negbin | ✓ | ZI | ✅ H |
-| 33 | negbin_negbin | ✓ | Hurdle | ✅ H |
-| 52 | binomial | ✓ | ZI | A (uses ratiod_zibinomial) |
-| 53 | binomial | ✓ | Hurdle | A (uses ratiod_hurdle_binomial) |
+---
 
-**Note**: Binomial ZI/Hurdle (rows 52, 53) use separate family classes (`ratiod_zibinomial()`, `ratiod_hurdle_binomial()`) rather than the `zi=` parameter, so they remain autodiff.
+## Implementation Phases
 
-## Phase 5: Spatial + Temporal (Medium-Hard) - DONE
+### Completed Features
 
-| # | Family | Spatial | Temporal | Status |
-|--:|--------|:-------:|:--------:|:------:|
-| 14 | poisson_gamma | ICAR | RW1 | ✅ H |
-| 15 | poisson_gamma | BYM2 | RW1 | ✅ H |
-| 16 | poisson_gamma | ICAR | AR1 | ✅ H |
-| 34 | negbin_negbin | ICAR | RW1 | ✅ H |
-| 35 | negbin_negbin | BYM2 | RW1 | ✅ H |
-| 36 | negbin_negbin | ICAR | AR1 | ✅ H |
-| 54 | binomial | ICAR | RW1 | ✅ H |
-| 55 | binomial | BYM2 | RW1 | ✅ H |
-| 56 | binomial | ICAR | AR1 | ✅ H |
+The following features are now fully implemented with N, A_t, and H:
 
-## Phase 6: Random Slopes (Hard) - DONE
+#### ✅ SVC (Spatially-Varying Coefficients) - COMPLETE
+- `hmc_svc.h`: Core NNGP likelihood and hand-coded `svc_nngp_gradients()`
+- `hmc_svc_autodiff.h`: Templated `nngp_log_lik<T>()` with Cholesky decomposition
+- `hmc_sampler.cpp`: `compute_gradient_svc_handcoded()` integrated at line 5180
+- **Status**: Ready for benchmarking
 
-| # | Family | RE | Status |
-|--:|--------|:------:|:------:|
-| 3 | poisson_gamma | slopes | ✅ H |
-| 23 | negbin_negbin | slopes | ✅ H |
-| 43 | binomial | slopes | ✅ H |
+#### ✅ TVC (Temporally-Varying Coefficients) - COMPLETE
+- `hmc_tvc.h`: Core RW1/RW2/AR1/IID priors
+- `hmc_tvc_autodiff.h`: Templated temporal priors for autodiff
+- `hmc_tvc_grad.h`: Analytical gradients (`rw1_grad_w`, `rw2_grad_w`, `ar1_grad_w`)
+- `hmc_sampler.cpp`: `compute_gradient_tvc_handcoded()` integrated at line 5183
+- **Status**: Ready for benchmarking
 
-**Note**: Both correlated (`|` syntax) and uncorrelated (`||` syntax) random slopes now use hand-coded gradients with Cholesky parameterization.
+#### ✅ OI/ZOIB Binomial - COMPLETE
+- Already implemented in `hmc_zi.h` with H gradients
+- Benchmarked in rows 78-79
 
-## Phase 7: Crossed RE (Hard) - DONE
+#### ✅ Latent Factors - COMPLETE
+- `hmc_latent.h`: Core functions (constraint application, priors)
+- `hmc_latent_autodiff.h`: Templated functions for A_t mode
+- `hmc_latent_grad.h`: Hand-coded gradients
+- `hmc_sampler.cpp`: `compute_gradient_latent_handcoded()` integrated
+- **Status**: Ready for benchmarking (expected 10-50x speedup over N)
 
-| # | Family | RE | Status |
-|--:|--------|:------:|:------:|
-| 4 | poisson_gamma | crossed | ✅ H |
-| 24 | negbin_negbin | crossed | ✅ H |
-| 44 | binomial | crossed | ✅ H |
+---
 
-**Note**: Crossed RE (multiple intercept-only terms like `(1|site) + (1|year)`) now use hand-coded gradients.
+### All Core Features Complete
 
-## Phase 8: Spatial + ZI (Medium) - DONE
+All model configurations now have H (hand-coded) gradients:
+- Core families (poisson_gamma, negbin_negbin, binomial)
+- Random intercepts and slopes
+- Spatial (ICAR, BYM2, GP, HSGP, MSGP, SVC)
+- Temporal (RW1, RW2, AR1, GP, TVC)
+- Spatiotemporal (Types I-IV)
+- ZI/Hurdle/OI/ZOIB
+- **Latent factors**
 
-| # | Family | Spatial | ZI | Status |
-|--:|--------|:-------:|:--:|:------:|
-| 18 | poisson_gamma | ICAR | ZI | ✅ H |
-| 38 | negbin_negbin | ICAR | ZI | ✅ H |
-| 58 | binomial | ICAR | ZI | ✅ H |
+---
 
-**Note**: Spatial+ZI uses the existing gradient components (ICAR/BYM2 + ZI) in combination.
+## Validation Protocol
 
-## Phase 9: Slopes + Spatial (Medium) - DONE
+For each feature moving from A_t to H:
 
-| # | Family | RE | Spatial | Status |
-|--:|--------|:------:|:-------:|:------:|
-| 19 | poisson_gamma | slopes | ICAR | ✅ H |
-| 39 | negbin_negbin | slopes | ICAR | ✅ H |
-| 59 | binomial | slopes | ICAR | ✅ H |
+1. Generate test data with known parameters
+2. Compute gradient using A_t (autodiff)
+3. Compute gradient using H (hand-coded)
+4. Check: `max(|grad_H - grad_A_t|) / max(|grad_A_t|) < 1e-5`
+5. Benchmark: H should be at least 3x faster than A_t
+6. Run full model fit and compare posteriors
 
-**Note**: Slopes+Spatial uses correlated/uncorrelated slope gradients with ICAR/BYM2 spatial.
+---
 
-## Phase 10: Binomial ZI (Separate Families) - DONE
+## Next Benchmarks Required
 
-| # | Family | ZI | Status |
-|--:|--------|:--:|:------:|
-| 52 | binomial | ZI | ✅ H |
-| 53 | binomial | Hurdle | ✅ H |
+All features now have H gradients. Priority benchmarks:
 
-**Note**: Binomial ZI/Hurdle families (`ratiod_zibinomial()`, `ratiod_hurdle_binomial()`) now use hand-coded gradients with full C++ implementation.
-
-## Phase 11: GP Models (Keep Autodiff)
-GP has O(n²/n³) - autodiff is appropriate.
-- Rows 7, 8, 17, 20, 27, 28, 37, 40, 47, 48, 57, 60
-
-## Implementation Order
-1. ✅ Basic models (6 configs) - DONE
-2. ✅ Phase 1: Temporal (9 configs) - DONE
-3. ✅ Phase 2: ICAR (3 configs) - DONE
-4. ✅ Phase 3: BYM2 (3 configs) - DONE
-5. ✅ Phase 4: ZI/Hurdle (4/6 configs) - DONE
-6. ✅ Phase 5: Spatial+Temporal (9 configs) - DONE
-7. ✅ Phase 6: Slopes (3 configs) - DONE (both correlated and uncorrelated)
-8. ✅ Phase 7: Crossed (3 configs) - DONE
-9. ✅ Phase 8: Spatial+ZI (3 configs) - DONE
-10. ✅ Phase 9: Slopes+Spatial (3 configs) - DONE
-11. ✅ Phase 10: Binomial ZI (2 configs) - DONE
-12. ⬜ Phase 11: GP (keep A) - appropriate for O(n²/n³) complexity
+1. **Benchmark SVC rows (26, 56, 88)**: Run with H gradient mode, validate against Stan
+2. **Benchmark TVC rows (27, 57, 89)**: Run with H gradient mode, validate against Stan
+3. **Benchmark Latent rows (30, 60, 92)**: Run with H gradient mode (expected 10-50x speedup)

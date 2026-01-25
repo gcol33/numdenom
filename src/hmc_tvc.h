@@ -31,6 +31,7 @@ struct TVCData {
 
   TemporalType structure;             // RW1, RW2, AR1, or GP
   bool shared;                        // Whether TVC is shared between num/denom
+  bool cyclic;                        // Whether temporal structure is cyclic
 };
 
 // -----------------------------------------------------------------------------

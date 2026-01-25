@@ -2,8 +2,8 @@
 // Fast linear algebra operations for ratiod HMC
 // Uses cache-friendly algorithms and SIMD-friendly patterns
 
-#ifndef QUOTR_LINALG_FAST_H
-#define QUOTR_LINALG_FAST_H
+#ifndef RATIOD_LINALG_FAST_H
+#define RATIOD_LINALG_FAST_H
 
 #include <vector>
 #include <cmath>
@@ -332,6 +332,280 @@ inline void softmax_inplace(double* x, int n) {
   for (int i = 0; i < n; i++) {
     x[i] /= sum;
   }
+}
+
+// ============================================================================
+// Conjugate Gradient (CG) for Symmetric Positive Definite Systems
+// The CORRECT solver for GP covariance matrices K + σ²I
+// Reference: Hestenes & Stiefel (1952), "Methods of Conjugate Gradients"
+// ============================================================================
+
+// Result struct for iterative solvers
+struct IterativeSolverResult {
+  std::vector<double> x;       // Solution vector
+  int iterations;              // Number of iterations used
+  double residual_norm;        // Final residual norm ||b - Ax||
+  bool converged;              // Whether convergence was achieved
+};
+
+// Standard Conjugate Gradient for SPD systems
+// A_func: function that computes A*v for given v (matrix-free interface)
+// b: right-hand side vector
+// x0: initial guess (if empty, uses zero)
+// tol: convergence tolerance for relative residual ||r||/||b||
+// max_iter: maximum number of iterations
+//
+// For GP regression: solves (K + σ²I) α = y
+// Complexity: O(N × k × iter) where k is kernel evaluation cost
+// Typically converges in O(√κ) iterations where κ is condition number
+template<typename MatVecFunc>
+IterativeSolverResult cg_solve(
+    MatVecFunc A_func,
+    const std::vector<double>& b,
+    const std::vector<double>& x0 = {},
+    double tol = 1e-8,
+    int max_iter = 1000
+) {
+  const int n = static_cast<int>(b.size());
+
+  IterativeSolverResult result;
+  result.iterations = 0;
+  result.converged = false;
+  result.x.resize(n);
+
+  // Initialize solution
+  if (x0.empty()) {
+    std::fill(result.x.begin(), result.x.end(), 0.0);
+  } else {
+    std::copy(x0.begin(), x0.end(), result.x.begin());
+  }
+
+  // Compute initial residual r = b - A*x
+  std::vector<double> r(n), p(n), Ap(n);
+  A_func(result.x.data(), Ap.data());
+
+  double b_norm = std::sqrt(dot_product(b.data(), b.data(), n));
+  if (b_norm < 1e-14) b_norm = 1.0;  // Avoid division by zero
+
+  for (int i = 0; i < n; i++) {
+    r[i] = b[i] - Ap[i];
+    p[i] = r[i];  // Initial search direction = residual
+  }
+
+  double r_dot_r = dot_product(r.data(), r.data(), n);
+  double r_norm = std::sqrt(r_dot_r);
+
+  // Check if already converged
+  if (r_norm / b_norm < tol) {
+    result.residual_norm = r_norm;
+    result.converged = true;
+    return result;
+  }
+
+  // CG iteration
+  for (int iter = 0; iter < max_iter; iter++) {
+    result.iterations = iter + 1;
+
+    // Compute A*p
+    A_func(p.data(), Ap.data());
+
+    // α = (r·r) / (p·Ap)
+    double p_dot_Ap = dot_product(p.data(), Ap.data(), n);
+
+    if (std::abs(p_dot_Ap) < 1e-30) {
+      // Breakdown: p is in null space of A (shouldn't happen for SPD)
+      break;
+    }
+
+    double alpha = r_dot_r / p_dot_Ap;
+
+    // Update solution: x = x + α*p
+    // Update residual: r = r - α*Ap
+    for (int i = 0; i < n; i++) {
+      result.x[i] += alpha * p[i];
+      r[i] -= alpha * Ap[i];
+    }
+
+    // Compute new residual norm
+    double r_dot_r_new = dot_product(r.data(), r.data(), n);
+    r_norm = std::sqrt(r_dot_r_new);
+
+    // Check convergence
+    if (r_norm / b_norm < tol) {
+      result.residual_norm = r_norm;
+      result.converged = true;
+      return result;
+    }
+
+    // β = (r_new·r_new) / (r·r)
+    double beta = r_dot_r_new / r_dot_r;
+    r_dot_r = r_dot_r_new;
+
+    // Update search direction: p = r + β*p
+    for (int i = 0; i < n; i++) {
+      p[i] = r[i] + beta * p[i];
+    }
+  }
+
+  // Did not converge within max_iter
+  result.residual_norm = r_norm;
+  return result;
+}
+
+// ============================================================================
+// Preconditioned Conjugate Gradient (PCG)
+// M_solve: applies preconditioner M^{-1} to a vector
+// For GP: use incomplete Cholesky, diagonal, or HSGP-based preconditioner
+// Converges in O(√(κ(M^{-1}A))) iterations instead of O(√κ(A))
+// ============================================================================
+template<typename MatVecFunc, typename PrecondFunc>
+IterativeSolverResult pcg_solve(
+    MatVecFunc A_func,
+    PrecondFunc M_solve,
+    const std::vector<double>& b,
+    const std::vector<double>& x0 = {},
+    double tol = 1e-8,
+    int max_iter = 1000
+) {
+  const int n = static_cast<int>(b.size());
+
+  IterativeSolverResult result;
+  result.iterations = 0;
+  result.converged = false;
+  result.x.resize(n);
+
+  // Initialize solution
+  if (x0.empty()) {
+    std::fill(result.x.begin(), result.x.end(), 0.0);
+  } else {
+    std::copy(x0.begin(), x0.end(), result.x.begin());
+  }
+
+  // Compute initial residual r = b - A*x
+  std::vector<double> r(n), z(n), p(n), Ap(n);
+  A_func(result.x.data(), Ap.data());
+
+  double b_norm = std::sqrt(dot_product(b.data(), b.data(), n));
+  if (b_norm < 1e-14) b_norm = 1.0;
+
+  for (int i = 0; i < n; i++) {
+    r[i] = b[i] - Ap[i];
+  }
+
+  double r_norm = std::sqrt(dot_product(r.data(), r.data(), n));
+
+  // Check if already converged
+  if (r_norm / b_norm < tol) {
+    result.residual_norm = r_norm;
+    result.converged = true;
+    return result;
+  }
+
+  // Apply preconditioner: z = M^{-1} * r
+  M_solve(r.data(), z.data());
+
+  // Initial search direction
+  std::copy(z.begin(), z.end(), p.begin());
+
+  double r_dot_z = dot_product(r.data(), z.data(), n);
+
+  // PCG iteration
+  for (int iter = 0; iter < max_iter; iter++) {
+    result.iterations = iter + 1;
+
+    // Compute A*p
+    A_func(p.data(), Ap.data());
+
+    // α = (r·z) / (p·Ap)
+    double p_dot_Ap = dot_product(p.data(), Ap.data(), n);
+
+    if (std::abs(p_dot_Ap) < 1e-30) {
+      break;
+    }
+
+    double alpha = r_dot_z / p_dot_Ap;
+
+    // Update solution and residual
+    for (int i = 0; i < n; i++) {
+      result.x[i] += alpha * p[i];
+      r[i] -= alpha * Ap[i];
+    }
+
+    r_norm = std::sqrt(dot_product(r.data(), r.data(), n));
+
+    // Check convergence
+    if (r_norm / b_norm < tol) {
+      result.residual_norm = r_norm;
+      result.converged = true;
+      return result;
+    }
+
+    // Apply preconditioner: z = M^{-1} * r
+    M_solve(r.data(), z.data());
+
+    double r_dot_z_new = dot_product(r.data(), z.data(), n);
+
+    // β = (r_new·z_new) / (r·z)
+    double beta = r_dot_z_new / r_dot_z;
+    r_dot_z = r_dot_z_new;
+
+    // Update search direction
+    for (int i = 0; i < n; i++) {
+      p[i] = z[i] + beta * p[i];
+    }
+  }
+
+  result.residual_norm = r_norm;
+  return result;
+}
+
+// ============================================================================
+// GP-specific helpers
+// ============================================================================
+
+// Create a kernel-vector product function for squared exponential kernel
+// coords: N x 2 matrix (row-major) of coordinates
+// sigma_sq: variance parameter
+// lengthscale: lengthscale parameter
+// Returns lambda that computes K(theta) * v for any vector v
+inline auto make_se_kernel_matvec(
+    const double* coords, int N,
+    double sigma_sq, double lengthscale
+) {
+  return [=](const double* v, double* result) {
+    const double inv_l2 = 1.0 / (lengthscale * lengthscale);
+
+    #ifdef _OPENMP
+    #pragma omp parallel for schedule(static)
+    #endif
+    for (int i = 0; i < N; i++) {
+      double sum = 0.0;
+      double xi = coords[2*i];
+      double yi = coords[2*i + 1];
+
+      for (int j = 0; j < N; j++) {
+        double dx = xi - coords[2*j];
+        double dy = yi - coords[2*j + 1];
+        double dist_sq = dx*dx + dy*dy;
+        double kij = sigma_sq * std::exp(-0.5 * dist_sq * inv_l2);
+        if (i == j) kij += 1e-6;  // Jitter for numerical stability
+        sum += kij * v[j];
+      }
+      result[i] = sum;
+    }
+  };
+}
+
+// Diagonal preconditioner (simple but effective for GP)
+// Uses the diagonal of K as preconditioner
+inline auto make_diagonal_precond(
+    const double* diag, int N
+) {
+  return [=](const double* v, double* result) {
+    for (int i = 0; i < N; i++) {
+      result[i] = v[i] / diag[i];
+    }
+  };
 }
 
 }  // namespace ratiod_linalg

@@ -42,11 +42,41 @@
 #' @param thin Thinning interval (default 1).
 #' @param cores Number of cores for parallel chains (default: chains).
 #' @param seed Random seed for reproducibility.
-#' @param backend Inference backend: `"auto"` (default) automatically selects
-#'   optimal backend; `"hmc"` full MCMC via native HMC/NUTS sampler;
-#'   `"pg"` Polya-Gamma Gibbs sampling (binomial only, experimental);
-#'   `"laplace"` Laplace approximation (fastest, approximate inference).
+#' @param mode Inference mode or backend. Accepts either:
+#'
+#'   **Tier names** (epistemic guarantees):
+#'   - `"auto"` (default): Selects between Exact and Structured based on model.
+#'     **Never** silently chooses Optimized.
+#'   - `"exact"` (Tier 1): Asymptotically correct posterior inference.
+#'     Credible intervals are interpretable as posterior uncertainty.
+#'   - `"structured"` (Tier 2): Accurate inference conditional on structural
+#'     assumptions (latent Gaussian, conditional independence).
+#'   - `"optimized"` (Tier 3): No general correctness guarantee.
+#'     Point estimates usually good, uncertainty often underestimated.
+#'     **Requires explicit opt-in.**
+#'
+#'   **Backend names** (specific implementation):
+#'   - `"hmc"` (Tier 1): Native HMC/NUTS sampler
+#'   - `"ess"` (Tier 1): Elliptical Slice Sampling
+#'   - `"pg"` (Tier 1): Pólya-Gamma Gibbs (binomial only)
+#'   - `"sghmc"` (Tier 1): Stochastic Gradient HMC (large datasets)
+#'   - `"sgld"` (Tier 1): Stochastic Gradient Langevin Dynamics (large datasets)
+#'   - `"laplace"` (Tier 2): Laplace approximation
+#'   - `"vi"` (Tier 3): Variational Inference
+#'
+#'   See [inference_mode_info()] for details on the tier system.
+#' @param vi_variant VI approximation type (only used when `backend = "vi"`):
+#'   `"auto"` (default) selects based on number of parameters;
+#'   `"meanfield"` diagonal covariance (fastest);
+#'   `"lowrank"` low-rank plus diagonal covariance (balanced);
+#'   `"fullrank"` full Cholesky covariance (best quality for small models).
 #' @param refresh Progress update frequency (default: iter/10).
+#' @param gradient_mode Gradient computation method for HMC backend:
+#'   `"auto"` (default) selects fastest available;
+#'   `"H"` hand-coded analytical gradients (fastest);
+#'   `"A"` forward-mode autodiff (fast, ~10x over tape);
+#'   `"A_t"` tape-based reverse-mode autodiff (slow);
+#'   `"N"` numerical finite differences (slowest, always works).
 #' @param ... Additional arguments passed to the sampler.
 #'
 #' @return A `ratiod_fit` object containing:
@@ -122,23 +152,41 @@ ratiod <- function(formula,
                   thin = 1,
                   cores = getOption("mc.cores", chains),
                   seed = NULL,
-                  backend = c("auto", "hmc", "pg", "laplace"),
+                  mode = c("auto", "exact", "structured", "optimized",
+                           "hmc", "ess", "pg", "sghmc", "sgld", "laplace", "vi"),
+                  vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
                   refresh = NULL,
+                  gradient_mode = c("auto", "N", "A", "A_t", "H"),
                   ...) {
 
-  backend <- match.arg(backend)
+  mode <- match.arg(mode)
+  vi_variant <- match.arg(vi_variant)
+  gradient_mode <- match.arg(gradient_mode)
 
   # Validate temporal specification
   if (!is.null(temporal)) {
     if (!inherits(temporal, "ratiod_temporal")) {
       stop(
         "`temporal` must be a ratiod_temporal object.\n",
-        "Options: temporal_rw1(), temporal_rw2(), temporal_ar1()",
+        "Options: temporal_rw1(), temporal_rw2(), temporal_ar1(), temporal_tvc()",
         call. = FALSE
       )
     }
-    temporal <- validate_temporal(temporal, data)
+    # TVC needs special validation with design matrix
+    if (inherits(temporal, "ratiod_tvc")) {
+      # Parse formula to get design matrix for TVC validation
+      parsed_formula <- ratiod_formula(formula, formula_num = formula_num,
+                                       formula_denom = formula_denom,
+                                       shared = shared, data = data)
+      X_num <- parsed_formula$numerator$X
+      temporal <- validate_tvc(temporal, data, X_num)
+    } else {
+      temporal <- validate_temporal(temporal, data)
+    }
   }
+
+  # Validate spatial specification
+  # (SVC is now handled in fit_hmc() with prepare_svc_for_hmc())
 
   # Validate zero-inflation specification
   if (!is.null(zi)) {
@@ -173,23 +221,39 @@ ratiod <- function(formula,
     }
   }
 
-  # Auto-select backend based on model characteristics
-  if (backend == "auto") {
-    backend <- select_backend(
-      family = family,
-      n_obs = nrow(data),
-      has_spatial = !is.null(spatial),
-      has_temporal = !is.null(temporal)
-    )
-    message(sprintf("Auto-selected backend: %s", backend))
+  # ===========================================================================
+  # Mode and Backend Selection
+  # ===========================================================================
+
+  # Select inference mode and backend
+  mode_selection <- select_inference_mode(
+    mode = mode,
+    family = family,
+    n_obs = nrow(data),
+    has_spatial = !is.null(spatial),
+    has_temporal = !is.null(temporal),
+    has_latent = !is.null(latent)
+  )
+
+  # Extract selected backend
+  selected_backend <- mode_selection$backend
+  selected_mode <- mode_selection$mode
+  selected_tier <- mode_selection$tier
+  selected_tier_name <- mode_selection$tier_name
+
+  # Display mode selection
+  message(sprintf("Inference: %s (Tier %d)", selected_tier_name, selected_tier))
+  message(sprintf("  Backend: %s", selected_backend))
+  if (mode == "auto") {
+    message(sprintf("  Reason: %s", mode_selection$reason))
   }
 
   # PG backend only works for binomial family (currently experimental)
-  if (backend == "pg") {
+  if (selected_backend == "pg") {
     if (!can_use_pg_backend(family)) {
       stop(
         "PG backend only supports ratiod_binomial() family.\n",
-        "For other families, use backend = 'hmc'.",
+        "For other families, use backend = 'hmc' or mode = 'exact'.",
         call. = FALSE
       )
     }
@@ -214,14 +278,17 @@ ratiod <- function(formula,
     )
   }
 
-  # Suggest alternative backends based on data characteristics
-  suggest_backend(
-    n_obs = nrow(data),
-    family = family,
-    spatial = spatial,
-    temporal = temporal,
-    current_backend = backend
-  )
+  # Suggest alternative modes based on data characteristics (only for auto mode)
+  if (mode == "auto") {
+    suggest_mode(
+      n_obs = nrow(data),
+      family = family,
+      spatial = spatial,
+      temporal = temporal,
+      current_mode = selected_mode,
+      current_backend = selected_backend
+    )
+  }
 
   # Parse formula
   formula_spec <- ratiod_formula(
@@ -238,12 +305,27 @@ ratiod <- function(formula,
   }
 
   # -------------------------------------------------------------------------
-  # Dispatch to PG backend for binomial models
+  # Dispatch to appropriate backend
   # -------------------------------------------------------------------------
-  if (backend == "pg") {
-    message("Fitting ratiod model with Polya-Gamma backend...")
-    message(sprintf("  Family: %s", family$name))
-    message(sprintf("  Observations: %d", nrow(data)))
+
+  # Common message elements
+  message(sprintf("Fitting ratiod model..."))
+  message(sprintf("  Family: %s", family$name))
+  message(sprintf("  Observations: %d", nrow(data)))
+
+  # Store mode info for the result
+  mode_info <- list(
+    mode = selected_mode,
+    tier = selected_tier,
+    tier_name = selected_tier_name,
+    backend = selected_backend,
+    reason = mode_selection$reason
+  )
+
+  # -------------------------------------------------------------------------
+  # Dispatch to PG backend (Tier 1: Exact)
+  # -------------------------------------------------------------------------
+  if (selected_backend == "pg") {
     message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
     message(sprintf("  Cores: %d", cores))
 
@@ -263,16 +345,19 @@ ratiod <- function(formula,
       verbose = !is.null(refresh) && refresh > 0
     )
 
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
+
     return(result)
   }
 
   # -------------------------------------------------------------------------
-  # Dispatch to Laplace backend for fast approximate inference
+  # Dispatch to Laplace backend (Tier 2: Structured)
   # -------------------------------------------------------------------------
-  if (backend == "laplace") {
-    message("Fitting ratiod model with Laplace approximation...")
-    message(sprintf("  Family: %s", family$name))
-    message(sprintf("  Observations: %d", nrow(data)))
+  if (selected_backend == "laplace") {
     message(sprintf("  Posterior samples: %d", iter - warmup))
     message(sprintf("  Cores: %d", cores))
 
@@ -287,16 +372,19 @@ ratiod <- function(formula,
       verbose = !is.null(refresh) && refresh > 0
     )
 
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
+
     return(result)
   }
 
   # -------------------------------------------------------------------------
-  # Dispatch to HMC/NUTS backend for full MCMC without Stan
+  # Dispatch to HMC/NUTS backend (Tier 1: Exact)
   # -------------------------------------------------------------------------
-  if (backend == "hmc") {
-    message("Fitting ratiod model with HMC/NUTS backend...")
-    message(sprintf("  Family: %s", family$name))
-    message(sprintf("  Observations: %d", nrow(data)))
+  if (selected_backend == "hmc") {
     message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
     if (!is.null(temporal)) {
       message(sprintf("  Temporal: %s (%d time points)", temporal$type, temporal$n_times))
@@ -321,15 +409,179 @@ ratiod <- function(formula,
       chains = chains,
       cores = cores,
       seed = seed,
+      verbose = is.null(refresh) || refresh > 0,
+      gradient_mode = gradient_mode
+    )
+
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
+
+    return(result)
+  }
+
+  # -------------------------------------------------------------------------
+  # Dispatch to VI backend (Tier 3: Optimized)
+  # -------------------------------------------------------------------------
+  if (selected_backend == "vi") {
+    message(sprintf("  VI variant: %s", vi_variant))
+    message("  Note: Tier 3 (Optimized) - uncertainty may be underestimated")
+
+    result <- fit_vi(
+      formula = formula_spec,
+      data = data,
+      family = family,
+      spatial = spatial,
+      temporal = temporal,
+      spatiotemporal = spatiotemporal,
+      zi = zi,
+      latent = latent,
+      priors = priors,
+      variant = vi_variant,
+      max_iter = iter,
+      seed = seed,
       verbose = is.null(refresh) || refresh > 0
     )
+
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
+
+    return(result)
+  }
+
+  # -------------------------------------------------------------------------
+  # Dispatch to ESS backend (Tier 1: Exact)
+  # -------------------------------------------------------------------------
+  if (selected_backend == "ess") {
+    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+
+    result <- fit_ess(
+      formula = formula_spec,
+      data = data,
+      family = family,
+      spatial = spatial,
+      temporal = temporal,
+      spatiotemporal = spatiotemporal,
+      zi = zi,
+      latent = latent,
+      priors = priors,
+      iter = iter,
+      warmup = warmup,
+      seed = seed,
+      verbose = is.null(refresh) || refresh > 0
+    )
+
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
+
+    return(result)
+  }
+
+  # -------------------------------------------------------------------------
+  # Dispatch to SGHMC backend (Tier 1: Exact, large-scale)
+  # -------------------------------------------------------------------------
+  if (selected_backend == "sghmc") {
+    # Default batch size: sqrt(n) for good variance/speed tradeoff
+    extra_args <- list(...)
+    batch_size <- extra_args$batch_size %||% ceiling(sqrt(nrow(data)))
+    # Remove batch_size from extra_args to avoid passing it twice
+    extra_args$batch_size <- NULL
+
+    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+    message(sprintf("  Batch size: %d (%.1f%% of data)", batch_size,
+                    100 * batch_size / nrow(data)))
+    message("  Note: SGHMC uses minibatch gradients for scalability")
+
+    # Note: SGHMC doesn't support spatiotemporal/latent yet
+    if (!is.null(spatiotemporal)) {
+      warning("SGHMC does not currently support spatiotemporal models. Ignoring.", call. = FALSE)
+    }
+    if (!is.null(latent)) {
+      warning("SGHMC does not currently support latent factors. Ignoring.", call. = FALSE)
+    }
+
+    result <- do.call(fit_sghmc, c(list(
+      formula = formula_spec,
+      data = data,
+      family = family,
+      spatial = spatial,
+      temporal = temporal,
+      zi = zi,
+      priors = priors,
+      iter = iter,
+      warmup = warmup,
+      batch_size = batch_size,
+      seed = seed,
+      verbose = is.null(refresh) || refresh > 0
+    ), extra_args))
+
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
+
+    return(result)
+  }
+
+  # -------------------------------------------------------------------------
+  # Dispatch to SGLD backend (Tier 1: Exact, large-scale)
+  # -------------------------------------------------------------------------
+  if (selected_backend == "sgld") {
+    # Default batch size: sqrt(n) for good variance/speed tradeoff
+    extra_args <- list(...)
+    batch_size <- extra_args$batch_size %||% ceiling(sqrt(nrow(data)))
+    # Remove batch_size from extra_args to avoid passing it twice
+    extra_args$batch_size <- NULL
+
+    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+    message(sprintf("  Batch size: %d (%.1f%% of data)", batch_size,
+                    100 * batch_size / nrow(data)))
+    message("  Note: SGLD uses Langevin dynamics with minibatch gradients")
+
+    # Note: SGLD doesn't support spatiotemporal/latent yet
+    if (!is.null(spatiotemporal)) {
+      warning("SGLD does not currently support spatiotemporal models. Ignoring.", call. = FALSE)
+    }
+    if (!is.null(latent)) {
+      warning("SGLD does not currently support latent factors. Ignoring.", call. = FALSE)
+    }
+
+    result <- do.call(fit_sgld, c(list(
+      formula = formula_spec,
+      data = data,
+      family = family,
+      spatial = spatial,
+      temporal = temporal,
+      zi = zi,
+      priors = priors,
+      iter = iter,
+      warmup = warmup,
+      batch_size = batch_size,
+      seed = seed,
+      verbose = is.null(refresh) || refresh > 0
+    ), extra_args))
+
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
 
     return(result)
   }
 
   # If we get here, no valid backend was selected
   stop(
-    sprintf("Unknown backend: '%s'. Use one of: 'auto', 'hmc', 'pg', 'laplace'", backend),
+    sprintf("Unknown backend: '%s'", selected_backend),
     call. = FALSE
   )
 }
@@ -337,15 +589,17 @@ ratiod <- function(formula,
 # Null coalescing operator
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
-#' Suggest alternative backends based on data characteristics
+#' Suggest alternative modes based on data characteristics
 #'
 #' @param n_obs Number of observations
 #' @param family ratiod family object
 #' @param spatial Spatial specification (or NULL)
 #' @param temporal Temporal specification (or NULL)
+#' @param current_mode Currently selected mode
 #' @param current_backend Currently selected backend
 #' @keywords internal
-suggest_backend <- function(n_obs, family, spatial, temporal = NULL, current_backend) {
+suggest_mode <- function(n_obs, family, spatial, temporal = NULL,
+                         current_mode, current_backend) {
 
   # Thresholds for suggestions
   LARGE_DATA_THRESHOLD <- 10000
@@ -353,33 +607,36 @@ suggest_backend <- function(n_obs, family, spatial, temporal = NULL, current_bac
 
   suggestions <- character(0)
 
-  # Large dataset warnings for HMC
-  if (n_obs >= VERY_LARGE_DATA_THRESHOLD && current_backend == "hmc") {
+  # Large dataset warnings for Exact mode
+  if (n_obs >= VERY_LARGE_DATA_THRESHOLD && current_mode == "exact") {
     if (!is.null(spatial)) {
       suggestions <- c(suggestions,
         sprintf("Large spatial dataset (%s observations).", format(n_obs, big.mark = ",")),
-        "Consider backend = 'laplace' for faster approximate inference."
+        "Consider mode = 'structured' for faster inference (Tier 2).",
+        "Or mode = 'sghmc' for stochastic gradient MCMC (Tier 1, exact)."
       )
     } else {
       suggestions <- c(suggestions,
         sprintf("Large dataset (%s observations).", format(n_obs, big.mark = ",")),
-        "HMC may be slow. Consider:",
-        "  - Reducing data via stratified sampling",
-        "  - backend = 'laplace' for approximate inference"
+        "Exact inference (Tier 1) may be slow. Consider:",
+        "  - mode = 'sghmc' or 'sgld' for stochastic gradient MCMC (Tier 1)",
+        "  - mode = 'structured' for Tier 2 (Laplace approximation)",
+        "  - Reducing data via stratified sampling"
       )
     }
-  } else if (n_obs >= LARGE_DATA_THRESHOLD && current_backend == "hmc") {
+  } else if (n_obs >= LARGE_DATA_THRESHOLD && current_mode == "exact") {
     suggestions <- c(suggestions,
       sprintf("Moderately large dataset (%s observations).", format(n_obs, big.mark = ",")),
       "If fitting is slow, consider:",
+      "  - mode = 'sghmc' for minibatch MCMC (Tier 1, scales better)",
       "  - Fewer iterations (iter = 1000 for initial exploration)",
-      "  - backend = 'laplace' for approximate inference"
+      "  - mode = 'structured' for faster Tier 2 inference"
     )
   }
 
   # Print suggestions as a message (not warning - it's informational)
   if (length(suggestions) > 0) {
-    message("\n", cli_rule("Backend suggestion"))
+    message("\n", cli_rule("Mode suggestion"))
     for (s in suggestions) {
       message("  ", s)
     }
@@ -460,6 +717,17 @@ print.ratiod_fit <- function(x, ...) {
   cat("ratiod model fit\n")
   cat("===============\n\n")
 
+  # Inference mode information (always visible)
+  tier <- x$inference_tier %||% NA
+  tier_name <- x$inference_tier_name %||% "Unknown"
+  backend <- x$backend %||% "unknown"
+
+  if (!is.na(tier)) {
+    cat(sprintf("Inference: %s (Tier %d)\n", tier_name, tier))
+  } else {
+    cat(sprintf("Backend: %s\n", backend))
+  }
+
   cat("Family:", x$family$name, "\n")
   cat("  ", x$family$description, "\n\n")
 
@@ -484,6 +752,18 @@ print.ratiod_fit <- function(x, ...) {
     cat("  Spatial:", "Yes\n")
   }
 
+  # Tier-specific notes
+  if (!is.na(tier)) {
+    cat("\n")
+    if (tier == 1) {
+      cat("Tier 1: Credible intervals are posterior uncertainty\n")
+    } else if (tier == 2) {
+      cat("Tier 2: Inference conditional on structural assumptions\n")
+    } else if (tier == 3) {
+      cat("Tier 3: Uncertainty may be underestimated\n")
+    }
+  }
+
   cat("\nUse summary() for parameter estimates\n")
   cat("Use ratio() to extract ratio posteriors\n")
 
@@ -505,8 +785,16 @@ summary.ratiod_fit <- function(object, prob = 0.95, ...) {
   cat("ratiod model summary\n")
   cat("===================\n\n")
 
+  # Inference mode information
+  tier <- object$inference_tier %||% NA
+  tier_name <- object$inference_tier_name %||% "Unknown"
   backend <- object$backend %||% "unknown"
-  cat("Backend:", backend, "\n")
+
+  if (!is.na(tier)) {
+    cat(sprintf("Inference: %s (Tier %d) via %s\n", tier_name, tier, backend))
+  } else {
+    cat("Backend:", backend, "\n")
+  }
   cat("Family:", object$family$name, "\n\n")
 
   # Calculate quantile probabilities
@@ -525,7 +813,7 @@ summary.ratiod_fit <- function(object, prob = 0.95, ...) {
   summ <- compute_param_summary(draws, probs)
 
   # Add diagnostics for MCMC backends
-  if (backend %in% c("hmc", "pg")) {
+  if (backend %in% c("hmc", "pg", "sghmc", "sgld", "ess")) {
     diag <- tryCatch(
       mcmc_diagnostics(object),
       error = function(e) NULL
@@ -680,6 +968,18 @@ print_diagnostics_summary <- function(object) {
     }
     cat("  Posterior samples:", object$n_save %||% NA, "\n")
     cat("  Note: Laplace provides approximate inference.\n")
+
+  } else if (backend %in% c("sghmc", "sgld")) {
+    # Stochastic gradient MCMC diagnostics
+    cat("  Iterations:", object$iter %||% NA, "\n")
+    cat("  Warmup:", object$warmup %||% NA, "\n")
+    cat("  Batch size:", object$batch_size %||% NA, "\n")
+    if (backend == "sghmc") {
+      cat("  Method: Stochastic Gradient HMC (Chen et al., 2014)\n")
+    } else {
+      cat("  Method: Stochastic Gradient Langevin Dynamics (Welling & Teh, 2011)\n")
+    }
+    cat("  Note: Uses minibatch gradients for scalability.\n")
   }
 }
 
@@ -1185,7 +1485,7 @@ check_diagnostics <- function(fit, quiet = FALSE) {
   n_bad_rhat <- 0
   n_low_ess <- 0
 
-  if (backend %in% c("hmc", "pg")) {
+  if (backend %in% c("hmc", "pg", "sghmc", "sgld", "ess")) {
     mcmc_diag <- tryCatch(
       mcmc_diagnostics(fit, pars = NULL),
       error = function(e) NULL

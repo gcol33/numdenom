@@ -1,5 +1,5 @@
-#ifndef QUOTR_HMC_ZI_H
-#define QUOTR_HMC_ZI_H
+#ifndef RATIOD_HMC_ZI_H
+#define RATIOD_HMC_ZI_H
 
 // Zero-inflation and hurdle model support for ratiod HMC
 // Provides log-likelihood functions for ZI-Poisson, ZI-NegBin,
@@ -18,7 +18,9 @@ enum class ZIType {
   HURDLE_POISSON, // Hurdle Poisson (truncated at zero)
   HURDLE_NEGBIN,  // Hurdle negative binomial
   ZI_BINOMIAL,    // Zero-inflated binomial
-  HURDLE_BINOMIAL // Hurdle binomial
+  HURDLE_BINOMIAL,// Hurdle binomial
+  OI_BINOMIAL,    // One-inflated binomial (excess y=n)
+  ZOIB            // Zero-and-one inflated binomial
 };
 
 // Parse ZI type from string
@@ -37,6 +39,10 @@ inline ZIType parse_zi_type(const std::string& zi_type_str) {
     return ZIType::ZI_BINOMIAL;
   } else if (zi_type_str == "hurdle_binomial") {
     return ZIType::HURDLE_BINOMIAL;
+  } else if (zi_type_str == "oi_binomial") {
+    return ZIType::OI_BINOMIAL;
+  } else if (zi_type_str == "zoib" || zi_type_str == "zoibinomial") {
+    return ZIType::ZOIB;
   } else {
     return ZIType::NONE;
   }
@@ -186,6 +192,52 @@ inline double zi_binomial_lpmf_logit(int y, int n, double p, double logit_zi) {
     return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
   } else {
     return log1m_logistic(logit_zi) + binomial_lpmf(y, n, p);
+  }
+}
+
+// One-inflated binomial log-PMF (logit scale for oi)
+// y: successes, n: trials, p: success probability, logit_oi: logit of OI prob (psi)
+// P(Y=n) = psi + (1-psi) * p^n
+// P(Y=y) = (1-psi) * Binomial(y; n, p), y < n
+inline double oi_binomial_lpmf_logit(int y, int n, double p, double logit_oi) {
+  if (y == n) {
+    // log(P(Y=n)) = log(sigmoid(logit_oi) + sigmoid(-logit_oi) * p^n)
+    double log_oi = log_logistic(logit_oi);
+    double log_1m_oi = log1m_logistic(logit_oi);
+    double log_pn_count = n * std::log(p);  // p^n
+
+    double a = log_oi;
+    double b = log_1m_oi + log_pn_count;
+    double max_ab = std::max(a, b);
+    return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
+  } else {
+    return log1m_logistic(logit_oi) + binomial_lpmf(y, n, p);
+  }
+}
+
+// Zero-and-one inflated binomial log-PMF (logit scale for both zi and oi)
+// y: successes, n: trials, p: success probability
+// logit_zi: logit of P(structural zero) = pi_0
+// logit_oi: logit of P(structural one | not structural zero) = pi_1
+//
+// P(Y=0) = pi_0
+// P(Y=n) = (1 - pi_0) * pi_1
+// P(Y=y) = (1 - pi_0) * (1 - pi_1) * Binomial(y; n, p), 0 < y < n
+inline double zoib_lpmf_logit(int y, int n, double p, double logit_zi, double logit_oi) {
+  double log_pi0 = log_logistic(logit_zi);       // log(pi_0)
+  double log_1m_pi0 = log1m_logistic(logit_zi);  // log(1 - pi_0)
+  double log_pi1 = log_logistic(logit_oi);       // log(pi_1)
+  double log_1m_pi1 = log1m_logistic(logit_oi);  // log(1 - pi_1)
+
+  if (y == 0) {
+    // P(Y=0) = pi_0
+    return log_pi0;
+  } else if (y == n) {
+    // P(Y=n) = (1 - pi_0) * pi_1
+    return log_1m_pi0 + log_pi1;
+  } else {
+    // P(Y=y) = (1 - pi_0) * (1 - pi_1) * Binomial(y; n, p)
+    return log_1m_pi0 + log_1m_pi1 + binomial_lpmf(y, n, p);
   }
 }
 
@@ -396,6 +448,93 @@ inline double hurdle_binomial_grad_eta(int y, int n, double p, double logit_thet
     if (normalizer < 1e-12) normalizer = 1e-12;
     double grad_normalizer = n * p * std::pow(1.0 - p, n - 1) / normalizer;
     return (y - n * p) - grad_normalizer;
+  }
+}
+
+// ============================================================================
+// OI-binomial gradients
+// ============================================================================
+
+// Gradient of OI-binomial log-likelihood w.r.t. logit_oi
+inline double oi_binomial_grad_logit_oi(int y, int n, double p, double logit_oi) {
+  double oi = logistic(logit_oi);
+  double one_m_oi = 1.0 - oi;
+
+  if (y == n) {
+    // d/d(logit_oi) log(oi + (1-oi)*p^n)
+    // = oi*(1-oi)*(1 - p^n) / [oi + (1-oi)*p^n]
+    double pn_binom = std::pow(p, n);  // p^n
+    double prob_n = oi + one_m_oi * pn_binom;
+    if (prob_n < 1e-12) prob_n = 1e-12;
+    return oi * one_m_oi * (1.0 - pn_binom) / prob_n;
+  } else {
+    // d/d(logit_oi) log(1-oi) = -oi
+    return -oi;
+  }
+}
+
+// Gradient of OI-binomial log-likelihood w.r.t. logit(p) (eta)
+inline double oi_binomial_grad_eta(int y, int n, double p, double logit_oi) {
+  double oi = logistic(logit_oi);
+  double one_m_oi = 1.0 - oi;
+
+  if (y == n) {
+    // d/d(eta) log(oi + (1-oi)*p^n)
+    // d/d(p) [oi + (1-oi)*p^n] = (1-oi)*n*p^(n-1)
+    // d/d(eta) = d/d(p) * p*(1-p) = (1-oi)*n*p^(n-1)*p*(1-p)
+    //          = (1-oi)*n*p^n*(1-p)
+    double pn = std::pow(p, n);
+    double prob_n = oi + one_m_oi * pn;
+    if (prob_n < 1e-12) prob_n = 1e-12;
+    return one_m_oi * n * pn * (1.0 - p) / prob_n;
+  } else {
+    // d/d(eta) [log(1-oi) + binomial_lpmf]
+    // = 0 + (y - n*p)
+    return y - n * p;
+  }
+}
+
+// ============================================================================
+// ZOIB gradients
+// ============================================================================
+
+// Gradient of ZOIB log-likelihood w.r.t. logit_zi (pi_0)
+inline double zoib_grad_logit_zi(int y, int n, double p, double logit_zi, double logit_oi) {
+  double pi0 = logistic(logit_zi);
+
+  if (y == 0) {
+    // d/d(logit_zi) log(pi_0) = 1 - pi_0
+    return 1.0 - pi0;
+  } else {
+    // d/d(logit_zi) log(1 - pi_0) = -pi_0
+    return -pi0;
+  }
+}
+
+// Gradient of ZOIB log-likelihood w.r.t. logit_oi (pi_1)
+inline double zoib_grad_logit_oi(int y, int n, double p, double logit_zi, double logit_oi) {
+  double pi1 = logistic(logit_oi);
+
+  if (y == 0) {
+    // No dependence on pi_1 when y=0
+    return 0.0;
+  } else if (y == n) {
+    // d/d(logit_oi) log(pi_1) = 1 - pi_1
+    return 1.0 - pi1;
+  } else {
+    // d/d(logit_oi) log(1 - pi_1) = -pi_1
+    return -pi1;
+  }
+}
+
+// Gradient of ZOIB log-likelihood w.r.t. logit(p) (eta)
+inline double zoib_grad_eta(int y, int n, double p, double logit_zi, double logit_oi) {
+  if (y == 0 || y == n) {
+    // At boundaries, likelihood doesn't depend on p
+    return 0.0;
+  } else {
+    // Interior: d/d(eta) binomial_lpmf = y - n*p
+    return y - n * p;
   }
 }
 

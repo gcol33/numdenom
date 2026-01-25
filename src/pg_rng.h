@@ -2,8 +2,8 @@
 // Pólya-Gamma random number generator
 // Based on Polson, Scott & Windle (2013) JASA
 
-#ifndef QUOTR_PG_RNG_H
-#define QUOTR_PG_RNG_H
+#ifndef RATIOD_PG_RNG_H
+#define RATIOD_PG_RNG_H
 
 #include <Rcpp.h>
 #include <cmath>

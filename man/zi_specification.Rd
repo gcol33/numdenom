@@ -7,6 +7,14 @@
 Functions to specify zero-inflation or hurdle model components for ratiod models.
 These handle excess zeros in count data where the standard count distribution
 (Poisson, negative binomial) doesn't adequately capture the zero proportion.
+
+\strong{Note on naming convention:} These functions (\code{zi_poisson()}, \code{zi_negbin()},
+\code{hurdle_poisson()}, \code{hurdle_negbin()}) are \strong{ZI specification} functions for
+the \code{zi} argument in \code{\link[=ratiod]{ratiod()}}. They are distinct from the \strong{family functions}
+(\code{ratiod_zipois()}, \code{ratiod_zinegbin()}, \code{ratiod_hurdle_pois()}, \code{ratiod_hurdle_negbin()})
+which specify the complete model family. Use ZI specifications when you want to
+add zero-inflation to an existing family; use ZI family functions when you want
+a pre-configured zero-inflated family.
 }
 \details{
 \strong{Zero-Inflated Models:}

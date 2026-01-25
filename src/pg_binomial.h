@@ -2,8 +2,8 @@
 // Pólya-Gamma Gibbs sampler for binomial models with random effects
 // For the ratiod package: hierarchical ratio inference
 
-#ifndef QUOTR_PG_BINOMIAL_H
-#define QUOTR_PG_BINOMIAL_H
+#ifndef RATIOD_PG_BINOMIAL_H
+#define RATIOD_PG_BINOMIAL_H
 
 #include <Rcpp.h>
 #include <vector>

@@ -10,9 +10,10 @@ namespace ad {
 // New code should use TapeScope or create_tape()/delete_tape()
 Tape* global_tape = nullptr;
 
-// Backward-compatible constructor using global tape
-// WARNING: Not thread-safe! Use Var(tape, value) in parallel code.
-Var::Var(double value) : tape(global_tape) {
+// Backward-compatible constructor using current tape
+// Uses thread-local current_tape() which is set by TapeScope
+// Falls back to global_tape for legacy code
+Var::Var(double value) : tape(current_tape() ? current_tape() : global_tape) {
   if (tape != nullptr) {
     idx = tape->add_node(value);
   } else {

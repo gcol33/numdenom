@@ -23,8 +23,11 @@ ratiod(
   thin = 1,
   cores = getOption("mc.cores", chains),
   seed = NULL,
-  backend = c("auto", "hmc", "pg", "laplace"),
+  mode = c("auto", "exact", "structured", "optimized", "hmc", "ess", "pg", "sghmc",
+    "sgld", "laplace", "vi"),
+  vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
   refresh = NULL,
+  gradient_mode = c("auto", "N", "A", "A_t", "H"),
   ...
 )
 }
@@ -81,12 +84,48 @@ See \code{\link[=latent_factor]{latent_factor()}}.}
 
 \item{seed}{Random seed for reproducibility.}
 
-\item{backend}{Inference backend: \code{"auto"} (default) automatically selects
-optimal backend; \code{"hmc"} full MCMC via native HMC/NUTS sampler;
-\code{"pg"} Polya-Gamma Gibbs sampling (binomial only, experimental);
-\code{"laplace"} Laplace approximation (fastest, approximate inference).}
+\item{mode}{Inference mode or backend. Accepts either:
+
+\strong{Tier names} (epistemic guarantees):
+\itemize{
+\item \code{"auto"} (default): Selects between Exact and Structured based on model.
+\strong{Never} silently chooses Optimized.
+\item \code{"exact"} (Tier 1): Asymptotically correct posterior inference.
+Credible intervals are interpretable as posterior uncertainty.
+\item \code{"structured"} (Tier 2): Accurate inference conditional on structural
+assumptions (latent Gaussian, conditional independence).
+\item \code{"optimized"} (Tier 3): No general correctness guarantee.
+Point estimates usually good, uncertainty often underestimated.
+\strong{Requires explicit opt-in.}
+}
+
+\strong{Backend names} (specific implementation):
+\itemize{
+\item \code{"hmc"} (Tier 1): Native HMC/NUTS sampler
+\item \code{"ess"} (Tier 1): Elliptical Slice Sampling
+\item \code{"pg"} (Tier 1): Pólya-Gamma Gibbs (binomial only)
+\item \code{"sghmc"} (Tier 1): Stochastic Gradient HMC (large datasets)
+\item \code{"sgld"} (Tier 1): Stochastic Gradient Langevin Dynamics (large datasets)
+\item \code{"laplace"} (Tier 2): Laplace approximation
+\item \code{"vi"} (Tier 3): Variational Inference
+}
+
+See \code{\link[=inference_mode_info]{inference_mode_info()}} for details on the tier system.}
+
+\item{vi_variant}{VI approximation type (only used when \code{backend = "vi"}):
+\code{"auto"} (default) selects based on number of parameters;
+\code{"meanfield"} diagonal covariance (fastest);
+\code{"lowrank"} low-rank plus diagonal covariance (balanced);
+\code{"fullrank"} full Cholesky covariance (best quality for small models).}
 
 \item{refresh}{Progress update frequency (default: iter/10).}
+
+\item{gradient_mode}{Gradient computation method for HMC backend:
+\code{"auto"} (default) selects fastest available;
+\code{"H"} hand-coded analytical gradients (fastest);
+\code{"A"} forward-mode autodiff (fast, ~10x over tape);
+\code{"A_t"} tape-based reverse-mode autodiff (slow);
+\code{"N"} numerical finite differences (slowest, always works).}
 
 \item{...}{Additional arguments passed to the sampler.}
 }

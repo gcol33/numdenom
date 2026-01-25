@@ -2,8 +2,8 @@
 // Temporal random effects support for HMC backend
 // Supports RW1, RW2, and AR1 temporal structures
 
-#ifndef QUOTR_HMC_TEMPORAL_H
-#define QUOTR_HMC_TEMPORAL_H
+#ifndef RATIOD_HMC_TEMPORAL_H
+#define RATIOD_HMC_TEMPORAL_H
 
 #define _USE_MATH_DEFINES  // For M_PI on Windows
 #include <vector>

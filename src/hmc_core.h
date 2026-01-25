@@ -2,8 +2,8 @@
 // Hamiltonian Monte Carlo with NUTS (No-U-Turn Sampler)
 // Custom implementation for ratiod - no Stan dependency
 
-#ifndef QUOTR_HMC_CORE_H
-#define QUOTR_HMC_CORE_H
+#ifndef RATIOD_HMC_CORE_H
+#define RATIOD_HMC_CORE_H
 
 #include <Rcpp.h>
 #include <vector>
@@ -26,7 +26,10 @@ struct NUTSResult;
 enum class ModelType {
   BINOMIAL,
   NEGBIN_NEGBIN,
-  POISSON_GAMMA
+  POISSON_GAMMA,
+  GAMMA_GAMMA,
+  LOGNORMAL,
+  BETA_BINOMIAL
 };
 
 // Model data container

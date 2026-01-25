@@ -10,7 +10,7 @@ spatial_svc(
   cov = c("exponential", "matern", "gaussian", "spherical"),
   nn = 15,
   shared = TRUE,
-  scale = TRUE
+  scale_coords = TRUE
 )
 }
 \arguments{
@@ -34,7 +34,7 @@ Larger values give better approximation but slower computation.}
 numerator and denominator. Set to FALSE for process-specific SVCs
 (triggers warning about potential confounding).}
 
-\item{scale}{Logical; if TRUE (default), coordinates are scaled to
+\item{scale_coords}{Logical; if TRUE (default), coordinates are scaled to
 unit variance before computing distances.}
 }
 \value{

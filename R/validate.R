@@ -66,13 +66,21 @@ pp_check.ratiod_fit <- function(object, type = c("dens_overlay", "scatter", "int
          "  install.packages('bayesplot')", call. = FALSE)
   }
 
-  # Extract posterior predictive draws
-  y_rep_num <- object$stanfit$draws("y_num_rep", format = "matrix")
-  y_rep_denom <- object$stanfit$draws("y_denom_rep", format = "matrix")
+
+  # Check if posterior predictive draws are available
+  if (is.null(object$draws$y_num_rep) || is.null(object$draws$y_denom_rep)) {
+    stop("Posterior predictive draws not available.\n",
+         "  pp_check requires models fitted with `predict = TRUE`.\n",
+         "  Re-fit with: ratiod(..., predict = TRUE)", call. = FALSE)
+  }
+
+  # Extract posterior predictive draws from HMC backend
+  y_rep_num <- object$draws$y_num_rep
+  y_rep_denom <- object$draws$y_denom_rep
 
   # Observed data
-  y_num <- object$stan_data$y_num
-  y_denom <- object$stan_data$y_denom
+  y_num <- object$.internal$hmc_data$y_num
+  y_denom <- object$.internal$hmc_data$y_denom
 
   # Select which to plot
   if (component == "numerator") {
@@ -169,24 +177,15 @@ loo.ratiod_fit <- function(x, ...) {
   }
 
   # Try combined log_lik first (all models should have this)
-  ll <- tryCatch(
-    x$stanfit$draws("log_lik", format = "matrix"),
-    error = function(e) NULL
-  )
+  ll <- x$draws$log_lik
 
   if (!is.null(ll)) {
     return(loo::loo(ll, ...))
   }
 
   # Fall back to separate components for two-process models
-  ll_num <- tryCatch(
-    x$stanfit$draws("log_lik_num", format = "matrix"),
-    error = function(e) NULL
-  )
-  ll_denom <- tryCatch(
-    x$stanfit$draws("log_lik_denom", format = "matrix"),
-    error = function(e) NULL
-  )
+  ll_num <- x$draws$log_lik_num
+  ll_denom <- x$draws$log_lik_denom
 
   if (is.null(ll_num) && is.null(ll_denom)) {
     stop("Log-likelihood not found in model output.", call. = FALSE)
@@ -222,24 +221,15 @@ waic.ratiod_fit <- function(x, ...) {
   }
 
   # Try combined log_lik first
-  ll <- tryCatch(
-    x$stanfit$draws("log_lik", format = "matrix"),
-    error = function(e) NULL
-  )
+  ll <- x$draws$log_lik
 
   if (!is.null(ll)) {
     return(loo::waic(ll, ...))
   }
 
   # Fall back to separate components
-  ll_num <- tryCatch(
-    x$stanfit$draws("log_lik_num", format = "matrix"),
-    error = function(e) NULL
-  )
-  ll_denom <- tryCatch(
-    x$stanfit$draws("log_lik_denom", format = "matrix"),
-    error = function(e) NULL
-  )
+  ll_num <- x$draws$log_lik_num
+  ll_denom <- x$draws$log_lik_denom
 
   if (is.null(ll_num) && is.null(ll_denom)) {
     stop("Log-likelihood not found in model output.", call. = FALSE)
@@ -414,7 +404,7 @@ ratiod_average <- function(..., weights = c("loo", "waic", "pbma", "pbma+"),
   names(models) <- model_names
 
   # Check data compatibility
-  n_obs <- vapply(models, function(m) m$stan_data$N, integer(1))
+  n_obs <- vapply(models, function(m) m$.internal$hmc_data$N, integer(1))
   if (length(unique(n_obs)) > 1) {
     stop("All models must be fitted to the same data", call. = FALSE)
   }

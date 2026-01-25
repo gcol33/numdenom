@@ -1005,23 +1005,27 @@ detect_spatial_type <- function(object) {
   spatial <- object$spatial
   if (is.null(spatial)) return(NULL)
 
-  # Check hmc_data for spatial type
-
+  # Check hmc_data for spatial type (string values)
   hmc_data <- object$.internal$hmc_data
-  if (!is.null(hmc_data$gp_type)) {
+  if (!is.null(hmc_data$gp_type) && is.character(hmc_data$gp_type)) {
     gp_type <- hmc_data$gp_type
-    if (gp_type == 1L) return("gp")
-    if (gp_type == 2L) return("hsgp")
-    if (gp_type == 3L) return("msgp")
+    if (gp_type == "gp") return("gp")
+    if (gp_type == "hsgp") return("hsgp")
+    if (gp_type %in% c("msgp", "multiscale_gp")) return("msgp")
   }
 
-  # Check spatial object type
+  # Check spatial object class
   if (inherits(spatial, "ratiod_gp")) return("gp")
   if (inherits(spatial, "ratiod_hsgp")) return("hsgp")
   if (inherits(spatial, "ratiod_msgp")) return("msgp")
+
+  # Check spatial$type field
   if (!is.null(spatial$type)) {
-    if (spatial$type == "icar") return("icar")
+    if (spatial$type %in% c("icar", "car", "car_proper")) return("icar")
     if (spatial$type == "bym2") return("bym2")
+    if (spatial$type == "gp") return("gp")
+    if (spatial$type == "hsgp") return("hsgp")
+    if (spatial$type %in% c("msgp", "multiscale_gp")) return("msgp")
   }
 
   NULL
@@ -1038,7 +1042,7 @@ predict_spatial_hmc <- function(object, newdata, coords.0, spatial_type, return_
     return(predict_spatial_gp(object, coords.0, return_spatial))
   } else if (spatial_type == "hsgp") {
     return(predict_spatial_hsgp(object, coords.0, return_spatial))
-  } else if (spatial_type %in% c("icar", "bym2")) {
+  } else if (spatial_type %in% c("icar", "bym2", "car", "car_proper")) {
     return(predict_spatial_areal(object, newdata, return_spatial))
   }
 
@@ -1266,7 +1270,8 @@ predict_spatial_areal <- function(object, newdata, return_spatial) {
 
   spatial_type <- spatial$type %||% "icar"
 
-  if (spatial_type == "icar") {
+  # Handle all ICAR-type models (car, car_proper both use ICAR parameterization)
+  if (spatial_type %in% c("icar", "car", "car_proper")) {
     idx <- idx + 1  # skip tau_spatial
     phi_spatial <- samples[, (idx + 1):(idx + n_units), drop = FALSE]
     spatial_effect <- phi_spatial
@@ -1356,7 +1361,7 @@ predict_pg <- function(object, newdata, type, re_formula, allow_new_levels,
     if (!is.null(spatial_type)) {
       if (spatial_type == "gp" && !is.null(coords.0)) {
         spatial_result <- predict_spatial_gp_pg(object, coords.0, return_spatial)
-      } else if (spatial_type %in% c("icar", "bym2")) {
+      } else if (spatial_type %in% c("icar", "bym2", "car", "car_proper")) {
         spatial_result <- predict_spatial_areal_pg(object, newdata, return_spatial)
       } else {
         spatial_result <- list(w_pred = NULL, w_samples = NULL)
@@ -1378,8 +1383,45 @@ predict_pg <- function(object, newdata, type, re_formula, allow_new_levels,
 build_prediction_data_pg <- function(object, newdata, re_formula, allow_new_levels) {
   formula <- object$formula
 
-  # Build design matrix
-  X <- model.matrix(formula$numerator$terms %||% ~ 1, data = newdata)
+  # Build design matrix matching the original X dimensions
+  X_orig <- object$.internal$X
+  if (!is.null(X_orig)) {
+    colnames_orig <- colnames(X_orig)
+    # Try to use stored formula terms
+    num_terms <- formula$numerator$terms
+    if (!is.null(num_terms)) {
+      X <- model.matrix(num_terms, data = newdata)
+    } else {
+      # Fall back to using X column names
+      X <- model.matrix(~ 1, data = newdata)
+      if (ncol(X) != length(colnames_orig)) {
+        pred_vars <- setdiff(colnames_orig, "(Intercept)")
+        if (length(pred_vars) > 0 && all(pred_vars %in% names(newdata))) {
+          fmla <- as.formula(paste("~", paste(pred_vars, collapse = " + ")))
+          X <- model.matrix(fmla, data = newdata)
+        }
+      }
+    }
+    # Ensure column alignment
+    if (ncol(X) != ncol(X_orig)) {
+      # Reorder/subset to match original columns
+      common_cols <- intersect(colnames(X), colnames_orig)
+      if (length(common_cols) < length(colnames_orig)) {
+        # Add missing columns as zeros
+        X_new <- matrix(0, nrow(X), length(colnames_orig))
+        colnames(X_new) <- colnames_orig
+        for (col in common_cols) {
+          X_new[, col] <- X[, col]
+        }
+        X <- X_new
+      } else {
+        X <- X[, colnames_orig, drop = FALSE]
+      }
+    }
+  } else {
+    # No original X stored, use formula directly
+    X <- model.matrix(formula$numerator$terms %||% ~ 1, data = newdata)
+  }
 
   # Handle random effects
   include_re <- !isTRUE(is.na(re_formula)) && !identical(re_formula, ~ 0)

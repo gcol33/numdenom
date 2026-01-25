@@ -17,6 +17,7 @@
 #include "hmc_latent.h"
 #include "hmc_spatiotemporal.h"
 #include "hmc_hsgp.h"
+#include "hmc_tvc.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -39,15 +40,37 @@ using ratiod_spatiotemporal::NonsepType;
 // Model configuration
 // =====================================================================
 
-enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA };
+enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA, GAMMA_GAMMA, LOGNORMAL, BETA_BINOMIAL };
 enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP, HSGP };
+
+// Gradient computation methods
+// AUTO: Use fastest available (H > A > A_t > N)
+// NUMERICAL (N): Finite differences - slow but always works
+// AUTODIFF_TAPE (A_t): Tape-based reverse-mode - slow due to heap allocation
+// AUTODIFF_FORWARD (A): Forward-mode dual numbers - fast, ~10x over A_t
+// HANDCODED (H): Analytical gradients - fastest when available
+enum class GradientMode { AUTO, NUMERICAL, AUTODIFF_TAPE, AUTODIFF_FORWARD, HANDCODED };
+
+// Parse gradient mode from string
+inline GradientMode parse_gradient_mode(const std::string& mode_str) {
+    if (mode_str == "auto" || mode_str == "AUTO") return GradientMode::AUTO;
+    if (mode_str == "N" || mode_str == "numerical") return GradientMode::NUMERICAL;
+    if (mode_str == "A_t" || mode_str == "autodiff_tape") return GradientMode::AUTODIFF_TAPE;
+    if (mode_str == "A" || mode_str == "autodiff" || mode_str == "forward") return GradientMode::AUTODIFF_FORWARD;
+    if (mode_str == "H" || mode_str == "handcoded" || mode_str == "analytical") return GradientMode::HANDCODED;
+    return GradientMode::AUTO;  // Default
+}
+
+// Set global gradient mode (defined in hmc_sampler.cpp)
+void set_gradient_mode(GradientMode mode);
 
 // Model data container with spatial support
 struct ModelData {
   // Response data
   std::vector<int> y_num;
   std::vector<int> y_denom;
-  std::vector<double> y_denom_cont;
+  std::vector<double> y_num_cont;    // For continuous numerator (gamma_gamma, lognormal)
+  std::vector<double> y_denom_cont;  // For continuous denominator (poisson_gamma, gamma_gamma, lognormal)
 
   // Design matrices (stored as flat vectors for cache efficiency)
   std::vector<double> X_num_flat;
@@ -103,6 +126,11 @@ struct ModelData {
   std::vector<double> X_zi_flat;        // Design matrix for ZI probability (flat)
   int p_zi;                             // Number of ZI predictors
   double zi_prior_sd;                   // Prior SD for ZI coefficients
+
+  // One-inflation structure (for OI-binomial and ZOIB models)
+  std::vector<double> X_oi_flat;        // Design matrix for OI probability (flat)
+  int p_oi;                             // Number of OI predictors
+  double oi_prior_sd;                   // Prior SD for OI coefficients
 
   // SVC (Spatially-Varying Coefficients) structure
   ratiod_svc::SVCData svc_data;
@@ -165,6 +193,12 @@ struct ModelData {
   double st_phi_space_prior_upper;
   double st_phi_time_prior_lower;       // Uniform bounds for temporal range
   double st_phi_time_prior_upper;
+
+  // TVC (Temporally-Varying Coefficients) structure
+  ratiod_tvc::TVCData tvc_data;
+  bool has_tvc;
+  double tvc_tau_shape;                 // Gamma shape for TVC precision
+  double tvc_tau_rate;                  // Gamma rate for TVC precision
 
   // Dimensions
   int N;
@@ -235,6 +269,9 @@ struct ParamLayout {
   // Zero-inflation parameters
   int beta_zi_start, beta_zi_end;       // ZI regression coefficients
 
+  // One-inflation parameters (for OI-binomial and ZOIB)
+  int beta_oi_start, beta_oi_end;       // OI regression coefficients
+
   // SVC parameters
   int log_sigma2_svc_start, log_sigma2_svc_end;  // Log spatial variance per SVC term
   int log_phi_svc_start, log_phi_svc_end;        // Log range parameter per SVC term
@@ -279,6 +316,11 @@ struct ParamLayout {
   int log_phi_st_time_idx;                           // Log temporal range (GP-based)
   int st_delta_start, st_delta_end;                  // ST interaction effects (S * T)
 
+  // TVC (Temporally-Varying Coefficients) parameters
+  int log_tau_tvc_start, log_tau_tvc_end;            // Log precision per TVC term
+  int logit_rho_tvc_start, logit_rho_tvc_end;        // AR1 correlations (if structure == AR1)
+  int tvc_w_start, tvc_w_end;                        // TVC values (n_groups * n_tvc * n_times)
+
   int total_params;
 
   bool has_re;
@@ -293,10 +335,12 @@ struct ParamLayout {
   bool is_ar1;
   bool has_multiscale_temporal;
   bool has_zi;
+  bool has_oi;  // For OI-binomial and ZOIB models
   bool has_svc;
   bool has_latent;
   bool has_spatiotemporal;
   bool is_st_gp;
+  bool has_tvc;
 };
 
 ParamLayout compute_param_layout(const ModelData& data);
@@ -345,18 +389,28 @@ struct DualAveraging {
   int m;
 
   // Default constructor with dimension-adaptive target
-  DualAveraging(double epsilon_init = 1.0, int n_params = 1);
+  // target_boost: additional boost to target acceptance for challenging models
+  //               (e.g., +0.10 for MSGP+temporal combinations)
+  DualAveraging(double epsilon_init = 1.0, int n_params = 1, double target_boost = 0.0);
   double update(double alpha);
   double final_epsilon() const;
 
   // Compute dimension-adaptive target acceptance rate
-  // Based on optimal scaling theory: lower for higher dimensions
-  static double compute_target(int n_params) {
-    // For d dimensions: target ≈ 0.65 for d=1, decreasing to ~0.55 for d≥50
-    if (n_params <= 5) return 0.65;
-    if (n_params <= 20) return 0.60;
-    if (n_params <= 50) return 0.57;
-    return 0.55;
+  // Higher targets (closer to 1) = smaller step sizes = fewer divergences
+  // but slower exploration. Stan default is 0.80.
+  // target_boost: additional boost for challenging model combinations
+  static double compute_target(int n_params, double target_boost = 0.0) {
+    // Use higher targets (0.75-0.85) to avoid divergences in
+    // challenging models (ICAR, hierarchical negbin, etc.)
+    double base_target;
+    if (n_params <= 5) base_target = 0.85;
+    else if (n_params <= 20) base_target = 0.82;
+    else if (n_params <= 50) base_target = 0.80;
+    else if (n_params <= 100) base_target = 0.78;
+    else base_target = 0.75;
+
+    // Apply boost, cap at 0.99
+    return std::min(0.99, base_target + target_boost);
   }
 };
 

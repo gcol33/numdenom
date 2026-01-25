@@ -74,7 +74,8 @@ fit_hmc <- function(formula,
                     cores = NULL,
                     L = 20,
                     seed = NULL,
-                    verbose = TRUE) {
+                    verbose = TRUE,
+                    gradient_mode = "auto") {
 
   # Set cores
   if (is.null(cores)) {
@@ -122,21 +123,70 @@ fit_hmc <- function(formula,
 
   # Prepare zero-inflation structure
 
-  # Check if family itself is ZI (ratiod_zibinomial, ratiod_hurdle_binomial)
+  # Check if family itself is ZI/OI/ZOIB (ratiod_zi*, ratiod_hurdle_*, ratiod_oi*, ratiod_zoib*)
   # In this case, extract ZI info from family, not from zi= parameter
-  if (is.null(zi) && isTRUE(family$zero_inflated)) {
-    # Family-based ZI (binomial ZI/hurdle)
+  if (is.null(zi) && (isTRUE(family$zero_inflated) || isTRUE(family$one_inflated))) {
+    # Determine ZI type string based on family distribution and zi_type
+    dist <- family$numerator$distribution
     zi_type <- if (family$zi_type == "hurdle") {
-      "hurdle_binomial"
+      # Hurdle models
+      switch(dist,
+        "hurdle_binomial" = "hurdle_binomial",
+        "hurdle_poisson" = "hurdle_poisson",
+        "hurdle_neg_binomial" = "hurdle_negbin",
+        "hurdle_binomial"  # fallback
+      )
+    } else if (family$zi_type == "one_inflated") {
+      # One-inflated models (excess at upper boundary)
+      "oi_binomial"
+    } else if (family$zi_type == "zoib") {
+      # Zero-and-one-inflated binomial
+      "zoib"
     } else {
-      "zi_binomial"
+      # Zero-inflated mixture models
+      switch(dist,
+        "zero_inflated_binomial" = "zi_binomial",
+        "zero_inflated_poisson" = "zi_poisson",
+        "zero_inflated_neg_binomial" = "zi_negbin",
+        "zi_binomial"  # fallback
+      )
     }
-    zi_info <- list(
-      type = zi_type,
-      X_zi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only for now
-      p_zi = 1L,
-      coef_names = "(Intercept)_zi"
-    )
+
+    # Build ZI/OI info based on model type
+    if (family$zi_type == "one_inflated") {
+      # OI-binomial: only OI coefficient, no ZI
+      zi_info <- list(
+        type = zi_type,
+        X_zi = matrix(0, nrow = hmc_data$N, ncol = 1),  # Placeholder (not used)
+        p_zi = 0L,  # No ZI coefficient for OI-only models
+        coef_names = NULL,
+        X_oi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
+        p_oi = 1L,
+        coef_names_oi = "(Intercept)_oi"
+      )
+    } else if (family$zi_type == "zoib") {
+      # ZOIB: both ZI and OI coefficients
+      zi_info <- list(
+        type = zi_type,
+        X_zi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
+        p_zi = 1L,
+        coef_names = "(Intercept)_zi",
+        X_oi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
+        p_oi = 1L,
+        coef_names_oi = "(Intercept)_oi"
+      )
+    } else {
+      # ZI/Hurdle models: only ZI coefficient
+      zi_info <- list(
+        type = zi_type,
+        X_zi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
+        p_zi = 1L,
+        coef_names = "(Intercept)_zi",
+        X_oi = NULL,
+        p_oi = 0L,
+        coef_names_oi = NULL
+      )
+    }
   } else {
     zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N)
   }
@@ -146,6 +196,9 @@ fit_hmc <- function(formula,
 
   # Prepare spatiotemporal structure
   spatiotemporal_info <- prepare_spatiotemporal_for_hmc(spatiotemporal, data)
+
+  # Prepare SVC structure (if spatial is an SVC specification)
+  svc_info <- prepare_svc_for_hmc(spatial, data, hmc_data$N, hmc_data$X_num)
 
   # Get prior parameters
   priors <- priors %||% ratiod_priors()
@@ -159,7 +212,7 @@ fit_hmc <- function(formula,
 
   # Initialize parameters
   q_init <- initialize_hmc_params_full(
-    hmc_data, model_type, spatial_info, temporal_info, zi_info, latent_info
+    hmc_data, model_type, spatial_info, temporal_info, zi_info, latent_info, svc_info
   )
 
   if (verbose) {
@@ -251,7 +304,11 @@ fit_hmc <- function(formula,
       phi_prior_upper = priors$gp_phi_prior_upper %||% 100.0,
       # HSGP parameters
       hsgp_m = as.integer(gp_info$hsgp_m %||% 8L),
-      hsgp_c = gp_info$hsgp_c %||% 1.5
+      hsgp_c = gp_info$hsgp_c %||% 1.5,
+      # GP solver configuration
+      solver = gp_info$solver %||% "auto",
+      cg_tol = gp_info$cg_tol %||% 1e-6,
+      cg_maxiter = as.integer(gp_info$cg_maxiter %||% 100L)
     )
 
     # Bundle multiscale GP parameters
@@ -391,7 +448,12 @@ fit_hmc <- function(formula,
     zi_params <- list(
       type = zi_info$type,
       X = zi_info$X_zi,
-      prior_sd = priors$zi_prior_sd %||% 10.0
+      p_zi = zi_info$p_zi %||% as.integer(ncol(zi_info$X_zi)),  # Explicit p_zi for OI-only models
+      prior_sd = priors$zi_prior_sd %||% 10.0,
+      # OI info for OI-binomial and ZOIB models
+      X_oi = zi_info$X_oi,
+      p_oi = zi_info$p_oi %||% 0L,
+      oi_prior_sd = priors$oi_prior_sd %||% priors$zi_prior_sd %||% 10.0
     )
 
     latent_params <- list(
@@ -421,10 +483,64 @@ fit_hmc <- function(formula,
       sigma2_prior_alpha = priors$st_sigma2_prior_alpha %||% 0.01
     )
 
+    # TVC (Temporally-Varying Coefficients) parameters
+    # Check if temporal is a TVC specification
+    tvc_info <- prepare_tvc_for_hmc(temporal, data, hmc_data$N, hmc_data$X_num)
+    tvc_params <- list(
+      has_tvc = tvc_info$has_tvc %||% FALSE,
+      n_tvc = as.integer(tvc_info$n_tvc %||% 0L),
+      n_times = as.integer(tvc_info$n_times %||% 0L),
+      n_groups = as.integer(tvc_info$n_groups %||% 1L),
+      structure = tvc_info$structure %||% "rw1",
+      shared = tvc_info$shared %||% TRUE,
+      cyclic = tvc_info$cyclic %||% FALSE,
+      tvc_indices = as.integer(tvc_info$tvc_indices %||% integer(0)),
+      time_index = as.integer(tvc_info$time_index %||% integer(0)),
+      group_index = as.integer(tvc_info$group_index %||% integer(0)),
+      X_tvc = as.numeric(tvc_info$X_tvc %||% numeric(0)),
+      tau_shape = priors$tvc_tau_shape %||% 2.0,
+      tau_rate = priors$tvc_tau_rate %||% 0.5
+    )
+
+    # SVC (Spatially-Varying Coefficients) parameters
+    # Check if spatial is an SVC specification
+    svc_info <- prepare_svc_for_hmc(spatial, data, hmc_data$N, hmc_data$X_num)
+    svc_params <- list(
+      has_svc = svc_info$has_svc %||% FALSE,
+      n_svc = as.integer(svc_info$n_svc %||% 0L),
+      nn = as.integer(svc_info$nn %||% 0L),
+      shared = svc_info$shared %||% TRUE,
+      cov_type = svc_info$cov_type %||% "exponential",
+      coords = as.numeric(svc_info$coords %||% numeric(0)),
+      svc_indices = as.integer(svc_info$svc_indices %||% integer(0)),
+      X_svc = as.numeric(svc_info$X_svc %||% numeric(0)),
+      nn_idx = as.integer(svc_info$nn_idx %||% integer(0)),
+      nn_dist = as.numeric(svc_info$nn_dist %||% numeric(0)),
+      nn_order = as.integer(svc_info$nn_order %||% integer(0)),
+      nn_order_inv = as.integer(svc_info$nn_order_inv %||% integer(0)),
+      sigma2_prior_scale = svc_info$sigma2_prior_scale %||% 1.0,
+      phi_prior_lower = svc_info$phi_prior_lower %||% 0.01,
+      phi_prior_upper = svc_info$phi_prior_upper %||% 10.0,
+      tau_shape = priors$svc_tau_shape %||% 1.0,
+      tau_rate = priors$svc_tau_rate %||% 0.01
+    )
+
+    # Populate spatial_info with SVC details for output conversion
+    if (svc_info$has_svc) {
+      spatial_info$n_svc <- svc_info$n_svc
+      spatial_info$svc_names <- svc_info$svc_names
+      spatial_info$X_svc <- if (!is.null(svc_info$X_svc)) {
+        matrix(svc_info$X_svc, nrow = hmc_data$N, ncol = svc_info$n_svc)
+      } else {
+        NULL
+      }
+    }
+
     fit_raw <- cpp_hmc_fit(
       q_init = q_init,
       y_num = as.integer(hmc_data$y_num),
       y_denom = as.integer(hmc_data$y_denom),
+      y_num_cont = hmc_data$y_num_cont,
       y_denom_cont = hmc_data$y_denom_cont,
       X_num = hmc_data$X_num,
       X_denom = hmc_data$X_denom,
@@ -436,13 +552,16 @@ fit_hmc <- function(formula,
       zi_params = zi_params,
       latent_params = latent_params,
       st_params = st_params,
+      tvc_params = tvc_params,
+      svc_params = svc_params,
       n_iter = as.integer(iter),
       n_warmup = as.integer(warmup),
       L = as.integer(L),
       n_chains = as.integer(chains),
       seed = as.integer(seed),
       n_threads = n_threads_within,
-      verbose = verbose
+      verbose = verbose,
+      gradient_mode_str = gradient_mode
     )
   }
 
@@ -475,9 +594,16 @@ get_hmc_model_type <- function(family) {
   if (dist == "binomial") return("binomial")
   if (dist %in% c("negbin", "negative_binomial", "neg_binomial_2")) return("negbin_negbin")
   if (dist == "poisson") return("poisson_gamma")
-  # ZI-binomial and hurdle-binomial use binomial base with ZI flag
+  if (dist == "gamma") return("gamma_gamma")
+  if (dist == "lognormal") return("lognormal")
+  if (dist == "beta_binomial") return("beta_binomial")
 
-  if (dist %in% c("zero_inflated_binomial", "hurdle_binomial")) return("binomial")
+  # ZI/Hurdle/OI/ZOIB variants map to their base model types
+  if (dist %in% c("zero_inflated_binomial", "hurdle_binomial",
+                  "one_inflated_binomial", "zero_one_inflated_binomial")) return("binomial")
+  if (dist %in% c("zero_inflated_poisson", "hurdle_poisson")) return("poisson_gamma")
+  if (dist %in% c("zero_inflated_neg_binomial", "hurdle_neg_binomial")) return("negbin_negbin")
+
   stop("Unsupported family for HMC backend: ", dist)
 }
 
@@ -503,6 +629,9 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
   re_info <- extract_re_for_hmc(formula)
 
   # Prepare response based on model type
+  # Initialize y_num_cont (used for continuous families)
+  y_num_cont <- rep(0.0, length(y_num))
+
   if (model_type == "binomial") {
     y_num <- as.integer(y_num)
     y_denom <- as.integer(y_denom)
@@ -516,6 +645,23 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
     y_denom_int <- rep(1L, length(y_num))
     y_denom_cont <- as.numeric(y_denom)
     y_denom <- y_denom_int
+  } else if (model_type == "gamma_gamma") {
+    # Gamma-Gamma: both continuous
+    y_num_cont <- as.numeric(y_num)
+    y_denom_cont <- as.numeric(y_denom)
+    y_num <- rep(0L, length(y_num))    # Dummy integer for C++ struct
+    y_denom <- rep(0L, length(y_num_cont))
+  } else if (model_type == "lognormal") {
+    # Lognormal: both continuous
+    y_num_cont <- as.numeric(y_num)
+    y_denom_cont <- as.numeric(y_denom)
+    y_num <- rep(0L, length(y_num))    # Dummy integer for C++ struct
+    y_denom <- rep(0L, length(y_num_cont))
+  } else if (model_type == "beta_binomial") {
+    # Beta-binomial: integer counts
+    y_num <- as.integer(y_num)
+    y_denom <- as.integer(y_denom)
+    y_denom_cont <- rep(0.0, length(y_num))
   }
 
   # Build slope design matrices for random effects with slopes
@@ -554,6 +700,7 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
   list(
     y_num = y_num,
     y_denom = y_denom,
+    y_num_cont = y_num_cont,
     y_denom_cont = y_denom_cont,
     X_num = X_num,
     X_denom = X_denom,
@@ -1057,10 +1204,10 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
     }
 
     # Compute ratio
-    if (model_type == "binomial") {
-      ratio_draws[s, ] <- 1 / (1 + exp(-eta_num))
+    if (model_type == "binomial" || model_type == "beta_binomial") {
+      ratio_draws[s, ] <- 1 / (1 + exp(-eta_num))  # inv_logit(eta)
     } else {
-      ratio_draws[s, ] <- exp(eta_num - eta_denom)
+      ratio_draws[s, ] <- exp(eta_num - eta_denom)  # exp(log(mu_num/mu_denom))
     }
   }
 
@@ -1083,11 +1230,35 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
       precision_diag = numeric(0),
       precision_offdiag = numeric(0),
       precision_structure = list(cyclic = FALSE),
-      shared = TRUE
+      shared = TRUE,
+      # TVC fields (not used for regular temporal)
+      n_tvc = 0L,
+      structure = "none"
     ))
   }
 
   # Temporal has already been validated by ratiod()
+  # Check if it's a TVC specification
+  if (inherits(temporal, "ratiod_tvc")) {
+    # TVC-specific fields
+    return(list(
+      type = "tvc",
+      time_index = temporal$time_index,
+      group_index = temporal$group_index,
+      n_times = temporal$n_times,
+      n_groups = temporal$n_groups,
+      n_temporal_params = temporal$n_temporal_params,
+      precision_structure = NULL,
+      shared = temporal$shared,
+      # TVC-specific
+      n_tvc = temporal$n_tvc,
+      structure = temporal$structure,
+      tvc_indices = temporal$tvc_indices,
+      tvc_names = temporal$tvc_names
+    ))
+  }
+
+  # Regular temporal (RW1, RW2, AR1, etc.)
   list(
     type = temporal$type,
     time_index = temporal$time_index,
@@ -1096,7 +1267,140 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
     n_groups = temporal$n_groups,
     n_temporal_params = temporal$n_temporal_params,
     precision_structure = temporal$precision_structure,
-    shared = temporal$shared
+    shared = temporal$shared,
+    # TVC fields (not used for regular temporal)
+    n_tvc = 0L,
+    structure = temporal$type  # Use type as structure for consistency
+  )
+}
+
+
+#' Prepare TVC (Temporally-Varying Coefficients) for HMC
+#' @keywords internal
+prepare_tvc_for_hmc <- function(temporal, data, N, X_num) {
+  # Check if temporal is a TVC specification
+  if (is.null(temporal) || !inherits(temporal, "ratiod_tvc")) {
+    return(list(
+      has_tvc = FALSE,
+      n_tvc = 0L,
+      n_times = 0L,
+      n_groups = 1L,
+      structure = "none",
+      shared = TRUE,
+      cyclic = FALSE,
+      tvc_indices = integer(0),
+      time_index = integer(0),
+      group_index = integer(0),
+      X_tvc = numeric(0)
+    ))
+  }
+
+  # TVC has already been validated by ratiod()
+  # Extract TVC-specific fields
+  n_tvc <- temporal$n_tvc
+  n_times <- temporal$n_times
+  n_groups <- temporal$n_groups %||% 1L
+  tvc_indices <- temporal$tvc_indices
+  time_index <- temporal$time_index
+  group_index <- temporal$group_index %||% rep(1L, N)
+
+  # Extract the X_tvc design matrix subset (columns from X_num at tvc_indices)
+  # Store as flat vector in row-major order for C++
+  X_tvc <- as.numeric(t(X_num[, tvc_indices, drop = FALSE]))
+
+  list(
+    has_tvc = TRUE,
+    n_tvc = as.integer(n_tvc),
+    n_times = as.integer(n_times),
+    n_groups = as.integer(n_groups),
+    structure = temporal$structure %||% "rw1",
+    shared = temporal$shared %||% TRUE,
+    cyclic = temporal$cyclic %||% FALSE,
+    tvc_indices = as.integer(tvc_indices),
+    time_index = as.integer(time_index),
+    group_index = as.integer(group_index),
+    X_tvc = X_tvc
+  )
+}
+
+
+#' Prepare SVC (Spatially-Varying Coefficients) for HMC
+#' @keywords internal
+prepare_svc_for_hmc <- function(svc, data, N, X_num) {
+  # Check if spatial is a SVC specification
+  if (is.null(svc) || !inherits(svc, "ratiod_svc")) {
+    return(list(
+      has_svc = FALSE,
+      n_svc = 0L,
+      n_obs = as.integer(N),
+      nn = 0L,
+      shared = TRUE,
+      cov_type = "exponential",
+      coords = numeric(0),
+      svc_indices = integer(0),
+      X_svc = numeric(0),
+      nn_idx = integer(0),
+      nn_dist = numeric(0),
+      nn_order = integer(0),
+      nn_order_inv = integer(0),
+      sigma2_prior_scale = 1.0,
+      phi_prior_lower = 0.3,
+      phi_prior_upper = 10.0,
+      tau_shape = 1.0,
+      tau_rate = 0.01
+    ))
+  }
+
+  # Validate SVC if not already done (coords_matrix will be NULL if not validated)
+  if (is.null(svc$coords_matrix)) {
+    svc <- validate_svc(svc, data, X_num)
+  }
+
+  # Extract SVC-specific fields
+  n_svc <- svc$n_svc
+  nn <- svc$nn
+  svc_indices <- svc$svc_indices
+  coords_matrix <- svc$coords_matrix  # N x 2 matrix
+  neighbor_info <- svc$neighbor_info
+
+  # Extract the X_svc design matrix subset (columns from X_num at svc_indices)
+  # Store as flat vector in row-major order for C++
+  X_svc <- as.numeric(t(X_num[, svc_indices, drop = FALSE]))
+
+  # Flatten coords to row-major for C++ (x1, y1, x2, y2, ...)
+  coords_flat <- as.numeric(t(coords_matrix))
+
+  # Flatten neighbor indices and distances (N x nn matrices)
+  # NOTE: C++ expects 1-based indices (converts with -1 internally)
+  # R's nn_idx uses 0 for "no neighbor" which C++ also expects (checks > 0)
+  nn_idx_flat <- as.integer(t(neighbor_info$nn_idx))
+  nn_dist_flat <- as.numeric(t(neighbor_info$nn_dist))
+
+  list(
+    has_svc = TRUE,
+    n_svc = as.integer(n_svc),
+    n_obs = as.integer(N),
+    nn = as.integer(nn),
+    shared = svc$shared %||% TRUE,
+    cov_type = svc$cov %||% "exponential",
+    coords = coords_flat,
+    svc_indices = as.integer(svc_indices),
+    X_svc = X_svc,
+    nn_idx = nn_idx_flat,
+    nn_dist = nn_dist_flat,
+    # IMPORTANT: Convert nn_order from R's 1-based to C++'s 0-based indexing
+    # C++ uses nn_order[i] directly as index into w[] and coords[]
+    nn_order = as.integer(neighbor_info$nn_order - 1L),
+    nn_order_inv = as.integer(neighbor_info$nn_order_inv - 1L),
+    sigma2_prior_scale = 1.0,
+    # Increased phi_prior_lower from 0.01 to 0.3 to prevent ill-conditioned matrices
+    # Very small phi values (short range correlations) cause near-singular covariances
+    phi_prior_lower = 0.3,
+    # Increased phi_prior_upper from 10 to 30 to give more room for long-range correlations
+    # When coordinates span [0,10], phi=30 means correlations decay over ~1 unit (practical range = 3/phi)
+    phi_prior_upper = 30.0,
+    tau_shape = 1.0,
+    tau_rate = 0.01
   )
 }
 
@@ -1165,7 +1469,10 @@ prepare_zi_for_hmc <- function(zi, data, N) {
       type = "none",
       X_zi = matrix(0, nrow = N, ncol = 1),
       p_zi = 1L,
-      coef_names = NULL
+      coef_names = NULL,
+      X_oi = NULL,
+      p_oi = 0L,
+      coef_names_oi = NULL
     ))
   }
 
@@ -1186,7 +1493,11 @@ prepare_zi_for_hmc <- function(zi, data, N) {
     type = zi_type,
     X_zi = X_zi,
     p_zi = ncol(X_zi),
-    coef_names = colnames(X_zi)
+    coef_names = colnames(X_zi),
+    # OI info (not used for standard ZI, but needed for consistent interface)
+    X_oi = NULL,
+    p_oi = 0L,
+    coef_names_oi = NULL
   )
 }
 
@@ -1194,8 +1505,72 @@ prepare_zi_for_hmc <- function(zi, data, N) {
 #' Initialize parameters for HMC with full feature support
 #' @keywords internal
 initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
-                                        temporal_info, zi_info, latent_info = NULL) {
-  n_params <- hmc_data$p_num + hmc_data$p_denom
+                                        temporal_info, zi_info, latent_info = NULL,
+                                        svc_info = NULL) {
+  # Start building parameter vector with data-driven initialization
+  q_init <- numeric(0)
+  idx <- 1
+
+  # Fixed effects: initialize intercept based on data for better starting point
+  # For log-link families (gamma, lognormal, poisson, negbin), set intercept to log(mean(y))
+  # This prevents huge gradients from starting at mu=1 when data has mean >> 1
+
+  # Numerator fixed effects
+  p_num <- hmc_data$p_num
+  if (p_num > 0) {
+    beta_num_init <- rep(0.0, p_num)
+    # Data-driven intercept for continuous families (log link)
+    if (model_type %in% c("gamma_gamma", "lognormal", "poisson_gamma", "negbin_negbin")) {
+      if (!is.null(hmc_data$y_num_cont) && any(hmc_data$y_num_cont > 0)) {
+        # Use y_num_cont for continuous families
+        y_mean <- mean(hmc_data$y_num_cont[hmc_data$y_num_cont > 0])
+        if (is.finite(y_mean) && y_mean > 0) {
+          beta_num_init[1] <- log(y_mean)
+        }
+      } else if (!is.null(hmc_data$y_num) && any(hmc_data$y_num > 0)) {
+        # Use y_num for count families
+        y_mean <- mean(hmc_data$y_num[hmc_data$y_num > 0])
+        if (is.finite(y_mean) && y_mean > 0) {
+          beta_num_init[1] <- log(y_mean)
+        }
+      }
+    } else if (model_type %in% c("binomial", "beta_binomial")) {
+      # Binomial/beta-binomial: logit link, initialize to logit(p_hat)
+      if (!is.null(hmc_data$y_num) && !is.null(hmc_data$y_denom) &&
+          any(hmc_data$y_denom > 0)) {
+        # p_hat = sum(successes) / sum(trials)
+        total_successes <- sum(hmc_data$y_num)
+        total_trials <- sum(hmc_data$y_denom)
+        if (total_trials > 0) {
+          p_hat <- total_successes / total_trials
+          # Bound away from 0 and 1 to avoid infinite logit
+          p_hat <- max(0.01, min(0.99, p_hat))
+          beta_num_init[1] <- qlogis(p_hat)  # logit(p_hat)
+        }
+      }
+    }
+    q_init <- c(q_init, beta_num_init)
+  }
+
+  # Denominator fixed effects
+  p_denom <- hmc_data$p_denom
+  if (p_denom > 0) {
+    beta_denom_init <- rep(0.0, p_denom)
+    if (model_type %in% c("gamma_gamma", "lognormal", "poisson_gamma", "negbin_negbin")) {
+      if (!is.null(hmc_data$y_denom_cont) && any(hmc_data$y_denom_cont > 0)) {
+        y_mean <- mean(hmc_data$y_denom_cont[hmc_data$y_denom_cont > 0])
+        if (is.finite(y_mean) && y_mean > 0) {
+          beta_denom_init[1] <- log(y_mean)
+        }
+      } else if (!is.null(hmc_data$y_denom) && any(hmc_data$y_denom > 0)) {
+        y_mean <- mean(hmc_data$y_denom[hmc_data$y_denom > 0])
+        if (is.finite(y_mean) && y_mean > 0) {
+          beta_denom_init[1] <- log(y_mean)
+        }
+      }
+    }
+    q_init <- c(q_init, beta_denom_init)
+  }
 
   # Random effects (supports multi-term RE with slopes and correlations)
   n_re_terms <- hmc_data$n_re_terms %||% 0L
@@ -1204,63 +1579,100 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 
   if (n_re_terms > 0) {
     if (has_slopes) {
-      n_params <- n_params + hmc_data$total_sigma_params + hmc_data$total_re_params
+      q_init <- c(q_init, rep(0.0, hmc_data$total_sigma_params + hmc_data$total_re_params))
       if (has_correlated_slopes) {
-        n_params <- n_params + hmc_data$total_chol_params
+        q_init <- c(q_init, rep(0.0, hmc_data$total_chol_params))
       }
     } else if (n_re_terms > 1) {
-      n_params <- n_params + n_re_terms + hmc_data$total_re_groups
+      q_init <- c(q_init, rep(0.0, n_re_terms + hmc_data$total_re_groups))
     } else if (hmc_data$n_re_groups > 0) {
-      n_params <- n_params + 1 + hmc_data$n_re_groups
+      q_init <- c(q_init, rep(0.0, 1 + hmc_data$n_re_groups))
     }
   } else if (hmc_data$n_re_groups > 0) {
     # Single-term legacy path (used by GP interface where n_re_terms = 0)
-    n_params <- n_params + 1 + hmc_data$n_re_groups
+    q_init <- c(q_init, rep(0.0, 1 + hmc_data$n_re_groups))
   }
 
-  # Overdispersion
+  # Overdispersion / shape / sigma parameters
+  # Initialize log(phi) = log(2) ~ 0.69 for moderate overdispersion/shape
   if (model_type == "negbin_negbin") {
-    n_params <- n_params + 2
+    q_init <- c(q_init, log(2), log(2))  # log_phi_num, log_phi_denom
   } else if (model_type == "poisson_gamma") {
-    n_params <- n_params + 1
+    q_init <- c(q_init, log(2))  # log_shape
+  } else if (model_type == "gamma_gamma") {
+    q_init <- c(q_init, log(2), log(2))  # log_shape_num, log_shape_denom
+  } else if (model_type == "lognormal") {
+    q_init <- c(q_init, log(0.5), log(0.5))  # log_sigma_num, log_sigma_denom
+  } else if (model_type == "beta_binomial") {
+    q_init <- c(q_init, log(10))  # log_phi (precision)
   }
 
   # Spatial
   if (spatial_info$type == "icar") {
-    n_params <- n_params + 1 + spatial_info$n_units
+    q_init <- c(q_init, rep(0.0, 1 + spatial_info$n_units))
   } else if (spatial_info$type == "bym2") {
-    n_params <- n_params + 2 + 2 * spatial_info$n_units
+    q_init <- c(q_init, rep(0.0, 2 + 2 * spatial_info$n_units))
   } else if (spatial_info$type == "gp") {
-    n_params <- n_params + 2 + spatial_info$n_units
+    q_init <- c(q_init, rep(0.0, 2 + spatial_info$n_units))
   } else if (spatial_info$type == "multiscale_gp") {
-    n_params <- n_params + 4 + 2 * spatial_info$n_units
+    q_init <- c(q_init, rep(0.0, 4 + 2 * spatial_info$n_units))
   } else if (spatial_info$type == "hsgp") {
-    # HSGP: 2 hyperparams (log_sigma2, log_lengthscale) + m^2 basis coefficients
     hsgp_m <- spatial_info$hsgp_m %||% 8L
-    n_params <- n_params + 2 + hsgp_m * hsgp_m
+    q_init <- c(q_init, rep(0.0, 2 + hsgp_m * hsgp_m))
   }
 
-  # Temporal
-  if (temporal_info$type != "none") {
-    n_params <- n_params + 1 + temporal_info$n_temporal_params
+  # Temporal (regular temporal effects, not TVC)
+  if (temporal_info$type != "none" && temporal_info$type != "tvc") {
+    n_temporal_params <- 1 + temporal_info$n_temporal_params
     if (temporal_info$type == "ar1") {
-      n_params <- n_params + 1
+      n_temporal_params <- n_temporal_params + 1
+    }
+    q_init <- c(q_init, rep(0.0, n_temporal_params))
+  }
+
+  # TVC (Temporally-Varying Coefficients)
+  if (!is.null(temporal_info$type) && temporal_info$type == "tvc") {
+    n_tvc <- temporal_info$n_tvc %||% 0L
+    n_times <- temporal_info$n_times %||% 0L
+    n_groups <- temporal_info$n_groups %||% 1L
+    structure <- temporal_info$structure %||% "rw1"
+
+    if (n_tvc > 0) {
+      n_tvc_params <- n_tvc
+      if (structure == "ar1") {
+        n_tvc_params <- n_tvc_params + 1
+      }
+      n_tvc_params <- n_tvc_params + n_times * n_tvc * n_groups
+      q_init <- c(q_init, rep(0.0, n_tvc_params))
     }
   }
 
   # Zero-inflation
   if (zi_info$type != "none") {
-    n_params <- n_params + zi_info$p_zi
+    q_init <- c(q_init, rep(0.0, zi_info$p_zi))
+    if (!is.null(zi_info$p_oi) && zi_info$p_oi > 0) {
+      q_init <- c(q_init, rep(0.0, zi_info$p_oi))
+    }
   }
 
   # Latent factors
   if (!is.null(latent_info) && latent_info$type != "none") {
     K <- latent_info$n_factors
     N <- latent_info$n_obs
-    n_params <- n_params + K + N * K
+    q_init <- c(q_init, rep(0.0, K + N * K))
   }
 
-  rep(0.0, n_params)
+  # SVC (Spatially-Varying Coefficients)
+  if (!is.null(svc_info) && isTRUE(svc_info$has_svc)) {
+    n_svc <- svc_info$n_svc %||% 0L
+    n_obs <- svc_info$n_obs %||% hmc_data$N
+    if (n_svc > 0) {
+      # log_sigma2_svc (n_svc) + log_phi_svc (n_svc) + svc_w (n_svc * n_obs)
+      q_init <- c(q_init, rep(0.0, 2 * n_svc + n_svc * n_obs))
+    }
+  }
+
+  q_init
 }
 
 
@@ -1293,7 +1705,7 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
 
   # Build parameter names and extract draws
   draws_list <- build_draws_list_full(
-    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type
+    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info
   )
 
   draws <- do.call(cbind, draws_list)
@@ -1314,7 +1726,7 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     samples_list <- lapply(seq_len(chains), function(c) {
       chain_samples <- fit_raw$samples[[c]]
       chain_draws <- build_draws_list_full(
-        chain_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type
+        chain_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info
       )
       chain_mat <- do.call(cbind, chain_draws)
       colnames(chain_mat) <- names(chain_draws)
@@ -1365,7 +1777,7 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
 #' Build draws list with full feature support
 #' @keywords internal
 build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info,
-                                   zi_info, model_type) {
+                                   zi_info, model_type, latent_info = NULL) {
   draws_list <- list()
   idx <- 1
 
@@ -1490,9 +1902,68 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
   } else if (model_type == "poisson_gamma") {
     draws_list[["shape"]] <- exp(samples[, idx])
     idx <- idx + 1
+  } else if (model_type == "gamma_gamma") {
+    draws_list[["shape_num"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["shape_denom"]] <- exp(samples[, idx])
+    idx <- idx + 1
+  } else if (model_type == "lognormal") {
+    draws_list[["sigma_num"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["sigma_denom"]] <- exp(samples[, idx])
+    idx <- idx + 1
+  } else if (model_type == "beta_binomial") {
+    draws_list[["phi"]] <- exp(samples[, idx])  # precision parameter
+    idx <- idx + 1
   }
 
-  # Spatial
+  # SVC (Spatially Varying Coefficients) - must come before other spatial types
+  # C++ order: fixed -> RE -> overdispersion -> SVC -> spatial -> temporal
+  if (spatial_info$type == "svc") {
+    n_svc <- spatial_info$n_svc %||% 0L
+    N_obs <- spatial_info$n_units %||% 0L
+    svc_names <- spatial_info$svc_names
+
+    if (n_svc > 0 && N_obs > 0) {
+      # Extract log_sigma2 for each SVC term (variance parameter)
+      for (j in seq_len(n_svc)) {
+        name <- if (!is.null(svc_names) && j <= length(svc_names)) {
+          paste0("sigma2_svc[", svc_names[j], "]")
+        } else {
+          paste0("sigma2_svc[", j, "]")
+        }
+        draws_list[[name]] <- exp(samples[, idx])
+        idx <- idx + 1
+      }
+
+      # Extract log_phi for each SVC term (range parameter)
+      for (j in seq_len(n_svc)) {
+        name <- if (!is.null(svc_names) && j <= length(svc_names)) {
+          paste0("phi_svc[", svc_names[j], "]")
+        } else {
+          paste0("phi_svc[", j, "]")
+        }
+        draws_list[[name]] <- exp(samples[, idx])
+        idx <- idx + 1
+      }
+
+      # Extract SVC coefficients: w[j, i] for each term j and observation i
+      # Layout in C++ is w_flat[j * n_obs + i]
+      for (j in seq_len(n_svc)) {
+        term_name <- if (!is.null(svc_names) && j <= length(svc_names)) {
+          svc_names[j]
+        } else {
+          as.character(j)
+        }
+        for (i in seq_len(N_obs)) {
+          draws_list[[paste0("svc[", term_name, ",", i, "]")]] <- samples[, idx]
+          idx <- idx + 1
+        }
+      }
+    }
+  }
+
+  # Spatial (ICAR, BYM2)
   if (spatial_info$type == "icar") {
     draws_list[["tau_spatial"]] <- exp(samples[, idx])
     idx <- idx + 1
@@ -1520,7 +1991,8 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
   }
 
   # Temporal
-  if (temporal_info$type != "none") {
+  if (temporal_info$type != "none" && temporal_info$type != "tvc") {
+    # Regular temporal (RW1, RW2, AR1)
     draws_list[["tau_temporal"]] <- exp(samples[, idx])
     idx <- idx + 1
 
@@ -1538,6 +2010,52 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
     }
   }
 
+  # TVC (Temporally-Varying Coefficients)
+  if (temporal_info$type == "tvc") {
+    n_tvc <- temporal_info$n_tvc %||% 0L
+    n_times <- temporal_info$n_times %||% 0L
+    n_groups <- temporal_info$n_groups %||% 1L
+    structure <- temporal_info$structure %||% "rw1"
+    tvc_names <- temporal_info$tvc_names
+
+    # TVC precision parameters (one per TVC term)
+    for (j in seq_len(n_tvc)) {
+      name <- if (!is.null(tvc_names) && j <= length(tvc_names)) {
+        paste0("tau_tvc[", tvc_names[j], "]")
+      } else {
+        paste0("tau_tvc[", j, "]")
+      }
+      draws_list[[name]] <- exp(samples[, idx])
+      idx <- idx + 1
+    }
+
+    # AR1 rho for TVC
+    if (structure == "ar1") {
+      logit_rho <- samples[, idx]
+      draws_list[["rho_tvc"]] <- 1 / (1 + exp(-logit_rho))
+      idx <- idx + 1
+    }
+
+    # TVC values: w[g, j, t]
+    for (g in seq_len(n_groups)) {
+      for (j in seq_len(n_tvc)) {
+        term_name <- if (!is.null(tvc_names) && j <= length(tvc_names)) {
+          tvc_names[j]
+        } else {
+          as.character(j)
+        }
+        for (t in seq_len(n_times)) {
+          if (n_groups > 1) {
+            draws_list[[paste0("tvc[", term_name, ",g", g, ",t", t, "]")]] <- samples[, idx]
+          } else {
+            draws_list[[paste0("tvc[", term_name, ",t", t, "]")]] <- samples[, idx]
+          }
+          idx <- idx + 1
+        }
+      }
+    }
+  }
+
   # Zero-inflation coefficients
   if (zi_info$type != "none") {
     for (j in seq_len(zi_info$p_zi)) {
@@ -1548,6 +2066,29 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
       }
       draws_list[[paste0("beta_zi[", j, "]")]] <- samples[, idx]
       idx <- idx + 1
+    }
+  }
+
+  # Latent factors
+  if (!is.null(latent_info) && latent_info$type != "none" && latent_info$n_factors > 0) {
+    n_factors <- latent_info$n_factors
+    n_obs <- latent_info$n_obs
+
+    # Extract log_sigma for each factor (transform to sigma)
+    for (k in seq_len(n_factors)) {
+      draws_list[[paste0("sigma_latent[", k, "]")]] <- exp(samples[, idx])
+      idx <- idx + 1
+    }
+
+    # Extract factor scores (N x K)
+    # Store only a summary (mean per factor) to avoid huge output
+    # The raw factors are high-dimensional (N x K parameters)
+    for (k in seq_len(n_factors)) {
+      # Compute mean factor score across observations for each draw
+      factor_cols <- idx:(idx + n_obs - 1)
+      factor_mat <- samples[, factor_cols, drop = FALSE]
+      draws_list[[paste0("latent_mean[", k, "]")]] <- rowMeans(factor_mat)
+      idx <- idx + n_obs
     }
   }
 
@@ -1646,9 +2187,42 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
     idx <- idx + 2
   } else if (model_type == "poisson_gamma") {
     idx <- idx + 1
+  } else if (model_type == "gamma_gamma") {
+    idx <- idx + 2
+  } else if (model_type == "lognormal") {
+    idx <- idx + 2
+  } else if (model_type == "beta_binomial") {
+    idx <- idx + 1
   }
 
-  # Spatial effects
+  # SVC (Spatially Varying Coefficients) - must come before other spatial types
+  # C++ order: fixed -> RE -> overdispersion -> SVC -> spatial -> temporal
+  svc_effect <- NULL
+  if (spatial_info$type == "svc") {
+    n_svc <- spatial_info$n_svc %||% 0L
+    N_obs <- spatial_info$n_units %||% 0L
+
+    if (n_svc > 0 && N_obs > 0) {
+      # Skip hyperparameters
+      idx <- idx + n_svc  # log_sigma2
+      idx <- idx + n_svc  # log_phi
+
+      # Extract SVC coefficients: w_flat[j * n_obs + i]
+      n_svc_params <- n_svc * N_obs
+      svc_w <- samples[, idx:(idx + n_svc_params - 1), drop = FALSE]
+      idx <- idx + n_svc_params
+
+      # svc_effect will be computed per sample in the ratio loop
+      svc_effect <- list(
+        w = svc_w,
+        n_svc = n_svc,
+        N_obs = N_obs,
+        X_svc = spatial_info$X_svc  # The covariate matrix for SVC
+      )
+    }
+  }
+
+  # Spatial effects (ICAR, BYM2)
   spatial_effect <- NULL
   if (spatial_info$type == "icar") {
     idx <- idx + 1  # Skip log_tau
@@ -1768,11 +2342,33 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
       }
     }
 
+    # Add SVC effect: sum_j(w_j[i] * x_j[i])
+    if (!is.null(svc_effect)) {
+      n_svc <- svc_effect$n_svc
+      N_obs <- svc_effect$N_obs
+      X_svc <- svc_effect$X_svc
+      svc_w <- svc_effect$w
+
+      # For each observation, compute sum of w_j[i] * x_j[i]
+      for (i in seq_len(N)) {
+        svc_contrib <- 0
+        for (j in seq_len(n_svc)) {
+          # Index in svc_w: (j-1) * N_obs + i
+          w_ji <- svc_w[s, (j - 1) * N_obs + i]
+          x_ji <- if (!is.null(X_svc)) X_svc[i, j] else 1.0
+          svc_contrib <- svc_contrib + w_ji * x_ji
+        }
+        # SVC effect is shared between numerator and denominator
+        eta_num[i] <- eta_num[i] + svc_contrib
+        eta_denom[i] <- eta_denom[i] + svc_contrib
+      }
+    }
+
     # Compute ratio
-    if (model_type == "binomial") {
-      ratio_draws[s, ] <- 1 / (1 + exp(-eta_num))
+    if (model_type == "binomial" || model_type == "beta_binomial") {
+      ratio_draws[s, ] <- 1 / (1 + exp(-eta_num))  # inv_logit(eta)
     } else {
-      ratio_draws[s, ] <- exp(eta_num - eta_denom)
+      ratio_draws[s, ] <- exp(eta_num - eta_denom)  # exp(log(mu_num/mu_denom))
     }
   }
 
@@ -1840,7 +2436,11 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       cov_type = "exponential",
       nu = 1.5,
       shared = TRUE,
-      sampler = "noncentered"
+      sampler = "noncentered",
+      # Solver config (defaults)
+      solver = "auto",
+      cg_tol = 1e-6,
+      cg_maxiter = 100L
     ))
   }
 
@@ -1881,7 +2481,11 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       range_regional_upper = 10,
       cov_type = "exponential",
       nu = 1.5,
-      sampler = "noncentered"
+      sampler = "noncentered",
+      # Solver config (HSGP uses Cholesky internally, but keep consistent interface)
+      solver = "cholesky",
+      cg_tol = 1e-6,
+      cg_maxiter = 100L
     ))
   }
 
@@ -1934,7 +2538,11 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       cov_type = gp$cov,
       nu = gp$nu,
       shared = gp$shared,
-      sampler = gp$sampler %||% "noncentered"
+      sampler = gp$sampler %||% "noncentered",
+      # Solver config (multiscale uses Cholesky by default)
+      solver = "cholesky",
+      cg_tol = 1e-6,
+      cg_maxiter = 100L
     )
   } else {
     # Single-scale GP
@@ -1973,7 +2581,11 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       # Common params
       cov_type = gp$cov,
       nu = gp$nu,
-      shared = gp$shared
+      shared = gp$shared,
+      # Solver config
+      solver = gp$solver %||% "auto",
+      cg_tol = gp$cg_tol %||% 1e-6,
+      cg_maxiter = as.integer(gp$cg_maxiter %||% 100L)
     )
   }
 }

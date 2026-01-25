@@ -9,6 +9,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <Rcpp.h>  // For Rcpp::Rcout in debug
 
 // Fallback definition of M_PI if not provided by <cmath>
 #ifndef M_PI
@@ -171,7 +172,8 @@ inline double nngp_log_lik(
           sum -= L[j * n_neighbors + m] * L[k * n_neighbors + m];
         }
         if (j == k) {
-          L[j * n_neighbors + j] = std::sqrt(std::max(1e-10, sum));
+          // Numerical stability: use larger jitter to prevent ill-conditioning
+          L[j * n_neighbors + j] = std::sqrt(std::max(1e-6, sum));
         } else {
           L[j * n_neighbors + k] = sum / L[k * n_neighbors + k];
         }
@@ -210,7 +212,8 @@ inline double nngp_log_lik(
     for (int j = 0; j < n_neighbors; j++) {
       c_Cinv_c += c_vec[j] * alpha[j];
     }
-    double cond_var = std::max(1e-10, sigma2 - c_Cinv_c);
+    // Numerical stability: larger floor to prevent near-zero variance
+    double cond_var = std::max(1e-6, sigma2 - c_Cinv_c);
 
     // Log-likelihood contribution
     double resid = w[obs_idx] - cond_mean;
@@ -273,6 +276,247 @@ inline CovType parse_cov_type(const std::string& cov_str) {
   if (cov_str == "gaussian") return CovType::GAUSSIAN;
   if (cov_str == "spherical") return CovType::SPHERICAL;
   return CovType::EXPONENTIAL;  // Default
+}
+
+// -----------------------------------------------------------------------------
+// Gradient computation for SVC parameters (for hand-coded HMC gradients)
+// -----------------------------------------------------------------------------
+
+// Struct to hold SVC NNGP gradient results
+struct SVCGradients {
+  std::vector<double> grad_w;         // Gradient w.r.t. spatial effects (length n_obs)
+  double grad_log_sigma2;             // Gradient w.r.t. log(sigma2)
+  double grad_log_phi;                // Gradient w.r.t. log(phi)
+};
+
+// Covariance derivative w.r.t. phi: dk(d)/dphi
+inline double dcov_dphi_svc(double d, double phi, double cov_val, CovType cov_type) {
+  if (d < 1e-10) return 0.0;
+  switch (cov_type) {
+    case CovType::EXPONENTIAL:
+      return cov_val * d / (phi * phi);
+    case CovType::MATERN: {
+      double u = 1.732050808 * d / phi;  // sqrt(3) * d / phi
+      return (1.0 + u > 1e-10) ? cov_val * u * u / (phi * (1.0 + u)) : 0.0;
+    }
+    case CovType::GAUSSIAN:
+      return cov_val * 2.0 * d * d / (phi * phi * phi);
+    default:
+      return cov_val * d / (phi * phi);
+  }
+}
+
+// Debug counter for SVC gradient diagnostics
+static int svc_debug_counter = 0;
+
+// Fully analytical NNGP gradients for SVC - single pass, no redundant function calls
+// Complexity: O(N * nn²) - ~4x faster than numerical
+inline void svc_nngp_gradients(
+    const std::vector<double>& w,
+    double sigma2,
+    double phi,
+    const SVCData& svc_data,
+    SVCGradients& grads
+) {
+  int N = svc_data.n_obs;
+  int nn = svc_data.nn;
+  bool debug = (svc_debug_counter == 0);  // Only debug first call
+
+  grads.grad_w.assign(N, 0.0);
+  grads.grad_log_sigma2 = 0.0;
+  grads.grad_log_phi = 0.0;
+
+  // Validate - with debug output
+  bool val_fail = false;
+  if ((int)svc_data.nn_order.size() < N) {
+    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: nn_order.size()=" << svc_data.nn_order.size() << " < N=" << N << "\n";
+    val_fail = true;
+  }
+  if ((int)svc_data.nn_idx.size() < N * nn) {
+    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: nn_idx.size()=" << svc_data.nn_idx.size() << " < N*nn=" << N*nn << "\n";
+    val_fail = true;
+  }
+  if ((int)svc_data.nn_dist.size() < N * nn) {
+    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: nn_dist.size()=" << svc_data.nn_dist.size() << " < N*nn=" << N*nn << "\n";
+    val_fail = true;
+  }
+  if ((int)w.size() < N) {
+    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: w.size()=" << w.size() << " < N=" << N << "\n";
+    val_fail = true;
+  }
+  if ((int)svc_data.coords.size() < 2 * N) {
+    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: coords.size()=" << svc_data.coords.size() << " < 2*N=" << 2*N << "\n";
+    val_fail = true;
+  }
+  if (val_fail) {
+    svc_debug_counter++;
+    return;
+  }
+
+  if (debug) {
+    Rcpp::Rcout << "[SVC DEBUG] Validation passed: N=" << N << ", nn=" << nn
+                << ", sigma2=" << sigma2 << ", phi=" << phi << "\n";
+  }
+
+  // First observation: marginal N(0, sigma2)
+  int first_idx = svc_data.nn_order[0];
+  if (first_idx < 0 || first_idx >= N) {
+    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: first_idx=" << first_idx << " out of bounds [0," << N << ")\n";
+    svc_debug_counter++;
+    return;
+  }
+  double w0 = w[first_idx];
+  grads.grad_w[first_idx] = -w0 / sigma2;
+  grads.grad_log_sigma2 += 0.5 * (w0 * w0 / sigma2 - 1.0);  // Will multiply by sigma2 at end
+
+  // Preallocate work arrays (reused across iterations)
+  std::vector<double> c_vec(nn), dc_vec(nn), C_mat(nn * nn), L(nn * nn);
+  std::vector<double> y_vec(nn), alpha(nn), y2(nn), beta(nn), w_nb(nn);
+  std::vector<int> nb_idx(nn);
+
+  for (int i = 1; i < N; i++) {
+    int obs_idx = svc_data.nn_order[i];
+    if (obs_idx < 0 || obs_idx >= N) continue;
+
+    // Count neighbors
+    int n_nb = 0;
+    for (int j = 0; j < nn && svc_data.nn_idx[i * nn + j] > 0; j++) n_nb++;
+
+    if (n_nb == 0) {
+      double wi = w[obs_idx];
+      grads.grad_w[obs_idx] += -wi / sigma2;
+      grads.grad_log_sigma2 += 0.5 * (wi * wi / sigma2 - 1.0);
+      continue;
+    }
+
+    // Build c_vec, dc_vec (covariances and derivatives)
+    for (int j = 0; j < n_nb; j++) {
+      double d = svc_data.nn_dist[i * nn + j];
+      c_vec[j] = compute_cov(d, sigma2, phi, svc_data.cov_type);
+      dc_vec[j] = dcov_dphi_svc(d, phi, c_vec[j], svc_data.cov_type);
+    }
+
+    // Build C_mat and get neighbor indices
+    bool ok = true;
+    for (int j1 = 0; j1 < n_nb && ok; j1++) {
+      int raw1 = svc_data.nn_idx[i * nn + j1];
+      if (raw1 - 1 < 0 || raw1 - 1 >= (int)svc_data.nn_order.size()) { ok = false; break; }
+      int idx1 = svc_data.nn_order[raw1 - 1];
+      if (idx1 < 0 || idx1 >= N) { ok = false; break; }
+      nb_idx[j1] = idx1;
+
+      for (int j2 = 0; j2 < n_nb; j2++) {
+        if (j1 == j2) {
+          C_mat[j1 * n_nb + j2] = sigma2;
+        } else {
+          int raw2 = svc_data.nn_idx[i * nn + j2];
+          if (raw2 - 1 < 0 || raw2 - 1 >= (int)svc_data.nn_order.size()) { ok = false; break; }
+          int idx2 = svc_data.nn_order[raw2 - 1];
+          double dx = svc_data.coords[idx1 * 2] - svc_data.coords[idx2 * 2];
+          double dy = svc_data.coords[idx1 * 2 + 1] - svc_data.coords[idx2 * 2 + 1];
+          C_mat[j1 * n_nb + j2] = compute_cov(std::sqrt(dx*dx + dy*dy), sigma2, phi, svc_data.cov_type);
+        }
+      }
+    }
+    if (!ok) {
+      double wi = w[obs_idx];
+      grads.grad_w[obs_idx] += -wi / sigma2;
+      grads.grad_log_sigma2 += 0.5 * (wi * wi / sigma2 - 1.0);
+      continue;
+    }
+
+    // Cholesky: C = LL'
+    std::fill(L.begin(), L.begin() + n_nb * n_nb, 0.0);
+    for (int j = 0; j < n_nb; j++) {
+      double s = 0.0;
+      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * L[j * n_nb + k];
+      double diag = C_mat[j * n_nb + j] - s;
+      // Numerical stability: larger minimum diagonal for better conditioning
+      L[j * n_nb + j] = (diag > 1e-6) ? std::sqrt(diag) : 1e-3;
+      for (int k = j + 1; k < n_nb; k++) {
+        double t = 0.0;
+        for (int m = 0; m < j; m++) t += L[k * n_nb + m] * L[j * n_nb + m];
+        L[k * n_nb + j] = (C_mat[k * n_nb + j] - t) / L[j * n_nb + j];
+      }
+    }
+
+    // Solve L*y = c, L'*alpha = y => alpha = C^{-1}c
+    for (int j = 0; j < n_nb; j++) {
+      double s = 0.0;
+      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
+      y_vec[j] = (c_vec[j] - s) / L[j * n_nb + j];
+    }
+    for (int j = n_nb - 1; j >= 0; j--) {
+      double s = 0.0;
+      for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
+      alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
+    }
+
+    // Get w_neighbors and solve for beta = C^{-1}w_nb
+    for (int j = 0; j < n_nb; j++) w_nb[j] = w[nb_idx[j]];
+    for (int j = 0; j < n_nb; j++) {
+      double s = 0.0;
+      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y2[k];
+      y2[j] = (w_nb[j] - s) / L[j * n_nb + j];
+    }
+    for (int j = n_nb - 1; j >= 0; j--) {
+      double s = 0.0;
+      for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * beta[k];
+      beta[j] = (y2[j] - s) / L[j * n_nb + j];
+    }
+
+    // Conditional mean and variance
+    double mu = 0.0, c_alpha = 0.0;
+    for (int j = 0; j < n_nb; j++) { mu += alpha[j] * w_nb[j]; c_alpha += c_vec[j] * alpha[j]; }
+    // Numerical stability: larger floor for conditional variance
+    double v = std::max(sigma2 - c_alpha, 1e-6);
+    double r = w[obs_idx] - mu;
+
+    // Gradient w.r.t. w
+    grads.grad_w[obs_idx] += -r / v;
+    for (int j = 0; j < n_nb; j++) grads.grad_w[nb_idx[j]] += alpha[j] * r / v;
+
+    // Gradient w.r.t. sigma2: dv/ds2 = 1 - c'α/s2
+    double dll_dv = 0.5 * (r * r / v - 1.0) / v;
+    grads.grad_log_sigma2 += dll_dv * (1.0 - c_alpha / sigma2) * sigma2;
+
+    // Gradient w.r.t. phi: compute quadratic forms on-the-fly
+    double alpha_dc = 0.0, dc_beta = 0.0;
+    for (int j = 0; j < n_nb; j++) { alpha_dc += alpha[j] * dc_vec[j]; dc_beta += dc_vec[j] * beta[j]; }
+
+    // alpha' * dC/dphi * alpha and alpha' * dC/dphi * beta (computed on-the-fly)
+    double alpha_dC_alpha = 0.0, alpha_dC_beta = 0.0;
+    for (int j1 = 0; j1 < n_nb; j1++) {
+      for (int j2 = 0; j2 < n_nb; j2++) {
+        double dC_jk = 0.0;
+        if (j1 != j2) {
+          double dx = svc_data.coords[nb_idx[j1] * 2] - svc_data.coords[nb_idx[j2] * 2];
+          double dy = svc_data.coords[nb_idx[j1] * 2 + 1] - svc_data.coords[nb_idx[j2] * 2 + 1];
+          double d12 = std::sqrt(dx*dx + dy*dy);
+          dC_jk = dcov_dphi_svc(d12, phi, C_mat[j1 * n_nb + j2], svc_data.cov_type);
+        }
+        alpha_dC_alpha += alpha[j1] * dC_jk * alpha[j2];
+        alpha_dC_beta += alpha[j1] * dC_jk * beta[j2];
+      }
+    }
+
+    double dv_dphi = -2.0 * alpha_dc + alpha_dC_alpha;
+    double dr_dphi = -dc_beta + alpha_dC_beta;
+    grads.grad_log_phi += (dll_dv * dv_dphi + (-r / v) * dr_dphi) * phi;
+  }
+
+  // Debug output for first call
+  if (debug) {
+    // Compute gradient summary stats
+    double sum_abs_grad_w = 0.0;
+    for (int i = 0; i < N; i++) {
+      sum_abs_grad_w += std::abs(grads.grad_w[i]);
+    }
+    Rcpp::Rcout << "[SVC DEBUG] Output: sum|grad_w|=" << sum_abs_grad_w
+                << ", grad_log_sigma2=" << grads.grad_log_sigma2
+                << ", grad_log_phi=" << grads.grad_log_phi << "\n";
+    svc_debug_counter++;
+  }
 }
 
 } // namespace ratiod_svc

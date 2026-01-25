@@ -19,7 +19,8 @@ NULL
 #' This is an intrinsic model (improper prior) that captures smooth
 #' temporal trends. It is equivalent to an ICAR model on a 1D chain.
 #'
-#' @param time_var Name of the time variable in data (character).
+#' @param time_var Name of the time variable in data. Can be a formula
+#'   (e.g., `~ year`) or a character string (e.g., `"year"`).
 #' @param group_var Optional name of grouping variable for panel data.
 #'   If provided, separate random walks are estimated for each group.
 #' @param cyclic Logical; if TRUE, the random walk wraps around (first and
@@ -110,14 +111,38 @@ NULL
 temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
                          shared = TRUE) {
 
- if (!is.character(time_var) || length(time_var) != 1) {
-   stop("`time_var` must be a single character string", call. = FALSE)
- }
+  # Accept either formula (~ time) or character string ("time")
+  if (inherits(time_var, "formula")) {
+    time_var <- all.vars(time_var)
+    if (length(time_var) != 1) {
+      stop("`time_var` formula must specify exactly 1 variable", call. = FALSE)
+    }
+  } else if (!is.character(time_var) || length(time_var) != 1) {
+    stop("`time_var` must be a formula (~ time) or single character string",
+         call. = FALSE)
+  }
 
- if (!is.null(group_var)) {
-   if (!is.character(group_var) || length(group_var) != 1) {
-     stop("`group_var` must be a single character string", call. = FALSE)
-   }
+  # Accept either formula or character for group_var
+  if (!is.null(group_var)) {
+    if (inherits(group_var, "formula")) {
+      group_var <- all.vars(group_var)
+      if (length(group_var) != 1) {
+        stop("`group_var` formula must specify exactly 1 variable", call. = FALSE)
+      }
+    } else if (!is.character(group_var) || length(group_var) != 1) {
+      stop("`group_var` must be a formula or single character string",
+           call. = FALSE)
+    }
+  }
+
+ # Warning for non-shared temporal effects
+ if (!shared) {
+   warning(
+     "Non-shared temporal effects (shared = FALSE) may lead to confounded ratio estimates.\n",
+     "Consider whether temporal effects should be shared between\n",
+     "numerator and denominator to prevent spurious temporal patterns in ratios.",
+     call. = FALSE
+   )
  }
 
  structure(
@@ -187,14 +212,38 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
 temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
                          shared = TRUE) {
 
- if (!is.character(time_var) || length(time_var) != 1) {
-   stop("`time_var` must be a single character string", call. = FALSE)
- }
+  # Accept either formula (~ time) or character string ("time")
+  if (inherits(time_var, "formula")) {
+    time_var <- all.vars(time_var)
+    if (length(time_var) != 1) {
+      stop("`time_var` formula must specify exactly 1 variable", call. = FALSE)
+    }
+  } else if (!is.character(time_var) || length(time_var) != 1) {
+    stop("`time_var` must be a formula (~ time) or single character string",
+         call. = FALSE)
+  }
 
- if (!is.null(group_var)) {
-   if (!is.character(group_var) || length(group_var) != 1) {
-     stop("`group_var` must be a single character string", call. = FALSE)
-   }
+  # Accept either formula or character for group_var
+  if (!is.null(group_var)) {
+    if (inherits(group_var, "formula")) {
+      group_var <- all.vars(group_var)
+      if (length(group_var) != 1) {
+        stop("`group_var` formula must specify exactly 1 variable", call. = FALSE)
+      }
+    } else if (!is.character(group_var) || length(group_var) != 1) {
+      stop("`group_var` must be a formula or single character string",
+           call. = FALSE)
+    }
+  }
+
+  # Warning for non-shared temporal effects
+ if (!shared) {
+   warning(
+     "Non-shared temporal effects (shared = FALSE) may lead to confounded ratio estimates.\n",
+     "Consider whether temporal effects should be shared between\n",
+     "numerator and denominator to prevent spurious temporal patterns in ratios.",
+     call. = FALSE
+   )
  }
 
  structure(
@@ -291,17 +340,31 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 temporal_ar1 <- function(time_var, group_var = NULL, shared = TRUE,
                          rho_prior = NULL) {
 
- if (!is.character(time_var) || length(time_var) != 1) {
-   stop("`time_var` must be a single character string", call. = FALSE)
- }
+  # Accept either formula (~ time) or character string ("time")
+  if (inherits(time_var, "formula")) {
+    time_var <- all.vars(time_var)
+    if (length(time_var) != 1) {
+      stop("`time_var` formula must specify exactly 1 variable", call. = FALSE)
+    }
+  } else if (!is.character(time_var) || length(time_var) != 1) {
+    stop("`time_var` must be a formula (~ time) or single character string",
+         call. = FALSE)
+  }
 
- if (!is.null(group_var)) {
-   if (!is.character(group_var) || length(group_var) != 1) {
-     stop("`group_var` must be a single character string", call. = FALSE)
-   }
- }
+  # Accept either formula or character for group_var
+  if (!is.null(group_var)) {
+    if (inherits(group_var, "formula")) {
+      group_var <- all.vars(group_var)
+      if (length(group_var) != 1) {
+        stop("`group_var` formula must specify exactly 1 variable", call. = FALSE)
+      }
+    } else if (!is.character(group_var) || length(group_var) != 1) {
+      stop("`group_var` must be a formula or single character string",
+           call. = FALSE)
+    }
+  }
 
- structure(
+  structure(
    list(
      type = "ar1",
      time_var = time_var,
@@ -607,7 +670,8 @@ build_ar1_precision <- function(T, rho, tau = 1) {
 #' This is particularly useful for long time series where patterns exist at
 #' multiple temporal scales (e.g., annual cycles, decadal trends).
 #'
-#' @param time_var Name of the time variable in data (character).
+#' @param time_var Name of the time variable in data. Can be a formula
+#'   (e.g., `~ year`) or a character string (e.g., `"year"`).
 #' @param trend Type of trend component: `"rw2"` (default, smooth),
 #'   `"rw1"` (less smooth), or `"none"`.
 #' @param seasonal Period for seasonal component (integer). Set to `NULL`
@@ -922,7 +986,8 @@ validate_temporal_multiscale <- function(temporal, data) {
 #' - Continuous time (e.g., exact timestamps)
 #' - Smooth temporal trends with uncertainty
 #'
-#' @param time_var Name of the time variable in data (character). Should be
+#' @param time_var Name of the time variable in data. Can be a formula
+#'   (e.g., `~ year`) or a character string (e.g., `"year"`). Should be
 #'   numeric (continuous time) or convertible to numeric.
 #' @param cov Covariance function: `"exponential"` (default, rough),
 #'   `"matern"` (tunable smoothness), `"gaussian"` (very smooth), or
@@ -938,7 +1003,7 @@ validate_temporal_multiscale <- function(temporal, data) {
 #'   If provided, separate GPs are estimated for each group.
 #' @param shared Logical; if TRUE (default), temporal effect enters both
 #'   numerator and denominator.
-#' @param scale Logical; if TRUE (default), time values are scaled to
+#' @param scale_coords Logical; if TRUE (default), time values are scaled to
 #'   unit variance before computing distances.
 #'
 #' @return A `ratiod_temporal_gp` object
@@ -997,7 +1062,7 @@ temporal_gp <- function(time_var,
                         period = NULL,
                         group_var = NULL,
                         shared = TRUE,
-                        scale = TRUE) {
+                        scale_coords = TRUE) {
 
   cov <- match.arg(cov)
 
@@ -1045,7 +1110,7 @@ temporal_gp <- function(time_var,
       nu = if (cov == "matern") nu else NULL,
       period = if (cov == "periodic") period else NULL,
       shared = shared,
-      scale = scale,
+      scale_coords = scale_coords,
       cyclic = FALSE,
       # Filled in during validation
       n_times = NULL,
@@ -1131,7 +1196,7 @@ validate_temporal_gp <- function(temporal, data) {
   }
 
   # Scale time values if requested
-  if (temporal$scale) {
+  if (temporal$scale_coords) {
     time_vals <- as.vector(scale(time_vals))
   }
 
@@ -1183,7 +1248,8 @@ validate_temporal_gp <- function(temporal, data) {
 #' regression coefficients to change smoothly over time using a Gaussian
 #' process or random walk prior. This captures how effects evolve temporally.
 #'
-#' @param time_var Name of the time variable in data (character).
+#' @param time_var Name of the time variable in data. Can be a formula
+#'   (e.g., `~ year`) or a character string (e.g., `"year"`).
 #' @param terms Which coefficients should vary over time. Options:
 #'   - Integer vector: Column indices of design matrix (1 = intercept)
 #'   - Character vector: Coefficient names (e.g., `"(Intercept)"`, `"depth"`)

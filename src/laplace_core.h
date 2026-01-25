@@ -2,8 +2,8 @@
 // Core Laplace approximation engine for ratiod
 // Implements nested Laplace approximation for latent Gaussian models
 
-#ifndef QUOTR_LAPLACE_CORE_H
-#define QUOTR_LAPLACE_CORE_H
+#ifndef RATIOD_LAPLACE_CORE_H
+#define RATIOD_LAPLACE_CORE_H
 
 #include <Rcpp.h>
 #include <vector>
