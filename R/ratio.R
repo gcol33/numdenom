@@ -692,12 +692,23 @@ compute_fitted_laplace <- function(object) {
 #'   Use `NULL` to include all random effects (if new levels match),
 #'   `NA` or `~ 0` to exclude random effects (population-level prediction).
 #' @param allow_new_levels Logical; if TRUE, allows new group levels not
-
 #'   in the original data (predictions use population mean).
+#' @param coords.0 Matrix of spatial coordinates for new prediction locations
+#'   (required for GP/HSGP spatial models). Should be N x 2 matrix with same
+#'   coordinate system as training data.
+#' @param include_spatial Logical; if TRUE (default), include spatial random
+#'   effects in predictions. Set to FALSE for fixed-effects-only predictions.
+#' @param return_spatial Logical; if TRUE, return spatial effect samples at
+#'   new locations as `w.0.samples` in the output (similar to spOccupancy).
+#' @param n_samples Number of posterior samples to draw for backends that
+
+#'   don't store samples directly (e.g., Laplace, VI). Default uses all
+#'   available samples for HMC/PG.
 #' @param ... Ignored
 #'
 #' @return If `summary = TRUE`, a data frame with posterior summaries.
 #'   If `summary = FALSE`, a matrix of posterior draws (rows = draws, cols = obs).
+#'   If `return_spatial = TRUE`, returns a list with `predictions` and `w.0.samples`.
 #'
 #' @examples
 #' \dontrun{
@@ -729,6 +740,33 @@ compute_fitted_laplace <- function(object) {
 #'
 #' # Get full posterior draws
 #' predict(fit, newdata = new_df, summary = FALSE)
+#'
+#' # --- Spatial prediction example (GP) ---
+#' # Fit model with GP spatial effects
+#' df$x <- runif(n)
+#' df$y <- runif(n)
+#' fit_gp <- ratiod(
+#'   count | effort ~ depth,
+#'   data = df,
+#'   spatial = spatial_gp(coords = c("x", "y")),
+#'   family = ratiod_poisson_gamma(),
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#'
+#' # Predict at new locations (kriging)
+#' new_coords <- matrix(runif(20), ncol = 2)
+#' new_df <- data.frame(depth = rnorm(10))
+#' pred <- predict(fit_gp, newdata = new_df, coords.0 = new_coords)
+#'
+#' # Return spatial effect samples (like spOccupancy)
+#' pred_spatial <- predict(fit_gp, newdata = new_df, coords.0 = new_coords,
+#'                         return_spatial = TRUE)
+#' str(pred_spatial$w.0.samples)  # [n_samples, n_new]
+#'
+#' # --- Areal spatial prediction (ICAR/BYM2) ---
+#' # Predict for existing regions (lookup)
+#' new_df <- data.frame(region = c("A", "B"), depth = c(1, 2))
+#' predict(fit_icar, newdata = new_df)
 #' }
 #'
 #' @method predict ratiod_fit
@@ -736,7 +774,9 @@ compute_fitted_laplace <- function(object) {
 predict.ratiod_fit <- function(object, newdata, type = c("response", "link"),
                                component = c("ratio", "numerator", "denominator", "all"),
                                summary = TRUE, probs = c(0.025, 0.5, 0.975),
-                               re_formula = NULL, allow_new_levels = FALSE, ...) {
+                               re_formula = NULL, allow_new_levels = FALSE,
+                               coords.0 = NULL, include_spatial = TRUE,
+                               return_spatial = FALSE, n_samples = NULL, ...) {
 
   type <- match.arg(type)
   component <- match.arg(component)
@@ -746,21 +786,33 @@ predict.ratiod_fit <- function(object, newdata, type = c("response", "link"),
     return(fitted(object, component = component, summary = summary, probs = probs))
   }
 
-  # Check backend
+  # Check backend and dispatch
+
   backend <- object$backend
 
-  # For now, only support HMC backend for predictions
-  if (backend != "hmc") {
-    stop("predict() with newdata currently only supported for HMC backend.\n",
-         "For other backends, use fitted() for in-sample fitted values.",
-         call. = FALSE)
+  # Dispatch to appropriate backend
+
+  if (backend == "hmc") {
+    pred_result <- predict_hmc(object, newdata, type, re_formula, allow_new_levels,
+                               coords.0, include_spatial, return_spatial)
+  } else if (backend == "pg") {
+    pred_result <- predict_pg(object, newdata, type, re_formula, allow_new_levels,
+                              coords.0, include_spatial, return_spatial)
+  } else if (backend == "laplace") {
+    pred_result <- predict_laplace(object, newdata, type, re_formula, allow_new_levels,
+                                   coords.0, include_spatial, return_spatial,
+                                   n_samples = n_samples %||% 1000L)
+  } else if (backend == "vi") {
+    pred_result <- predict_vi(object, newdata, type, re_formula, allow_new_levels,
+                              coords.0, include_spatial, return_spatial,
+                              n_samples = n_samples %||% 1000L)
+  } else {
+    stop("predict() not yet supported for backend '", backend, "'.\n",
+         "Use fitted() for in-sample fitted values.", call. = FALSE)
   }
 
-  # Build design matrices for new data
-  pred_data <- build_prediction_data(object, newdata, re_formula, allow_new_levels)
-
-  # Compute predictions
-  pred_draws <- compute_predictions_hmc(object, pred_data, type)
+  pred_draws <- pred_result$draws
+  w_samples <- pred_result$w_samples  # NULL if no spatial or return_spatial = FALSE
 
   # Select component
   if (component == "all") {
@@ -789,14 +841,14 @@ predict.ratiod_fit <- function(object, newdata, type = c("response", "link"),
     result <- do.call(rbind, result_list)
     rownames(result) <- NULL
 
-    structure(
+    predictions <- structure(
       result,
       n_draws = nrow(draws_list[[1]]),
       newdata = newdata,
       class = c("ratiod_prediction", "data.frame")
     )
   } else {
-    structure(
+    predictions <- structure(
       draws_list,
       n_draws = nrow(draws_list[[1]]),
       n_obs = ncol(draws_list[[1]]),
@@ -804,6 +856,16 @@ predict.ratiod_fit <- function(object, newdata, type = c("response", "link"),
       class = "ratiod_prediction_draws"
     )
   }
+
+  # Return with spatial samples if requested
+  if (return_spatial && !is.null(w_samples)) {
+    return(list(
+      predictions = predictions,
+      w.0.samples = w_samples
+    ))
+  }
+
+  predictions
 }
 
 
@@ -884,6 +946,699 @@ build_prediction_data <- function(object, newdata, re_formula, allow_new_levels)
     N = nrow(newdata),
     include_re = include_re
   )
+}
+
+
+#' Predict for HMC backend
+#' @keywords internal
+predict_hmc <- function(object, newdata, type, re_formula, allow_new_levels,
+                        coords.0, include_spatial, return_spatial) {
+
+  # Build design matrices for new data
+  pred_data <- build_prediction_data(object, newdata, re_formula, allow_new_levels)
+
+  # Check for spatial model
+  spatial <- object$spatial
+  spatial_type <- detect_spatial_type(object)
+  has_spatial <- !is.null(spatial_type) && include_spatial
+
+  # Validate coords.0 for GP models
+  if (has_spatial && spatial_type %in% c("gp", "hsgp", "msgp")) {
+    if (is.null(coords.0)) {
+      stop("coords.0 required for spatial prediction with GP/HSGP models.\n",
+           "Provide a matrix of coordinates for new prediction locations.",
+           call. = FALSE)
+    }
+    coords.0 <- as.matrix(coords.0)
+    if (ncol(coords.0) != 2) {
+      stop("coords.0 must be an N x 2 matrix of spatial coordinates.", call. = FALSE)
+    }
+    if (nrow(coords.0) != nrow(newdata)) {
+      stop("coords.0 must have the same number of rows as newdata.", call. = FALSE)
+    }
+  }
+
+  # Compute fixed effects + RE predictions
+  pred_draws <- compute_predictions_hmc(object, pred_data, type)
+
+  # Add spatial effects if applicable
+  w_samples <- NULL
+  if (has_spatial) {
+    spatial_result <- predict_spatial_hmc(object, newdata, coords.0, spatial_type,
+                                          return_spatial)
+    w_samples <- spatial_result$w_samples
+
+    # Add spatial effects to linear predictor
+    if (!is.null(spatial_result$w_pred)) {
+      pred_draws <- add_spatial_to_predictions(pred_draws, spatial_result$w_pred,
+                                               object$.internal$model_type, type)
+    }
+  }
+
+  list(draws = pred_draws, w_samples = w_samples)
+}
+
+
+#' Detect spatial type from fitted object
+#' @keywords internal
+detect_spatial_type <- function(object) {
+  spatial <- object$spatial
+  if (is.null(spatial)) return(NULL)
+
+  # Check hmc_data for spatial type
+
+  hmc_data <- object$.internal$hmc_data
+  if (!is.null(hmc_data$gp_type)) {
+    gp_type <- hmc_data$gp_type
+    if (gp_type == 1L) return("gp")
+    if (gp_type == 2L) return("hsgp")
+    if (gp_type == 3L) return("msgp")
+  }
+
+  # Check spatial object type
+  if (inherits(spatial, "ratiod_gp")) return("gp")
+  if (inherits(spatial, "ratiod_hsgp")) return("hsgp")
+  if (inherits(spatial, "ratiod_msgp")) return("msgp")
+  if (!is.null(spatial$type)) {
+    if (spatial$type == "icar") return("icar")
+    if (spatial$type == "bym2") return("bym2")
+  }
+
+  NULL
+}
+
+
+#' Predict spatial effects for HMC backend
+#' @keywords internal
+predict_spatial_hmc <- function(object, newdata, coords.0, spatial_type, return_spatial) {
+  hmc_data <- object$.internal$hmc_data
+  samples <- object$.internal$samples
+
+  if (spatial_type == "gp") {
+    return(predict_spatial_gp(object, coords.0, return_spatial))
+  } else if (spatial_type == "hsgp") {
+    return(predict_spatial_hsgp(object, coords.0, return_spatial))
+  } else if (spatial_type %in% c("icar", "bym2")) {
+    return(predict_spatial_areal(object, newdata, return_spatial))
+  }
+
+  list(w_pred = NULL, w_samples = NULL)
+}
+
+
+#' Predict GP spatial effects at new locations (kriging)
+#' @keywords internal
+predict_spatial_gp <- function(object, coords.0, return_spatial) {
+  hmc_data <- object$.internal$hmc_data
+  samples <- object$.internal$samples
+  n_samples <- nrow(samples)
+  n_new <- nrow(coords.0)
+
+  # Get training coordinates
+  coords_train <- matrix(hmc_data$coords, ncol = 2, byrow = TRUE)
+  n_train <- nrow(coords_train)
+
+  # Extract GP hyperparameters and spatial effects from samples
+  # Find parameter indices - this depends on model structure
+  idx <- hmc_data$p_num + hmc_data$p_denom
+  if (hmc_data$n_re_groups > 0) {
+    idx <- idx + 1 + hmc_data$n_re_groups  # skip sigma_re and RE values
+  }
+
+  # GP hyperparameters: log_sigma2_gp, log_phi_gp
+  log_sigma2_gp <- samples[, idx + 1]
+  log_phi_gp <- samples[, idx + 2]
+  sigma2_gp <- exp(log_sigma2_gp)
+  phi_gp <- exp(log_phi_gp)
+
+  # Spatial effects w: n_train values
+  w_start <- idx + 3
+  w_train <- samples[, w_start:(w_start + n_train - 1), drop = FALSE]
+
+  # Covariance type
+  cov_type <- hmc_data$cov_type %||% 0L  # 0 = exponential
+
+  # Perform kriging for each posterior sample
+  w_pred <- matrix(NA_real_, nrow = n_samples, ncol = n_new)
+
+  for (s in seq_len(n_samples)) {
+    w_pred[s, ] <- kriging_predict(
+      coords_train = coords_train,
+      coords_new = coords.0,
+      w_train = w_train[s, ],
+      sigma2 = sigma2_gp[s],
+      phi = phi_gp[s],
+      cov_type = cov_type,
+      nn = min(hmc_data$nn %||% 15L, n_train)
+    )
+  }
+
+  list(
+    w_pred = w_pred,
+    w_samples = if (return_spatial) w_pred else NULL
+  )
+}
+
+
+#' Kriging prediction at new locations
+#' @keywords internal
+kriging_predict <- function(coords_train, coords_new, w_train, sigma2, phi,
+                            cov_type, nn = 15) {
+  n_train <- nrow(coords_train)
+  n_new <- nrow(coords_new)
+  w_new <- numeric(n_new)
+
+  # Use NNGP-style prediction: for each new point, use nearest neighbors
+  for (i in seq_len(n_new)) {
+    s0 <- coords_new[i, ]
+
+    # Find nearest neighbors
+    dists_to_train <- sqrt(rowSums((coords_train - matrix(s0, n_train, 2, byrow = TRUE))^2))
+    nn_idx <- order(dists_to_train)[seq_len(min(nn, n_train))]
+    nn_dists <- dists_to_train[nn_idx]
+
+    # Compute covariances
+    C_s0_S <- cov_function(nn_dists, sigma2, phi, cov_type)
+
+    # Covariance among neighbors
+    coords_nn <- coords_train[nn_idx, , drop = FALSE]
+    nn_count <- length(nn_idx)
+    C_SS <- matrix(0, nn_count, nn_count)
+    for (j in seq_len(nn_count)) {
+      for (k in seq_len(nn_count)) {
+        if (j == k) {
+          C_SS[j, k] <- sigma2
+        } else {
+          d_jk <- sqrt(sum((coords_nn[j, ] - coords_nn[k, ])^2))
+          C_SS[j, k] <- cov_function(d_jk, sigma2, phi, cov_type)
+        }
+      }
+    }
+
+    # Add jitter for numerical stability
+    C_SS <- C_SS + diag(1e-6, nn_count)
+
+    # Kriging weights: C_s0_S * C_SS^{-1}
+    w_nn <- w_train[nn_idx]
+    weights <- solve(C_SS, C_s0_S)
+
+    # Kriging mean (we ignore kriging variance for point prediction)
+    w_new[i] <- sum(weights * w_nn)
+  }
+
+  w_new
+}
+
+
+#' Covariance function for GP
+#' @keywords internal
+cov_function <- function(d, sigma2, phi, cov_type) {
+  # cov_type: 0 = exponential, 1 = matern32, 2 = squared_exp
+  if (cov_type == 0L) {
+    # Exponential
+    sigma2 * exp(-d / phi)
+  } else if (cov_type == 1L) {
+    # Matern 3/2
+    r <- sqrt(3) * d / phi
+    sigma2 * (1 + r) * exp(-r)
+  } else if (cov_type == 2L) {
+    # Squared exponential (Gaussian)
+    sigma2 * exp(-0.5 * (d / phi)^2)
+  } else {
+    # Default to exponential
+    sigma2 * exp(-d / phi)
+  }
+}
+
+
+#' Predict HSGP spatial effects at new locations (basis evaluation)
+#' @keywords internal
+predict_spatial_hsgp <- function(object, coords.0, return_spatial) {
+  hmc_data <- object$.internal$hmc_data
+  samples <- object$.internal$samples
+  n_samples <- nrow(samples)
+  n_new <- nrow(coords.0)
+
+  # HSGP parameters
+  hsgp_m <- hmc_data$hsgp_m %||% 8L
+  hsgp_c <- hmc_data$hsgp_c %||% 1.5
+
+  # Get training coordinates to determine domain
+  coords_train <- matrix(hmc_data$coords, ncol = 2, byrow = TRUE)
+  L <- hsgp_c * apply(coords_train, 2, function(x) diff(range(x)) / 2)
+
+  # Center coordinates
+  center <- colMeans(coords_train)
+  coords_centered <- t(t(coords.0) - center)
+
+  # Compute HSGP basis at new locations
+  n_basis <- hsgp_m^2
+  phi_new <- matrix(0, n_new, n_basis)
+
+  idx <- 0
+  for (m1 in seq_len(hsgp_m)) {
+    for (m2 in seq_len(hsgp_m)) {
+      idx <- idx + 1
+      phi_new[, idx] <- cos(m1 * pi * (coords_centered[, 1] + L[1]) / (2 * L[1])) *
+                        cos(m2 * pi * (coords_centered[, 2] + L[2]) / (2 * L[2]))
+    }
+  }
+
+  # Find HSGP coefficients in samples
+  # Layout: beta_num, beta_denom, [sigma_re, re], log_sigma2, log_phi, hsgp_beta[1:n_basis]
+  idx <- hmc_data$p_num + hmc_data$p_denom
+  if (hmc_data$n_re_groups > 0) {
+    idx <- idx + 1 + hmc_data$n_re_groups
+  }
+  idx <- idx + 2  # skip log_sigma2, log_phi
+
+  hsgp_beta <- samples[, (idx + 1):(idx + n_basis), drop = FALSE]
+
+  # Compute spatial effect at new locations
+  w_pred <- hsgp_beta %*% t(phi_new)  # [n_samples, n_new]
+
+  list(
+    w_pred = w_pred,
+    w_samples = if (return_spatial) w_pred else NULL
+  )
+}
+
+
+#' Predict areal spatial effects (ICAR/BYM2 lookup)
+#' @keywords internal
+predict_spatial_areal <- function(object, newdata, return_spatial) {
+  spatial <- object$spatial
+  hmc_data <- object$.internal$hmc_data
+  samples <- object$.internal$samples
+  n_samples <- nrow(samples)
+
+  # Get spatial grouping variable from newdata
+  spatial_var <- spatial$group_var
+  if (is.null(spatial_var) || !spatial_var %in% names(newdata)) {
+    warning("Spatial group variable '", spatial_var, "' not found in newdata. ",
+            "Spatial effects will be excluded from predictions.", call. = FALSE)
+    return(list(w_pred = NULL, w_samples = NULL))
+  }
+
+  # Map new data spatial groups to training groups
+  orig_data <- object$data
+  orig_levels <- unique(orig_data[[spatial_var]])
+  new_levels <- newdata[[spatial_var]]
+
+  n_new <- nrow(newdata)
+  spatial_group <- integer(n_new)
+  for (i in seq_len(n_new)) {
+    match_idx <- match(new_levels[i], orig_levels)
+    if (!is.na(match_idx)) {
+      spatial_group[i] <- match_idx
+    }
+    # Unmatched levels stay at 0 (no spatial effect)
+  }
+
+  # Find spatial effects in samples
+  # For ICAR: phi_spatial[1:n_units]
+  # For BYM2: sigma_spatial, rho, phi_scaled[1:n_units], theta[1:n_units]
+  n_units <- length(orig_levels)
+  idx <- hmc_data$p_num + hmc_data$p_denom
+  if (hmc_data$n_re_groups > 0) {
+    idx <- idx + 1 + hmc_data$n_re_groups
+  }
+
+  spatial_type <- spatial$type %||% "icar"
+
+  if (spatial_type == "icar") {
+    idx <- idx + 1  # skip tau_spatial
+    phi_spatial <- samples[, (idx + 1):(idx + n_units), drop = FALSE]
+    spatial_effect <- phi_spatial
+  } else if (spatial_type == "bym2") {
+    sigma_spatial <- exp(samples[, idx + 1])
+    rho <- 1 / (1 + exp(-samples[, idx + 2]))
+    phi_scaled <- samples[, (idx + 3):(idx + 2 + n_units), drop = FALSE]
+    theta <- samples[, (idx + 3 + n_units):(idx + 2 + 2 * n_units), drop = FALSE]
+
+    bym2_scale <- spatial$scale_factor %||% 1.0
+
+    spatial_effect <- matrix(0, n_samples, n_units)
+    for (s in seq_len(n_samples)) {
+      spatial_effect[s, ] <- sigma_spatial[s] * (
+        sqrt(rho[s]) * phi_scaled[s, ] * bym2_scale +
+        sqrt(1 - rho[s]) * theta[s, ]
+      )
+    }
+  }
+
+  # Look up spatial effects for new data
+  w_pred <- matrix(0, n_samples, n_new)
+  for (i in seq_len(n_new)) {
+    g <- spatial_group[i]
+    if (g > 0) {
+      w_pred[, i] <- spatial_effect[, g]
+    }
+  }
+
+  list(
+    w_pred = w_pred,
+    w_samples = if (return_spatial) w_pred else NULL
+  )
+}
+
+
+#' Add spatial effects to prediction draws
+#' @keywords internal
+add_spatial_to_predictions <- function(pred_draws, w_pred, model_type, type) {
+  n_samples <- nrow(w_pred)
+  n_obs <- ncol(w_pred)
+
+  if (type == "link") {
+    # Add to linear predictor
+    pred_draws$numerator <- pred_draws$numerator + w_pred
+    pred_draws$denominator <- pred_draws$denominator + w_pred  # shared spatial effect
+
+    if (model_type == "binomial") {
+      pred_draws$ratio <- pred_draws$numerator
+    } else {
+      pred_draws$ratio <- pred_draws$numerator - pred_draws$denominator
+    }
+  } else {
+    # Response scale: need to recompute
+    eta_num <- log(pred_draws$numerator) + w_pred
+    eta_denom <- log(pred_draws$denominator) + w_pred
+
+    if (model_type == "binomial") {
+      pred_draws$numerator <- 1 / (1 + exp(-eta_num))
+      pred_draws$ratio <- pred_draws$numerator
+    } else {
+      pred_draws$numerator <- exp(eta_num)
+      pred_draws$denominator <- exp(eta_denom)
+      pred_draws$ratio <- pred_draws$numerator / pred_draws$denominator
+    }
+  }
+
+  pred_draws
+}
+
+
+#' Predict for PG backend
+#' @keywords internal
+predict_pg <- function(object, newdata, type, re_formula, allow_new_levels,
+                       coords.0, include_spatial, return_spatial) {
+  # PG backend stores samples like HMC
+  # Build design matrices for new data
+  pred_data <- build_prediction_data_pg(object, newdata, re_formula, allow_new_levels)
+
+  # Compute predictions from PG samples
+  pred_draws <- compute_predictions_pg(object, pred_data, type)
+
+  # Spatial effects (PG supports ICAR, BYM2, GP)
+  w_samples <- NULL
+  if (include_spatial && !is.null(object$spatial)) {
+    spatial_type <- object$spatial_type %||% object$spatial$type
+    if (!is.null(spatial_type)) {
+      if (spatial_type == "gp" && !is.null(coords.0)) {
+        spatial_result <- predict_spatial_gp_pg(object, coords.0, return_spatial)
+      } else if (spatial_type %in% c("icar", "bym2")) {
+        spatial_result <- predict_spatial_areal_pg(object, newdata, return_spatial)
+      } else {
+        spatial_result <- list(w_pred = NULL, w_samples = NULL)
+      }
+
+      w_samples <- spatial_result$w_samples
+      if (!is.null(spatial_result$w_pred)) {
+        pred_draws <- add_spatial_to_predictions_pg(pred_draws, spatial_result$w_pred, type)
+      }
+    }
+  }
+
+  list(draws = pred_draws, w_samples = w_samples)
+}
+
+
+#' Build prediction data for PG backend
+#' @keywords internal
+build_prediction_data_pg <- function(object, newdata, re_formula, allow_new_levels) {
+  formula <- object$formula
+
+  # Build design matrix
+  X <- model.matrix(formula$numerator$terms %||% ~ 1, data = newdata)
+
+  # Handle random effects
+  include_re <- !isTRUE(is.na(re_formula)) && !identical(re_formula, ~ 0)
+  re_group <- rep(0L, nrow(newdata))
+
+  if (include_re) {
+    re_info <- object$.internal$re_info
+    if (!is.null(re_info) && re_info$n_groups > 0) {
+      re_var <- re_info$group_var
+      if (!is.null(re_var) && re_var %in% names(newdata)) {
+        orig_data <- object$data
+        orig_levels <- unique(orig_data[[re_var]])
+        for (i in seq_len(nrow(newdata))) {
+          match_idx <- match(newdata[[re_var]][i], orig_levels)
+          if (!is.na(match_idx)) {
+            re_group[i] <- match_idx
+          } else if (!allow_new_levels) {
+            stop("New level found in '", re_var, "'. Set allow_new_levels = TRUE.",
+                 call. = FALSE)
+          }
+        }
+      }
+    }
+  }
+
+  list(X = X, re_group = re_group, N = nrow(newdata), include_re = include_re)
+}
+
+
+#' Compute predictions for PG backend
+#' @keywords internal
+compute_predictions_pg <- function(object, pred_data, type) {
+  beta <- object$.internal$beta
+  re <- object$.internal$re
+  n_samples <- nrow(beta)
+  N <- pred_data$N
+
+  # Compute linear predictor
+  eta <- matrix(NA_real_, n_samples, N)
+  for (s in seq_len(n_samples)) {
+    eta[s, ] <- as.numeric(pred_data$X %*% beta[s, ])
+    if (pred_data$include_re && !is.null(re)) {
+      for (i in seq_len(N)) {
+        g <- pred_data$re_group[i]
+        if (g > 0 && g <= ncol(re)) {
+          eta[s, i] <- eta[s, i] + re[s, g]
+        }
+      }
+    }
+  }
+
+  if (type == "link") {
+    return(list(
+      numerator = eta,
+      denominator = matrix(0, n_samples, N),
+      ratio = eta
+    ))
+  }
+
+  # Response scale (binomial -> probability)
+  prob <- 1 / (1 + exp(-eta))
+  list(
+    numerator = prob,
+    denominator = matrix(1, n_samples, N),
+    ratio = prob
+  )
+}
+
+
+#' Predict spatial effects for PG GP models
+#' @keywords internal
+predict_spatial_gp_pg <- function(object, coords.0, return_spatial) {
+  # Similar to HMC GP prediction but using PG stored samples
+  w_gp <- object$.internal$w_gp
+  if (is.null(w_gp)) return(list(w_pred = NULL, w_samples = NULL))
+
+  n_samples <- nrow(w_gp)
+  n_new <- nrow(coords.0)
+
+  # Get training coordinates from spatial object
+  spatial <- object$spatial
+  coords_train <- spatial$coords_matrix
+  if (is.null(coords_train)) {
+    warning("Training coordinates not found. Cannot predict spatial effects.",
+            call. = FALSE)
+    return(list(w_pred = NULL, w_samples = NULL))
+  }
+
+  # Get GP hyperparameters
+  sigma2_gp <- object$.internal$chain_results[[1]]$sigma2_gp
+  phi_gp <- object$.internal$chain_results[[1]]$phi_gp
+
+  # Covariance type
+  cov_type <- switch(spatial$cov %||% "exponential",
+    "exponential" = 0L,
+    "matern" = 1L,
+    "gaussian" = 2L,
+    0L
+  )
+
+  # Kriging prediction
+  w_pred <- matrix(NA_real_, n_samples, n_new)
+  for (s in seq_len(n_samples)) {
+    w_pred[s, ] <- kriging_predict(
+      coords_train = coords_train,
+      coords_new = coords.0,
+      w_train = w_gp[s, ],
+      sigma2 = sigma2_gp[s],
+      phi = phi_gp[s],
+      cov_type = cov_type,
+      nn = spatial$nn %||% 15L
+    )
+  }
+
+  list(w_pred = w_pred, w_samples = if (return_spatial) w_pred else NULL)
+}
+
+
+#' Predict areal spatial effects for PG backend
+#' @keywords internal
+predict_spatial_areal_pg <- function(object, newdata, return_spatial) {
+  spatial_draws <- object$.internal$spatial
+  if (is.null(spatial_draws)) return(list(w_pred = NULL, w_samples = NULL))
+
+  spatial <- object$spatial
+  spatial_var <- spatial$group_var
+
+  if (is.null(spatial_var) || !spatial_var %in% names(newdata)) {
+    return(list(w_pred = NULL, w_samples = NULL))
+  }
+
+  # Map groups
+  orig_data <- object$data
+  orig_levels <- unique(orig_data[[spatial_var]])
+  n_new <- nrow(newdata)
+  n_samples <- nrow(spatial_draws)
+
+  spatial_group <- integer(n_new)
+  for (i in seq_len(n_new)) {
+    match_idx <- match(newdata[[spatial_var]][i], orig_levels)
+    if (!is.na(match_idx)) spatial_group[i] <- match_idx
+  }
+
+  # Look up
+  w_pred <- matrix(0, n_samples, n_new)
+  for (i in seq_len(n_new)) {
+    g <- spatial_group[i]
+    if (g > 0 && g <= ncol(spatial_draws)) {
+      w_pred[, i] <- spatial_draws[, g]
+    }
+  }
+
+  list(w_pred = w_pred, w_samples = if (return_spatial) w_pred else NULL)
+}
+
+
+#' Add spatial effects to PG predictions
+#' @keywords internal
+add_spatial_to_predictions_pg <- function(pred_draws, w_pred, type) {
+  if (type == "link") {
+    pred_draws$numerator <- pred_draws$numerator + w_pred
+    pred_draws$ratio <- pred_draws$numerator
+  } else {
+    eta <- log(pred_draws$numerator / (1 - pred_draws$numerator)) + w_pred
+    pred_draws$numerator <- 1 / (1 + exp(-eta))
+    pred_draws$ratio <- pred_draws$numerator
+  }
+  pred_draws
+}
+
+
+#' Predict for Laplace backend
+#' @keywords internal
+predict_laplace <- function(object, newdata, type, re_formula, allow_new_levels,
+                            coords.0, include_spatial, return_spatial, n_samples) {
+  # Laplace stores mode and Hessian
+  # Sample from MVN(mode, H^{-1}) for uncertainty quantification
+
+  mode <- object$.internal$mode
+  hessian_inv <- object$.internal$hessian_inv
+
+  if (is.null(mode) || is.null(hessian_inv)) {
+    stop("Laplace fit missing mode or Hessian. Cannot generate predictions.",
+         call. = FALSE)
+  }
+
+  # Sample from approximate posterior
+  samples <- mvtnorm_rmvnorm(n_samples, mode, hessian_inv)
+
+  # Build prediction data and compute (similar to HMC)
+  pred_data <- build_prediction_data(object, newdata, re_formula, allow_new_levels)
+
+  # Create temporary object with samples for compute_predictions_hmc
+  temp_object <- object
+  temp_object$.internal$samples <- samples
+
+  pred_draws <- compute_predictions_hmc(temp_object, pred_data, type)
+
+  # Spatial not yet supported for Laplace
+  list(draws = pred_draws, w_samples = NULL)
+}
+
+
+#' Simple MVN sampler (avoid mvtnorm dependency)
+#' @keywords internal
+mvtnorm_rmvnorm <- function(n, mean, sigma) {
+  p <- length(mean)
+  # Cholesky decomposition
+  L <- tryCatch(chol(sigma), error = function(e) {
+    # Add jitter if not positive definite
+    chol(sigma + diag(1e-6, p))
+  })
+  Z <- matrix(rnorm(n * p), n, p)
+  sweep(Z %*% L, 2, mean, "+")
+}
+
+
+#' Predict for VI backend
+#' @keywords internal
+predict_vi <- function(object, newdata, type, re_formula, allow_new_levels,
+                       coords.0, include_spatial, return_spatial, n_samples) {
+  # VI stores variational parameters
+  # Sample from variational posterior q(theta)
+
+  vi_params <- object$.internal$vi_params
+  if (is.null(vi_params)) {
+    stop("VI fit missing variational parameters.", call. = FALSE)
+  }
+
+  # Sample from variational posterior
+  samples <- sample_vi_posterior(vi_params, n_samples)
+
+  # Build prediction data
+  pred_data <- build_prediction_data(object, newdata, re_formula, allow_new_levels)
+
+  # Create temporary object
+  temp_object <- object
+  temp_object$.internal$samples <- samples
+
+  pred_draws <- compute_predictions_hmc(temp_object, pred_data, type)
+
+  list(draws = pred_draws, w_samples = NULL)
+}
+
+
+#' Sample from VI variational posterior
+#' @keywords internal
+sample_vi_posterior <- function(vi_params, n_samples) {
+  # Mean-field: q(theta) = prod N(mu_i, sigma_i^2)
+  mu <- vi_params$mu
+  sigma <- vi_params$sigma
+
+  if (is.null(mu) || is.null(sigma)) {
+    stop("VI parameters missing mu or sigma.", call. = FALSE)
+  }
+
+  p <- length(mu)
+  Z <- matrix(rnorm(n_samples * p), n_samples, p)
+  sweep(Z * matrix(sigma, n_samples, p, byrow = TRUE), 2, mu, "+")
 }
 
 
