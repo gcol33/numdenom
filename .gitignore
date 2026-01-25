@@ -37,15 +37,16 @@ cran-comments.md
 .claude/
 CLAUDE.md
 
-# Dev scripts (ad-hoc testing/debugging)
-test_*.R
-debug_*.R
-bench_*.R
-clean_build.R
-build_and_test.R
-check_cols.R
-validate_*.R
-derive_*.py
+# Dev scripts (ad-hoc testing/debugging) - root only
+/test_*.R
+/debug_*.R
+/bench_*.R
+/benchmark_*.R
+/clean_build.R
+/build_and_test.R
+/check_cols.R
+/validate_*.R
+/derive_*.py
 
 # Dev output files
 *.Rout
@@ -67,3 +68,5 @@ roadmap_v2.md
 
 # Reference/scratch directories
 gp_ref/
+benchmarks/results_*.rds
+benchmarks/*.rds
