@@ -315,7 +315,7 @@ Priority order for creating joint Stan models:
 | 36 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | H | 17.1 | 17.2 | 17.1 | 17.1 | ✓Stan (joint) |
 | 37 | negbin_negbin | ✓ | GP | ✗ | ✗ | H | 92.2 | | | | O(N³) |
 | 38 | negbin_negbin | ✓ | HSGP | ✗ | ✗ | H | 12.9 | | | | ✓Stan (joint, 0.46 SE) |
-| 39 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | H | 193.0 | | | | FIXED |
+| 39 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | H | 193.0 | | | | ✓runs (9 div, O(N³)) |
 | 40 | negbin_negbin | ✓ | pCAR | ✗ | ✗ | H | 8.2 | | 64.4 | | ✓Stan (joint) |
 | 41 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | H | 8.2 | | 62.5 | | ✓Stan (joint) |
 | 42 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | H | 8.2 | | 62.8 | | ✓Stan (joint) |
@@ -328,8 +328,8 @@ Priority order for creating joint Stan models:
 | 49 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | H | 8.5 | | 82.2 | | ✓Stan* (soft constraint) |
 | 50 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | H | 8.3 | | 65.8 | | ✓Stan* (soft constraint) |
 | 51 | negbin_negbin | ✓ | GP | RW1 | ✗ | H | 101.2 | | | | O(N³) |
-| 52 | negbin_negbin | ✓ | HSGP | RW1 | ✗ | H | 6.8 | | | | FIXED |
-| 53 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | H | 190.3 | | | | FIXED |
+| 52 | negbin_negbin | ✓ | HSGP | RW1 | ✗ | H | 6.8 | | | | ✓runs (0 div) |
+| 53 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | H | 190.3 | | | | ✓runs (0 div, O(N³)) |
 | 54 | negbin_negbin | ✓ | ICAR | ✗ | ZI | H | 25.2 | | | | ✓Stan* (soft constraint) |
 | 55 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H | 13.2 | | | | ✓Stan* (soft constraint) |
 | 56 | negbin_negbin | ✓ | SVC | ✗ | ✗ | H | 764.6 | | | | SVC NNGP O(N²) |
@@ -473,7 +473,7 @@ Priority order for creating joint Stan models:
 | **✓Sim** (simulation truth: gg, ln) | 6 | 6% |
 | **Structural diff** (brms uses IID RE for ICAR) | 2 | 2% |
 | Needs joint Stan model (remaining pg, nb) | 25 | 23% |
-| ✓runs only (no Stan equiv: OI, ZOIB, MS_t) | 20 | 19% |
+| ✓runs only (no Stan equiv: OI, ZOIB, MS_t, MSGP) | 23 | 21% |
 | **Total validated (✓Stan + ✓Stan* + ✓Sim)** | **60** | **56%** |
 | **Total** | **107** | **100%** |
 
