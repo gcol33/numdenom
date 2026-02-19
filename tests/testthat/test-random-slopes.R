@@ -240,7 +240,7 @@ test_that("random slopes model compiles and runs without error", {
     iter = 200,
     warmup = 100,
     chains = 1,
-    backend = "hmc"
+    mode = "hmc"
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -305,7 +305,7 @@ test_that("correlated random slopes model runs without error", {
     iter = 200,
     warmup = 100,
     chains = 1,
-    backend = "hmc"
+    mode = "hmc"
   )
 
   expect_s3_class(fit, "ratiod_fit")

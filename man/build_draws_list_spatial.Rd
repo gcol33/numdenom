@@ -4,7 +4,13 @@
 \alias{build_draws_list_spatial}
 \title{Build draws list with spatial parameters}
 \usage{
-build_draws_list_spatial(samples, hmc_data, spatial_info, model_type)
+build_draws_list_spatial(
+  samples,
+  hmc_data,
+  spatial_info,
+  model_type,
+  re_param = "noncentered"
+)
 }
 \description{
 Build draws list with spatial parameters

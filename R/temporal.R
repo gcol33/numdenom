@@ -1201,8 +1201,18 @@ validate_temporal_gp <- function(temporal, data) {
   }
 
   temporal$n_obs <- N
-  temporal$time_values <- time_vals
-  temporal$n_times <- length(unique(time_vals))
+
+  # Extract unique time values (sorted) and create time index
+  # GP uses one effect per unique time, not per observation
+  unique_times <- sort(unique(time_vals))
+  temporal$unique_time_values <- unique_times  # Unique times for GP cov matrix
+  temporal$n_times <- length(unique_times)
+
+  # Create time_index: maps each obs to its unique time point (1-based)
+  temporal$time_index <- match(time_vals, unique_times)
+
+  # Keep original time_values for backward compatibility
+  temporal$time_values <- unique_times  # Now unique times, not per-obs
 
   # Handle grouping
   if (!is.null(temporal$group_var)) {
@@ -1220,18 +1230,18 @@ validate_temporal_gp <- function(temporal, data) {
     temporal$group_index <- rep(1L, N)
   }
 
-  # Compute time distances for GP (for state-space or direct)
-  # Store as N x N matrix for small data or compute on-the-fly for large
-  if (N <= 500) {
-    temporal$time_distances <- outer(time_vals, time_vals,
+  # Compute time distances for GP on unique times (not N x N)
+  n_unique <- temporal$n_times
+  if (n_unique <= 500) {
+    temporal$time_distances <- outer(unique_times, unique_times,
                                      FUN = function(x, y) abs(x - y))
   } else {
     # For large data, we'll compute distances on-the-fly in C++
     temporal$time_distances <- NULL
   }
 
-  # Total temporal parameters = N observations (one effect per obs)
-  temporal$n_temporal_params <- N * temporal$n_groups
+  # Total temporal parameters = n_times (one effect per unique time), not N
+  temporal$n_temporal_params <- temporal$n_times * temporal$n_groups
 
   temporal
 }

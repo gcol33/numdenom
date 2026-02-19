@@ -4,7 +4,13 @@
 \alias{compute_ratio_draws_hmc_spatial}
 \title{Compute ratio draws from HMC samples (with spatial)}
 \usage{
-compute_ratio_draws_hmc_spatial(samples, hmc_data, spatial_info, model_type)
+compute_ratio_draws_hmc_spatial(
+  samples,
+  hmc_data,
+  spatial_info,
+  model_type,
+  re_param = "noncentered"
+)
 }
 \description{
 Compute ratio draws from HMC samples (with spatial)

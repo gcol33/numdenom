@@ -16,7 +16,7 @@ test_that("ratiod fits poisson_gamma model", {
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -44,7 +44,7 @@ test_that("ratiod fits negbin_negbin model", {
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -71,7 +71,7 @@ test_that("ratiod fits binomial model", {
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -93,17 +93,16 @@ test_that("ratiod auto-selects HMC backend", {
     x = rnorm(n)
   )
 
-  expect_message(
-    fit <- ratiod(
-      count | effort ~ x,
-      data = df,
-      family = ratiod_poisson_gamma(),
-      backend = "auto",
-      iter = 200,
-      warmup = 100,
-      chains = 1
-    ),
-    "Auto-selected backend"
+  # mode = "auto" silently selects the best backend (HMC by default)
+  fit <- ratiod(
+    count | effort ~ x,
+    data = df,
+    family = ratiod_poisson_gamma(),
+    mode = "auto",  # Use mode instead of backend
+    iter = 200,
+    warmup = 100,
+    chains = 1,
+    verbose = FALSE
   )
 
   expect_equal(fit$backend, "hmc")
@@ -150,7 +149,7 @@ test_that("ratiod handles formula_num and formula_denom", {
     formula_denom = ~ temp,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -177,7 +176,7 @@ test_that("print.ratiod_fit works", {
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1
@@ -207,7 +206,7 @@ test_that("summary.ratiod_fit works", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -216,7 +215,7 @@ test_that("summary.ratiod_fit works", {
   output <- capture.output(summary(fit))
 
   expect_true(any(grepl("ratiod model summary", output)))
-  expect_true(any(grepl("Backend:", output)))
+  expect_true(any(grepl("Inference:.*hmc", output)))  # Shows "Inference: Exact (Tier 1) via hmc"
   expect_true(any(grepl("Fixed effects", output)))
   expect_true(any(grepl("Diagnostics:", output)))
 })
@@ -236,7 +235,7 @@ test_that("summary.ratiod_fit respects prob argument", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1
@@ -262,7 +261,7 @@ test_that("mcmc_diagnostics works", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -293,7 +292,7 @@ test_that("mcmc_diagnostics filters parameters", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1
@@ -319,7 +318,7 @@ test_that("check_diagnostics works", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -349,7 +348,7 @@ test_that("check_diagnostics prints output", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -374,7 +373,7 @@ test_that("n_divergent returns count", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1
@@ -501,7 +500,7 @@ test_that("get_draws_array returns correct structure", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1

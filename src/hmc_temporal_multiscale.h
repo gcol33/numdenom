@@ -16,19 +16,19 @@ namespace ratiod_temporal {
 
 // Multi-scale temporal data structure
 struct MultiscaleTemporalData {
-  int n_times;                       // Number of unique time points
-  int n_groups;                      // Number of groups (for panel data)
-  int n_obs;                         // Total observations
+  int n_times = 0;                   // Number of unique time points
+  int n_groups = 0;                  // Number of groups (for panel data)
+  int n_obs = 0;                     // Total observations
 
   std::vector<int> time_index;       // Time index for each observation (1-based)
   std::vector<int> group_index;      // Group index for each observation (1-based)
 
   // Component specifications
-  TemporalType trend_type;           // rw1, rw2, or none
-  int seasonal_period;               // 0 if no seasonal, else period (e.g., 12)
-  TemporalType short_term_type;      // ar1, iid, or none
+  TemporalType trend_type = TemporalType::NONE;    // rw1, rw2, or none
+  int seasonal_period = 0;                          // 0 if no seasonal, else period (e.g., 12)
+  TemporalType short_term_type = TemporalType::NONE; // ar1, iid, or none
 
-  bool shared;                       // Shared between num/denom
+  bool shared = true;                // Shared between num/denom
 };
 
 // -----------------------------------------------------------------------------

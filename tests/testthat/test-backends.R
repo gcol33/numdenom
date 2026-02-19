@@ -155,9 +155,9 @@ test_that("Laplace backend works with random effects", {
   expect_gt(cor(re_est, true_re), 0.7)
 })
 
-test_that("can_use_pg_backend correctly identifies binomial family", {
+test_that("can_use_pg_backend correctly identifies supported families", {
   expect_true(numdenom:::can_use_pg_backend(ratiod_binomial()))
-  expect_false(numdenom:::can_use_pg_backend(ratiod_negbin_negbin()))
+  expect_true(numdenom:::can_use_pg_backend(ratiod_negbin_negbin()))  # PG supports negbin via CRT augmentation
   expect_false(numdenom:::can_use_pg_backend(ratiod_poisson_gamma()))
 })
 

@@ -116,6 +116,37 @@ safe_sqrt(const T& x) {
     return fwd::Dual(s, 0.5 * x.grad / s);
 }
 
+// max - double version (returns the larger of a and b)
+template<typename T>
+inline typename std::enable_if<!is_autodiff<T>::value, T>::type
+safe_max(T a, T b) {
+    return (a > b) ? a : b;
+}
+
+// max - ad::Var (tape) version
+// Note: for tape autodiff, max is non-differentiable at a==b,
+// but we use subgradient (gradient of the active branch)
+template<typename T>
+inline typename std::enable_if<is_ad_var<T>::value, T>::type
+safe_max(const T& a, const T& b) {
+    if (a.val() >= b.val()) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+// max - fwd::Dual version
+template<typename T>
+inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
+safe_max(const T& a, const T& b) {
+    if (a.val >= b.val) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
 // lgamma (log of gamma function) - double version
 template<typename T>
 inline typename std::enable_if<!is_autodiff<T>::value, T>::type

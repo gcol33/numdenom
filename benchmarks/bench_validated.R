@@ -1,5 +1,12 @@
 # Integrated Benchmark + Stan Validation
-# Every benchmark includes Stan comparison for correctness validation
+#
+# IMPORTANT: For poisson_gamma and negbin_negbin families, brms comparison is INVALID
+# because numdenom models BOTH numerator and denominator as random variables,
+# while brms with offset() treats the denominator as FIXED.
+#
+# Use bench_joint_validation.R for pg/nb families (custom Stan models)
+# This script validates BINOMIAL family only (trials are fixed, so brms is valid)
+#
 # Standard parameters: N=500, iter=1000, warmup=500, chains=2
 
 library(numdenom)
@@ -33,22 +40,15 @@ for (i in 1:N_SITES) {
 }
 spatial_site <- factor(rep(1:N_SITES, length.out = N))
 
-# Generate data for each family
-y_pg <- rpois(N, exp(2 + 0.3*x))
-effort <- rgamma(N, 10, 1)
-df_pg <- data.frame(y = y_pg, effort = effort, x = x, site = site, time = time,
-                    lon = lon, lat = lat, spatial_site = spatial_site)
-
-y_nb <- rnbinom(N, mu = exp(2 + 0.3*x), size = 5)
-denom <- rnbinom(N, mu = 100, size = 10)
-denom[denom == 0] <- 1
-df_nb <- data.frame(y = y_nb, denom = denom, x = x, site = site, time = time,
-                    lon = lon, lat = lat, spatial_site = spatial_site)
-
+# Generate BINOMIAL data (trials are fixed - valid for brms comparison)
 trials <- sample(10:50, N, replace = TRUE)
 y_bin <- rbinom(N, trials, plogis(0.5 + 0.3*x))
 df_bin <- data.frame(y = y_bin, trials = trials, x = x, site = site, time = time,
                      lon = lon, lat = lat, spatial_site = spatial_site)
+
+# ZI binomial data
+df_bin_zi <- df_bin
+df_bin_zi$y <- ifelse(runif(N) < 0.3, 0, df_bin_zi$y)
 
 # Validation function
 validate_against_stan <- function(nd_fit, brms_fit, param_name = "x") {
@@ -79,7 +79,8 @@ validate_against_stan <- function(nd_fit, brms_fit, param_name = "x") {
 }
 
 # Main benchmark function
-bench_validated <- function(name, row, nd_call, brms_call, true_x = 0.3) {
+bench_validated <- function(name, row, nd_call, brms_call, true_x = 0.3,
+                           run_4mode = FALSE, skip_stan = FALSE) {
   cat(sprintf("\n\n========== Row %d: %s ==========\n", row, name))
   cat(sprintf("True x = %.2f\n\n", true_x))
 
@@ -101,18 +102,20 @@ bench_validated <- function(name, row, nd_call, brms_call, true_x = 0.3) {
   })
 
   # Run brms/Stan
-  cat("Running brms/Stan... ")
-  flush.console()
-  tryCatch({
-    time_brms <- system.time({
-      fit_brms <- eval(brms_call)
-    })["elapsed"]
-    result$time_brms <- time_brms
-    cat(sprintf("%.1fs\n", time_brms))
-  }, error = function(e) {
-    cat(sprintf("ERROR: %s\n", conditionMessage(e)))
-    result$error_brms <<- conditionMessage(e)
-  })
+  if (!skip_stan) {
+    cat("Running brms/Stan... ")
+    flush.console()
+    tryCatch({
+      time_brms <- system.time({
+        fit_brms <- eval(brms_call)
+      })["elapsed"]
+      result$time_brms <- time_brms
+      cat(sprintf("%.1fs\n", time_brms))
+    }, error = function(e) {
+      cat(sprintf("ERROR: %s\n", conditionMessage(e)))
+      result$error_brms <<- conditionMessage(e)
+    })
+  }
 
   # Validate
   if (!is.null(result$time_nd) && !is.null(result$time_brms)) {
@@ -135,79 +138,16 @@ bench_validated <- function(name, row, nd_call, brms_call, true_x = 0.3) {
 
 results <- list()
 
-# ============================================================
-# Row 1: poisson_gamma base (no RE)
-# ============================================================
-results[["1"]] <- bench_validated("pg_base", 1,
-  nd_call = quote(ratiod(y | effort ~ x, data = df_pg, family = ratiod_poisson_gamma(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
-  brms_call = quote(brm(y ~ x + offset(log(effort)), data = df_pg, family = poisson(),
-                        iter = 1000, warmup = 500, chains = 2,
-                        backend = "cmdstanr", silent = 2, refresh = 0))
-)
+cat("=======================================================\n")
+cat("BINOMIAL FAMILY VALIDATION (brms comparison is valid)\n")
+cat("=======================================================\n")
+cat("For poisson_gamma and negbin_negbin, see bench_joint_validation.R\n")
 
 # ============================================================
-# Row 2: poisson_gamma + RE
+# BINOMIAL FAMILY (trials fixed - brms comparison IS valid)
 # ============================================================
-results[["2"]] <- bench_validated("pg_re", 2,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
-  brms_call = quote(brm(y ~ x + (1|site) + offset(log(effort)), data = df_pg, family = poisson(),
-                        iter = 1000, warmup = 500, chains = 2,
-                        backend = "cmdstanr", silent = 2, refresh = 0))
-)
 
-# ============================================================
-# Row 5: poisson_gamma + ICAR
-# ============================================================
-results[["5"]] <- bench_validated("pg_icar", 5,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
-                         spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
-  brms_call = quote(brm(y ~ x + (1|site) + (1|spatial_site) + offset(log(effort)),
-                        data = df_pg, family = poisson(),
-                        iter = 1000, warmup = 500, chains = 2,
-                        backend = "cmdstanr", silent = 2, refresh = 0))
-)
-
-# ============================================================
-# Row 11: poisson_gamma + RW1 temporal
-# ============================================================
-results[["11"]] <- bench_validated("pg_rw1", 11,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
-                         temporal = temporal_rw1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
-  brms_call = quote(brm(y ~ x + (1|site) + (1|time) + offset(log(effort)),
-                        data = df_pg, family = poisson(),
-                        iter = 1000, warmup = 500, chains = 2,
-                        backend = "cmdstanr", silent = 2, refresh = 0))
-)
-
-# ============================================================
-# Row 31: negbin_negbin base
-# ============================================================
-results[["31"]] <- bench_validated("nb_base", 31,
-  nd_call = quote(ratiod(y | denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
-  brms_call = quote(brm(y ~ x + offset(log(denom)), data = df_nb, family = negbinomial(),
-                        iter = 1000, warmup = 500, chains = 2,
-                        backend = "cmdstanr", silent = 2, refresh = 0))
-)
-
-# ============================================================
-# Row 32: negbin_negbin + RE
-# ============================================================
-results[["32"]] <- bench_validated("nb_re", 32,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
-  brms_call = quote(brm(y ~ x + (1|site) + offset(log(denom)), data = df_nb, family = negbinomial(),
-                        iter = 1000, warmup = 500, chains = 2,
-                        backend = "cmdstanr", silent = 2, refresh = 0))
-)
-
-# ============================================================
 # Row 61: binomial base
-# ============================================================
 results[["61"]] <- bench_validated("bin_base", 61,
   nd_call = quote(ratiod(y | trials ~ x, data = df_bin, family = ratiod_binomial(),
                          iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
@@ -216,9 +156,7 @@ results[["61"]] <- bench_validated("bin_base", 61,
                         backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
-# ============================================================
 # Row 62: binomial + RE
-# ============================================================
 results[["62"]] <- bench_validated("bin_re", 62,
   nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
@@ -227,9 +165,7 @@ results[["62"]] <- bench_validated("bin_re", 62,
                         backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
-# ============================================================
 # Row 65: binomial + ICAR
-# ============================================================
 results[["65"]] <- bench_validated("bin_icar", 65,
   nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
@@ -240,9 +176,18 @@ results[["65"]] <- bench_validated("bin_icar", 65,
                         backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
-# ============================================================
+# Row 66: binomial + BYM2
+results[["66"]] <- bench_validated("bin_bym2", 66,
+  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+                         spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
+                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site),
+                        data = df_bin, family = binomial(),
+                        iter = 1000, warmup = 500, chains = 2,
+                        backend = "cmdstanr", silent = 2, refresh = 0))
+)
+
 # Row 71: binomial + RW1 temporal
-# ============================================================
 results[["71"]] <- bench_validated("bin_rw1", 71,
   nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          temporal = temporal_rw1("time"),
@@ -253,16 +198,38 @@ results[["71"]] <- bench_validated("bin_rw1", 71,
                         backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
+# Row 76: binomial + ZI
+results[["76"]] <- bench_validated("bin_zi", 76,
+  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin_zi, family = ratiod_zibinomial(),
+                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  brms_call = quote(brm(y | trials(trials) ~ x + (1|site),
+                        data = df_bin_zi, family = zero_inflated_binomial(),
+                        iter = 1000, warmup = 500, chains = 2,
+                        backend = "cmdstanr", silent = 2, refresh = 0))
+)
+
+# Row 80: binomial + ICAR + RW1
+results[["80"]] <- bench_validated("bin_icar_rw1", 80,
+  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+                         spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
+                         temporal = temporal_rw1("time"),
+                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site) + (1|time),
+                        data = df_bin, family = binomial(),
+                        iter = 1000, warmup = 500, chains = 2,
+                        backend = "cmdstanr", silent = 2, refresh = 0))
+)
+
 # ============================================================
 # Summary
 # ============================================================
 cat("\n\n")
-cat(paste(rep("=", 70), collapse = ""), "\n")
-cat("VALIDATED BENCHMARK SUMMARY\n")
-cat(paste(rep("=", 70), collapse = ""), "\n")
+cat(paste(rep("=", 80), collapse = ""), "\n")
+cat("BINOMIAL FAMILY VALIDATION SUMMARY\n")
+cat(paste(rep("=", 80), collapse = ""), "\n")
 cat(sprintf("%-8s %-15s %8s %8s %8s %6s %s\n",
             "Row", "Model", "numdenom", "Stan", "Speedup", "Diff", "Status"))
-cat(paste(rep("-", 70), collapse = ""), "\n")
+cat(paste(rep("-", 80), collapse = ""), "\n")
 
 n_pass <- 0
 n_total <- 0
@@ -279,12 +246,16 @@ for (r in results) {
   }
 }
 
-cat(paste(rep("-", 70), collapse = ""), "\n")
+cat(paste(rep("-", 80), collapse = ""), "\n")
 cat(sprintf("Validated: %d/%d passed\n", n_pass, n_total))
 
 if (n_pass < n_total) {
   cat("\n*** WARNING: Some models failed validation! ***\n")
 }
+
+cat("\n")
+cat("NOTE: For poisson_gamma and negbin_negbin validation,\n")
+cat("run bench_joint_validation.R (uses custom Stan models).\n")
 
 saveRDS(results, "benchmarks/results_validated.rds")
 cat("\nResults saved to benchmarks/results_validated.rds\n")

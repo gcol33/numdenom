@@ -18,7 +18,8 @@ make_re_params <- function(n) {
     n_coefs_vec = integer(0),
     correlated_vec = logical(0),
     n_chol_vec = integer(0),
-    slope_matrices = list()
+    slope_matrices = list(),
+    parameterization = 0L  # 0 = centered (default)
   )
 }
 
@@ -35,7 +36,8 @@ make_re_params_with_groups <- function(n, group_vec) {
     n_coefs_vec = integer(0),
     correlated_vec = logical(0),
     n_chol_vec = integer(0),
-    slope_matrices = list()
+    slope_matrices = list(),
+    parameterization = 0L  # 0 = centered (default)
   )
 }
 
@@ -64,7 +66,16 @@ make_temporal_params <- function(n, time_idx, type = "rw1", n_times, cyclic = FA
     cyclic = cyclic,
     shared = TRUE,
     tau_shape = 2.0,
-    tau_rate = 0.5
+    tau_rate = 0.5,
+    # GP-specific fields (required even for non-GP types)
+    time_values = numeric(0),
+    cov_type = "exponential",
+    nu = 1.5,
+    period = 1.0,
+    gp_sigma2_prior_U = 1.0,
+    gp_sigma2_prior_alpha = 0.01,
+    gp_phi_prior_lower = 0.01,
+    gp_phi_prior_upper = 10.0
   )
 }
 
@@ -83,7 +94,12 @@ make_zi_params <- function(n) {
   list(
     type = "none",
     X = matrix(0, nrow = n, ncol = 1),
-    prior_sd = 10.0
+    p_zi = 1L,
+    prior_sd = 10.0,
+    # OI fields (required even for non-OI types)
+    X_oi = NULL,
+    p_oi = 0L,
+    oi_prior_sd = 10.0
   )
 }
 
@@ -115,6 +131,38 @@ make_st_params <- function() {
     adj_col_idx = integer(0),
     sigma2_prior_U = 1.0,
     sigma2_prior_alpha = 0.01
+  )
+}
+
+make_tvc_params <- function() {
+  list(
+    has_tvc = FALSE,
+    n_tvc = 0L,
+    n_times = 0L,
+    n_groups = 1L,
+    structure = "rw1",
+    time_idx = integer(0),
+    group_idx = integer(0),
+    X_tvc = matrix(0, nrow = 1, ncol = 1),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01
+  )
+}
+
+make_svc_params <- function() {
+  list(
+    has_svc = FALSE,
+    n_svc = 0L,
+    nn = 0L,
+    shared = TRUE,
+    cov_type = "exponential",
+    spatial_idx = integer(0),
+    X_svc = matrix(0, nrow = 1, ncol = 1),
+    coords = matrix(0, nrow = 1, ncol = 2),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01,
+    phi_prior_shape = 3.0,
+    phi_prior_rate = 1.0
   )
 }
 
@@ -157,6 +205,7 @@ test_that("negbin_negbin with RW2 temporal runs correctly (row 42)", {
     q_init = rep(0, n_params),
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = X,
@@ -168,6 +217,8 @@ test_that("negbin_negbin with RW2 temporal runs correctly (row 42)", {
     zi_params = make_zi_params(n),
     latent_params = make_latent_params(),
     st_params = make_st_params(),
+    tvc_params = make_tvc_params(),
+    svc_params = make_svc_params(),
     n_iter = 600L,
     n_warmup = 300L,
     L = 10L,
@@ -186,7 +237,7 @@ test_that("negbin_negbin with RW2 temporal runs correctly (row 42)", {
   expect_true(all(is.finite(temporal_means)))
 
   # Acceptance rate should be reasonable
-  expect_true(result$acceptance_rate > 0.1)
+  expect_true(mean(result$accept_prob) > 0.1)
 })
 
 
@@ -223,6 +274,7 @@ test_that("binomial with RW2 temporal runs correctly (row 43)", {
     q_init = rep(0, n_params),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -234,6 +286,8 @@ test_that("binomial with RW2 temporal runs correctly (row 43)", {
     zi_params = make_zi_params(n),
     latent_params = make_latent_params(),
     st_params = make_st_params(),
+    tvc_params = make_tvc_params(),
+    svc_params = make_svc_params(),
     n_iter = 600L,
     n_warmup = 300L,
     L = 10L,
@@ -252,7 +306,7 @@ test_that("binomial with RW2 temporal runs correctly (row 43)", {
   expect_true(all(is.finite(temporal_means)))
 
   # Acceptance rate should be reasonable
-  expect_true(result$acceptance_rate > 0.1)
+  expect_true(mean(result$accept_prob) > 0.1)
 })
 
 # =============================================================================
@@ -333,7 +387,7 @@ test_that("negbin_negbin with MSGP runs correctly (row 44)", {
       data = as.data.frame(df),
       spatial = ms,
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -368,7 +422,7 @@ test_that("binomial with MSGP runs correctly (row 45)", {
       data = as.data.frame(df),
       spatial = ms,
       family = ratiod_binomial(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -454,7 +508,7 @@ test_that("negbin_negbin with GP + RW1 runs correctly (row 46)", {
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_rw1("time"),
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -480,7 +534,7 @@ test_that("binomial with GP + RW1 runs correctly (row 47)", {
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_rw1("time"),
       family = ratiod_binomial(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -506,7 +560,7 @@ test_that("poisson_gamma with GP + RW2 runs correctly (row 48)", {
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_rw2("time"),
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -532,7 +586,7 @@ test_that("poisson_gamma with GP + AR1 runs correctly (row 49)", {
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_ar1("time"),
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -558,7 +612,7 @@ test_that("negbin_negbin with GP + AR1 runs correctly (row 50)", {
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_ar1("time"),
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -584,7 +638,7 @@ test_that("binomial with GP + AR1 runs correctly (row 51)", {
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_ar1("time"),
       family = ratiod_binomial(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -703,7 +757,7 @@ test_that("poisson_gamma with BYM2 + ZI runs correctly (row 52)", {
       spatial = spatial_bym2(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -729,7 +783,7 @@ test_that("poisson_gamma with GP + ZI runs correctly (row 53)", {
       spatial = spatial_gp(~ x + y, nn = 8),
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -763,7 +817,7 @@ test_that("negbin_negbin with ICAR + ZI runs correctly (row 54)", {
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -830,7 +884,7 @@ test_that("poisson_gamma with crossed RE + ICAR runs correctly (row 57)", {
       data = df,
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -887,7 +941,7 @@ test_that("poisson_gamma with random slopes + RW1 runs correctly (row 60)", {
       data = df,
       temporal = temporal_rw1("time"),
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -964,7 +1018,7 @@ test_that("poisson_gamma with ICAR + RW1 + ZI runs correctly (row 64)", {
       temporal = temporal_rw1("time"),
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1002,7 +1056,7 @@ test_that("negbin_negbin with BYM2 + ZI runs correctly (row 55)", {
       spatial = spatial_bym2(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1036,7 +1090,7 @@ test_that("binomial with ICAR + ZI runs correctly (row 56)", {
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_binomial(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1099,7 +1153,7 @@ test_that("poisson_gamma with crossed RE + BYM2 runs correctly (row 58)", {
       data = df,
       spatial = spatial_bym2(adj_mat, level = "group", group_var = "site"),
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1163,7 +1217,7 @@ test_that("negbin_negbin with crossed RE + ICAR runs correctly (row 59)", {
       data = df,
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1220,7 +1274,7 @@ test_that("poisson_gamma with random slopes + AR1 runs correctly (row 61)", {
       data = df,
       temporal = temporal_ar1("time"),
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1274,7 +1328,7 @@ test_that("negbin_negbin with random slopes + RW1 runs correctly (row 62)", {
       data = df,
       temporal = temporal_rw1("time"),
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1331,7 +1385,7 @@ test_that("binomial with random slopes + AR1 runs correctly (row 63)", {
       data = df,
       temporal = temporal_ar1("time"),
       family = ratiod_binomial(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1404,7 +1458,7 @@ test_that("poisson_gamma with BYM2 + RW1 + ZI runs correctly (row 65)", {
       temporal = temporal_rw1("time"),
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,
@@ -1477,7 +1531,7 @@ test_that("negbin_negbin with ICAR + RW1 + ZI runs correctly (row 66)", {
       temporal = temporal_rw1("time"),
       zi = ~ 1,
       family = ratiod_negbin_negbin(),
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       iter = 400,
       warmup = 200,

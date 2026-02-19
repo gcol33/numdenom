@@ -16,16 +16,16 @@ enum class TemporalCovType { EXPONENTIAL, MATERN, GAUSSIAN, PERIODIC };
 
 // Temporal GP data structure
 struct TemporalGPData {
-  int n_obs;                          // Number of observations
-  int n_groups;                       // Number of groups (for panel data)
+  int n_obs = 0;                      // Number of unique time points (NOT total obs)
+  int n_groups = 1;                   // Number of groups (for panel data)
 
   std::vector<double> time_values;    // Numeric time values (length n_obs)
   std::vector<int> group_index;       // Group index for each obs (1-based)
 
-  TemporalCovType cov_type;
-  double nu;                          // Matern smoothness (if applicable)
-  double period;                      // Period for periodic covariance
-  bool shared;                        // Whether GP is shared between num/denom
+  TemporalCovType cov_type = TemporalCovType::EXPONENTIAL;
+  double nu = 1.5;                    // Matern smoothness (if applicable)
+  double period = 1.0;                // Period for periodic covariance
+  bool shared = true;                 // Whether GP is shared between num/denom
 };
 
 // -----------------------------------------------------------------------------

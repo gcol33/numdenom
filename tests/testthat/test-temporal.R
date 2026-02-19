@@ -14,7 +14,8 @@ make_re_params_temporal <- function(n) {
     n_coefs_vec = integer(0),
     correlated_vec = logical(0),
     n_chol_vec = integer(0),
-    slope_matrices = list()
+    slope_matrices = list(),
+    parameterization = 0L  # 0 = centered (default)
   )
 }
 
@@ -42,7 +43,16 @@ make_temporal_params <- function(n, time_idx, type = "rw1", n_times, cyclic = FA
     cyclic = cyclic,
     shared = TRUE,
     tau_shape = 2.0,
-    tau_rate = 0.5
+    tau_rate = 0.5,
+    # GP-specific fields (required even for non-GP types)
+    time_values = numeric(0),
+    cov_type = "exponential",
+    nu = 1.5,
+    period = 1.0,
+    gp_sigma2_prior_U = 1.0,
+    gp_sigma2_prior_alpha = 0.01,
+    gp_phi_prior_lower = 0.01,
+    gp_phi_prior_upper = 10.0
   )
 }
 
@@ -61,7 +71,12 @@ make_zi_params_temporal <- function(n) {
   list(
     type = "none",
     X = matrix(0, nrow = n, ncol = 1),
-    prior_sd = 10.0
+    p_zi = 1L,
+    prior_sd = 10.0,
+    # OI fields (required even for non-OI types)
+    X_oi = NULL,
+    p_oi = 0L,
+    oi_prior_sd = 10.0
   )
 }
 
@@ -96,6 +111,37 @@ make_st_params_temporal <- function() {
   )
 }
 
+make_tvc_params_temporal <- function() {
+  list(
+    has_tvc = FALSE,
+    n_tvc = 0L,
+    n_times = 0L,
+    n_groups = 1L,
+    structure = "rw1",
+    time_idx = integer(0),
+    group_idx = integer(0),
+    X_tvc = matrix(0, nrow = 1, ncol = 1),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01
+  )
+}
+
+make_svc_params_temporal <- function() {
+  list(
+    has_svc = FALSE,
+    n_svc = 0L,
+    nn = 0L,
+    shared = TRUE,
+    cov_type = "exponential",
+    spatial_idx = integer(0),
+    X_svc = matrix(0, nrow = 1, ncol = 1),
+    coords = matrix(0, nrow = 1, ncol = 2),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01,
+    phi_prior_shape = 3.0,
+    phi_prior_rate = 1.0
+  )
+}
 
 test_that("temporal_rw1 creates correct structure", {
   temp <- temporal_rw1("time_var")
@@ -149,7 +195,11 @@ test_that("temporal with panel group", {
 
 
 test_that("temporal shared=FALSE works", {
-  temp <- temporal_rw1("time_var", shared = FALSE)
+  # Expect warning about non-shared effects
+  expect_warning(
+    temp <- temporal_rw1("time_var", shared = FALSE),
+    "confounded"
+  )
 
   expect_s3_class(temp, "ratiod_temporal")
   expect_false(temp$shared)
@@ -223,6 +273,7 @@ test_that("HMC with temporal RW1 runs", {
     q_init = rep(0, 12),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -234,6 +285,8 @@ test_that("HMC with temporal RW1 runs", {
     zi_params = make_zi_params_temporal(n),
     latent_params = make_latent_params_temporal(),
     st_params = make_st_params_temporal(),
+    tvc_params = make_tvc_params_temporal(),
+    svc_params = make_svc_params_temporal(),
     n_iter = 800L,
     n_warmup = 400L,
     L = 10L,
@@ -288,6 +341,7 @@ test_that("HMC with temporal AR1 runs", {
     q_init = rep(0, 15),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -299,6 +353,8 @@ test_that("HMC with temporal AR1 runs", {
     zi_params = make_zi_params_temporal(n),
     latent_params = make_latent_params_temporal(),
     st_params = make_st_params_temporal(),
+    tvc_params = make_tvc_params_temporal(),
+    svc_params = make_svc_params_temporal(),
     n_iter = 800L,
     n_warmup = 400L,
     L = 10L,
@@ -344,6 +400,7 @@ test_that("HMC with cyclic RW1 (seasonal) runs", {
     q_init = rep(0, 16),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -355,6 +412,8 @@ test_that("HMC with cyclic RW1 (seasonal) runs", {
     zi_params = make_zi_params_temporal(n),
     latent_params = make_latent_params_temporal(),
     st_params = make_st_params_temporal(),
+    tvc_params = make_tvc_params_temporal(),
+    svc_params = make_svc_params_temporal(),
     n_iter = 600L,
     n_warmup = 300L,
     L = 10L,
@@ -405,6 +464,7 @@ test_that("HMC with panel temporal (group-specific) runs", {
     q_init = rep(0, 19),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -416,6 +476,8 @@ test_that("HMC with panel temporal (group-specific) runs", {
     zi_params = make_zi_params_temporal(n),
     latent_params = make_latent_params_temporal(),
     st_params = make_st_params_temporal(),
+    tvc_params = make_tvc_params_temporal(),
+    svc_params = make_svc_params_temporal(),
     n_iter = 600L,
     n_warmup = 300L,
     L = 10L,
@@ -455,6 +517,7 @@ test_that("HMC with temporal runs multiple chains in parallel", {
     q_init = rep(0, 10),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -466,6 +529,8 @@ test_that("HMC with temporal runs multiple chains in parallel", {
     zi_params = make_zi_params_temporal(n),
     latent_params = make_latent_params_temporal(),
     st_params = make_st_params_temporal(),
+    tvc_params = make_tvc_params_temporal(),
+    svc_params = make_svc_params_temporal(),
     n_iter = 400L,
     n_warmup = 200L,
     L = 10L,
@@ -600,9 +665,9 @@ test_that("validate_temporal_gp with grouping", {
   validated <- validate_temporal_gp(temp, df)
 
   expect_equal(validated$n_groups, 3)
-  # For GP, we have one effect per observation per group
-  # With 30 obs and 3 groups, we get 30 * 3 = 90 temporal params
-  expect_equal(validated$n_temporal_params, 90)
+  # For GP, we have one effect per unique time per group
+  # With 10 unique times and 3 groups, we get 10 * 3 = 30 temporal params
+  expect_equal(validated$n_temporal_params, 30)
 })
 
 

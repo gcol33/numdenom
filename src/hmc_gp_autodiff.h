@@ -165,6 +165,7 @@ T gp_nngp_log_lik_t(
     if (gp_data.nn_order.size() < (size_t)N) return T(-1e10);
     if (gp_data.nn_idx.size() < (size_t)(N * nn)) return T(-1e10);
     if (gp_data.nn_dist.size() < (size_t)(N * nn)) return T(-1e10);
+    if (gp_data.nn_neighbor_dist.size() < (size_t)(N * nn * nn)) return T(-1e10);  // Critical: prevents segfault
     if (w.size() < (size_t)N) return T(-1e10);
     if (gp_data.coords.size() < (size_t)(2 * N)) return T(-1e10);
 
@@ -335,6 +336,7 @@ T multiscale_gp_log_lik_t(
     gp_local.coords = ms_data.coords;
     gp_local.nn_idx = ms_data.nn_idx_local;
     gp_local.nn_dist = ms_data.nn_dist_local;
+    gp_local.nn_neighbor_dist = ms_data.nn_neighbor_dist_local;
     gp_local.nn_order = ms_data.nn_order_local;
     gp_local.nn_order_inv = ms_data.nn_order_inv_local;
     gp_local.cov_type = ms_data.cov_type;
@@ -345,6 +347,7 @@ T multiscale_gp_log_lik_t(
     gp_regional.coords = ms_data.coords;
     gp_regional.nn_idx = ms_data.nn_idx_regional;
     gp_regional.nn_dist = ms_data.nn_dist_regional;
+    gp_regional.nn_neighbor_dist = ms_data.nn_neighbor_dist_regional;
     gp_regional.nn_order = ms_data.nn_order_regional;
     gp_regional.nn_order_inv = ms_data.nn_order_inv_regional;
     gp_regional.cov_type = ms_data.cov_type;

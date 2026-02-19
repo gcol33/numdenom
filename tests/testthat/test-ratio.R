@@ -17,7 +17,7 @@ make_test_fit <- function() {
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -138,7 +138,7 @@ test_that("ratio_contrast computes differences", {
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -168,7 +168,7 @@ test_that("ratio_contrast computes ratio of ratios", {
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -220,7 +220,7 @@ test_that("print.ratiod_contrast works", {
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 300,
     warmup = 150,
     chains = 1
@@ -427,7 +427,7 @@ test_that("ratio with logit scale warns for non-proportion ratios", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -476,7 +476,7 @@ test_that("print.ratiod_ratio_summary with many rows", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,

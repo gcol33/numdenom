@@ -177,15 +177,25 @@ loo.ratiod_fit <- function(x, ...) {
   }
 
   # Try combined log_lik first (all models should have this)
-  ll <- x$draws$log_lik
+  # Handle both list and matrix draws formats
+  if (is.list(x$draws) && !is.matrix(x$draws)) {
+    ll <- x$draws$log_lik
+  } else {
+    ll <- NULL
+  }
 
   if (!is.null(ll)) {
     return(loo::loo(ll, ...))
   }
 
   # Fall back to separate components for two-process models
-  ll_num <- x$draws$log_lik_num
-  ll_denom <- x$draws$log_lik_denom
+  if (is.list(x$draws) && !is.matrix(x$draws)) {
+    ll_num <- x$draws$log_lik_num
+    ll_denom <- x$draws$log_lik_denom
+  } else {
+    ll_num <- NULL
+    ll_denom <- NULL
+  }
 
   if (is.null(ll_num) && is.null(ll_denom)) {
     stop("Log-likelihood not found in model output.", call. = FALSE)
@@ -221,15 +231,25 @@ waic.ratiod_fit <- function(x, ...) {
   }
 
   # Try combined log_lik first
-  ll <- x$draws$log_lik
+  # Handle both list and matrix draws formats
+  if (is.list(x$draws) && !is.matrix(x$draws)) {
+    ll <- x$draws$log_lik
+  } else {
+    ll <- NULL
+  }
 
   if (!is.null(ll)) {
     return(loo::waic(ll, ...))
   }
 
   # Fall back to separate components
-  ll_num <- x$draws$log_lik_num
-  ll_denom <- x$draws$log_lik_denom
+  if (is.list(x$draws) && !is.matrix(x$draws)) {
+    ll_num <- x$draws$log_lik_num
+    ll_denom <- x$draws$log_lik_denom
+  } else {
+    ll_num <- NULL
+    ll_denom <- NULL
+  }
 
   if (is.null(ll_num) && is.null(ll_denom)) {
     stop("Log-likelihood not found in model output.", call. = FALSE)

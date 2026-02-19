@@ -315,7 +315,7 @@ test_that("ratiod_average errors when models have different data sizes", {
 
   mock_fit1 <- structure(
     list(
-      stan_data = list(N = 50L),
+      .internal = list(hmc_data = list(N = 50L)),
       draws = mock_draws,
       loo = list(pointwise = matrix(runif(50), ncol = 1))
     ),
@@ -323,7 +323,7 @@ test_that("ratiod_average errors when models have different data sizes", {
   )
   mock_fit2 <- structure(
     list(
-      stan_data = list(N = 100L),
+      .internal = list(hmc_data = list(N = 100L)),
       draws = mock_draws,
       loo = list(pointwise = matrix(runif(100), ncol = 1))
     ),

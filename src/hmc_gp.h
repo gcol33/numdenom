@@ -252,17 +252,21 @@ inline GPSolver parse_gp_solver(const std::string& s) {
 
 // Single-scale GP data structure
 struct GPData {
-  int n_obs;                          // Number of observations
+  int n_obs;                          // Number of unique locations
   int nn;                             // Number of nearest neighbors
 
-  std::vector<double> coords;         // Coordinates (n_obs x 2, flattened)
+  std::vector<double> coords;         // Coordinates (n_obs x 2, flattened) — unique locations only
 
-  // NNGP neighbor structure
+  // NNGP neighbor structure (computed on unique locations)
   std::vector<int> nn_idx;            // Neighbor indices (n_obs x nn, flattened)
   std::vector<double> nn_dist;        // Distances to neighbors (n_obs x nn, flattened)
   std::vector<double> nn_neighbor_dist;  // Phase 1.3: pairwise distances among neighbors (n_obs x nn x nn)
   std::vector<int> nn_order;          // Observation ordering for NNGP
   std::vector<int> nn_order_inv;      // Inverse ordering
+
+  // Observation-to-location mapping (0-based, length = total N)
+  // Maps each observation to its unique location index
+  std::vector<int> obs_to_loc;
 
   CovType cov_type;
   double nu;                          // Matern smoothness (if applicable)
@@ -274,11 +278,14 @@ struct GPData {
 
 // Multi-scale GP data structure
 struct MultiscaleGPData {
-  int n_obs;
+  int n_obs;                          // Number of unique locations
 
-  std::vector<double> coords;         // Coordinates (n_obs x 2, flattened)
+  std::vector<double> coords;         // Coordinates (n_obs x 2, flattened) — unique locations only
 
-  // Local scale neighbor structure
+  // Observation-to-location mapping (0-based, length = total N)
+  std::vector<int> obs_to_loc;
+
+  // Local scale neighbor structure (computed on unique locations)
   int nn_local;
   std::vector<int> nn_idx_local;
   std::vector<double> nn_dist_local;
@@ -286,7 +293,7 @@ struct MultiscaleGPData {
   std::vector<int> nn_order_local;
   std::vector<int> nn_order_inv_local;
 
-  // Regional scale neighbor structure
+  // Regional scale neighbor structure (computed on unique locations)
   int nn_regional;
   std::vector<int> nn_idx_regional;
   std::vector<double> nn_dist_regional;
@@ -327,6 +334,7 @@ inline double gp_nngp_log_lik(
   if (gp_data.nn_order.size() < (size_t)N) return -INFINITY;
   if (gp_data.nn_idx.size() < (size_t)(N * nn)) return -INFINITY;
   if (gp_data.nn_dist.size() < (size_t)(N * nn)) return -INFINITY;  // Added: was missing
+  if (gp_data.nn_neighbor_dist.size() < (size_t)(N * nn * nn)) return -INFINITY;  // Critical: prevents segfault
   if (w.size() < (size_t)N) return -INFINITY;
   if (gp_data.coords.size() < (size_t)(2 * N)) return -INFINITY;
 

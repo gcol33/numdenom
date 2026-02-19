@@ -1186,23 +1186,41 @@ validate_gp <- function(gp, data) {
     coords <- scale(coords)
   }
 
-  gp$n_obs <- N
-  gp$n_spatial <- N
-  gp$coords_matrix <- coords
+  # Detect unique coordinates (NNGP requires unique locations)
+  coord_key <- paste(coords[, 1], coords[, 2], sep = ",")
+  unique_keys <- unique(coord_key)
+  obs_to_loc <- match(coord_key, unique_keys)
+  unique_coords <- coords[match(unique_keys, coord_key), , drop = FALSE]
+  n_unique <- nrow(unique_coords)
 
-  # Compute neighbors
+  if (n_unique < N) {
+    message(sprintf("GP: %d unique locations from %d observations", n_unique, N))
+  }
+
+  gp$n_obs <- n_unique
+  gp$n_spatial <- n_unique
+  gp$n_unique <- n_unique
+  gp$obs_to_loc <- as.integer(obs_to_loc)
+  gp$unique_coords <- unique_coords
+  gp$coords_matrix <- coords  # Keep full coords for reference
+
+  # Compute neighbors on unique coordinates only
+  # Store clamped nn values back so prepare_gp_for_hmc passes correct sizes to C++
   if (inherits(gp, "ratiod_gp")) {
     # Single-scale GP
-    nn <- min(gp$nn, N - 1)
-    gp$neighbor_info <- compute_nngp_neighbors(coords, nn)
+    nn <- min(gp$nn, n_unique - 1)
+    gp$nn <- nn
+    gp$neighbor_info <- compute_nngp_neighbors(unique_coords, nn)
 
   } else if (inherits(gp, "ratiod_multiscale")) {
     # Multi-scale: separate neighbor structures for each scale
-    nn_local <- min(gp$nn_local, N - 1)
-    nn_regional <- min(gp$nn_regional, N - 1)
+    nn_local <- min(gp$nn_local, n_unique - 1)
+    nn_regional <- min(gp$nn_regional, n_unique - 1)
+    gp$nn_local <- nn_local
+    gp$nn_regional <- nn_regional
 
-    gp$neighbor_info_local <- compute_nngp_neighbors(coords, nn_local)
-    gp$neighbor_info_regional <- compute_nngp_neighbors(coords, nn_regional)
+    gp$neighbor_info_local <- compute_nngp_neighbors(unique_coords, nn_local)
+    gp$neighbor_info_regional <- compute_nngp_neighbors(unique_coords, nn_regional)
   }
 
   gp

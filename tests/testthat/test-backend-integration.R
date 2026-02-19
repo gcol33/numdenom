@@ -14,7 +14,7 @@ quick_fit <- function(family = ratiod_poisson_gamma(), n = 20, iter = 100, warmu
     count | effort ~ x,
     data = df,
     family = family,
-    backend = "hmc",
+    mode = "hmc",
     iter = iter,
     warmup = warmup,
     chains = 1,
@@ -46,7 +46,7 @@ test_that("HMC backend works with negbin_negbin", {
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -72,7 +72,7 @@ test_that("HMC backend works with binomial", {
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -98,7 +98,7 @@ test_that("HMC backend works with random effects", {
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -325,7 +325,7 @@ test_that("HMC backend works with multiple chains", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 2,
@@ -356,7 +356,7 @@ test_that("ratio_contrast computes contrasts", {
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -384,7 +384,7 @@ test_that("ratio_contrast computes ratio of ratios", {
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -416,7 +416,7 @@ test_that("Laplace backend works with binomial", {
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
-    backend = "laplace",
+    mode = "laplace",
     verbose = FALSE
   )
 
@@ -437,7 +437,7 @@ test_that("Laplace backend works with poisson_gamma", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "laplace",
+    mode = "laplace",
     verbose = FALSE
   )
 
@@ -459,7 +459,7 @@ test_that("Laplace backend works with random effects", {
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "laplace",
+    mode = "laplace",
     verbose = FALSE
   )
 
@@ -481,18 +481,15 @@ test_that("PG backend works with binomial", {
     x = rnorm(n)
   )
 
-  expect_warning(
-    fit <- ratiod(
-      successes | trials ~ x,
-      data = df,
-      family = ratiod_binomial(),
-      backend = "pg",
-      iter = 100,
-      warmup = 50,
-      chains = 1,
-      verbose = FALSE
-    ),
-    "experimental"
+  fit <- ratiod(
+    successes | trials ~ x,
+    data = df,
+    family = ratiod_binomial(),
+    mode = "pg",
+    iter = 100,
+    warmup = 50,
+    chains = 1,
+    verbose = FALSE
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -510,18 +507,15 @@ test_that("PG backend works with random effects", {
     site = factor(rep(1:5, each = 8))
   )
 
-  expect_warning(
-    fit <- ratiod(
-      successes | trials ~ x + (1 | site),
-      data = df,
-      family = ratiod_binomial(),
-      backend = "pg",
-      iter = 100,
-      warmup = 50,
-      chains = 1,
-      verbose = FALSE
-    ),
-    "experimental"
+  fit <- ratiod(
+    successes | trials ~ x + (1 | site),
+    data = df,
+    family = ratiod_binomial(),
+    mode = "pg",
+    iter = 100,
+    warmup = 50,
+    chains = 1,
+    verbose = FALSE
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -553,19 +547,16 @@ test_that("PG backend works with spatial CAR", {
   adj[3, 4] <- adj[4, 3] <- 1
   adj[4, 5] <- adj[5, 4] <- 1
 
-  expect_warning(
-    fit <- ratiod(
-      successes | trials ~ x + (1 | site),
-      data = df,
-      family = ratiod_binomial(),
-      spatial = spatial_car(adj, level = "group", group_var = "site"),
-      backend = "pg",
-      iter = 100,
-      warmup = 50,
-      chains = 1,
-      verbose = FALSE
-    ),
-    "experimental"
+  fit <- ratiod(
+    successes | trials ~ x + (1 | site),
+    data = df,
+    family = ratiod_binomial(),
+    spatial = spatial_car(adj, level = "group", group_var = "site"),
+    mode = "pg",
+    iter = 100,
+    warmup = 50,
+    chains = 1,
+    verbose = FALSE
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -596,7 +587,7 @@ test_that("HMC backend works with spatial CAR", {
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(adj, level = "group", group_var = "site"),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -629,7 +620,7 @@ test_that("HMC backend works with temporal RW1", {
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("time"),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -662,7 +653,7 @@ test_that("HMC backend works with temporal AR1", {
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_ar1("time"),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -695,7 +686,7 @@ test_that("HMC backend works with temporal RW2", {
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw2("time"),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -726,7 +717,7 @@ test_that("HMC backend works with cyclic RW1", {
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("month", cyclic = TRUE),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -755,7 +746,7 @@ test_that("HMC backend works with parallel chains", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 2,
@@ -783,7 +774,7 @@ test_that("HMC backend with 4 chains produces consistent results", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 4,
@@ -822,7 +813,7 @@ test_that("Temporal model works with multiple chains", {
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("time"),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 2,
@@ -855,7 +846,7 @@ test_that("Model handles single time point per site", {
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("time"),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,

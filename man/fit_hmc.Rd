@@ -21,7 +21,8 @@ fit_hmc(
   L = 20,
   seed = NULL,
   verbose = TRUE,
-  gradient_mode = "auto"
+  gradient_mode = "auto",
+  re_param = "noncentered"
 )
 }
 \arguments{

@@ -11,6 +11,20 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// cpp_flatten_3d_rowmajor
+Rcpp::NumericVector cpp_flatten_3d_rowmajor(Rcpp::NumericVector arr, int d1, int d2, int d3);
+RcppExport SEXP _numdenom_cpp_flatten_3d_rowmajor(SEXP arrSEXP, SEXP d1SEXP, SEXP d2SEXP, SEXP d3SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type arr(arrSEXP);
+    Rcpp::traits::input_parameter< int >::type d1(d1SEXP);
+    Rcpp::traits::input_parameter< int >::type d2(d2SEXP);
+    Rcpp::traits::input_parameter< int >::type d3(d3SEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_flatten_3d_rowmajor(arr, d1, d2, d3));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_sample_crt
 Rcpp::IntegerVector cpp_sample_crt(Rcpp::IntegerVector y, double r);
 RcppExport SEXP _numdenom_cpp_sample_crt(SEXP ySEXP, SEXP rSEXP) {
@@ -1744,6 +1758,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_numdenom_cpp_flatten_3d_rowmajor", (DL_FUNC) &_numdenom_cpp_flatten_3d_rowmajor, 4},
     {"_numdenom_cpp_sample_crt", (DL_FUNC) &_numdenom_cpp_sample_crt, 2},
     {"_numdenom_cpp_sample_crt_sum", (DL_FUNC) &_numdenom_cpp_sample_crt_sum, 2},
     {"_numdenom_cpp_crt_mean", (DL_FUNC) &_numdenom_cpp_crt_mean, 2},

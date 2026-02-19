@@ -14,7 +14,8 @@ make_re_params <- function(n, group = rep(0L, n), n_groups = 0L, n_terms = 0L) {
     n_coefs_vec = integer(0),
     correlated_vec = logical(0),
     n_chol_vec = integer(0),
-    slope_matrices = list()
+    slope_matrices = list(),
+    parameterization = 0L  # 0 = centered (default)
   )
 }
 
@@ -41,7 +42,16 @@ make_temporal_params <- function(n) {
     cyclic = FALSE,
     shared = TRUE,
     tau_shape = 2.0,
-    tau_rate = 0.5
+    tau_rate = 0.5,
+    # GP-specific fields (required even for non-GP types)
+    time_values = numeric(0),
+    cov_type = "exponential",
+    nu = 1.5,
+    period = 1.0,
+    gp_sigma2_prior_U = 1.0,
+    gp_sigma2_prior_alpha = 0.01,
+    gp_phi_prior_lower = 0.01,
+    gp_phi_prior_upper = 10.0
   )
 }
 
@@ -60,7 +70,12 @@ make_zi_params <- function(n) {
   list(
     type = "none",
     X = matrix(0, nrow = n, ncol = 1),
-    prior_sd = 10.0
+    p_zi = 1L,
+    prior_sd = 10.0,
+    # OI fields (required even for non-OI types)
+    X_oi = NULL,
+    p_oi = 0L,
+    oi_prior_sd = 10.0
   )
 }
 
@@ -95,6 +110,37 @@ make_st_params <- function() {
   )
 }
 
+make_tvc_params <- function() {
+  list(
+    has_tvc = FALSE,
+    n_tvc = 0L,
+    n_times = 0L,
+    n_groups = 1L,
+    structure = "rw1",
+    time_idx = integer(0),
+    group_idx = integer(0),
+    X_tvc = matrix(0, nrow = 1, ncol = 1),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01
+  )
+}
+
+make_svc_params <- function() {
+  list(
+    has_svc = FALSE,
+    n_svc = 0L,
+    nn = 0L,
+    shared = TRUE,
+    cov_type = "exponential",
+    spatial_idx = integer(0),
+    X_svc = matrix(0, nrow = 1, ncol = 1),
+    coords = matrix(0, nrow = 1, ncol = 2),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01,
+    phi_prior_shape = 3.0,
+    phi_prior_rate = 1.0
+  )
+}
 
 test_that("HMC backend runs for binomial model", {
   skip_on_cran()
@@ -118,6 +164,7 @@ test_that("HMC backend runs for binomial model", {
     q_init = rep(0, 3),  # 2 beta_num + 1 beta_denom
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -129,6 +176,8 @@ test_that("HMC backend runs for binomial model", {
     zi_params = make_zi_params(n),
     latent_params = make_latent_params(),
     st_params = make_st_params(),
+    tvc_params = make_tvc_params(),
+    svc_params = make_svc_params(),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,
@@ -171,6 +220,7 @@ test_that("HMC backend runs for negbin model", {
     q_init = rep(0, 6),  # 2 + 2 fixed + 2 log_phi
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = X,
@@ -182,6 +232,8 @@ test_that("HMC backend runs for negbin model", {
     zi_params = make_zi_params(n),
     latent_params = make_latent_params(),
     st_params = make_st_params(),
+    tvc_params = make_tvc_params(),
+    svc_params = make_svc_params(),
     n_iter = 500L,
     n_warmup = 250L,
     L = 10L,
@@ -219,6 +271,7 @@ test_that("HMC backend runs with random effects", {
     q_init = rep(0, 14),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -230,6 +283,8 @@ test_that("HMC backend runs with random effects", {
     zi_params = make_zi_params(n),
     latent_params = make_latent_params(),
     st_params = make_st_params(),
+    tvc_params = make_tvc_params(),
+    svc_params = make_svc_params(),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,
@@ -310,6 +365,7 @@ test_that("HMC backend runs with ICAR spatial effects", {
     q_init = rep(0, 20),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -321,6 +377,8 @@ test_that("HMC backend runs with ICAR spatial effects", {
     zi_params = make_zi_params(n),
     latent_params = make_latent_params(),
     st_params = make_st_params(),
+    tvc_params = make_tvc_params(),
+    svc_params = make_svc_params(),
     n_iter = 500L,
     n_warmup = 250L,
     L = 10L,
@@ -357,6 +415,7 @@ test_that("HMC backend runs multiple chains in parallel", {
     q_init = rep(0, 3),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
+    y_num_cont = rep(0.0, n),
     y_denom_cont = rep(0.0, n),
     X_num = X,
     X_denom = matrix(1, n, 1),
@@ -368,6 +427,8 @@ test_that("HMC backend runs multiple chains in parallel", {
     zi_params = make_zi_params(n),
     latent_params = make_latent_params(),
     st_params = make_st_params(),
+    tvc_params = make_tvc_params(),
+    svc_params = make_svc_params(),
     n_iter = 300L,
     n_warmup = 150L,
     L = 10L,

@@ -10,10 +10,12 @@ test_that("can_use_pg_backend returns TRUE for binomial family", {
   expect_true(numdenom:::can_use_pg_backend(fam))
 })
 
-test_that("can_use_pg_backend returns FALSE for non-binomial family", {
+test_that("can_use_pg_backend returns TRUE for negbin family (PG+CRT)", {
   fam <- ratiod_negbin_negbin()
-  expect_false(numdenom:::can_use_pg_backend(fam))
+  expect_true(numdenom:::can_use_pg_backend(fam))
+})
 
+test_that("can_use_pg_backend returns FALSE for poisson_gamma family", {
   fam <- ratiod_poisson_gamma()
   expect_false(numdenom:::can_use_pg_backend(fam))
 })

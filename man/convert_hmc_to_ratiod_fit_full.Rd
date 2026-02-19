@@ -18,7 +18,8 @@ convert_hmc_to_ratiod_fit_full(
   model_type,
   iter,
   warmup,
-  chains
+  chains,
+  re_param = "noncentered"
 )
 }
 \description{

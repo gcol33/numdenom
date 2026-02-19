@@ -58,6 +58,11 @@ T compute_log_post_impl(
     }
 
     // Random effects
+    // For non-centered parameterization (re_parameterization == 1):
+    //   - params store z ~ N(0,1)
+    //   - actual RE = sigma_re * z
+    // For centered parameterization (re_parameterization == 0):
+    //   - params store re ~ N(0, sigma_re^2) directly
     T sigma_re = T(1.0);
     std::vector<T> re;
     if (layout.has_re) {
@@ -66,8 +71,18 @@ T compute_log_post_impl(
 
         int n_re = layout.re_end - layout.re_start;
         re.resize(n_re);
-        for (int g = 0; g < n_re; g++) {
-            re[g] = params[layout.re_start + g];
+
+        if (data.re_parameterization == 1) {
+            // Non-centered: params are z values, compute re = sigma * z
+            for (int g = 0; g < n_re; g++) {
+                T z_g = params[layout.re_start + g];
+                re[g] = sigma_re * z_g;
+            }
+        } else {
+            // Centered: params are actual RE values
+            for (int g = 0; g < n_re; g++) {
+                re[g] = params[layout.re_start + g];
+            }
         }
     }
 
@@ -117,20 +132,32 @@ T compute_log_post_impl(
     std::vector<T> phi_temporal;
     T tau_temporal = T(1.0);
     T rho_ar1 = T(0.5);
+    T sigma2_temporal_gp = T(1.0);
+    T phi_temporal_gp = T(1.0);  // lengthscale
 
     if (layout.has_temporal) {
-        T log_tau = params[layout.log_tau_temporal_idx];
-        tau_temporal = safe_exp(log_tau);
-
+        // Extract temporal effects (common to all temporal types)
         int n_temporal = layout.temporal_end - layout.temporal_start;
         phi_temporal.resize(n_temporal);
         for (int t = 0; t < n_temporal; t++) {
             phi_temporal[t] = params[layout.temporal_start + t];
         }
 
-        if (layout.is_ar1) {
-            T logit_rho = params[layout.logit_rho_ar1_idx];
-            rho_ar1 = inv_logit(logit_rho);
+        if (layout.is_temporal_gp) {
+            // Temporal GP: sigma2 and phi (lengthscale) parameters
+            T log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
+            T log_phi = params[layout.log_phi_temporal_gp_idx];
+            sigma2_temporal_gp = safe_exp(log_sigma2);
+            phi_temporal_gp = safe_exp(log_phi);
+        } else {
+            // RW1/RW2/AR1: tau-based parameterization
+            T log_tau = params[layout.log_tau_temporal_idx];
+            tau_temporal = safe_exp(log_tau);
+
+            if (layout.is_ar1) {
+                T logit_rho = params[layout.logit_rho_ar1_idx];
+                rho_ar1 = inv_logit(logit_rho);
+            }
         }
     }
 
@@ -147,18 +174,32 @@ T compute_log_post_impl(
         log_post = log_post + log_prior_normal(beta_denom[j], tau_beta);
     }
 
-    // Random effects: N(0, sigma_re^2) with Half-Cauchy on sigma
+    // Random effects prior with Half-Cauchy on sigma_re
+    // For non-centered: z ~ N(0,1), so prior is on params (z values) with tau=1
+    // For centered: re ~ N(0, sigma_re^2), so prior uses tau = 1/sigma_re^2
     if (layout.has_re) {
-        // Half-Cauchy prior on sigma_re
+        // Half-Cauchy prior on sigma_re (same for both parameterizations)
         T log_sigma_re = params[layout.log_sigma_re_idx];
         log_post = log_post + log_prior_half_cauchy(log_sigma_re, data.sigma_re_scale);
 
-        // RE prior: N(0, sigma_re^2)
-        T tau_re = T(1.0) / (sigma_re * sigma_re + T(1e-10));
-        for (size_t g = 0; g < re.size(); g++) {
-            log_post = log_post + log_prior_normal(re[g], get_value(tau_re));
-            // Add normalization constant
-            log_post = log_post + T(0.5) * safe_log(tau_re);
+        // Prior on RE/z values
+        int n_re = layout.re_end - layout.re_start;
+        if (data.re_parameterization == 1) {
+            // Non-centered: z ~ N(0, 1), so tau = 1
+            // Prior on z values (the stored params)
+            for (int g = 0; g < n_re; g++) {
+                T z_g = params[layout.re_start + g];
+                log_post = log_post + log_prior_normal(z_g, 1.0);
+                // Normalization constant for tau=1: 0.5 * log(1) = 0
+            }
+        } else {
+            // Centered: re ~ N(0, sigma_re^2)
+            T tau_re = T(1.0) / (sigma_re * sigma_re + T(1e-10));
+            for (int g = 0; g < n_re; g++) {
+                log_post = log_post + log_prior_normal(re[g], get_value(tau_re));
+                // Add normalization constant
+                log_post = log_post + T(0.5) * safe_log(tau_re);
+            }
         }
     }
 
@@ -229,51 +270,101 @@ T compute_log_post_impl(
 
     // Temporal priors
     if (layout.has_temporal) {
-        T log_tau = params[layout.log_tau_temporal_idx];
-        log_post = log_post + log_prior_gamma(log_tau, data.tau_temporal_shape, data.tau_temporal_rate);
-
         int T_times = data.n_times;
 
-        if (data.temporal_type == TemporalType::RW1) {
-            // RW1: sum of (phi[t] - phi[t-1])^2
-            T quad_form = T(0.0);
+        if (layout.is_temporal_gp) {
+            // Temporal GP: PC prior on sigma2, uniform on phi (lengthscale)
+            T log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
+            T log_phi = params[layout.log_phi_temporal_gp_idx];
+
+            // PC prior on sigma2 (favor smaller variance)
+            // log p(sigma2) = log(rate) - rate * sqrt(sigma2) - log(2 * sqrt(sigma2))
+            double rate = -std::log(data.temporal_gp_sigma2_prior_alpha) / data.temporal_gp_sigma2_prior_U;
+            T sigma_gp = safe_sqrt(sigma2_temporal_gp);
+            log_post = log_post + T(std::log(rate)) - T(rate) * sigma_gp - safe_log(T(2.0) * sigma_gp);
+            log_post = log_post + log_sigma2;  // Jacobian for log transform
+
+            // Uniform prior on phi within bounds - just check bounds
+            double phi_val = get_value(phi_temporal_gp);
+            if (phi_val < data.temporal_gp_phi_prior_lower || phi_val > data.temporal_gp_phi_prior_upper) {
+                return T(-INFINITY);
+            }
+            log_post = log_post - T(std::log(data.temporal_gp_phi_prior_upper - data.temporal_gp_phi_prior_lower));
+            log_post = log_post + log_phi;  // Jacobian
+
+            // GP log-likelihood for temporal effects using exponential covariance
+            // For efficiency, use state-space representation (AR1 approximation)
             for (int g = 0; g < data.n_temporal_groups; g++) {
+                // First time point: marginal N(0, sigma2)
+                T f0 = phi_temporal[g * T_times];
+                log_post = log_post - T(0.5) * safe_log(T(2.0 * M_PI) * sigma2_temporal_gp);
+                log_post = log_post - T(0.5) * f0 * f0 / sigma2_temporal_gp;
+
+                // Subsequent time points: conditional on previous
                 for (int t = 1; t < T_times; t++) {
-                    T diff = phi_temporal[g * T_times + t] - phi_temporal[g * T_times + t - 1];
-                    quad_form = quad_form + diff * diff;
+                    T f_prev = phi_temporal[g * T_times + t - 1];
+                    T f_curr = phi_temporal[g * T_times + t];
+
+                    // Time difference (assumes consecutive integer times scaled)
+                    double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
+                    T rho = safe_exp(T(-dt) / phi_temporal_gp);
+                    T cond_var = sigma2_temporal_gp * (T(1.0) - rho * rho);
+
+                    // Ensure positive variance
+                    T cond_var_safe = safe_max(cond_var, T(1e-10));
+                    T cond_mean = rho * f_prev;
+                    T resid = f_curr - cond_mean;
+
+                    log_post = log_post - T(0.5) * safe_log(T(2.0 * M_PI) * cond_var_safe);
+                    log_post = log_post - T(0.5) * resid * resid / cond_var_safe;
                 }
             }
-            log_post = log_post + T(0.5 * (T_times - 1) * data.n_temporal_groups) * log_tau;
-            log_post = log_post - T(0.5) * tau_temporal * quad_form;
+        } else {
+            // RW1/RW2/AR1: tau-based parameterization
+            T log_tau = params[layout.log_tau_temporal_idx];
+            log_post = log_post + log_prior_gamma(log_tau, data.tau_temporal_shape, data.tau_temporal_rate);
 
-        } else if (data.temporal_type == TemporalType::RW2) {
-            // RW2: sum of (phi[t] - 2*phi[t-1] + phi[t-2])^2
-            T quad_form = T(0.0);
-            for (int g = 0; g < data.n_temporal_groups; g++) {
-                for (int t = 2; t < T_times; t++) {
-                    T diff = phi_temporal[g * T_times + t]
-                           - T(2.0) * phi_temporal[g * T_times + t - 1]
-                           + phi_temporal[g * T_times + t - 2];
-                    quad_form = quad_form + diff * diff;
+            if (data.temporal_type == TemporalType::RW1) {
+                // RW1: sum of (phi[t] - phi[t-1])^2
+                T quad_form = T(0.0);
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    for (int t = 1; t < T_times; t++) {
+                        T diff = phi_temporal[g * T_times + t] - phi_temporal[g * T_times + t - 1];
+                        quad_form = quad_form + diff * diff;
+                    }
                 }
-            }
-            log_post = log_post + T(0.5 * (T_times - 2) * data.n_temporal_groups) * log_tau;
-            log_post = log_post - T(0.5) * tau_temporal * quad_form;
+                log_post = log_post + T(0.5 * (T_times - 1) * data.n_temporal_groups) * log_tau;
+                log_post = log_post - T(0.5) * tau_temporal * quad_form;
 
-        } else if (data.temporal_type == TemporalType::AR1) {
-            // AR1: phi[t] | phi[t-1] ~ N(rho * phi[t-1], 1/tau)
-            T logit_rho = params[layout.logit_rho_ar1_idx];
-            log_post = log_post + safe_log(rho_ar1 + T(1.0)) + safe_log(T(1.0) - rho_ar1);  // Jacobian
+            } else if (data.temporal_type == TemporalType::RW2) {
+                // RW2: sum of (phi[t] - 2*phi[t-1] + phi[t-2])^2
+                T quad_form = T(0.0);
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    for (int t = 2; t < T_times; t++) {
+                        T diff = phi_temporal[g * T_times + t]
+                               - T(2.0) * phi_temporal[g * T_times + t - 1]
+                               + phi_temporal[g * T_times + t - 2];
+                        quad_form = quad_form + diff * diff;
+                    }
+                }
+                log_post = log_post + T(0.5 * (T_times - 2) * data.n_temporal_groups) * log_tau;
+                log_post = log_post - T(0.5) * tau_temporal * quad_form;
 
-            for (int g = 0; g < data.n_temporal_groups; g++) {
-                // First time point: phi[0] ~ N(0, 1/(tau*(1-rho^2)))
-                T var_stationary = T(1.0) / (tau_temporal * (T(1.0) - rho_ar1 * rho_ar1));
-                log_post = log_post - T(0.5) * phi_temporal[g * T_times] * phi_temporal[g * T_times] / var_stationary;
+            } else if (data.temporal_type == TemporalType::AR1) {
+                // AR1: phi[t] | phi[t-1] ~ N(rho * phi[t-1], 1/tau)
+                // Jacobian for logit -> rho transformation: log(rho+1) + log(1-rho)
+                log_post = log_post + safe_log(rho_ar1 + T(1.0)) + safe_log(T(1.0) - rho_ar1);
 
-                // Subsequent: phi[t] | phi[t-1]
-                for (int t = 1; t < T_times; t++) {
-                    T resid = phi_temporal[g * T_times + t] - rho_ar1 * phi_temporal[g * T_times + t - 1];
-                    log_post = log_post - T(0.5) * tau_temporal * resid * resid;
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    // First time point: phi[0] ~ N(0, 1/(tau*(1-rho^2)))
+                    T var_stationary = T(1.0) / (tau_temporal * (T(1.0) - rho_ar1 * rho_ar1));
+                    log_post = log_post - T(0.5) * phi_temporal[g * T_times] * phi_temporal[g * T_times] / var_stationary;
+
+                    // Subsequent: phi[t] | phi[t-1]
+                    for (int t = 1; t < T_times; t++) {
+                        T resid = phi_temporal[g * T_times + t] - rho_ar1 * phi_temporal[g * T_times + t - 1];
+                        log_post = log_post - T(0.5) * tau_temporal * resid * resid;
+                    }
                 }
             }
         }
@@ -334,6 +425,9 @@ T compute_log_post_impl(
             // NNGP log-likelihood
             log_post = log_post + ratiod_svc_ad::nngp_log_lik(w_j, svc_sigma2[j], svc_phi[j], data.svc_data);
         }
+
+        // Soft sum-to-zero constraint for identifiability
+        log_post = log_post + ratiod_svc_ad::svc_sum_to_zero_penalty(svc_w_flat, data.svc_data, 1.0);
 
         // Precompute SVC contribution to linear predictor
         svc_eta.resize(n_obs, T(0.0));

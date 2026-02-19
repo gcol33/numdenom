@@ -75,7 +75,8 @@ fit_hmc <- function(formula,
                     L = 20,
                     seed = NULL,
                     verbose = TRUE,
-                    gradient_mode = "auto") {
+                    gradient_mode = "auto",
+                    re_param = "noncentered") {
 
   # Set cores
   if (is.null(cores)) {
@@ -102,17 +103,25 @@ fit_hmc <- function(formula,
   }
 
   # Prepare spatial structure
-  # Check if GP-based spatial (requires different sampler)
-  use_gp_sampler <- is_gp_spatial(spatial)
+  # Check if GP-based spatial or multiscale temporal (both require GP sampler)
+  # temporal_multiscale is only fully supported in the GP sampler path
+  use_gp_sampler <- is_gp_spatial(spatial) || is_multiscale_temporal(temporal)
 
   if (use_gp_sampler) {
     # GP spatial uses dedicated sampler
     gp_info <- prepare_gp_for_hmc(spatial, data, hmc_data$N)
-    spatial_info <- list(type = gp_info$gp_type, n_units = hmc_data$N,
-                         group = seq_len(hmc_data$N), adj_row_ptr = integer(1),
+    gp_n_units <- if (gp_info$n_unique > 0L) gp_info$n_unique else hmc_data$N
+    gp_group <- if (length(gp_info$gp_obs_to_loc) > 0) gp_info$gp_obs_to_loc else seq_len(hmc_data$N)
+    spatial_info <- list(type = gp_info$gp_type, n_units = gp_n_units,
+                         group = gp_group, adj_row_ptr = integer(1),
                          adj_col_idx = integer(0), n_neighbors = integer(0),
                          bym2_scale = 1.0,
-                         hsgp_m = gp_info$hsgp_m)  # HSGP: basis functions per dim
+                         hsgp_m = gp_info$hsgp_m,  # HSGP: basis functions per dim
+                         # Range bounds for proper initialization (from prepare_gp_for_hmc)
+                         range_local_lower = gp_info$range_local_lower,
+                         range_local_upper = gp_info$range_local_upper,
+                         range_regional_lower = gp_info$range_regional_lower,
+                         range_regional_upper = gp_info$range_regional_upper)
   } else {
     gp_info <- NULL
     spatial_info <- prepare_spatial_for_hmc(spatial, data, hmc_data$N)
@@ -204,8 +213,35 @@ fit_hmc <- function(formula,
   priors <- priors %||% ratiod_priors()
   sigma_beta <- priors$sigma_beta %||% 10.0
   sigma_re_scale <- priors$sigma_re_scale %||% 2.5
-  phi_shape <- priors$phi_shape %||% 2.0
-  phi_rate <- priors$phi_rate %||% 0.1
+
+  # Family-specific priors for phi parameter
+  # - negbin_negbin: phi is overdispersion, use Gamma(2, 0.1) with mode=10
+  # - lognormal: phi is sigma (log-scale SD), use Gamma(2, 2) with mode=0.5
+  # - gamma_gamma: phi is shape, use Gamma(2, 0.5) with mode=2
+  # - poisson_gamma: phi is shape of gamma denominator, use Gamma(2, 0.5) with mode=2
+  # - beta_binomial: phi is precision (alpha+beta), use Gamma(2, 0.1) with mode=10
+  if (!is.null(priors$phi_shape) && !is.null(priors$phi_rate)) {
+    # User explicitly specified priors
+    phi_shape <- priors$phi_shape
+    phi_rate <- priors$phi_rate
+  } else if (model_type == "lognormal") {
+    # Lognormal: sigma typically 0.1-2, use Gamma(2, 2) with mode=0.5, mean=1
+    phi_shape <- priors$phi_shape %||% 2.0
+    phi_rate <- priors$phi_rate %||% 2.0
+  } else if (model_type == "gamma_gamma") {
+    # Gamma-Gamma: shape typically 1-10, use Gamma(2, 0.5) with mode=2, mean=4
+    phi_shape <- priors$phi_shape %||% 2.0
+    phi_rate <- priors$phi_rate %||% 0.5
+  } else if (model_type == "poisson_gamma") {
+    # Poisson-Gamma: shape typically 1-10, use Gamma(2, 0.5) with mode=2, mean=4
+    phi_shape <- priors$phi_shape %||% 2.0
+    phi_rate <- priors$phi_rate %||% 0.5
+  } else {
+    # Default (negbin_negbin, beta_binomial): overdispersion/precision, mode=10
+    phi_shape <- priors$phi_shape %||% 2.0
+    phi_rate <- priors$phi_rate %||% 0.1
+  }
+
   tau_spatial_shape <- priors$tau_spatial_shape %||% 1.0
   tau_spatial_rate <- priors$tau_spatial_rate %||% 0.01
 
@@ -308,7 +344,10 @@ fit_hmc <- function(formula,
       # GP solver configuration
       solver = gp_info$solver %||% "auto",
       cg_tol = gp_info$cg_tol %||% 1e-6,
-      cg_maxiter = as.integer(gp_info$cg_maxiter %||% 100L)
+      cg_maxiter = as.integer(gp_info$cg_maxiter %||% 100L),
+      # Observation-to-location mapping (1-based)
+      gp_obs_to_loc = as.integer(gp_info$gp_obs_to_loc),
+      n_unique = as.integer(gp_info$n_unique)
     )
 
     # Bundle multiscale GP parameters
@@ -395,7 +434,8 @@ fit_hmc <- function(formula,
       n_chains = as.integer(chains),
       seed = as.integer(seed),
       n_threads = n_threads_within,
-      verbose = verbose
+      verbose = verbose,
+      gradient_mode_str = gradient_mode
     ))
   } else {
     # Bundle parameters into lists to stay under R's 65-argument limit for .Call
@@ -410,7 +450,8 @@ fit_hmc <- function(formula,
       n_coefs_vec = as.integer(re_n_coefs_vec),
       correlated_vec = as.logical(re_correlated_vec),
       n_chol_vec = as.integer(re_n_chol_vec),
-      slope_matrices = slope_matrices_list
+      slope_matrices = slope_matrices_list,
+      parameterization = as.integer(if (re_param == "centered") 0L else 1L)
     )
 
     spatial_params <- list(
@@ -433,7 +474,16 @@ fit_hmc <- function(formula,
       cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
       shared = temporal_info$shared %||% TRUE,
       tau_shape = tau_temporal_shape,
-      tau_rate = tau_temporal_rate
+      tau_rate = tau_temporal_rate,
+      # GP-specific fields (only used when type = "gp")
+      time_values = temporal_info$time_values %||% numeric(0),
+      cov_type = temporal_info$cov_type %||% "exponential",
+      nu = temporal_info$nu %||% 1.5,
+      period = temporal_info$period %||% 1.0,
+      gp_sigma2_prior_U = priors$temporal_gp_sigma2_prior_U %||% 1.0,
+      gp_sigma2_prior_alpha = priors$temporal_gp_sigma2_prior_alpha %||% 0.01,
+      gp_phi_prior_lower = priors$temporal_gp_phi_prior_lower %||% 0.01,
+      gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0
     )
 
     prior_params <- list(
@@ -580,7 +630,8 @@ fit_hmc <- function(formula,
     model_type = model_type,
     iter = iter,
     warmup = warmup,
-    chains = chains
+    chains = chains,
+    re_param = re_param
   )
 
   return(fit)
@@ -620,7 +671,10 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
   X_denom <- formula$denominator$X
 
   # Ensure X_denom exists
-  if (is.null(X_denom) || ncol(X_denom) == 0) {
+  # For binomial/beta_binomial, denominator is fixed trials - no beta_denom needed
+  if (model_type %in% c("binomial", "beta_binomial")) {
+    X_denom <- matrix(numeric(0), nrow = nrow(data), ncol = 0)
+  } else if (is.null(X_denom) || ncol(X_denom) == 0) {
     X_denom <- matrix(1, nrow = nrow(data), ncol = 1)
     colnames(X_denom) <- "(Intercept)_denom"
   }
@@ -937,7 +991,8 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     adj_row_ptr = adj_row_ptr,
     adj_col_idx = adj_col_idx,
     n_neighbors = n_neighbors,
-    bym2_scale = bym2_scale
+    bym2_scale = bym2_scale,
+    group_var = spatial$group_var  # Preserve for prediction lookup
   )
 }
 
@@ -998,7 +1053,7 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
 
   # Build parameter names and extract draws
   draws_list <- build_draws_list_spatial(
-    all_samples, hmc_data, spatial_info, model_type
+    all_samples, hmc_data, spatial_info, model_type, re_param = re_param
   )
 
   draws <- do.call(cbind, draws_list)
@@ -1006,7 +1061,7 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
 
   # Compute ratios
   ratio_draws <- compute_ratio_draws_hmc_spatial(
-    all_samples, hmc_data, spatial_info, model_type
+    all_samples, hmc_data, spatial_info, model_type, re_param = re_param
   )
 
   # Diagnostics
@@ -1024,6 +1079,7 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
     spatiotemporal = spatiotemporal_info,
     backend = "hmc",
     algorithm = "HMC",
+    re_param = re_param,
     iter = iter,
     warmup = warmup,
     chains = chains,
@@ -1049,7 +1105,8 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
 
 #' Build draws list with spatial parameters
 #' @keywords internal
-build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type) {
+build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type,
+                                      re_param = "noncentered") {
   draws_list <- list()
   idx <- 1
 
@@ -1067,12 +1124,18 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
     idx <- idx + 1
   }
 
-  # Random effects
+  # Random effects - transform z to re if noncentered
   if (hmc_data$n_re_groups > 0) {
-    draws_list[["sigma_re"]] <- exp(samples[, idx])
+    sigma_re <- exp(samples[, idx])
+    draws_list[["sigma_re"]] <- sigma_re
     idx <- idx + 1
     for (g in seq_len(hmc_data$n_re_groups)) {
-      draws_list[[paste0("re[", g, "]")]] <- samples[, idx]
+      z_or_re <- samples[, idx]
+      if (re_param == "noncentered") {
+        draws_list[[paste0("re[", g, "]")]] <- sigma_re * z_or_re
+      } else {
+        draws_list[[paste0("re[", g, "]")]] <- z_or_re
+      }
       idx <- idx + 1
     }
   }
@@ -1113,6 +1176,42 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
       draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
       idx <- idx + 1
     }
+  } else if (spatial_info$type == "gp") {
+    draws_list[["sigma2_gp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["phi_gp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    for (s in seq_len(spatial_info$n_units)) {
+      draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+  } else if (spatial_info$type == "multiscale_gp") {
+    draws_list[["sigma2_gp_local"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["phi_gp_local"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    for (s in seq_len(spatial_info$n_units)) {
+      draws_list[[paste0("gp_local_w[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+    draws_list[["sigma2_gp_regional"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["phi_gp_regional"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    for (s in seq_len(spatial_info$n_units)) {
+      draws_list[[paste0("gp_regional_w[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+  } else if (spatial_info$type == "hsgp") {
+    draws_list[["sigma2_hsgp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["lengthscale_hsgp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    hsgp_m <- spatial_info$hsgp_m %||% 8L
+    for (s in seq_len(hsgp_m * hsgp_m)) {
+      draws_list[[paste0("hsgp_beta[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
   }
 
   draws_list
@@ -1122,7 +1221,7 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
 #' Compute ratio draws from HMC samples (with spatial)
 #' @keywords internal
 compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
-                                             model_type) {
+                                             model_type, re_param = "noncentered") {
   n_samples <- nrow(samples)
   N <- hmc_data$N
 
@@ -1132,11 +1231,18 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
 
   idx <- hmc_data$p_num + hmc_data$p_denom + 1
 
-  # Random effects
+  # Random effects - transform z to re if noncentered
   re <- NULL
   if (hmc_data$n_re_groups > 0) {
-    idx <- idx + 1  # Skip log_sigma_re
-    re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
+    sigma_re <- exp(samples[, idx])
+    idx <- idx + 1
+    z_or_re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
+    if (re_param == "noncentered") {
+      # Transform: re = sigma * z
+      re <- sweep(z_or_re, 1, sigma_re, "*")
+    } else {
+      re <- z_or_re
+    }
     idx <- idx + hmc_data$n_re_groups
   }
 
@@ -1172,6 +1278,18 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
         sqrt(1 - rho[s]) * theta[s, ]
       )
     }
+  } else if (spatial_info$type == "gp") {
+    idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp
+    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    idx <- idx + spatial_info$n_units
+  } else if (spatial_info$type == "multiscale_gp") {
+    idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
+    gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    idx <- idx + spatial_info$n_units
+    idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
+    gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    idx <- idx + spatial_info$n_units
+    spatial_effect <- gp_local_w + gp_regional_w
   }
 
   # Compute ratios
@@ -1192,7 +1310,7 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
       }
     }
 
-    # Add spatial
+    # Add spatial (GP/MSGP use spatial_info$group for obs_to_loc mapping)
     if (!is.null(spatial_effect)) {
       for (i in seq_len(N)) {
         sp_g <- spatial_info$group[i]
@@ -1255,6 +1373,50 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
       structure = temporal$structure,
       tvc_indices = temporal$tvc_indices,
       tvc_names = temporal$tvc_names
+    ))
+  }
+
+  # Check if it's a temporal GP specification
+  if (inherits(temporal, "ratiod_temporal_gp")) {
+    return(list(
+      type = "gp",
+      time_index = temporal$time_index,  # Maps obs to unique time (1-based)
+      group_index = temporal$group_index,
+      n_times = temporal$n_times,
+      n_groups = temporal$n_groups,
+      n_temporal_params = temporal$n_times * temporal$n_groups,  # One effect per unique time
+      precision_structure = list(cyclic = FALSE),
+      shared = temporal$shared,
+      # GP-specific fields
+      time_values = temporal$unique_time_values,  # Unique time values (length n_times)
+      cov_type = temporal$cov,
+      nu = temporal$nu %||% 1.5,
+      period = temporal$period %||% 1.0,
+      # TVC fields (not used)
+      n_tvc = 0L,
+      structure = "gp"
+    ))
+  }
+
+  # Check if it's multiscale temporal
+  if (inherits(temporal, "ratiod_temporal_multiscale")) {
+    return(list(
+      type = "multiscale",
+      time_index = temporal$time_index,
+      group_index = temporal$group_index,
+      n_times = temporal$n_times,
+      n_groups = temporal$n_groups,
+      n_temporal_params = temporal$n_temporal_params,
+      precision_structure = temporal$precision_structure,
+      shared = temporal$shared,
+      # Multiscale-specific fields needed for parameter initialization
+      trend = temporal$trend,
+      seasonal = temporal$seasonal,
+      short_term = temporal$short_term,
+      components = temporal$components,
+      # TVC fields (not used)
+      n_tvc = 0L,
+      structure = "multiscale"
     ))
   }
 
@@ -1613,21 +1775,69 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
   } else if (spatial_info$type == "bym2") {
     q_init <- c(q_init, rep(0.0, 2 + 2 * spatial_info$n_units))
   } else if (spatial_info$type == "gp") {
+    # Layout: log_sigma2, log_phi, w[n_units]
+    # Default phi prior range [0.01, 100] has geometric mean = 1.0, so log(1.0) = 0
     q_init <- c(q_init, rep(0.0, 2 + spatial_info$n_units))
   } else if (spatial_info$type == "multiscale_gp") {
-    q_init <- c(q_init, rep(0.0, 4 + 2 * spatial_info$n_units))
+    # Initialize phi to geometric mean of range bounds (on log scale)
+    range_local_lower <- spatial_info$range_local_lower %||% 0.01
+    range_local_upper <- spatial_info$range_local_upper %||% 1.0
+    range_regional_lower <- spatial_info$range_regional_lower %||% 1.0
+    range_regional_upper <- spatial_info$range_regional_upper %||% 10.0
+    log_phi_local_init <- log(sqrt(range_local_lower * range_local_upper))
+    log_phi_regional_init <- log(sqrt(range_regional_lower * range_regional_upper))
+    # Layout: log_sigma2_local, log_phi_local, w_local[n_units], log_sigma2_regional, log_phi_regional, w_regional[n_units]
+    q_init <- c(q_init,
+                0.0, log_phi_local_init, rep(0.0, spatial_info$n_units),
+                0.0, log_phi_regional_init, rep(0.0, spatial_info$n_units))
   } else if (spatial_info$type == "hsgp") {
     hsgp_m <- spatial_info$hsgp_m %||% 8L
     q_init <- c(q_init, rep(0.0, 2 + hsgp_m * hsgp_m))
   }
 
-  # Temporal (regular temporal effects, not TVC)
-  if (temporal_info$type != "none" && temporal_info$type != "tvc") {
-    n_temporal_params <- 1 + temporal_info$n_temporal_params
-    if (temporal_info$type == "ar1") {
-      n_temporal_params <- n_temporal_params + 1
+  # Temporal (regular temporal effects, not TVC or multiscale)
+  # Note: multiscale temporal is handled by the GP sampler path which has its own param layout
+  if (temporal_info$type != "none" && temporal_info$type != "tvc" &&
+      temporal_info$type != "multiscale") {
+    if (temporal_info$type == "gp") {
+      # Temporal GP: log_sigma2 + log_phi + N effects
+      n_temporal_params <- 2 + temporal_info$n_temporal_params
+    } else {
+      # RW1/RW2/AR1: log_tau + effects (+ rho for AR1)
+      n_temporal_params <- 1 + temporal_info$n_temporal_params
+      if (temporal_info$type == "ar1") {
+        n_temporal_params <- n_temporal_params + 1
+      }
     }
     q_init <- c(q_init, rep(0.0, n_temporal_params))
+  }
+
+  # Multiscale temporal: handled by GP sampler path
+  # Layout: [log_sigma2_trend, trend[n_times], log_sigma2_seasonal, seasonal[period],
+  #          log_sigma2_short, (logit_rho if AR1), short[n_times]]
+  if (temporal_info$type == "multiscale") {
+    n_times <- temporal_info$n_times %||% 0L
+    trend_type <- temporal_info$trend %||% "none"
+    seasonal_period <- temporal_info$seasonal %||% 0L
+    short_type <- temporal_info$short_term %||% "none"
+
+    n_ms_params <- 0L
+    # Trend component
+    if (trend_type != "none") {
+      n_ms_params <- n_ms_params + 1 + n_times  # log_sigma2_trend + effects
+    }
+    # Seasonal component
+    if (!is.null(seasonal_period) && seasonal_period >= 2) {
+      n_ms_params <- n_ms_params + 1 + seasonal_period  # log_sigma2_seasonal + effects
+    }
+    # Short-term component
+    if (short_type != "none") {
+      n_ms_params <- n_ms_params + 1 + n_times  # log_sigma2_short + effects
+      if (short_type == "ar1") {
+        n_ms_params <- n_ms_params + 1  # logit_rho
+      }
+    }
+    q_init <- c(q_init, rep(0.0, n_ms_params))
   }
 
   # TVC (Temporally-Varying Coefficients)
@@ -1684,7 +1894,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
                                            zi_info,
                                            latent_info = NULL,
                                            formula, data, family,
-                                           model_type, iter, warmup, chains) {
+                                           model_type, iter, warmup, chains,
+                                           re_param = "noncentered") {
   # Handle multi-chain case
   if (chains > 1) {
     # Combine chains
@@ -1705,7 +1916,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
 
   # Build parameter names and extract draws
   draws_list <- build_draws_list_full(
-    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info
+    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info,
+    re_param = re_param
   )
 
   draws <- do.call(cbind, draws_list)
@@ -1713,7 +1925,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
 
   # Compute ratios
   ratio_draws <- compute_ratio_draws_hmc_full(
-    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type
+    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type,
+    re_param = re_param
   )
 
   # Diagnostics
@@ -1726,7 +1939,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     samples_list <- lapply(seq_len(chains), function(c) {
       chain_samples <- fit_raw$samples[[c]]
       chain_draws <- build_draws_list_full(
-        chain_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info
+        chain_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info,
+        re_param = re_param
       )
       chain_mat <- do.call(cbind, chain_draws)
       colnames(chain_mat) <- names(chain_draws)
@@ -1750,6 +1964,7 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     latent = latent_info,
     backend = "hmc",
     algorithm = "HMC",
+    re_param = re_param,
     iter = iter,
     warmup = warmup,
     chains = chains,
@@ -1777,7 +1992,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
 #' Build draws list with full feature support
 #' @keywords internal
 build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info,
-                                   zi_info, model_type, latent_info = NULL) {
+                                   zi_info, model_type, latent_info = NULL,
+                                   re_param = "noncentered") {
   draws_list <- list()
   idx <- 1
 
@@ -1796,6 +2012,8 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
   }
 
   # Random effects (supports multi-term RE with slopes)
+  # When re_param == "noncentered", samples contain z values that need transformation to actual RE
+  # When re_param == "centered", samples contain actual RE values
   n_re_terms <- hmc_data$n_re_terms %||% 0L
   has_slopes <- hmc_data$has_slopes %||% FALSE
   has_correlated_slopes <- hmc_data$has_correlated_slopes %||% FALSE
@@ -1803,6 +2021,10 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
   if (n_re_terms > 0 && has_slopes) {
     # With random slopes: each term has n_coefs sigma parameters and n_groups * n_coefs RE params
     # Layout: [sigmas for all terms] [chol params for correlated terms] [RE for all terms]
+
+    # Store sigma values for later transformation (if non-centered)
+    sigma_values <- list()
+    chol_values <- list()
 
     # First extract all sigma parameters
     for (t in seq_len(n_re_terms)) {
@@ -1812,19 +2034,27 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
       slope_names <- term$slope_vars_clean %||% term$slope_vars
 
       if (n_coefs == 1) {
-        draws_list[[paste0("sigma_re[", t, "]")]] <- exp(samples[, idx])
+        sigma_t <- exp(samples[, idx])
+        draws_list[[paste0("sigma_re[", t, "]")]] <- sigma_t
+        sigma_values[[t]] <- list(sigma_t)
         idx <- idx + 1
       } else {
         # Multiple sigmas: intercept + slopes
+        sigma_values[[t]] <- list()
         coef_idx <- 1
         if (isTRUE(term$has_intercept)) {
-          draws_list[[paste0("sigma_re[", t, ",intercept]")]] <- exp(samples[, idx])
+          sigma_t <- exp(samples[, idx])
+          draws_list[[paste0("sigma_re[", t, ",intercept]")]] <- sigma_t
+          sigma_values[[t]][[coef_idx]] <- sigma_t
           idx <- idx + 1
           coef_idx <- coef_idx + 1
         }
         for (s in seq_along(slope_names)) {
-          draws_list[[paste0("sigma_re[", t, ",", slope_names[s], "]")]] <- exp(samples[, idx])
+          sigma_t <- exp(samples[, idx])
+          draws_list[[paste0("sigma_re[", t, ",", slope_names[s], "]")]] <- sigma_t
+          sigma_values[[t]][[coef_idx]] <- sigma_t
           idx <- idx + 1
+          coef_idx <- coef_idx + 1
         }
       }
     }
@@ -1834,15 +2064,18 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
       term <- hmc_data$re_terms[[t]]
       n_chol <- term$n_chol %||% 0L
       if (n_chol > 0 && isTRUE(term$correlated)) {
+        chol_values[[t]] <- list()
         # Store raw Cholesky parameters (off-diagonal elements)
         for (c in seq_len(n_chol)) {
-          draws_list[[paste0("L_chol[", t, ",", c, "]")]] <- samples[, idx]
+          chol_val <- samples[, idx]
+          draws_list[[paste0("L_chol[", t, ",", c, "]")]] <- chol_val
+          chol_values[[t]][[c]] <- chol_val
           idx <- idx + 1
         }
       }
     }
 
-    # Then extract all RE effects
+    # Then extract all RE effects, transforming z to re if non-centered
     for (t in seq_len(n_re_terms)) {
       term <- hmc_data$re_terms[[t]]
       n_groups_t <- term$n_groups
@@ -1852,43 +2085,94 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
 
       for (g in seq_len(n_groups_t)) {
         if (n_coefs == 1) {
-          draws_list[[paste0("re[", t, ",", g, "]")]] <- samples[, idx]
+          z_or_re <- samples[, idx]
+          if (re_param == "noncentered") {
+            # Transform: re = sigma * z
+            draws_list[[paste0("re[", t, ",", g, "]")]] <- sigma_values[[t]][[1]] * z_or_re
+          } else {
+            draws_list[[paste0("re[", t, ",", g, "]")]] <- z_or_re
+          }
           idx <- idx + 1
         } else {
-          # Multiple coefficients per group
+          # Multiple coefficients per group - need matrix transformation for correlated
+          # Extract all z values for this group first
+          z_vals <- list()
+          re_indices <- list()
           coef_idx <- 1
           if (isTRUE(term$has_intercept)) {
-            draws_list[[paste0("re[", t, ",", g, ",intercept]")]] <- samples[, idx]
+            z_vals[[coef_idx]] <- samples[, idx]
+            re_indices[[coef_idx]] <- list(name = paste0("re[", t, ",", g, ",intercept]"), idx = idx)
             idx <- idx + 1
             coef_idx <- coef_idx + 1
           }
           for (s in seq_along(slope_names)) {
-            draws_list[[paste0("re[", t, ",", g, ",", slope_names[s], "]")]] <- samples[, idx]
+            z_vals[[coef_idx]] <- samples[, idx]
+            re_indices[[coef_idx]] <- list(name = paste0("re[", t, ",", g, ",", slope_names[s], "]"), idx = idx)
             idx <- idx + 1
+            coef_idx <- coef_idx + 1
+          }
+
+          if (re_param == "noncentered" && isTRUE(term$correlated) && n_coefs == 2) {
+            # For 2x2 correlated case: re = diag(sigma) * L * z
+            # L = [[1, 0], [L21, sqrt(1-L21^2)]]
+            sigma1 <- sigma_values[[t]][[1]]
+            sigma2 <- sigma_values[[t]][[2]]
+            L21 <- chol_values[[t]][[1]]
+            L22 <- sqrt(1 - L21^2)
+            z1 <- z_vals[[1]]
+            z2 <- z_vals[[2]]
+            # re1 = sigma1 * (1 * z1 + 0 * z2) = sigma1 * z1
+            # re2 = sigma2 * (L21 * z1 + L22 * z2)
+            draws_list[[re_indices[[1]]$name]] <- sigma1 * z1
+            draws_list[[re_indices[[2]]$name]] <- sigma2 * (L21 * z1 + L22 * z2)
+          } else if (re_param == "noncentered") {
+            # Uncorrelated or >2 coefs: re_j = sigma_j * z_j
+            for (j in seq_along(z_vals)) {
+              draws_list[[re_indices[[j]]$name]] <- sigma_values[[t]][[j]] * z_vals[[j]]
+            }
+          } else {
+            # Centered: store as-is
+            for (j in seq_along(z_vals)) {
+              draws_list[[re_indices[[j]]$name]] <- z_vals[[j]]
+            }
           }
         }
       }
     }
   } else if (n_re_terms > 1) {
     # Multiple RE terms (intercept only): extract sigma_re for each term
+    sigma_values <- list()
     for (t in seq_len(n_re_terms)) {
-      draws_list[[paste0("sigma_re[", t, "]")]] <- exp(samples[, idx])
+      sigma_t <- exp(samples[, idx])
+      draws_list[[paste0("sigma_re[", t, "]")]] <- sigma_t
+      sigma_values[[t]] <- sigma_t
       idx <- idx + 1
     }
     # Extract RE effects for each term
     for (t in seq_len(n_re_terms)) {
       n_groups_t <- hmc_data$re_terms[[t]]$n_groups
       for (g in seq_len(n_groups_t)) {
-        draws_list[[paste0("re[", t, ",", g, "]")]] <- samples[, idx]
+        z_or_re <- samples[, idx]
+        if (re_param == "noncentered") {
+          draws_list[[paste0("re[", t, ",", g, "]")]] <- sigma_values[[t]] * z_or_re
+        } else {
+          draws_list[[paste0("re[", t, ",", g, "]")]] <- z_or_re
+        }
         idx <- idx + 1
       }
     }
   } else if (hmc_data$n_re_groups > 0) {
     # Single RE term (intercept only)
-    draws_list[["sigma_re"]] <- exp(samples[, idx])
+    sigma_re <- exp(samples[, idx])
+    draws_list[["sigma_re"]] <- sigma_re
     idx <- idx + 1
     for (g in seq_len(hmc_data$n_re_groups)) {
-      draws_list[[paste0("re[", g, "]")]] <- samples[, idx]
+      z_or_re <- samples[, idx]
+      if (re_param == "noncentered") {
+        draws_list[[paste0("re[", g, "]")]] <- sigma_re * z_or_re
+      } else {
+        draws_list[[paste0("re[", g, "]")]] <- z_or_re
+      }
       idx <- idx + 1
     }
   }
@@ -1988,25 +2272,75 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
       draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
       idx <- idx + 1
     }
+  } else if (spatial_info$type == "gp") {
+    draws_list[["sigma2_gp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["phi_gp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    for (s in seq_len(spatial_info$n_units)) {
+      draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+  } else if (spatial_info$type == "multiscale_gp") {
+    draws_list[["sigma2_gp_local"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["phi_gp_local"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    for (s in seq_len(spatial_info$n_units)) {
+      draws_list[[paste0("gp_local_w[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+    draws_list[["sigma2_gp_regional"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["phi_gp_regional"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    for (s in seq_len(spatial_info$n_units)) {
+      draws_list[[paste0("gp_regional_w[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+  } else if (spatial_info$type == "hsgp") {
+    draws_list[["sigma2_hsgp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws_list[["lengthscale_hsgp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    hsgp_m <- spatial_info$hsgp_m %||% 8L
+    for (s in seq_len(hsgp_m * hsgp_m)) {
+      draws_list[[paste0("hsgp_beta[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
   }
 
   # Temporal
   if (temporal_info$type != "none" && temporal_info$type != "tvc") {
-    # Regular temporal (RW1, RW2, AR1)
-    draws_list[["tau_temporal"]] <- exp(samples[, idx])
-    idx <- idx + 1
-
-    # AR1 rho parameter
-    if (temporal_info$type == "ar1") {
-      logit_rho_ar1 <- samples[, idx]
-      draws_list[["rho_ar1"]] <- 1 / (1 + exp(-logit_rho_ar1))
+    if (temporal_info$type == "gp") {
+      # Temporal GP: sigma2 and phi instead of tau
+      draws_list[["sigma2_temporal_gp"]] <- exp(samples[, idx])
       idx <- idx + 1
-    }
-
-    # Temporal effects
-    for (t in seq_len(temporal_info$n_temporal_params)) {
-      draws_list[[paste0("temporal[", t, "]")]] <- samples[, idx]
+      draws_list[["phi_temporal_gp"]] <- exp(samples[, idx])
       idx <- idx + 1
+
+      # Temporal GP effects (one per observation)
+      for (i in seq_len(temporal_info$n_temporal_params)) {
+        draws_list[[paste0("temporal_gp[", i, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+    } else {
+      # Regular temporal (RW1, RW2, AR1)
+      draws_list[["tau_temporal"]] <- exp(samples[, idx])
+      idx <- idx + 1
+
+      # AR1 rho parameter
+      if (temporal_info$type == "ar1") {
+        logit_rho_ar1 <- samples[, idx]
+        draws_list[["rho_ar1"]] <- 1 / (1 + exp(-logit_rho_ar1))
+        idx <- idx + 1
+      }
+
+      # Temporal effects
+      for (t in seq_len(temporal_info$n_temporal_params)) {
+        draws_list[[paste0("temporal[", t, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
     }
   }
 
@@ -2069,6 +2403,19 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
     }
   }
 
+  # One-inflation coefficients (for OI-binomial and ZOIB models)
+  if (!is.null(zi_info$p_oi) && zi_info$p_oi > 0) {
+    for (j in seq_len(zi_info$p_oi)) {
+      coef_name <- if (!is.null(zi_info$coef_names_oi)) {
+        zi_info$coef_names_oi[j]
+      } else {
+        paste0("beta_oi[", j, "]")
+      }
+      draws_list[[paste0("beta_oi[", j, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+  }
+
   # Latent factors
   if (!is.null(latent_info) && latent_info$type != "none" && latent_info$n_factors > 0) {
     n_factors <- latent_info$n_factors
@@ -2099,7 +2446,8 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
 #' Compute ratio draws from HMC samples (full feature support)
 #' @keywords internal
 compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
-                                          temporal_info, zi_info, model_type) {
+                                          temporal_info, zi_info, model_type,
+                                          re_param = "noncentered") {
   n_samples <- nrow(samples)
   N <- hmc_data$N
 
@@ -2110,6 +2458,7 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
   idx <- hmc_data$p_num + hmc_data$p_denom + 1
 
   # Random effects (supports multi-term RE with slopes)
+  # When re_param == "noncentered", samples contain z values that need transformation
   re <- NULL
   re_multi <- NULL
   re_slopes_multi <- NULL
@@ -2118,23 +2467,37 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
   has_correlated_slopes <- hmc_data$has_correlated_slopes %||% FALSE
 
   if (n_re_terms > 0 && has_slopes) {
-    # With random slopes - need to skip sigma, cholesky, then extract RE
+    # With random slopes - extract sigma, cholesky, then RE and transform
 
-    # Skip all sigma_re parameters (one per coefficient type per term)
+    # Extract all sigma_re parameters (one per coefficient type per term)
+    sigma_values <- list()
     for (t in seq_len(n_re_terms)) {
-      n_coefs <- hmc_data$re_terms[[t]]$n_coefs
-      idx <- idx + n_coefs
-    }
-
-    # Skip Cholesky parameters for correlated terms
-    if (has_correlated_slopes) {
-      for (t in seq_len(n_re_terms)) {
-        n_chol <- hmc_data$re_terms[[t]]$n_chol %||% 0L
-        idx <- idx + n_chol
+      term <- hmc_data$re_terms[[t]]
+      n_coefs <- term$n_coefs
+      sigma_values[[t]] <- list()
+      for (c in seq_len(n_coefs)) {
+        sigma_values[[t]][[c]] <- exp(samples[, idx])
+        idx <- idx + 1
       }
     }
 
-    # Extract RE for all terms (including slopes)
+    # Extract Cholesky parameters for correlated terms
+    chol_values <- list()
+    if (has_correlated_slopes) {
+      for (t in seq_len(n_re_terms)) {
+        term <- hmc_data$re_terms[[t]]
+        n_chol <- term$n_chol %||% 0L
+        if (n_chol > 0 && isTRUE(term$correlated)) {
+          chol_values[[t]] <- list()
+          for (c in seq_len(n_chol)) {
+            chol_values[[t]][[c]] <- samples[, idx]
+            idx <- idx + 1
+          }
+        }
+      }
+    }
+
+    # Extract RE for all terms (including slopes) and transform if noncentered
     re_multi <- list()
     re_slopes_multi <- list()
 
@@ -2158,27 +2521,74 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
 
       for (g in seq_len(n_groups_t)) {
         base_col <- (g - 1) * n_coefs + 1
-        re_multi[[t]][, g] <- re_params[, base_col]  # Intercept
-        if (n_coefs > 1) {
-          for (s in seq_len(n_coefs - 1)) {
-            re_slopes_multi[[t]][, g, s] <- re_params[, base_col + s]
+
+        if (re_param == "noncentered") {
+          # Transform z to actual RE
+          if (n_coefs == 1) {
+            # Simple case: re = sigma * z
+            re_multi[[t]][, g] <- sigma_values[[t]][[1]] * re_params[, base_col]
+          } else if (n_coefs == 2 && isTRUE(term$correlated) && !is.null(chol_values[[t]])) {
+            # Correlated 2x2 case: re = diag(sigma) * L * z
+            # L = [[1, 0], [L21, sqrt(1-L21^2)]]
+            z1 <- re_params[, base_col]
+            z2 <- re_params[, base_col + 1]
+            sigma1 <- sigma_values[[t]][[1]]
+            sigma2 <- sigma_values[[t]][[2]]
+            L21 <- chol_values[[t]][[1]]
+            L22 <- sqrt(pmax(0, 1 - L21^2))  # pmax to avoid numerical issues
+            re_multi[[t]][, g] <- sigma1 * z1  # Intercept
+            re_slopes_multi[[t]][, g, 1] <- sigma2 * (L21 * z1 + L22 * z2)  # Slope
+          } else {
+            # Uncorrelated or >2 coefs: re_j = sigma_j * z_j
+            re_multi[[t]][, g] <- sigma_values[[t]][[1]] * re_params[, base_col]
+            if (n_coefs > 1) {
+              for (s in seq_len(n_coefs - 1)) {
+                re_slopes_multi[[t]][, g, s] <- sigma_values[[t]][[s + 1]] * re_params[, base_col + s]
+              }
+            }
+          }
+        } else {
+          # Centered: use values as-is
+          re_multi[[t]][, g] <- re_params[, base_col]  # Intercept
+          if (n_coefs > 1) {
+            for (s in seq_len(n_coefs - 1)) {
+              re_slopes_multi[[t]][, g, s] <- re_params[, base_col + s]
+            }
           }
         }
       }
     }
   } else if (n_re_terms > 1) {
-    # Multiple RE terms (intercept only): skip sigma_re for each term
-    idx <- idx + n_re_terms
+    # Multiple RE terms (intercept only): extract sigma_re for each term
+    sigma_values <- list()
+    for (t in seq_len(n_re_terms)) {
+      sigma_values[[t]] <- exp(samples[, idx])
+      idx <- idx + 1
+    }
     # Extract RE for all terms
     re_multi <- list()
     for (t in seq_len(n_re_terms)) {
       n_groups_t <- hmc_data$re_terms[[t]]$n_groups
-      re_multi[[t]] <- samples[, idx:(idx + n_groups_t - 1), drop = FALSE]
+      z_or_re <- samples[, idx:(idx + n_groups_t - 1), drop = FALSE]
+      if (re_param == "noncentered") {
+        # Transform: re = sigma * z
+        re_multi[[t]] <- sweep(z_or_re, 1, sigma_values[[t]], "*")
+      } else {
+        re_multi[[t]] <- z_or_re
+      }
       idx <- idx + n_groups_t
     }
   } else if (hmc_data$n_re_groups > 0) {
-    idx <- idx + 1  # Skip log_sigma_re
-    re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
+    # Single RE term (intercept only)
+    sigma_re <- exp(samples[, idx])
+    idx <- idx + 1
+    z_or_re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
+    if (re_param == "noncentered") {
+      # Transform: re = sigma * z
+      re <- sweep(z_or_re, 1, sigma_re, "*")
+    } else {
+      re <- z_or_re
+    }
     idx <- idx + hmc_data$n_re_groups
   }
 
@@ -2249,6 +2659,18 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
         sqrt(1 - rho[s]) * theta[s, ]
       )
     }
+  } else if (spatial_info$type == "gp") {
+    idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp
+    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    idx <- idx + spatial_info$n_units
+  } else if (spatial_info$type == "multiscale_gp") {
+    idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
+    gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    idx <- idx + spatial_info$n_units
+    idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
+    gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    idx <- idx + spatial_info$n_units
+    spatial_effect <- gp_local_w + gp_regional_w
   }
 
   # Temporal effects
@@ -2440,7 +2862,9 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       # Solver config (defaults)
       solver = "auto",
       cg_tol = 1e-6,
-      cg_maxiter = 100L
+      cg_maxiter = 100L,
+      gp_obs_to_loc = integer(0),
+      n_unique = 0L
     ))
   }
 
@@ -2492,8 +2916,8 @@ prepare_gp_for_hmc <- function(gp, data, N) {
   # Validate GP specification (computes neighbor structure)
   validated <- validate_gp(gp, data)
 
-  # Extract coordinates
-  coords_mat <- validated$coords_matrix
+  # Extract unique coordinates (NNGP computed on unique locations only)
+  coords_mat <- validated$unique_coords
   coords_flat <- as.vector(t(coords_mat))  # Row-major flatten
 
   if (inherits(gp, "ratiod_multiscale")) {
@@ -2520,14 +2944,14 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_dist_local = as.vector(t(local_info$nn_dist)),
       nn_order_local = as.integer(local_info$nn_order),
       nn_order_inv_local = as.integer(local_info$nn_order_inv),
-      nn_local = as.integer(gp$nn_local),
+      nn_local = as.integer(validated$nn_local),
       nn_neighbor_dist_local = nn_neighbor_dist_local_flat,  # Phase 1.3
       # Regional scale
       nn_idx_regional = as.integer(as.vector(t(regional_info$nn_idx))),
       nn_dist_regional = as.vector(t(regional_info$nn_dist)),
       nn_order_regional = as.integer(regional_info$nn_order),
       nn_order_inv_regional = as.integer(regional_info$nn_order_inv),
-      nn_regional = as.integer(gp$nn_regional),
+      nn_regional = as.integer(validated$nn_regional),
       nn_neighbor_dist_regional = nn_neighbor_dist_regional_flat,  # Phase 1.3
       # Range constraints
       range_local_lower = gp$range_local[1],
@@ -2542,15 +2966,24 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       # Solver config (multiscale uses Cholesky by default)
       solver = "cholesky",
       cg_tol = 1e-6,
-      cg_maxiter = 100L
+      cg_maxiter = 100L,
+      # Observation-to-location mapping (1-based)
+      gp_obs_to_loc = as.integer(validated$obs_to_loc),
+      n_unique = validated$n_unique
     )
   } else {
     # Single-scale GP
     nn_info <- validated$neighbor_info
 
-    # Phase 1.3: Flatten nn_neighbor_dist from N x k x k for C++ row-major access
-    # C++ accesses as: i * nn * nn + j1 * nn + j2 (i slowest, j2 fastest)
-    nn_neighbor_dist_flat <- as.vector(aperm(nn_info$nn_neighbor_dist, c(3, 2, 1)))
+    # Phase 1.3: Flatten nn_neighbor_dist from N x nn x nn for C++ row-major access
+    # C++ accesses as: i * nn * nn + j1 * nn + j2 (0-indexed, i slowest, j2 fastest)
+    # R stores column-major: arr[i, j1, j2] at index (j2-1)*N*nn + (j1-1)*N + i (1-indexed)
+    # Use C++ helper for fast flattening
+    nn <- validated$nn
+    N_gp <- nrow(nn_info$nn_idx)
+    nn_neighbor_dist_flat <- cpp_flatten_3d_rowmajor(
+      as.vector(nn_info$nn_neighbor_dist), N_gp, nn, nn
+    )
 
     list(
       gp_type = "gp",
@@ -2560,7 +2993,7 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_order = as.integer(nn_info$nn_order),
       nn_order_inv = as.integer(nn_info$nn_order_inv),
       nn_neighbor_dist = nn_neighbor_dist_flat,  # Phase 1.3: cached pairwise distances
-      nn = as.integer(gp$nn),
+      nn = as.integer(validated$nn),
       # Multi-scale params (not used for single-scale)
       nn_idx_local = integer(0),
       nn_dist_local = numeric(0),
@@ -2585,7 +3018,10 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       # Solver config
       solver = gp$solver %||% "auto",
       cg_tol = gp$cg_tol %||% 1e-6,
-      cg_maxiter = as.integer(gp$cg_maxiter %||% 100L)
+      cg_maxiter = as.integer(gp$cg_maxiter %||% 100L),
+      # Observation-to-location mapping (1-based)
+      gp_obs_to_loc = as.integer(validated$obs_to_loc),
+      n_unique = validated$n_unique
     )
   }
 }

@@ -15,7 +15,8 @@ make_re_params_hmc <- function(n, group = rep(0L, n), n_groups = 0L, n_terms = 0
     n_coefs_vec = integer(0),
     correlated_vec = logical(0),
     n_chol_vec = integer(0),
-    slope_matrices = list()
+    slope_matrices = list(),
+    parameterization = 0L  # 0 = centered (default)
   )
 }
 
@@ -42,7 +43,16 @@ make_temporal_params_hmc <- function(n) {
     cyclic = FALSE,
     shared = TRUE,
     tau_shape = 2.0,
-    tau_rate = 0.5
+    tau_rate = 0.5,
+    # GP-specific fields (required even for non-GP types)
+    time_values = numeric(0),
+    cov_type = "exponential",
+    nu = 1.5,
+    period = 1.0,
+    gp_sigma2_prior_U = 1.0,
+    gp_sigma2_prior_alpha = 0.01,
+    gp_phi_prior_lower = 0.01,
+    gp_phi_prior_upper = 10.0
   )
 }
 
@@ -61,7 +71,12 @@ make_zi_params_hmc <- function(n) {
   list(
     type = "none",
     X = matrix(0, nrow = n, ncol = 1),
-    prior_sd = 10.0
+    p_zi = 1L,
+    prior_sd = 10.0,
+    # OI fields (required even for non-OI types)
+    X_oi = NULL,
+    p_oi = 0L,
+    oi_prior_sd = 10.0
   )
 }
 
@@ -96,6 +111,38 @@ make_st_params_hmc <- function() {
   )
 }
 
+make_tvc_params_hmc <- function() {
+  list(
+    has_tvc = FALSE,
+    n_tvc = 0L,
+    n_times = 0L,
+    n_groups = 1L,
+    structure = "rw1",
+    time_idx = integer(0),
+    group_idx = integer(0),
+    X_tvc = matrix(0, nrow = 1, ncol = 1),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01
+  )
+}
+
+make_svc_params_hmc <- function() {
+  list(
+    has_svc = FALSE,
+    n_svc = 0L,
+    nn = 0L,
+    shared = TRUE,
+    cov_type = "exponential",
+    spatial_idx = integer(0),
+    X_svc = matrix(0, nrow = 1, ncol = 1),
+    coords = matrix(0, nrow = 1, ncol = 2),
+    sigma2_prior_U = 1.0,
+    sigma2_prior_alpha = 0.01,
+    phi_prior_shape = 3.0,
+    phi_prior_rate = 1.0
+  )
+}
+
 test_that("HMC backend works for negbin_negbin model", {
   skip_on_cran()
 
@@ -125,6 +172,7 @@ test_that("HMC backend works for negbin_negbin model", {
     q_init = q_init,
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
+    y_num_cont = rep(0.0, N),
     y_denom_cont = rep(0.0, N),
     X_num = X,
     X_denom = X,
@@ -136,6 +184,8 @@ test_that("HMC backend works for negbin_negbin model", {
     zi_params = make_zi_params_hmc(N),
     latent_params = make_latent_params_hmc(),
     st_params = make_st_params_hmc(),
+    tvc_params = make_tvc_params_hmc(),
+    svc_params = make_svc_params_hmc(),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,
@@ -181,6 +231,7 @@ test_that("HMC backend works for poisson_gamma model", {
     q_init = q_init,
     y_num = as.integer(y_num),
     y_denom = as.integer(rep(1, N)),  # placeholder
+    y_num_cont = rep(0.0, N),
     y_denom_cont = y_denom,
     X_num = X,
     X_denom = X,
@@ -192,6 +243,8 @@ test_that("HMC backend works for poisson_gamma model", {
     zi_params = make_zi_params_hmc(N),
     latent_params = make_latent_params_hmc(),
     st_params = make_st_params_hmc(),
+    tvc_params = make_tvc_params_hmc(),
+    svc_params = make_svc_params_hmc(),
     n_iter = 1000L,
     n_warmup = 500L,
     L = 10L,
@@ -225,7 +278,7 @@ test_that("ratiod() fits poisson_gamma model with HMC backend", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1,
@@ -253,7 +306,7 @@ test_that("ratiod() fits binomial model with HMC backend", {
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1,
@@ -280,7 +333,7 @@ test_that("ratiod() fits negbin_negbin model with HMC backend", {
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1,
@@ -310,7 +363,7 @@ test_that("ratiod() with random effects using HMC backend", {
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 200,
     warmup = 100,
     chains = 1,
@@ -346,7 +399,7 @@ test_that("summary.ratiod_fit returns correct structure", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -373,7 +426,7 @@ test_that("print.ratiod_fit works without error", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -399,7 +452,7 @@ test_that("ratio() works with HMC fit", {
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,
@@ -429,7 +482,7 @@ test_that("ratio_contrast() works with HMC fit", {
     count | effort ~ x + group,
     data = df,
     family = ratiod_poisson_gamma(),
-    backend = "hmc",
+    mode = "hmc",
     iter = 100,
     warmup = 50,
     chains = 1,

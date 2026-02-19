@@ -10,7 +10,9 @@ build_draws_list_full(
   spatial_info,
   temporal_info,
   zi_info,
-  model_type
+  model_type,
+  latent_info = NULL,
+  re_param = "noncentered"
 )
 }
 \description{

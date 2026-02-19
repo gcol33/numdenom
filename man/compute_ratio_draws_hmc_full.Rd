@@ -10,7 +10,8 @@ compute_ratio_draws_hmc_full(
   spatial_info,
   temporal_info,
   zi_info,
-  model_type
+  model_type,
+  re_param = "noncentered"
 )
 }
 \description{

@@ -13,6 +13,13 @@
 
 namespace ratiod_progress {
 
+// Check if R is running interactively
+inline bool is_interactive() {
+  Rcpp::Environment base("package:base");
+  Rcpp::Function interactive = base["interactive"];
+  return Rcpp::as<bool>(interactive());
+}
+
 // Progress reporter for HMC sampling
 // Thread-safe when used from a single chain
 class ProgressReporter {
@@ -24,6 +31,7 @@ public:
   int update_interval;
   bool verbose;
   bool show_progress_bar;
+  bool is_interactive_session;
 
   std::chrono::steady_clock::time_point start_time;
   std::chrono::steady_clock::time_point last_update;
@@ -36,6 +44,9 @@ public:
     : total_iter(total), warmup_iter(warmup), chain_id(chain), n_chains(n_ch),
       verbose(verbose_mode), show_progress_bar(progress_bar),
       last_iter(0), n_divergent(0), mean_accept_prob(0.0) {
+
+    // Check if in interactive session (only show \r updates in interactive mode)
+    is_interactive_session = is_interactive();
 
     // Update every 5% or at least every 10 iterations
     update_interval = std::max(10, total_iter / 20);
@@ -93,6 +104,12 @@ public:
     }
     last_iter = iter;
 
+    // Skip intermediate progress updates in non-interactive mode
+    // to avoid flooding output with \r-prefixed lines
+    if (!is_interactive_session && iter < total_iter - 1) {
+      return;
+    }
+
     auto now = std::chrono::steady_clock::now();
     double elapsed = std::chrono::duration<double>(now - start_time).count();
 
@@ -110,7 +127,7 @@ public:
       msg << "Chain " << (chain_id + 1) << "/" << n_chains << ": ";
     }
 
-    if (show_progress_bar) {
+    if (show_progress_bar && is_interactive_session) {
       msg << progress_bar(pct) << " ";
     }
 
@@ -118,12 +135,14 @@ public:
     msg << "(" << (iter + 1) << "/" << total_iter << ") ";
     msg << phase;
 
-    if (eta > 1.0) {
+    if (eta > 1.0 && is_interactive_session) {
       msg << " | ETA: " << format_duration(eta);
     }
 
-    // Print (carriage return for in-place update)
-    Rcpp::Rcout << "\r" << msg.str() << std::flush;
+    // Print (carriage return for in-place update only in interactive mode)
+    if (is_interactive_session) {
+      Rcpp::Rcout << "\r" << msg.str() << std::flush;
+    }
 
     // Final newline at completion
     if (iter >= total_iter - 1) {

@@ -182,6 +182,7 @@ double gp_nngp_log_lik_gpu(
   if ((int)gp_data.nn_order.size() < N) return -INFINITY;
   if ((int)gp_data.nn_idx.size() < N * nn) return -INFINITY;
   if ((int)gp_data.nn_dist.size() < N * nn) return -INFINITY;
+  if ((int)gp_data.nn_neighbor_dist.size() < N * nn * nn) return -INFINITY;  // Critical: prevents segfault
   if ((int)w.size() < N) return -INFINITY;
 
   double log_lik = 0.0;
@@ -413,6 +414,7 @@ double gp_nngp_log_lik_with_solver(
   if (gp_data.nn_order.size() < (size_t)N) return -INFINITY;
   if (gp_data.nn_idx.size() < (size_t)(N * nn)) return -INFINITY;
   if (gp_data.nn_dist.size() < (size_t)(N * nn)) return -INFINITY;
+  if (gp_data.nn_neighbor_dist.size() < (size_t)(N * nn * nn)) return -INFINITY;  // Critical: prevents segfault
   if (w.size() < (size_t)N) return -INFINITY;
 
   double log_lik = 0.0;

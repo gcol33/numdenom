@@ -22,7 +22,7 @@ make_mock_ratio_fit <- function(n_draws = 100, n_obs = 20) {
   structure(
     list(
       draws = draws,
-      backend = "hmc",
+      mode = "hmc",
       chains = 1,
       data = mock_data,
       formula = list(

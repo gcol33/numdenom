@@ -10,6 +10,7 @@
 #include <cmath>
 #include <random>
 #include "hmc_temporal.h"
+#include "hmc_temporal_gp.h"
 #include "hmc_zi.h"
 #include "hmc_svc.h"
 #include "hmc_gp.h"
@@ -27,6 +28,8 @@ namespace ratiod_hmc {
 
 using ratiod_temporal::TemporalType;
 using ratiod_temporal::TemporalData;
+using ratiod_temporal_gp::TemporalGPData;
+using ratiod_temporal_gp::TemporalCovType;
 using ratiod_zi::ZIType;
 using ratiod_gp::GPData;
 using ratiod_gp::MultiscaleGPData;
@@ -89,8 +92,8 @@ struct ModelData {
   int total_re_groups;                         // Sum of all groups across terms
 
   // Random slopes support
-  bool has_re_slopes;                          // Whether any RE term has slopes
-  bool has_re_correlated_slopes;               // Whether any RE term has correlated slopes
+  bool has_re_slopes = false;                  // Whether any RE term has slopes
+  bool has_re_correlated_slopes = false;       // Whether any RE term has correlated slopes
   std::vector<int> re_n_coefs;                 // Coefficients per group per term (1 = intercept only)
   std::vector<std::vector<double>> re_slope_matrices; // [term] -> flattened [N x n_slopes] slope design matrix
   std::vector<int> re_n_slopes;                // Number of slope variables per term
@@ -99,6 +102,11 @@ struct ModelData {
   int total_re_params;                         // Total RE parameters (groups * coefs)
   int total_sigma_params;                      // Total variance parameters (sum of n_coefs)
   int total_chol_params;                       // Total Cholesky correlation parameters
+
+  // RE parameterization: 0 = centered (default), 1 = non-centered
+  // Non-centered stores z ~ N(0,1) instead of re ~ N(0, sigma^2)
+  // and computes re = sigma * z (or re = diag(sigma) * L * z for correlated)
+  int re_parameterization;                     // 0 = centered, 1 = non-centered
 
   // Spatial structure
   SpatialType spatial_type;
@@ -134,71 +142,79 @@ struct ModelData {
 
   // SVC (Spatially-Varying Coefficients) structure
   ratiod_svc::SVCData svc_data;
-  bool has_svc;
-  double svc_sigma2_prior_scale;        // Half-Cauchy scale for sigma2
-  double svc_phi_prior_lower;           // Uniform prior lower bound for phi
-  double svc_phi_prior_upper;           // Uniform prior upper bound for phi
+  bool has_svc = false;
+  double svc_sigma2_prior_scale = 1.0;  // Half-Cauchy scale for sigma2
+  double svc_phi_prior_lower = 0.01;    // Uniform prior lower bound for phi
+  double svc_phi_prior_upper = 10.0;    // Uniform prior upper bound for phi
 
   // GP spatial structure (single-scale)
   GPData gp_data;
-  bool has_gp;
-  double gp_sigma2_prior_U;             // PC prior: P(sigma > U) = alpha
-  double gp_sigma2_prior_alpha;
-  double gp_phi_prior_lower;            // Uniform prior bounds for range
-  double gp_phi_prior_upper;
+  bool has_gp = false;
+  double gp_sigma2_prior_U = 1.0;       // PC prior: P(sigma > U) = alpha
+  double gp_sigma2_prior_alpha = 0.01;
+  double gp_phi_prior_lower = 0.01;     // Uniform prior bounds for range
+  double gp_phi_prior_upper = 10.0;
 
   // Multi-scale GP spatial structure
   MultiscaleGPData multiscale_gp_data;
-  bool has_multiscale_gp;
-  double ms_sigma2_local_prior_U;
-  double ms_sigma2_local_prior_alpha;
-  double ms_sigma2_regional_prior_U;
-  double ms_sigma2_regional_prior_alpha;
+  bool has_multiscale_gp = false;
+  double ms_sigma2_local_prior_U = 1.0;
+  double ms_sigma2_local_prior_alpha = 0.01;
+  double ms_sigma2_regional_prior_U = 1.0;
+  double ms_sigma2_regional_prior_alpha = 0.01;
 
   // Multi-scale temporal structure
   MultiscaleTemporalData multiscale_temporal_data;
-  bool has_multiscale_temporal;
-  double ms_sigma2_trend_prior_U;
-  double ms_sigma2_trend_prior_alpha;
-  double ms_sigma2_seasonal_prior_U;
-  double ms_sigma2_seasonal_prior_alpha;
-  double ms_sigma2_short_prior_U;
-  double ms_sigma2_short_prior_alpha;
+  bool has_multiscale_temporal = false;
+  double ms_sigma2_trend_prior_U = 1.0;
+  double ms_sigma2_trend_prior_alpha = 0.01;
+  double ms_sigma2_seasonal_prior_U = 1.0;
+  double ms_sigma2_seasonal_prior_alpha = 0.01;
+  double ms_sigma2_short_prior_U = 1.0;
+  double ms_sigma2_short_prior_alpha = 0.01;
+
+  // Temporal GP structure (for irregularly-spaced time series)
+  TemporalGPData temporal_gp_data;
+  bool has_temporal_gp = false;
+  double temporal_gp_sigma2_prior_U = 1.0;    // PC prior: P(sigma > U) = alpha
+  double temporal_gp_sigma2_prior_alpha = 0.01;
+  double temporal_gp_phi_prior_lower = 0.01;  // Uniform prior bounds for range
+  double temporal_gp_phi_prior_upper = 10.0;
 
   // HSGP (Hilbert Space GP) structure
   ratiod_hsgp::HSGPData hsgp_data;
-  bool has_hsgp;
-  int hsgp_m_per_dim;                  // Basis functions per dimension
-  double hsgp_boundary_factor;         // Boundary factor (c)
+  bool has_hsgp = false;
+  int hsgp_m_per_dim = 15;             // Basis functions per dimension
+  double hsgp_boundary_factor = 1.5;   // Boundary factor (c)
 
   // RSR (Restricted Spatial Regression) structure
-  bool has_rsr;
+  bool has_rsr = false;
   std::vector<double> rsr_projection;   // P_perp matrix (n x n, flattened)
-  int rsr_n;                            // Dimension of projection matrix
+  int rsr_n = 0;                        // Dimension of projection matrix
 
   // Latent factors for unmeasured confounders
-  bool has_latent;
-  int latent_n_factors;                 // Number of latent factors (K)
-  bool latent_shared;                   // Whether factors enter both num and denom
-  bool latent_scale;                    // Whether to standardize factors
-  int latent_constraint;                // 0 = sum_to_zero, 1 = first_zero
-  double latent_sigma_prior_rate;       // Exponential rate for PC prior on sigma
+  bool has_latent = false;
+  int latent_n_factors = 0;             // Number of latent factors (K)
+  bool latent_shared = true;            // Whether factors enter both num and denom
+  bool latent_scale = true;             // Whether to standardize factors
+  int latent_constraint = 0;            // 0 = sum_to_zero, 1 = first_zero
+  double latent_sigma_prior_rate = 1.0; // Exponential rate for PC prior on sigma
 
   // Spatiotemporal interaction
-  bool has_spatiotemporal;
+  bool has_spatiotemporal = false;
   SpatiotemporalData spatiotemporal_data;
-  double st_sigma2_prior_U;             // PC prior for interaction variance
-  double st_sigma2_prior_alpha;
-  double st_phi_space_prior_lower;      // Uniform bounds for spatial range
-  double st_phi_space_prior_upper;
-  double st_phi_time_prior_lower;       // Uniform bounds for temporal range
-  double st_phi_time_prior_upper;
+  double st_sigma2_prior_U = 1.0;       // PC prior for interaction variance
+  double st_sigma2_prior_alpha = 0.01;
+  double st_phi_space_prior_lower = 0.01;  // Uniform bounds for spatial range
+  double st_phi_space_prior_upper = 10.0;
+  double st_phi_time_prior_lower = 0.01;   // Uniform bounds for temporal range
+  double st_phi_time_prior_upper = 10.0;
 
   // TVC (Temporally-Varying Coefficients) structure
   ratiod_tvc::TVCData tvc_data;
-  bool has_tvc;
-  double tvc_tau_shape;                 // Gamma shape for TVC precision
-  double tvc_tau_rate;                  // Gamma rate for TVC precision
+  bool has_tvc = false;
+  double tvc_tau_shape = 1.0;           // Gamma shape for TVC precision
+  double tvc_tau_rate = 0.01;           // Gamma rate for TVC precision
 
   // Dimensions
   int N;
@@ -238,8 +254,8 @@ struct ParamLayout {
   std::vector<int> re_end_multi;        // End index for each RE term
 
   // Random slopes layout (when has_re_slopes is true)
-  bool has_re_slopes;
-  bool has_re_correlated_slopes;
+  bool has_re_slopes = false;
+  bool has_re_correlated_slopes = false;
   // For each term: number of coefficients (1 = intercept only, >1 = with slopes)
   std::vector<int> re_n_coefs_multi;
   // For each term: whether correlated (for | syntax) vs uncorrelated (for || syntax)
@@ -265,6 +281,10 @@ struct ParamLayout {
   int log_tau_temporal_idx;             // Log precision for temporal
   int logit_rho_ar1_idx;                // AR1 autocorrelation (logit scale)
   int temporal_start, temporal_end;     // Temporal effect parameters
+
+  // Temporal GP parameters (for irregularly-spaced time series)
+  int log_sigma2_temporal_gp_idx;       // Log marginal variance
+  int log_phi_temporal_gp_idx;          // Log length-scale
 
   // Zero-inflation parameters
   int beta_zi_start, beta_zi_end;       // ZI regression coefficients
@@ -321,26 +341,27 @@ struct ParamLayout {
   int logit_rho_tvc_start, logit_rho_tvc_end;        // AR1 correlations (if structure == AR1)
   int tvc_w_start, tvc_w_end;                        // TVC values (n_groups * n_tvc * n_times)
 
-  int total_params;
+  int total_params = 0;
 
-  bool has_re;
-  bool has_phi_num;
-  bool has_phi_denom;
-  bool has_spatial;
-  bool is_bym2;
-  bool is_gp;
-  bool is_multiscale_gp;
-  bool is_hsgp;
-  bool has_temporal;
-  bool is_ar1;
-  bool has_multiscale_temporal;
-  bool has_zi;
-  bool has_oi;  // For OI-binomial and ZOIB models
-  bool has_svc;
-  bool has_latent;
-  bool has_spatiotemporal;
-  bool is_st_gp;
-  bool has_tvc;
+  bool has_re = false;
+  bool has_phi_num = false;
+  bool has_phi_denom = false;
+  bool has_spatial = false;
+  bool is_bym2 = false;
+  bool is_gp = false;
+  bool is_multiscale_gp = false;
+  bool is_hsgp = false;
+  bool has_temporal = false;
+  bool is_ar1 = false;
+  bool is_temporal_gp = false;
+  bool has_multiscale_temporal = false;
+  bool has_zi = false;
+  bool has_oi = false;  // For OI-binomial and ZOIB models
+  bool has_svc = false;
+  bool has_latent = false;
+  bool has_spatiotemporal = false;
+  bool is_st_gp = false;
+  bool has_tvc = false;
 };
 
 ParamLayout compute_param_layout(const ModelData& data);

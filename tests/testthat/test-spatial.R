@@ -181,11 +181,17 @@ test_that("proper CAR validates adjacency like ICAR", {
 test_that("spatial_car shared argument works for both variants", {
   adj <- matrix(c(0, 1, 1, 0), 2, 2)
 
-  # ICAR
-  sp_icar <- spatial_car(adj, level = "obs", shared = FALSE)
+  # ICAR - expect warning about non-shared effects
+  expect_warning(
+    sp_icar <- spatial_car(adj, level = "obs", shared = FALSE),
+    "confounded"
+  )
   expect_false(sp_icar$shared)
 
-  # Proper CAR
-  sp_proper <- spatial_car(adj, level = "obs", proper = TRUE, shared = FALSE)
+  # Proper CAR - expect warning about non-shared effects
+  expect_warning(
+    sp_proper <- spatial_car(adj, level = "obs", proper = TRUE, shared = FALSE),
+    "confounded"
+  )
   expect_false(sp_proper$shared)
 })

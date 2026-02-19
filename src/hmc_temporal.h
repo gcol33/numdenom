@@ -20,7 +20,7 @@ namespace ratiod_temporal {
 // Temporal structure types
 // =====================================================================
 
-enum class TemporalType { NONE, RW1, RW2, AR1, IID };
+enum class TemporalType { NONE, RW1, RW2, AR1, IID, GP };
 
 // Temporal data container
 struct TemporalData {

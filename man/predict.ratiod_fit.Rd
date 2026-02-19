@@ -13,6 +13,10 @@
   probs = c(0.025, 0.5, 0.975),
   re_formula = NULL,
   allow_new_levels = FALSE,
+  coords.0 = NULL,
+  include_spatial = TRUE,
+  return_spatial = FALSE,
+  n_samples = NULL,
   ...
 )
 }
@@ -40,11 +44,26 @@ Use \code{NULL} to include all random effects (if new levels match),
 \item{allow_new_levels}{Logical; if TRUE, allows new group levels not
 in the original data (predictions use population mean).}
 
+\item{coords.0}{Matrix of spatial coordinates for new prediction locations
+(required for GP/HSGP spatial models). Should be N x 2 matrix with same
+coordinate system as training data.}
+
+\item{include_spatial}{Logical; if TRUE (default), include spatial random
+effects in predictions. Set to FALSE for fixed-effects-only predictions.}
+
+\item{return_spatial}{Logical; if TRUE, return spatial effect samples at
+new locations as \code{w.0.samples} in the output (similar to spOccupancy).}
+
+\item{n_samples}{Number of posterior samples to draw for backends that
+don't store samples directly (e.g., Laplace, VI). Default uses all
+available samples for HMC/PG.}
+
 \item{...}{Ignored}
 }
 \value{
 If \code{summary = TRUE}, a data frame with posterior summaries.
 If \code{summary = FALSE}, a matrix of posterior draws (rows = draws, cols = obs).
+If \code{return_spatial = TRUE}, returns a list with \code{predictions} and \code{w.0.samples}.
 }
 \description{
 Compute posterior predictions for new data from a fitted ratiod model.
@@ -79,6 +98,33 @@ predict(fit, newdata = new_df, re_formula = NA)
 
 # Get full posterior draws
 predict(fit, newdata = new_df, summary = FALSE)
+
+# --- Spatial prediction example (GP) ---
+# Fit model with GP spatial effects
+df$x <- runif(n)
+df$y <- runif(n)
+fit_gp <- ratiod(
+  count | effort ~ depth,
+  data = df,
+  spatial = spatial_gp(coords = c("x", "y")),
+  family = ratiod_poisson_gamma(),
+  iter = 200, warmup = 100, chains = 1
+)
+
+# Predict at new locations (kriging)
+new_coords <- matrix(runif(20), ncol = 2)
+new_df <- data.frame(depth = rnorm(10))
+pred <- predict(fit_gp, newdata = new_df, coords.0 = new_coords)
+
+# Return spatial effect samples (like spOccupancy)
+pred_spatial <- predict(fit_gp, newdata = new_df, coords.0 = new_coords,
+                        return_spatial = TRUE)
+str(pred_spatial$w.0.samples)  # [n_samples, n_new]
+
+# --- Areal spatial prediction (ICAR/BYM2) ---
+# Predict for existing regions (lookup)
+new_df <- data.frame(region = c("A", "B"), depth = c(1, 2))
+predict(fit_icar, newdata = new_df)
 }
 
 }

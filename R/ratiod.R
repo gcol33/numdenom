@@ -77,6 +77,11 @@
 #'   `"A"` forward-mode autodiff (fast, ~10x over tape);
 #'   `"A_t"` tape-based reverse-mode autodiff (slow);
 #'   `"N"` numerical finite differences (slowest, always works).
+#' @param re_param Random effects parameterization:
+#'   `"noncentered"` (default) stores z ~ N(0,1) and computes re = σ*z (or re = diag(σ)*L*z for correlated).
+#'     Better for weakly-informed random effects or small group sizes.
+#'   `"centered"` stores re directly with re ~ N(0,σ²) prior.
+#'     Better for strongly-informed random effects or large group sizes.
 #' @param ... Additional arguments passed to the sampler.
 #'
 #' @return A `ratiod_fit` object containing:
@@ -156,12 +161,21 @@ ratiod <- function(formula,
                            "hmc", "ess", "pg", "sghmc", "sgld", "laplace", "vi"),
                   vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
                   refresh = NULL,
+                  verbose = TRUE,
                   gradient_mode = c("auto", "N", "A", "A_t", "H"),
+                  re_param = c("noncentered", "centered"),
                   ...) {
 
   mode <- match.arg(mode)
   vi_variant <- match.arg(vi_variant)
   gradient_mode <- match.arg(gradient_mode)
+  re_param <- match.arg(re_param)
+
+  # Handle verbose from ... for backwards compatibility
+  extra_args <- list(...)
+  if ("verbose" %in% names(extra_args)) {
+    verbose <- extra_args$verbose
+  }
 
   # Validate temporal specification
   if (!is.null(temporal)) {
@@ -180,6 +194,12 @@ ratiod <- function(formula,
                                        shared = shared, data = data)
       X_num <- parsed_formula$numerator$X
       temporal <- validate_tvc(temporal, data, X_num)
+    } else if (inherits(temporal, "ratiod_temporal_gp")) {
+      # Temporal GP needs its own validation to populate GP-specific fields
+      temporal <- validate_temporal_gp(temporal, data)
+    } else if (inherits(temporal, "ratiod_temporal_multiscale")) {
+      # Multiscale temporal needs its own validation
+      temporal <- validate_temporal_multiscale(temporal, data)
     } else {
       temporal <- validate_temporal(temporal, data)
     }
@@ -242,10 +262,12 @@ ratiod <- function(formula,
   selected_tier_name <- mode_selection$tier_name
 
   # Display mode selection
-  message(sprintf("Inference: %s (Tier %d)", selected_tier_name, selected_tier))
-  message(sprintf("  Backend: %s", selected_backend))
-  if (mode == "auto") {
-    message(sprintf("  Reason: %s", mode_selection$reason))
+  if (verbose) {
+    message(sprintf("Inference: %s (Tier %d)", selected_tier_name, selected_tier))
+    message(sprintf("  Backend: %s", selected_backend))
+    if (mode == "auto") {
+      message(sprintf("  Reason: %s", mode_selection$reason))
+    }
   }
 
   # PG backend only works for binomial family (currently experimental)
@@ -257,7 +279,6 @@ ratiod <- function(formula,
         call. = FALSE
       )
     }
-    warning("PG backend is experimental. Consider using backend = 'hmc' for production.", call. = FALSE)
   }
 
   # Validate inputs
@@ -309,9 +330,11 @@ ratiod <- function(formula,
   # -------------------------------------------------------------------------
 
   # Common message elements
-  message(sprintf("Fitting ratiod model..."))
-  message(sprintf("  Family: %s", family$name))
-  message(sprintf("  Observations: %d", nrow(data)))
+  if (verbose) {
+    message(sprintf("Fitting ratiod model..."))
+    message(sprintf("  Family: %s", family$name))
+    message(sprintf("  Observations: %d", nrow(data)))
+  }
 
   # Store mode info for the result
   mode_info <- list(
@@ -326,8 +349,10 @@ ratiod <- function(formula,
   # Dispatch to PG backend (Tier 1: Exact)
   # -------------------------------------------------------------------------
   if (selected_backend == "pg") {
-    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
-    message(sprintf("  Cores: %d", cores))
+    if (verbose) {
+      message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+      message(sprintf("  Cores: %d", cores))
+    }
 
     result <- fit_pg_binomial(
       formula = formula_spec,
@@ -342,7 +367,7 @@ ratiod <- function(formula,
       prior_sigma_scale = priors$sigma_scale %||% 2.5,
       prior_tau_shape = priors$tau_shape %||% 1,
       prior_tau_rate = priors$tau_rate %||% 0.01,
-      verbose = !is.null(refresh) && refresh > 0
+      verbose = verbose
     )
 
     # Add mode information
@@ -358,8 +383,10 @@ ratiod <- function(formula,
   # Dispatch to Laplace backend (Tier 2: Structured)
   # -------------------------------------------------------------------------
   if (selected_backend == "laplace") {
-    message(sprintf("  Posterior samples: %d", iter - warmup))
-    message(sprintf("  Cores: %d", cores))
+    if (verbose) {
+      message(sprintf("  Posterior samples: %d", iter - warmup))
+      message(sprintf("  Cores: %d", cores))
+    }
 
     result <- fit_laplace(
       formula = formula_spec,
@@ -369,7 +396,7 @@ ratiod <- function(formula,
       priors = priors,
       n_samples = iter - warmup,
       cores = cores,
-      verbose = !is.null(refresh) && refresh > 0
+      verbose = verbose
     )
 
     # Add mode information
@@ -385,13 +412,15 @@ ratiod <- function(formula,
   # Dispatch to HMC/NUTS backend (Tier 1: Exact)
   # -------------------------------------------------------------------------
   if (selected_backend == "hmc") {
-    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
-    if (!is.null(temporal)) {
-      message(sprintf("  Temporal: %s (%d time points)", temporal$type, temporal$n_times))
-    }
-    if (!is.null(spatiotemporal)) {
-      message(sprintf("  Spatiotemporal: %s (%d x %d)",
-                      spatiotemporal$type, spatiotemporal$n_spatial, spatiotemporal$n_times))
+    if (verbose) {
+      message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+      if (!is.null(temporal)) {
+        message(sprintf("  Temporal: %s (%d time points)", temporal$type, temporal$n_times))
+      }
+      if (!is.null(spatiotemporal)) {
+        message(sprintf("  Spatiotemporal: %s (%d x %d)",
+                        spatiotemporal$type, spatiotemporal$n_spatial, spatiotemporal$n_times))
+      }
     }
 
     result <- fit_hmc(
@@ -409,8 +438,9 @@ ratiod <- function(formula,
       chains = chains,
       cores = cores,
       seed = seed,
-      verbose = is.null(refresh) || refresh > 0,
-      gradient_mode = gradient_mode
+      verbose = verbose,
+      gradient_mode = gradient_mode,
+      re_param = re_param
     )
 
     # Add mode information
@@ -426,8 +456,10 @@ ratiod <- function(formula,
   # Dispatch to VI backend (Tier 3: Optimized)
   # -------------------------------------------------------------------------
   if (selected_backend == "vi") {
-    message(sprintf("  VI variant: %s", vi_variant))
-    message("  Note: Tier 3 (Optimized) - uncertainty may be underestimated")
+    if (verbose) {
+      message(sprintf("  VI variant: %s", vi_variant))
+      message("  Note: Tier 3 (Optimized) - uncertainty may be underestimated")
+    }
 
     result <- fit_vi(
       formula = formula_spec,
@@ -442,7 +474,7 @@ ratiod <- function(formula,
       variant = vi_variant,
       max_iter = iter,
       seed = seed,
-      verbose = is.null(refresh) || refresh > 0
+      verbose = verbose
     )
 
     # Add mode information
@@ -458,7 +490,9 @@ ratiod <- function(formula,
   # Dispatch to ESS backend (Tier 1: Exact)
   # -------------------------------------------------------------------------
   if (selected_backend == "ess") {
-    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+    if (verbose) {
+      message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+    }
 
     result <- fit_ess(
       formula = formula_spec,
@@ -473,7 +507,7 @@ ratiod <- function(formula,
       iter = iter,
       warmup = warmup,
       seed = seed,
-      verbose = is.null(refresh) || refresh > 0
+      verbose = verbose
     )
 
     # Add mode information
@@ -495,10 +529,12 @@ ratiod <- function(formula,
     # Remove batch_size from extra_args to avoid passing it twice
     extra_args$batch_size <- NULL
 
-    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
-    message(sprintf("  Batch size: %d (%.1f%% of data)", batch_size,
-                    100 * batch_size / nrow(data)))
-    message("  Note: SGHMC uses minibatch gradients for scalability")
+    if (verbose) {
+      message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+      message(sprintf("  Batch size: %d (%.1f%% of data)", batch_size,
+                      100 * batch_size / nrow(data)))
+      message("  Note: SGHMC uses minibatch gradients for scalability")
+    }
 
     # Note: SGHMC doesn't support spatiotemporal/latent yet
     if (!is.null(spatiotemporal)) {
@@ -520,7 +556,7 @@ ratiod <- function(formula,
       warmup = warmup,
       batch_size = batch_size,
       seed = seed,
-      verbose = is.null(refresh) || refresh > 0
+      verbose = verbose
     ), extra_args))
 
     # Add mode information
@@ -542,10 +578,12 @@ ratiod <- function(formula,
     # Remove batch_size from extra_args to avoid passing it twice
     extra_args$batch_size <- NULL
 
-    message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
-    message(sprintf("  Batch size: %d (%.1f%% of data)", batch_size,
-                    100 * batch_size / nrow(data)))
-    message("  Note: SGLD uses Langevin dynamics with minibatch gradients")
+    if (verbose) {
+      message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+      message(sprintf("  Batch size: %d (%.1f%% of data)", batch_size,
+                      100 * batch_size / nrow(data)))
+      message("  Note: SGLD uses Langevin dynamics with minibatch gradients")
+    }
 
     # Note: SGLD doesn't support spatiotemporal/latent yet
     if (!is.null(spatiotemporal)) {
@@ -567,7 +605,7 @@ ratiod <- function(formula,
       warmup = warmup,
       batch_size = batch_size,
       seed = seed,
-      verbose = is.null(refresh) || refresh > 0
+      verbose = verbose
     ), extra_args))
 
     # Add mode information

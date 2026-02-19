@@ -203,3 +203,78 @@ test_that("validate_gp preserves coordinates when scale = FALSE", {
   expect_equal(validated$coords_matrix[, 1], c(100, 200, 300, 400))
   expect_equal(validated$coords_matrix[, 2], c(1000, 2000, 3000, 4000))
 })
+
+# --- Duplicate coordinate handling ---
+
+test_that("validate_gp detects unique coordinates and builds obs_to_loc", {
+  gp <- spatial_gp(~ lon + lat, nn = 2, scale_coords = FALSE)
+
+  # 3 sites, 2 obs per site = 6 obs
+  df <- data.frame(
+    lon = c(1, 1, 2, 2, 3, 3),
+    lat = c(10, 10, 20, 20, 30, 30)
+  )
+
+  expect_message(validated <- validate_gp(gp, df), "3 unique locations from 6")
+
+  expect_equal(validated$n_unique, 3L)
+  expect_equal(validated$n_obs, 3L)
+  expect_equal(validated$n_spatial, 3L)
+  expect_equal(validated$obs_to_loc, c(1L, 1L, 2L, 2L, 3L, 3L))
+  expect_equal(nrow(validated$unique_coords), 3L)
+  expect_equal(validated$unique_coords[1, ], c(1, 10))
+  expect_equal(validated$unique_coords[2, ], c(2, 20))
+  expect_equal(validated$unique_coords[3, ], c(3, 30))
+})
+
+test_that("validate_gp is identity mapping when all coordinates are unique", {
+  gp <- spatial_gp(~ lon + lat, nn = 3, scale_coords = FALSE)
+
+  df <- data.frame(lon = c(1, 2, 3, 4), lat = c(10, 20, 30, 40))
+
+  # Should not emit message when all unique
+  validated <- validate_gp(gp, df)
+
+  expect_equal(validated$n_unique, 4L)
+  expect_equal(validated$obs_to_loc, 1:4)
+  expect_equal(nrow(validated$unique_coords), 4L)
+})
+
+test_that("GP model fits with duplicate coordinates", {
+  skip_on_cran()
+  set.seed(42)
+  n_sites <- 10
+  n_per_site <- 5
+  N <- n_sites * n_per_site
+
+  site_x <- runif(n_sites)
+  site_y <- runif(n_sites)
+  site_id <- rep(1:n_sites, each = n_per_site)
+
+  df <- data.frame(
+    y = rbinom(N, 20, 0.5),
+    trials = rep(20L, N),
+    x = rnorm(N),
+    lon = site_x[site_id],
+    lat = site_y[site_id]
+  )
+
+  fit <- ratiod(
+    y | trials ~ x,
+    data = df,
+    family = ratiod_binomial(),
+    spatial = spatial_gp(~ lon + lat, nn = 5),
+    mode = "hmc",
+    iter = 50,
+    warmup = 25,
+    chains = 1,
+    verbose = FALSE
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+
+  # Verify sampler isn't stuck (at least some parameters have SD > 0)
+  draws <- fit$draws
+  sds <- apply(draws, 2, sd)
+  expect_true(all(sds > 1e-10), info = "All parameters should move")
+})

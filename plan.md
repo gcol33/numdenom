@@ -29,6 +29,7 @@ Never skip from N directly to H. A serves as the validation reference.
 | SVC | `hmc_svc.h` + `hmc_svc_autodiff.h` | ✓ | ✓ | ✓ | **Complete** |
 | Temporal RW/AR | `log_post_impl.h` | ✓ | ✓ | ✓ | Complete |
 | Temporal GP | `hmc_temporal_gp.h` | ✓ | ✗ | ✓ | Complete |
+| Multi-scale temporal | `hmc_multiscale_temporal_grad.h` + `hmc_temporal_multiscale_autodiff.h` | ✓ | ✓ | ✓ | **Complete** |
 | TVC | `hmc_tvc.h` + `hmc_tvc_autodiff.h` + `hmc_tvc_grad.h` | ✓ | ✓ | ✓ | **Complete** |
 | Spatiotemporal | `hmc_spatiotemporal.h` | ✓ | ✗ | ✓ | Complete (Types I-IV) |
 | Latent factors | `hmc_latent.h` + `hmc_latent_autodiff.h` + `hmc_latent_grad.h` | ✓ | ✓ | ✓ | **Complete** |
@@ -75,12 +76,20 @@ The following features are now fully implemented with N, A_t, and H:
 - Already implemented in `hmc_zi.h` with H gradients
 - Benchmarked in rows 78-79
 
+#### ✅ Multi-scale Temporal (MS_t) - COMPLETE
+- `hmc_multiscale_temporal_grad.h`: Hand-coded gradients for RW1, RW2, AR1, IID priors
+- `hmc_temporal_multiscale_autodiff.h`: Templated functions for A_t mode
+- `hmc_sampler.cpp`: `compute_gradient_multiscale_temporal_handcoded()` at line 4374
+- **Benchmark**: H=73s, A=180s, A_t=241s, N=92s (2.5x speedup H/A)
+- **Status**: Complete
+
 #### ✅ Latent Factors - COMPLETE
 - `hmc_latent.h`: Core functions (constraint application, priors)
 - `hmc_latent_autodiff.h`: Templated functions for A_t mode
 - `hmc_latent_grad.h`: Hand-coded gradients
 - `hmc_sampler.cpp`: `compute_gradient_latent_handcoded()` integrated
-- **Status**: Ready for benchmarking (expected 10-50x speedup over N)
+- **Benchmark (N=50, K=2)**: poisson_gamma 0.4s, negbin_negbin 0.8s, binomial 0.1s, all 0 div
+- **Status**: Benchmarked and validated
 
 ---
 
@@ -114,6 +123,16 @@ For each feature moving from A_t to H:
 
 All features now have H gradients. Priority benchmarks:
 
-1. **Benchmark SVC rows (26, 56, 88)**: Run with H gradient mode, validate against Stan
-2. **Benchmark TVC rows (27, 57, 89)**: Run with H gradient mode, validate against Stan
-3. **Benchmark Latent rows (30, 60, 92)**: Run with H gradient mode (expected 10-50x speedup)
+1. ~~**Benchmark SVC rows (26, 56, 88)**: Run with H gradient mode, validate against Stan~~
+   - ✅ **Row 26 (poisson_gamma + SVC)**: 759.0s H; NNGP requires custom Stan (deferred)
+   - ✅ **Row 56 (negbin_negbin + SVC)**: 764.6s H; NNGP requires custom Stan (deferred)
+   - ✅ **Row 88 (binomial + SVC)**: 708.6s H; NNGP requires custom Stan (deferred)
+   - **Note**: SVC uses NNGP approximation. Stan validation would require implementing NNGP from scratch in Stan, which is complex. H gradients are correct (validated against A_t).
+2. ~~**Benchmark TVC rows (27, 57, 89)**: Run with H gradient mode, validate against Stan~~
+   - ✅ **Row 27 (poisson_gamma + TVC)**: 6.6s H, 0 div; Stan 12.4s, 0 div; **VALIDATED**
+   - ✅ **Row 57 (negbin_negbin + TVC)**: 15.0s H, 0 div; **VALIDATED**
+   - ✅ **Row 89 (binomial + TVC)**: 13.0s H, 0 div; **VALIDATED**
+3. ~~**Benchmark Latent rows (30, 60, 92)**: Run with H gradient mode (expected 10-50x speedup)~~
+   - ✅ **Row 30 (poisson_gamma + latent)**: 0.4s H, 0 div; **VALIDATED**
+   - ✅ **Row 60 (negbin_negbin + latent)**: 0.8s H, 0 div; **VALIDATED**
+   - ✅ **Row 92 (binomial + latent)**: 0.1s H, 0 div; **VALIDATED**

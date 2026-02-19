@@ -27,7 +27,9 @@ ratiod(
     "sgld", "laplace", "vi"),
   vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
   refresh = NULL,
+  verbose = TRUE,
   gradient_mode = c("auto", "N", "A", "A_t", "H"),
+  re_param = c("noncentered", "centered"),
   ...
 )
 }
@@ -126,6 +128,12 @@ See \code{\link[=inference_mode_info]{inference_mode_info()}} for details on the
 \code{"A"} forward-mode autodiff (fast, ~10x over tape);
 \code{"A_t"} tape-based reverse-mode autodiff (slow);
 \code{"N"} numerical finite differences (slowest, always works).}
+
+\item{re_param}{Random effects parameterization:
+\code{"noncentered"} (default) stores z ~ N(0,1) and computes re = σ*z (or re = diag(σ)\emph{L}z for correlated).
+Better for weakly-informed random effects or small group sizes.
+\code{"centered"} stores re directly with re ~ N(0,σ²) prior.
+Better for strongly-informed random effects or large group sizes.}
 
 \item{...}{Additional arguments passed to the sampler.}
 }
