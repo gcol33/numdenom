@@ -11,7 +11,8 @@ initialize_hmc_params_full(
   temporal_info,
   zi_info,
   latent_info = NULL,
-  svc_info = NULL
+  svc_info = NULL,
+  spatiotemporal_info = NULL
 )
 }
 \description{

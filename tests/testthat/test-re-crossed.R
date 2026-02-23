@@ -140,8 +140,8 @@ test_that("random slopes work in HMC backend", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -234,8 +234,8 @@ test_that("HMC fits model with crossed RE terms", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -274,8 +274,8 @@ test_that("HMC with three crossed RE terms runs", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )

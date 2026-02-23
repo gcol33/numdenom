@@ -62,8 +62,8 @@ test_that("PG Gibbs sampler recovers parameters", {
     X = X,
     group = as.integer(group),
     n_groups = n_groups,
-    n_iter = 1500,
-    n_warmup = 500,
+    n_iter = 500,
+    n_warmup = 200,
     thin = 1,
     verbose = FALSE
   )

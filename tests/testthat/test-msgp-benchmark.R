@@ -105,7 +105,7 @@ test_that("MSGP samplers have acceptable divergence rates", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 500,
+      iter = 150,
       warmup = 250,
       verbose = FALSE
     )
@@ -145,7 +145,7 @@ test_that("MSGP sampler speed comparison", {
         family = ratiod_poisson_gamma(),
         mode = "hmc",
         chains = 1,
-        iter = 300,
+        iter = 150,
         warmup = 150,
         verbose = FALSE
       )

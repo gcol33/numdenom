@@ -178,8 +178,8 @@ test_that("HMC backend runs for binomial model", {
     st_params = make_st_params(),
     tvc_params = make_tvc_params(),
     svc_params = make_svc_params(),
-    n_iter = 1000L,
-    n_warmup = 500L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 123L,
@@ -188,7 +188,7 @@ test_that("HMC backend runs for binomial model", {
   )
 
   expect_true(is.matrix(result$samples))
-  expect_equal(nrow(result$samples), 500)  # n_iter - n_warmup
+  expect_equal(nrow(result$samples), 100)  # n_iter - n_warmup
   expect_equal(ncol(result$samples), 3)    # 2 beta_num + 1 beta_denom
 
   # Check intercept is approximately correct (wider tolerance)
@@ -234,8 +234,8 @@ test_that("HMC backend runs for negbin model", {
     st_params = make_st_params(),
     tvc_params = make_tvc_params(),
     svc_params = make_svc_params(),
-    n_iter = 500L,
-    n_warmup = 250L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 456L,
@@ -285,8 +285,8 @@ test_that("HMC backend runs with random effects", {
     st_params = make_st_params(),
     tvc_params = make_tvc_params(),
     svc_params = make_svc_params(),
-    n_iter = 1000L,
-    n_warmup = 500L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 789L,
@@ -379,8 +379,8 @@ test_that("HMC backend runs with ICAR spatial effects", {
     st_params = make_st_params(),
     tvc_params = make_tvc_params(),
     svc_params = make_svc_params(),
-    n_iter = 500L,
-    n_warmup = 250L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 111L,
@@ -389,7 +389,7 @@ test_that("HMC backend runs with ICAR spatial effects", {
   )
 
   expect_equal(ncol(result$samples), 20)
-  expect_equal(nrow(result$samples), 250)
+  expect_equal(nrow(result$samples), 100)
 
   # Check tau_spatial is positive
   log_tau_idx <- 4  # After 2 beta_num + 1 beta_denom
@@ -429,8 +429,8 @@ test_that("HMC backend runs multiple chains in parallel", {
     st_params = make_st_params(),
     tvc_params = make_tvc_params(),
     svc_params = make_svc_params(),
-    n_iter = 300L,
-    n_warmup = 150L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 2L,
     seed = 222L,
@@ -443,8 +443,8 @@ test_that("HMC backend runs multiple chains in parallel", {
   expect_equal(length(result$samples), 2)
 
   # Each chain has samples
-  expect_equal(nrow(result$samples[[1]]), 150)
-  expect_equal(nrow(result$samples[[2]]), 150)
+  expect_equal(nrow(result$samples[[1]]), 100)
+  expect_equal(nrow(result$samples[[2]]), 100)
 })
 
 

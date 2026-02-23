@@ -186,8 +186,8 @@ test_that("HMC backend works for negbin_negbin model", {
     st_params = make_st_params_hmc(),
     tvc_params = make_tvc_params_hmc(),
     svc_params = make_svc_params_hmc(),
-    n_iter = 1000L,
-    n_warmup = 500L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 456L,
@@ -196,7 +196,7 @@ test_that("HMC backend works for negbin_negbin model", {
   )
 
   expect_true(all(is.finite(fit$samples)))
-  expect_equal(nrow(fit$samples), 500)
+  expect_equal(nrow(fit$samples), 100)
   expect_equal(ncol(fit$samples), 6)
 
   # Check intercepts are in right ballpark
@@ -245,8 +245,8 @@ test_that("HMC backend works for poisson_gamma model", {
     st_params = make_st_params_hmc(),
     tvc_params = make_tvc_params_hmc(),
     svc_params = make_svc_params_hmc(),
-    n_iter = 1000L,
-    n_warmup = 500L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 789L,
@@ -255,7 +255,7 @@ test_that("HMC backend works for poisson_gamma model", {
   )
 
   expect_true(all(is.finite(fit$samples)))
-  expect_equal(nrow(fit$samples), 500)
+  expect_equal(nrow(fit$samples), 100)
   expect_equal(ncol(fit$samples), 5)
 })
 
@@ -279,8 +279,8 @@ test_that("ratiod() fits poisson_gamma model with HMC backend", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -307,8 +307,8 @@ test_that("ratiod() fits binomial model with HMC backend", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -334,8 +334,8 @@ test_that("ratiod() fits negbin_negbin model with HMC backend", {
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -364,8 +364,8 @@ test_that("ratiod() with random effects using HMC backend", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )

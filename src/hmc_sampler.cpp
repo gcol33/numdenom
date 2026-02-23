@@ -4,12 +4,14 @@
 
 #include "hmc_sampler.h"
 #include "linalg_fast.h"
+#include <RcppEigen.h>
 #include "hmc_progress.h"
 #include "autodiff.h"
 #include "autodiff_utils.h"
 #include "hmc_gp_autodiff.h"
 #include "hmc_temporal_autodiff.h"
 #include "hmc_tvc_grad.h"
+#include "hmc_multiscale_temporal_grad.h"
 #include <Rcpp.h>
 
 // Include log_post_impl.h AFTER hmc_sampler.h so types are defined
@@ -26,6 +28,47 @@
 using namespace Rcpp;
 
 namespace ratiod_hmc {
+
+// =====================================================================
+// Dense mass matrix: Cholesky decomposition via Eigen
+// =====================================================================
+
+bool DenseMassMatrix::update_from_covariance(const double* cov, int n_samples) {
+  // Map the covariance data into an Eigen matrix (column-major)
+  Eigen::Map<const Eigen::MatrixXd> C(cov, n, n);
+
+  // Cholesky decomposition: LL^T = C
+  Eigen::LLT<Eigen::MatrixXd> llt(C);
+  if (llt.info() != Eigen::Success) {
+    // Cholesky failed — degrade to diagonal
+    type = MassMatrixType::DIAG;
+    adapted = true;
+    // Extract diagonal from covariance as fallback
+    for (int i = 0; i < n; i++) {
+      double var_i = cov[static_cast<size_t>(i) * n + i];
+      inv_mass_diag[i] = std::max(1e-3, std::min(var_i, 1e3));
+      sqrt_mass_diag[i] = 1.0 / std::sqrt(inv_mass_diag[i]);
+    }
+    return false;
+  }
+
+  // Store full covariance as inv_mass_dense
+  std::memcpy(inv_mass_dense.data(), cov, static_cast<size_t>(n) * n * sizeof(double));
+
+  // Store Cholesky factor L
+  Eigen::MatrixXd L_mat = llt.matrixL();
+  std::memcpy(L_inv_mass.data(), L_mat.data(), static_cast<size_t>(n) * n * sizeof(double));
+
+  // Also update diagonal for fallback and find_reasonable_epsilon compatibility
+  for (int i = 0; i < n; i++) {
+    double var_i = cov[static_cast<size_t>(i) * n + i];
+    inv_mass_diag[i] = std::max(1e-3, std::min(var_i, 1e3));
+    sqrt_mass_diag[i] = 1.0 / std::sqrt(inv_mass_diag[i]);
+  }
+
+  adapted = true;
+  return true;
+}
 
 // =====================================================================
 // Parameter layout computation
@@ -518,21 +561,69 @@ inline double log_lik_binomial(int y, int n, double eta) {
 
 inline double log_lik_negbin(int y, double mu, double phi) {
   if (mu <= 0 || phi <= 0) return -1e10;
-  return R::lgammafn(y + phi) - R::lgammafn(phi) - R::lgammafn(y + 1.0)
+  return std::lgamma(y + phi) - std::lgamma(phi) - std::lgamma(y + 1.0)
        + phi * std::log(phi / (mu + phi))
        + y * std::log(mu / (mu + phi));
 }
 
 inline double log_lik_poisson(int y, double mu) {
   if (mu <= 0) return -1e10;
-  return y * std::log(mu) - mu - R::lgammafn(y + 1.0);
+  return y * std::log(mu) - mu - std::lgamma(y + 1.0);
 }
 
 inline double log_lik_gamma(double y, double shape, double mu) {
   if (y <= 0 || shape <= 0 || mu <= 0) return -1e10;
   double rate = shape / mu;
   return shape * std::log(rate) + (shape - 1.0) * std::log(y)
-       - rate * y - R::lgammafn(shape);
+       - rate * y - std::lgamma(shape);
+}
+
+// =====================================================================
+// Observation log-likelihood helper (fused with gradient computation)
+// Matches compute_log_post observation loop exactly. Used by specialized
+// H gradient functions to avoid a separate O(N) pass.
+// =====================================================================
+
+inline double compute_obs_ll(
+    const ModelData& data, int i,
+    double eta_num, double eta_denom,
+    double phi_num, double phi_denom
+) {
+  if (data.model_type == ModelType::BINOMIAL) {
+    return log_lik_binomial(data.y_num[i], data.y_denom[i], eta_num);
+  } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+    double mu_num = std::exp(eta_num);
+    double mu_denom = std::exp(eta_denom);
+    return log_lik_negbin(data.y_num[i], mu_num, phi_num)
+         + log_lik_negbin(data.y_denom[i], mu_denom, phi_denom);
+  } else if (data.model_type == ModelType::POISSON_GAMMA) {
+    double mu_num = std::exp(eta_num);
+    double mu_denom = std::exp(eta_denom);
+    return log_lik_poisson(data.y_num[i], mu_num)
+         + log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+  } else if (data.model_type == ModelType::GAMMA_GAMMA) {
+    double mu_num = std::exp(eta_num);
+    double mu_denom = std::exp(eta_denom);
+    return log_lik_gamma(data.y_num_cont[i], phi_num, mu_num)
+         + log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
+  } else if (data.model_type == ModelType::LOGNORMAL) {
+    double log_y_num = std::log(data.y_num_cont[i]);
+    double log_y_denom = std::log(data.y_denom_cont[i]);
+    double z_num = (log_y_num - eta_num) / phi_num;
+    double z_denom = (log_y_denom - eta_denom) / phi_denom;
+    return -log_y_num - std::log(phi_num) - 0.5 * z_num * z_num
+           -log_y_denom - std::log(phi_denom) - 0.5 * z_denom * z_denom;
+  } else if (data.model_type == ModelType::BETA_BINOMIAL) {
+    double p = 1.0 / (1.0 + std::exp(-eta_num));
+    int y = data.y_num[i];
+    int n = data.y_denom[i];
+    double alpha = p * phi_num;
+    double beta_param = (1.0 - p) * phi_num;
+    return std::lgamma(y + alpha) + std::lgamma(n - y + beta_param) - std::lgamma(n + phi_num)
+         - std::lgamma(alpha) - std::lgamma(beta_param) + std::lgamma(phi_num)
+         + ratiod::math::portable_lchoose(n, y);
+  }
+  return 0.0;
 }
 
 // =====================================================================
@@ -571,7 +662,8 @@ double icar_quadratic_form(
 double compute_log_post(
     const std::vector<double>& params,
     const ModelData& data,
-    const ParamLayout& layout
+    const ParamLayout& layout,
+    bool skip_obs_loop
 ) {
   // Extract parameters
   const double* beta_num = &params[layout.beta_num_start];
@@ -1383,8 +1475,13 @@ double compute_log_post(
   }
 
   // ============ LIKELIHOOD (parallelized) ============
+  // When skip_obs_loop is true, we skip this section entirely.
+  // This is used by the fused gradient+log_post computation where
+  // the observation log-likelihood is accumulated during the gradient pass.
 
   double log_lik = 0.0;
+
+  if (!skip_obs_loop) {
 
   // NOTE: Disable OpenMP for GP models to avoid race conditions
   // The GP NNGP likelihood accesses shared data structures that may not be thread-safe
@@ -1706,13 +1803,15 @@ double compute_log_post(
       double alpha = p * phi_num;
       double beta_param = (1.0 - p) * phi_num;
       // Beta-binomial log-likelihood
-      ll_i = R::lgammafn(y + alpha) + R::lgammafn(n - y + beta_param) - R::lgammafn(n + phi_num);
-      ll_i += -R::lgammafn(alpha) - R::lgammafn(beta_param) + R::lgammafn(phi_num);
-      ll_i += R::lchoose(n, y);
+      ll_i = std::lgamma(y + alpha) + std::lgamma(n - y + beta_param) - std::lgamma(n + phi_num);
+      ll_i += -std::lgamma(alpha) - std::lgamma(beta_param) + std::lgamma(phi_num);
+      ll_i += ratiod::math::portable_lchoose(n, y);
     }
 
     log_lik += ll_i;
   }
+
+  } // end if (!skip_obs_loop)
 
   log_post += log_lik;
   return log_post;
@@ -1774,10 +1873,16 @@ void compute_gradient_analytical(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
   int n_params = params.size();
   grad.assign(n_params, 0.0);
+
+  // Fused log-posterior computation: accumulate observation log-likelihood
+  // alongside gradients to avoid a separate O(N) pass.
+  const bool compute_lp = (log_post_out != nullptr);
+  double obs_log_lik = 0.0;
 
   // Extract parameters
   const double* beta_num = &params[layout.beta_num_start];
@@ -2207,6 +2312,7 @@ void compute_gradient_analytical(
     double local_grad_phi_num = 0.0;
     double local_grad_phi_denom = 0.0;
     std::vector<double> local_grad_re(layout.has_re ? data.n_re_groups : 0, 0.0);
+    double local_obs_ll = 0.0;  // Fused log-likelihood accumulator
 
     #pragma omp for schedule(static)
     for (int i = 0; i < data.N; i++) {
@@ -2474,7 +2580,7 @@ void compute_gradient_analytical(
         // Denominator NegBin gradient (always standard, not ZI)
         double denom_d = mu_denom + phi_denom;
         resid_denom = y_denom_i - mu_denom * (y_denom_i + phi_denom) / denom_d;
-        grad_phi_denom_i = R::digamma(y_denom_i + phi_denom) - R::digamma(phi_denom)
+        grad_phi_denom_i = ratiod::math::portable_digamma(y_denom_i + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                            + std::log(phi_denom / denom_d)
                            + (mu_denom - y_denom_i) / denom_d;
 
@@ -2499,7 +2605,7 @@ void compute_gradient_analytical(
             double denom_num = mu_num + phi_num;
             resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num;
             grad_logit_zi_i = -zi_prob;  // d/d(logit_zi) log(1-zi) = -zi
-            grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
+            grad_phi_num_i = ratiod::math::portable_digamma(y_num_i + phi_num) - ratiod::math::portable_digamma(phi_num)
                              + std::log(phi_num / denom_num)
                              + (mu_num - y_num_i) / denom_num;
           }
@@ -2521,7 +2627,7 @@ void compute_gradient_analytical(
             resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num
                         + phi_num * p0_nb * mu_num / ((phi_num + mu_num) * (1.0 - p0_nb));
             grad_logit_zi_i = 1.0 - zi_prob;  // d/d(logit_theta) log(theta) = 1-theta
-            grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
+            grad_phi_num_i = ratiod::math::portable_digamma(y_num_i + phi_num) - ratiod::math::portable_digamma(phi_num)
                              + std::log(phi_num / denom_num)
                              + (mu_num - y_num_i) / denom_num;
             // Truncation correction for phi gradient
@@ -2531,7 +2637,7 @@ void compute_gradient_analytical(
           // Standard NegBin (no ZI)
           double denom_num = mu_num + phi_num;
           resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num;
-          grad_phi_num_i = R::digamma(y_num_i + phi_num) - R::digamma(phi_num)
+          grad_phi_num_i = ratiod::math::portable_digamma(y_num_i + phi_num) - ratiod::math::portable_digamma(phi_num)
                            + std::log(phi_num / denom_num)
                            + (mu_num - y_num_i) / denom_num;
         }
@@ -2547,7 +2653,7 @@ void compute_gradient_analytical(
         resid_denom = phi_num * (y_denom_i / mu_denom - 1.0);
         double rate = phi_num / mu_denom;
         double grad_phi_gamma = std::log(rate) + 1.0 + std::log(y_denom_i)
-                                - R::digamma(phi_num) - rate * y_denom_i / phi_num;
+                                - ratiod::math::portable_digamma(phi_num) - rate * y_denom_i / phi_num;
 
         // Numerator with ZI handling
         if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::ZI_POISSON) {
@@ -2610,9 +2716,9 @@ void compute_gradient_analytical(
         double rate_num = phi_num / mu_num;
         double rate_denom = phi_denom / mu_denom;
         grad_phi_num_i = std::log(rate_num) + 1.0 + std::log(y_num_i)
-                         - R::digamma(phi_num) - y_num_i / mu_num;
+                         - ratiod::math::portable_digamma(phi_num) - y_num_i / mu_num;
         grad_phi_denom_i = std::log(rate_denom) + 1.0 + std::log(y_denom_i)
-                           - R::digamma(phi_denom) - y_denom_i / mu_denom;
+                           - ratiod::math::portable_digamma(phi_denom) - y_denom_i / mu_denom;
 
       } else if (data.model_type == ModelType::LOGNORMAL) {
         // ---- LOGNORMAL ----
@@ -2662,18 +2768,18 @@ void compute_gradient_analytical(
 
         // d(LL)/d(eta) = d(LL)/d(p) * d(p)/d(eta) where d(p)/d(eta) = p*(1-p)
         // d(LL)/d(p) = phi * (digamma(y+alpha) - digamma(n-y+beta) - digamma(alpha) + digamma(beta))
-        double psi_y_alpha = R::digamma(y_i + alpha);
-        double psi_nmy_beta = R::digamma(n_i - y_i + beta_param);
-        double psi_alpha = R::digamma(alpha);
-        double psi_beta = R::digamma(beta_param);
+        double psi_y_alpha = ratiod::math::portable_digamma(y_i + alpha);
+        double psi_nmy_beta = ratiod::math::portable_digamma(n_i - y_i + beta_param);
+        double psi_alpha = ratiod::math::portable_digamma(alpha);
+        double psi_beta = ratiod::math::portable_digamma(beta_param);
         double dLL_dp = phi_num * (psi_y_alpha - psi_nmy_beta - psi_alpha + psi_beta);
         resid_num = dLL_dp * p * (1.0 - p);
 
         // d(LL)/d(phi) where phi = alpha + beta
         // d(LL)/d(phi) = p*digamma(y+alpha) + (1-p)*digamma(n-y+beta) - digamma(n+phi)
         //               - p*digamma(alpha) - (1-p)*digamma(beta) + digamma(phi)
-        double psi_n_phi = R::digamma(n_i + phi_num);
-        double psi_phi = R::digamma(phi_num);
+        double psi_n_phi = ratiod::math::portable_digamma(n_i + phi_num);
+        double psi_phi = ratiod::math::portable_digamma(phi_num);
         grad_phi_num_i = p * psi_y_alpha + (1.0 - p) * psi_nmy_beta - psi_n_phi
                          - p * psi_alpha - (1.0 - p) * psi_beta + psi_phi;
 
@@ -2828,6 +2934,74 @@ void compute_gradient_analytical(
       grad_phi_num_lik += grad_phi_num_i;
       grad_phi_denom_lik += grad_phi_denom_i;
       #endif
+
+      // Fused log-likelihood: compute per-observation log_lik using already-computed
+      // intermediates. This avoids a separate O(N) pass through compute_log_post.
+      if (compute_lp) {
+        double ll_i = 0.0;
+        if (data.model_type == ModelType::BINOMIAL) {
+          double p_i = 1.0 / (1.0 + std::exp(-eta_num));
+          int n_trials = data.y_denom[i];
+          int y_i = data.y_num[i];
+          if (data.zi_type == ratiod_zi::ZIType::ZI_BINOMIAL) {
+            ll_i = ratiod_zi::zi_binomial_lpmf_logit(y_i, n_trials, p_i, logit_zi);
+          } else if (data.zi_type == ratiod_zi::ZIType::HURDLE_BINOMIAL) {
+            ll_i = ratiod_zi::hurdle_binomial_lpmf_logit(y_i, n_trials, p_i, logit_zi);
+          } else if (data.zi_type == ratiod_zi::ZIType::OI_BINOMIAL) {
+            ll_i = ratiod_zi::oi_binomial_lpmf_logit(y_i, n_trials, p_i, logit_oi);
+          } else if (data.zi_type == ratiod_zi::ZIType::ZOIB) {
+            ll_i = ratiod_zi::zoib_lpmf_logit(y_i, n_trials, p_i, logit_zi, logit_oi);
+          } else {
+            ll_i = log_lik_binomial(y_i, n_trials, eta_num);
+          }
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+          double mu_num_i = std::exp(eta_num);
+          double mu_denom_i = std::exp(eta_denom);
+          if (layout.has_zi) {
+            ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num_i, phi_num,
+                                               logit_zi, data.zi_type);
+          } else {
+            ll_i = log_lik_negbin(data.y_num[i], mu_num_i, phi_num);
+          }
+          ll_i += log_lik_negbin(data.y_denom[i], mu_denom_i, phi_denom);
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
+          double mu_num_i = std::exp(eta_num);
+          double mu_denom_i = std::exp(eta_denom);
+          if (layout.has_zi) {
+            ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num_i, phi_num,
+                                               logit_zi, data.zi_type);
+          } else {
+            ll_i = log_lik_poisson(data.y_num[i], mu_num_i);
+          }
+          ll_i += log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom_i);
+        } else if (data.model_type == ModelType::GAMMA_GAMMA) {
+          double mu_num_i = std::exp(eta_num);
+          double mu_denom_i = std::exp(eta_denom);
+          ll_i = log_lik_gamma(data.y_num_cont[i], phi_num, mu_num_i);
+          ll_i += log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom_i);
+        } else if (data.model_type == ModelType::LOGNORMAL) {
+          double log_y_num_i = std::log(data.y_num_cont[i]);
+          double log_y_denom_i = std::log(data.y_denom_cont[i]);
+          double z_num_i = (log_y_num_i - eta_num) / phi_num;
+          double z_denom_i = (log_y_denom_i - eta_denom) / phi_denom;
+          ll_i = -log_y_num_i - std::log(phi_num) - 0.5 * z_num_i * z_num_i;
+          ll_i += -log_y_denom_i - std::log(phi_denom) - 0.5 * z_denom_i * z_denom_i;
+        } else if (data.model_type == ModelType::BETA_BINOMIAL) {
+          double p_i = 1.0 / (1.0 + std::exp(-eta_num));
+          int y_i = data.y_num[i];
+          int n_i = data.y_denom[i];
+          double alpha_i = p_i * phi_num;
+          double beta_i = (1.0 - p_i) * phi_num;
+          ll_i = std::lgamma(y_i + alpha_i) + std::lgamma(n_i - y_i + beta_i) - std::lgamma(n_i + phi_num);
+          ll_i += -std::lgamma(alpha_i) - std::lgamma(beta_i) + std::lgamma(phi_num);
+          ll_i += ratiod::math::portable_lchoose(n_i, y_i);
+        }
+        #ifdef _OPENMP
+        local_obs_ll += ll_i;
+        #else
+        obs_log_lik += ll_i;
+        #endif
+      }
     }
 
   #ifdef _OPENMP
@@ -2845,6 +3019,7 @@ void compute_gradient_analytical(
       for (int g = 0; g < (int)local_grad_re.size(); g++) {
         grad[layout.re_start + g] += local_grad_re[g];
       }
+      obs_log_lik += local_obs_ll;
     }
   }  // end parallel
   #endif
@@ -3057,6 +3232,14 @@ void compute_gradient_analytical(
       grad[layout.log_tau_spatial_idx] += 0.5 * (n_spatial - 1) - 0.5 * tau_spatial * icar_quad;
     }
   }
+
+  // Fused log-posterior output: combine prior/structural terms with observation log-lik.
+  // Prior/structural terms are computed via compute_log_post with skip_obs_loop=true (O(p+S+T)).
+  // Observation log-lik was accumulated inline during the gradient computation (O(N)).
+  // Total: one O(N) pass instead of two.
+  if (log_post_out) {
+    *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+  }
 }
 
 // =====================================================================
@@ -3067,10 +3250,16 @@ void compute_gradient_numerical(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
   int n = params.size();
   grad.resize(n);
+
+  // Compute log_post at central point if requested (cheap: one extra eval)
+  if (log_post_out) {
+    *log_post_out = compute_log_post(params, data, layout);
+  }
 
   double h = 1e-5;
 
@@ -3133,7 +3322,8 @@ void compute_gradient_autodiff(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
     using namespace ratiod::ad;
 
@@ -3147,6 +3337,9 @@ void compute_gradient_autodiff(
     // Compute log posterior using templated implementation
     Var log_post = ratiod::compute_log_post_impl(params_ad, data, layout);
 
+    // Extract log_post value before backward pass (free: already computed)
+    if (log_post_out) *log_post_out = log_post.val();
+
     // Backward pass to compute gradients
     log_post.backward();
 
@@ -3154,6 +3347,43 @@ void compute_gradient_autodiff(
     grad = get_adjoints(params_ad);
 
     // TapeScope destructor handles cleanup
+}
+
+// =====================================================================
+// Arena-based reverse-mode autodiff gradient (O(N) - fast, all models)
+// Uses contiguous SoA memory layout with pre-computed partials.
+// ~10-30x faster than tape autodiff, within 50% of hand-coded speed.
+// =====================================================================
+
+void compute_gradient_arena(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
+) {
+    using namespace ratiod::arena;
+
+    // Thread-safe: each call gets its own arena via RAII
+    ArenaScope scope;
+    Arena* arena = scope.arena();
+
+    // Create autodiff variables from parameters
+    std::vector<Var> params_ar = make_vars(arena, params);
+
+    // Compute log posterior using templated implementation
+    Var log_post = ratiod::compute_log_post_impl(params_ar, data, layout);
+
+    // Extract log_post value before backward pass
+    if (log_post_out) *log_post_out = log_post.val();
+
+    // Backward pass to compute gradients
+    log_post.backward();
+
+    // Extract gradients
+    grad = get_adjoints(params_ar);
+
+    // ArenaScope destructor handles cleanup
 }
 
 // =====================================================================
@@ -3165,7 +3395,8 @@ void compute_gradient_forward(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
     int n_params = static_cast<int>(params.size());
     grad.assign(n_params, 0.0);
@@ -3187,6 +3418,9 @@ void compute_gradient_forward(
 
         // Extract gradient component
         grad[i] = log_post.grad;
+
+        // Extract log_post value on first pass (free: already computed)
+        if (i == 0 && log_post_out) *log_post_out = log_post.val;
     }
 }
 
@@ -3199,8 +3433,14 @@ void compute_gradient_gp_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -3339,6 +3579,9 @@ void compute_gradient_gp_handcoded(
             eta_num += gp_effect;
         }
 
+        // Fused log-posterior: accumulate obs log-lik
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         // Likelihood gradients depend on model type
         double dLL_deta_num = 0.0;
         double dLL_deta_denom = 0.0;
@@ -3387,7 +3630,7 @@ void compute_gradient_gp_handcoded(
             double mu_num = std::exp(eta_num);
             double y = data.y_num[i];
             // d(log_lik)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + 1 - (y+phi)/(mu+phi)
-            double dLL_dphi = R::digamma(y + phi_num) - R::digamma(phi_num)
+            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
                              + std::log(phi_num / (mu_num + phi_num)) + 1.0
                              - (y + phi_num) / (mu_num + phi_num);
             grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
@@ -3398,14 +3641,14 @@ void compute_gradient_gp_handcoded(
             if (data.model_type == ModelType::NEGBIN_NEGBIN) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom[i];
-                double dLL_dphi = R::digamma(y + phi_denom) - R::digamma(phi_denom)
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             } else if (data.model_type == ModelType::POISSON_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = R::digamma(phi_denom);
+                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
                 double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
                                  + std::log(y) - std::log(mu_denom)
                                  - y / mu_denom;
@@ -3413,6 +3656,8 @@ void compute_gradient_gp_handcoded(
             }
         }
     }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -3424,8 +3669,14 @@ void compute_gradient_gp_temporal_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -3496,6 +3747,8 @@ void compute_gradient_gp_temporal_handcoded(
             }
         }
 
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         double dLL_num = 0.0, dLL_denom = 0.0;
         if (data.model_type == ModelType::BINOMIAL) {
             double p = 1.0 / (1.0 + std::exp(-eta_num));
@@ -3557,6 +3810,8 @@ void compute_gradient_gp_temporal_handcoded(
             grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
         }
     }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -3568,8 +3823,14 @@ void compute_gradient_temporal_gp_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -3723,6 +3984,8 @@ void compute_gradient_temporal_gp_handcoded(
             }
         }
 
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         // Family-specific residuals
         double resid_num = 0.0, resid_denom = 0.0;
         double grad_phi_num_i = 0.0, grad_phi_denom_i = 0.0;
@@ -3736,10 +3999,10 @@ void compute_gradient_temporal_gp_handcoded(
             double denom_num = mu_num + phi_num, denom_d = mu_denom + phi_denom;
             resid_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_num;
             resid_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / denom_d;
-            grad_phi_num_i = R::digamma(data.y_num[i] + phi_num) - R::digamma(phi_num)
+            grad_phi_num_i = ratiod::math::portable_digamma(data.y_num[i] + phi_num) - ratiod::math::portable_digamma(phi_num)
                              + std::log(phi_num / denom_num)
                              + (mu_num - data.y_num[i]) / denom_num;
-            grad_phi_denom_i = R::digamma(data.y_denom[i] + phi_denom) - R::digamma(phi_denom)
+            grad_phi_denom_i = ratiod::math::portable_digamma(data.y_denom[i] + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                                + std::log(phi_denom / denom_d)
                                + (mu_denom - data.y_denom[i]) / denom_d;
 
@@ -3750,7 +4013,7 @@ void compute_gradient_temporal_gp_handcoded(
             resid_denom = phi_num * (y_denom_i / mu_denom - 1.0);
             double rate = phi_num / mu_denom;
             grad_phi_num_i = std::log(rate) + 1.0 + std::log(y_denom_i)
-                             - R::digamma(phi_num) - rate * y_denom_i / phi_num;
+                             - ratiod::math::portable_digamma(phi_num) - rate * y_denom_i / phi_num;
 
         } else if (data.model_type == ModelType::GAMMA_GAMMA) {
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
@@ -3759,9 +4022,9 @@ void compute_gradient_temporal_gp_handcoded(
             resid_denom = phi_denom * (y_denom_i / mu_denom - 1.0);
             double rate_num = phi_num / mu_num, rate_denom = phi_denom / mu_denom;
             grad_phi_num_i = std::log(rate_num) + 1.0 + std::log(y_num_i)
-                             - R::digamma(phi_num) - y_num_i / mu_num;
+                             - ratiod::math::portable_digamma(phi_num) - y_num_i / mu_num;
             grad_phi_denom_i = std::log(rate_denom) + 1.0 + std::log(y_denom_i)
-                               - R::digamma(phi_denom) - y_denom_i / mu_denom;
+                               - ratiod::math::portable_digamma(phi_denom) - y_denom_i / mu_denom;
 
         } else if (data.model_type == ModelType::LOGNORMAL) {
             double mu_num = eta_num, mu_denom = eta_denom;
@@ -3780,14 +4043,14 @@ void compute_gradient_temporal_gp_handcoded(
             double p = 1.0 / (1.0 + std::exp(-eta_num));
             int y_i = data.y_num[i], n_i = data.y_denom[i];
             double alpha = p * phi_num, beta_param = (1.0 - p) * phi_num;
-            double psi_y_alpha = R::digamma(y_i + alpha);
-            double psi_nmy_beta = R::digamma(n_i - y_i + beta_param);
-            double psi_alpha = R::digamma(alpha);
-            double psi_beta = R::digamma(beta_param);
+            double psi_y_alpha = ratiod::math::portable_digamma(y_i + alpha);
+            double psi_nmy_beta = ratiod::math::portable_digamma(n_i - y_i + beta_param);
+            double psi_alpha = ratiod::math::portable_digamma(alpha);
+            double psi_beta = ratiod::math::portable_digamma(beta_param);
             double dLL_dp = phi_num * (psi_y_alpha - psi_nmy_beta - psi_alpha + psi_beta);
             resid_num = dLL_dp * p * (1.0 - p);
-            double psi_n_phi = R::digamma(n_i + phi_num);
-            double psi_phi = R::digamma(phi_num);
+            double psi_n_phi = ratiod::math::portable_digamma(n_i + phi_num);
+            double psi_phi = ratiod::math::portable_digamma(phi_num);
             grad_phi_num_i = p * psi_y_alpha + (1.0 - p) * psi_nmy_beta - psi_n_phi
                              - p * psi_alpha - (1.0 - p) * psi_beta + psi_phi;
         }
@@ -3821,6 +4084,8 @@ void compute_gradient_temporal_gp_handcoded(
     // Dispersion gradient accumulation (on log scale: multiply by phi)
     if (layout.has_phi_num) grad[layout.log_phi_num_idx] += grad_phi_num_lik * phi_num;
     if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] += grad_phi_denom_lik * phi_denom;
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -3832,8 +4097,14 @@ void compute_gradient_msgp_temporal_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -3964,6 +4235,8 @@ void compute_gradient_msgp_temporal_handcoded(
             }
         }
 
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         double dLL_num = 0.0, dLL_denom = 0.0;
         if (data.model_type == ModelType::BINOMIAL) {
             double p = 1.0 / (1.0 + std::exp(-eta_num));
@@ -4031,6 +4304,8 @@ void compute_gradient_msgp_temporal_handcoded(
             grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
         }
     }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -4042,8 +4317,14 @@ void compute_gradient_svc_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -4211,6 +4492,8 @@ void compute_gradient_svc_handcoded(
             eta_num += svc_effect;
         }
 
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         // Likelihood gradients depend on model type
         double dLL_deta_num = 0.0;
         double dLL_deta_denom = 0.0;
@@ -4256,7 +4539,7 @@ void compute_gradient_svc_handcoded(
         if (layout.has_phi_num && data.model_type == ModelType::NEGBIN_NEGBIN) {
             double mu_num = std::exp(eta_num);
             double y = data.y_num[i];
-            double dLL_dphi = R::digamma(y + phi_num) - R::digamma(phi_num)
+            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
                              + std::log(phi_num / (mu_num + phi_num)) + 1.0
                              - (y + phi_num) / (mu_num + phi_num);
             grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
@@ -4267,14 +4550,14 @@ void compute_gradient_svc_handcoded(
             if (data.model_type == ModelType::NEGBIN_NEGBIN) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom[i];
-                double dLL_dphi = R::digamma(y + phi_denom) - R::digamma(phi_denom)
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             } else if (data.model_type == ModelType::POISSON_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = R::digamma(phi_denom);
+                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
                 double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
                                  + std::log(y) - std::log(mu_denom)
                                  - y / mu_denom;
@@ -4295,6 +4578,8 @@ void compute_gradient_svc_handcoded(
                     << " (n_svc=" << n_svc << ", N_obs=" << N_obs << ")\n";
         svc_grad_debug_counter++;
     }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -4306,8 +4591,14 @@ void compute_gradient_tvc_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -4482,6 +4773,8 @@ void compute_gradient_tvc_handcoded(
             eta_num += tvc_effect;
         }
 
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         // Likelihood gradients depend on model type
         double dLL_deta_num = 0.0;
         double dLL_deta_denom = 0.0;
@@ -4530,7 +4823,7 @@ void compute_gradient_tvc_handcoded(
         if (layout.has_phi_num && data.model_type == ModelType::NEGBIN_NEGBIN) {
             double mu_num = std::exp(eta_num);
             double y = data.y_num[i];
-            double dLL_dphi = R::digamma(y + phi_num) - R::digamma(phi_num)
+            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
                              + std::log(phi_num / (mu_num + phi_num)) + 1.0
                              - (y + phi_num) / (mu_num + phi_num);
             grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
@@ -4541,14 +4834,14 @@ void compute_gradient_tvc_handcoded(
             if (data.model_type == ModelType::NEGBIN_NEGBIN) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom[i];
-                double dLL_dphi = R::digamma(y + phi_denom) - R::digamma(phi_denom)
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             } else if (data.model_type == ModelType::POISSON_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = R::digamma(phi_denom);
+                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
                 double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
                                  + std::log(y) - std::log(mu_denom)
                                  - y / mu_denom;
@@ -4569,6 +4862,8 @@ void compute_gradient_tvc_handcoded(
                     << ", n_groups=" << n_groups << ")\n";
         tvc_grad_debug_counter++;
     }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -4580,8 +4875,14 @@ void compute_gradient_latent_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -4749,6 +5050,8 @@ void compute_gradient_latent_handcoded(
             eta_num += latent_effect;
         }
 
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         // Likelihood gradients depend on model type
         double dLL_deta_num = 0.0;
         double dLL_deta_denom = 0.0;
@@ -4801,7 +5104,7 @@ void compute_gradient_latent_handcoded(
             if (data.model_type == ModelType::NEGBIN_NEGBIN) {
                 double mu_num = std::exp(eta_num);
                 double y = data.y_num[i];
-                double dLL_dphi = R::digamma(y + phi_num) - R::digamma(phi_num)
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
                                  + std::log(phi_num / (mu_num + phi_num)) + 1.0
                                  - (y + phi_num) / (mu_num + phi_num);
                 grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
@@ -4809,7 +5112,7 @@ void compute_gradient_latent_handcoded(
                 // For POISSON_GAMMA, phi_num is the gamma shape parameter for denominator
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = R::digamma(phi_num);
+                double digamma_phi = ratiod::math::portable_digamma(phi_num);
                 double dLL_dphi = std::log(phi_num) + 1.0 - digamma_phi
                                  + std::log(y) - std::log(mu_denom)
                                  - y / mu_denom;
@@ -4821,7 +5124,7 @@ void compute_gradient_latent_handcoded(
         if (layout.has_phi_denom && data.model_type == ModelType::NEGBIN_NEGBIN) {
             double mu_denom = std::exp(eta_denom);
             double y = data.y_denom[i];
-            double dLL_dphi = R::digamma(y + phi_denom) - R::digamma(phi_denom)
+            double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                              + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                              - (y + phi_denom) / (mu_denom + phi_denom);
             grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
@@ -4877,6 +5180,8 @@ void compute_gradient_latent_handcoded(
             grad[layout.latent_factor_start + k] += -sum_grad;  // factor_raw[0,k]
         }
     }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -5080,8 +5385,14 @@ void compute_gradient_msgp_handcoded(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -5262,6 +5573,8 @@ void compute_gradient_msgp_handcoded(
             eta_num += ms_spatial;
         }
 
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
         // Likelihood gradients depend on model type
         double dLL_deta_num = 0.0;
         double dLL_deta_denom = 0.0;
@@ -5311,7 +5624,7 @@ void compute_gradient_msgp_handcoded(
             double mu_num = std::exp(eta_num);
             double y = data.y_num[i];
             // d(log_lik)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + 1 - (y+phi)/(mu+phi)
-            double dLL_dphi = R::digamma(y + phi_num) - R::digamma(phi_num)
+            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
                              + std::log(phi_num / (mu_num + phi_num)) + 1.0
                              - (y + phi_num) / (mu_num + phi_num);
             grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
@@ -5322,14 +5635,14 @@ void compute_gradient_msgp_handcoded(
             if (data.model_type == ModelType::NEGBIN_NEGBIN) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom[i];
-                double dLL_dphi = R::digamma(y + phi_denom) - R::digamma(phi_denom)
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             } else if (data.model_type == ModelType::POISSON_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = R::digamma(phi_denom);
+                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
                 double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
                                  + std::log(y) - std::log(mu_denom)
                                  - y / mu_denom;
@@ -5337,6 +5650,8 @@ void compute_gradient_msgp_handcoded(
             }
         }
     }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -5806,8 +6121,14 @@ void compute_gradient_hsgp(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 ) {
+    // Fused log-posterior: accumulate obs log-lik during gradient loop,
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    double obs_log_lik = 0.0;
   int n_params = params.size();
   grad.assign(n_params, 0.0);
 
@@ -5851,8 +6172,23 @@ void compute_gradient_hsgp(
   ratiod_hsgp::hsgp_evaluate(hsgp_beta, sigma2_hsgp, lengthscale_hsgp,
                               data.hsgp_data, hsgp_f);
 
+  // Temporal parameters (for HSGP + temporal combinations)
+  double tau_temporal = 0.0;
+  int T_len = 0;
+  const double* phi_temporal = nullptr;
+  double rho_ar1 = 0.5;
+  if (layout.has_temporal) {
+    tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
+    T_len = layout.temporal_end - layout.temporal_start;
+    phi_temporal = &params[layout.temporal_start];
+    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
+      rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
+    }
+  }
+
   // Compute likelihood and accumulate grad_f (gradient of log-lik w.r.t. f_i)
   std::vector<double> grad_f(data.N, 0.0);
+  std::vector<double> grad_temporal_lik(T_len, 0.0);
 
   // --- Prior gradients ---
 
@@ -5913,6 +6249,14 @@ void compute_gradient_hsgp(
     grad[layout.hsgp_beta_start + j] = -hsgp_beta[j];
   }
 
+  // Temporal prior on tau (Gamma) and rho (Beta)
+  if (layout.has_temporal) {
+    grad[layout.log_tau_temporal_idx] = (data.tau_temporal_shape - 1.0) - data.tau_temporal_rate * tau_temporal + 1.0;
+    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
+      grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+    }
+  }
+
   // --- Likelihood loop ---
   for (int i = 0; i < data.N; i++) {
     // Linear predictors
@@ -5938,6 +6282,19 @@ void compute_gradient_hsgp(
     } else {
       eta_num += hsgp_f[i];
     }
+
+    // Temporal effect
+    int t_idx = -1;
+    if (layout.has_temporal && !data.temporal_time_idx.empty() &&
+        i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+      t_idx = data.temporal_time_idx[i] - 1;
+      if (t_idx >= 0 && t_idx < T_len) {
+        if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
+        else { eta_num += phi_temporal[t_idx]; }
+      }
+    }
+
+    if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
 
     // Likelihood gradients depend on model type
     double dLL_deta_num = 0.0;
@@ -5982,7 +6339,7 @@ void compute_gradient_hsgp(
       double mu_num = std::exp(eta_num);
       double y = data.y_num[i];
       // d(log_lik)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + 1 - (y+phi)/(mu+phi)
-      double dLL_dphi = R::digamma(y + phi_num) - R::digamma(phi_num)
+      double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
                        + std::log(phi_num / (mu_num + phi_num)) + 1.0
                        - (y + phi_num) / (mu_num + phi_num);
       grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
@@ -5993,19 +6350,24 @@ void compute_gradient_hsgp(
       if (data.model_type == ModelType::NEGBIN_NEGBIN) {
         double mu_denom = std::exp(eta_denom);
         double y = data.y_denom[i];
-        double dLL_dphi = R::digamma(y + phi_denom) - R::digamma(phi_denom)
+        double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
                          + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                          - (y + phi_denom) / (mu_denom + phi_denom);
         grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
       } else if (data.model_type == ModelType::POISSON_GAMMA) {
         double mu_denom = std::exp(eta_denom);
         double y = data.y_denom_cont[i];
-        double digamma_phi = R::digamma(phi_denom);
+        double digamma_phi = ratiod::math::portable_digamma(phi_denom);
         double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
                          + std::log(y) - std::log(mu_denom)
                          - y / mu_denom;
         grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
       }
+    }
+
+    // Accumulate temporal likelihood gradient
+    if (layout.has_temporal && t_idx >= 0 && t_idx < T_len) {
+      grad_temporal_lik[t_idx] += data.temporal_shared ? (dLL_deta_num + dLL_deta_denom) : dLL_deta_num;
     }
 
     // Accumulate grad_f for HSGP
@@ -6027,6 +6389,760 @@ void compute_gradient_hsgp(
   }
   grad[layout.log_sigma2_hsgp_idx] += hsgp_grads.grad_log_sigma2;
   grad[layout.log_lengthscale_hsgp_idx] += hsgp_grads.grad_log_lengthscale;
+
+  // =========================================================================
+  // Temporal GMRF gradients (same pattern as compute_gradient_analytical)
+  // =========================================================================
+  if (layout.has_temporal && T_len > 0) {
+    for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
+    if (data.temporal_type == TemporalType::RW1) {
+      double qf = 0.0;
+      for (int t = 0; t < T_len; t++) {
+        double g = 0.0;
+        if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
+        if (t < T_len - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
+        grad[layout.temporal_start + t] += g;
+      }
+      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
+    } else if (data.temporal_type == TemporalType::RW2) {
+      double qf = 0.0;
+      for (int t = 0; t < T_len; t++) {
+        double g = 0.0;
+        if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
+        if (t >= 1 && t < T_len - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
+        if (t < T_len - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
+        grad[layout.temporal_start + t] += g;
+      }
+      for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
+      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
+    } else if (data.temporal_type == TemporalType::AR1) {
+      double omr2 = 1.0 - rho_ar1 * rho_ar1;
+      grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
+      if (T_len > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
+      double qf = omr2 * phi_temporal[0] * phi_temporal[0];
+      for (int t = 1; t < T_len; t++) {
+        double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
+        double g = -tau_temporal * r;
+        if (t < T_len - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
+        grad[layout.temporal_start + t] += g;
+      }
+      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * qf;
+      if (layout.logit_rho_ar1_idx >= 0) {
+        double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
+        for (int t = 1; t < T_len; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+        grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
+      }
+    }
+  }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+}
+
+// =====================================================================
+// Multiscale temporal gradient (hand-coded, rows 15, 45, 75)
+// Uses analytical gradients from hmc_multiscale_temporal_grad.h
+// Supports optional ICAR/BYM2 spatial
+// =====================================================================
+
+void compute_gradient_ms_temporal_handcoded(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
+) {
+    const bool fuse_lp = (log_post_out != nullptr);
+    double obs_log_lik = 0.0;
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    // Extract base parameters
+    const double* beta_num = &params[layout.beta_num_start];
+    const double* beta_denom = &params[layout.beta_denom_start];
+    double sigma_re = layout.has_re ? std::exp(params[layout.log_sigma_re_idx]) : 1.0;
+    const double* re = layout.has_re ? &params[layout.re_start] : nullptr;
+    double phi_num = layout.has_phi_num ? std::exp(params[layout.log_phi_num_idx]) : 1.0;
+    double phi_denom = layout.has_phi_denom ? std::exp(params[layout.log_phi_denom_idx]) : 1.0;
+
+    // Spatial parameters (ICAR/BYM2 if present)
+    double tau_spatial = 0.0;
+    const double* spatial_phi = nullptr;
+    double sigma_bym2 = 0.0, rho_bym2 = 0.0;
+    const double* theta_bym2 = nullptr;
+    if (layout.has_spatial) {
+        tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
+        spatial_phi = &params[layout.spatial_start];
+        if (layout.is_bym2) {
+            sigma_bym2 = std::exp(params[layout.log_sigma_bym2_idx]);
+            rho_bym2 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_bym2_idx]));
+            theta_bym2 = &params[layout.theta_bym2_start];
+        }
+    }
+
+    // Multiscale temporal parameters
+    const auto& mst = data.multiscale_temporal_data;
+    int n_trend = layout.trend_end - layout.trend_start;
+    int n_seasonal = layout.seasonal_end - layout.seasonal_start;
+    int n_short = layout.short_term_end - layout.short_term_start;
+
+    const double* trend = (n_trend > 0) ? &params[layout.trend_start] : nullptr;
+    const double* seasonal = (n_seasonal > 0) ? &params[layout.seasonal_start] : nullptr;
+    const double* short_term = (n_short > 0) ? &params[layout.short_term_start] : nullptr;
+
+    double sigma2_trend = (n_trend > 0) ? std::exp(params[layout.log_sigma2_trend_idx]) : 1.0;
+    double sigma2_seasonal = (n_seasonal > 0) ? std::exp(params[layout.log_sigma2_seasonal_idx]) : 1.0;
+    double sigma2_short = (n_short > 0) ? std::exp(params[layout.log_sigma2_short_idx]) : 1.0;
+    double rho_short = 0.5;
+    if (mst.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0) {
+        double logit_rho = params[layout.logit_rho_short_idx];
+        double u = 1.0 / (1.0 + std::exp(-logit_rho));
+        rho_short = 2.0 * u - 1.0;
+    }
+
+    // =========================================================================
+    // Prior gradients
+    // =========================================================================
+    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
+    for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
+    for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
+
+    if (layout.has_re && data.n_re_groups > 0) {
+        double ratio = sigma_re / data.sigma_re_scale;
+        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+    }
+
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+
+    // Spatial prior gradients (ICAR/BYM2)
+    if (layout.has_spatial && !layout.is_bym2) {
+        // ICAR: Gamma prior on tau_spatial
+        grad[layout.log_tau_spatial_idx] = (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
+    }
+    if (layout.is_bym2) {
+        // BYM2 prior gradients
+        double ratio_bym2 = sigma_bym2 / data.sigma_re_scale;
+        grad[layout.log_sigma_bym2_idx] = (-2.0 * ratio_bym2 / (data.sigma_re_scale * (1.0 + ratio_bym2 * ratio_bym2)) + 1.0) * sigma_bym2 - data.n_spatial_units;
+        grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
+    }
+
+    // PC priors on multiscale temporal variances
+    if (n_trend > 0) {
+        grad[layout.log_sigma2_trend_idx] = ratiod_temporal_grad::pc_prior_grad_log_sigma2(
+            sigma2_trend, data.ms_sigma2_trend_prior_U, data.ms_sigma2_trend_prior_alpha);
+    }
+    if (n_seasonal > 0) {
+        grad[layout.log_sigma2_seasonal_idx] = ratiod_temporal_grad::pc_prior_grad_log_sigma2(
+            sigma2_seasonal, data.ms_sigma2_seasonal_prior_U, data.ms_sigma2_seasonal_prior_alpha);
+    }
+    if (n_short > 0) {
+        grad[layout.log_sigma2_short_idx] = ratiod_temporal_grad::pc_prior_grad_log_sigma2(
+            sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha);
+    }
+    if (mst.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0) {
+        // Beta(2,2) prior on (rho+1)/2 → gradient = 1 - 2*u where u = (rho+1)/2
+        double u = (rho_short + 1.0) / 2.0;
+        grad[layout.logit_rho_short_idx] = 1.0 - 2.0 * u;
+    }
+
+    // =========================================================================
+    // Likelihood loop
+    // =========================================================================
+    std::vector<double> grad_trend_lik(n_trend, 0.0);
+    std::vector<double> grad_seasonal_lik(n_seasonal, 0.0);
+    std::vector<double> grad_short_lik(n_short, 0.0);
+    std::vector<double> grad_spatial_lik;
+    if (layout.has_spatial) grad_spatial_lik.assign(data.n_spatial_units, 0.0);
+    std::vector<double> grad_theta_lik;
+    if (layout.is_bym2) grad_theta_lik.assign(data.n_spatial_units, 0.0);
+
+    for (int i = 0; i < data.N; i++) {
+        double eta_num = 0.0, eta_denom = 0.0;
+        for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
+        for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
+        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+
+        // Spatial effect
+        int s_unit = -1;
+        if (layout.has_spatial && data.spatial_group[i] > 0) {
+            s_unit = data.spatial_group[i] - 1;
+            if (layout.is_bym2) {
+                double spatial_eff = sigma_bym2 * (std::sqrt(rho_bym2 * data.bym2_scale_factor) * spatial_phi[s_unit] + std::sqrt(1.0 - rho_bym2) * theta_bym2[s_unit]);
+                eta_num += spatial_eff; eta_denom += spatial_eff;
+            } else {
+                eta_num += spatial_phi[s_unit]; eta_denom += spatial_phi[s_unit];
+            }
+        }
+
+        // Multiscale temporal effect
+        int t_idx = -1;
+        if (!mst.time_index.empty() && i < (int)mst.time_index.size() && mst.time_index[i] > 0) {
+            t_idx = mst.time_index[i] - 1;
+            double ms_effect = 0.0;
+            if (trend != nullptr && t_idx < n_trend) ms_effect += trend[t_idx];
+            if (seasonal != nullptr && mst.seasonal_period > 0) {
+                int s_idx = t_idx % mst.seasonal_period;
+                if (s_idx < n_seasonal) ms_effect += seasonal[s_idx];
+            }
+            if (short_term != nullptr && t_idx < n_short) ms_effect += short_term[t_idx];
+            if (mst.shared) { eta_num += ms_effect; eta_denom += ms_effect; }
+            else { eta_num += ms_effect; }
+        }
+
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
+        double dLL_num = 0.0, dLL_denom = 0.0;
+        if (data.model_type == ModelType::BINOMIAL) {
+            double p = 1.0 / (1.0 + std::exp(-eta_num));
+            dLL_num = data.y_num[i] - data.y_denom[i] * p;
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
+            dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        }
+
+        for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] += dLL_num * data.X_num_flat[i * data.p_num + j];
+        for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] += dLL_denom * data.X_denom_flat[i * data.p_denom + j];
+        if (layout.has_re && data.re_group[i] > 0) grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
+
+        double dLL_shared = dLL_num + dLL_denom;
+
+        // Spatial likelihood gradient
+        if (layout.has_spatial && s_unit >= 0) {
+            if (layout.is_bym2) {
+                grad_spatial_lik[s_unit] += dLL_shared;
+                grad_theta_lik[s_unit] += dLL_shared;
+            } else {
+                grad_spatial_lik[s_unit] += dLL_shared;
+            }
+        }
+
+        // Multiscale temporal likelihood gradients
+        if (t_idx >= 0) {
+            double dLL_temporal = mst.shared ? dLL_shared : dLL_num;
+            if (trend != nullptr && t_idx < n_trend) grad_trend_lik[t_idx] += dLL_temporal;
+            if (seasonal != nullptr && mst.seasonal_period > 0) {
+                int s_idx = t_idx % mst.seasonal_period;
+                if (s_idx < n_seasonal) grad_seasonal_lik[s_idx] += dLL_temporal;
+            }
+            if (short_term != nullptr && t_idx < n_short) grad_short_lik[t_idx] += dLL_temporal;
+        }
+    }
+
+    // =========================================================================
+    // Spatial GMRF prior gradients (ICAR/BYM2)
+    // =========================================================================
+    if (layout.has_spatial) {
+        int S = data.n_spatial_units;
+        if (layout.is_bym2) {
+            double sqrt_rho_scale = std::sqrt(rho_bym2 * data.bym2_scale_factor);
+            double sqrt_one_minus_rho = std::sqrt(1.0 - rho_bym2);
+            // ICAR prior on spatial_phi
+            for (int s = 0; s < S; s++) {
+                double icar_grad = 0.0;
+                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
+                    int j = data.adj_col_idx[idx];  // already 0-based from R
+                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
+                }
+                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_bym2 * sqrt_rho_scale + icar_grad;
+                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_bym2 * sqrt_one_minus_rho - theta_bym2[s];
+            }
+            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S), data);
+            grad[layout.log_tau_spatial_idx] = 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
+            grad[layout.log_tau_spatial_idx] += (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
+        } else {
+            // ICAR
+            for (int s = 0; s < S; s++) {
+                double icar_grad = 0.0;
+                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
+                    int j = data.adj_col_idx[idx];  // already 0-based from R
+                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
+                }
+                grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad;
+            }
+            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S), data);
+            grad[layout.log_tau_spatial_idx] += 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
+        }
+    }
+
+    // =========================================================================
+    // Multiscale temporal GMRF prior gradients
+    // =========================================================================
+    ratiod_temporal_grad::MultiscaleTemporalGradients ms_grads;
+    ratiod_temporal_grad::multiscale_temporal_prior_gradients(
+        trend, n_trend,
+        seasonal, n_seasonal,
+        short_term, n_short,
+        sigma2_trend, sigma2_seasonal, sigma2_short, rho_short,
+        mst, ms_grads);
+
+    for (int t = 0; t < n_trend; t++) grad[layout.trend_start + t] = grad_trend_lik[t] + ms_grads.grad_trend[t];
+    for (int t = 0; t < n_seasonal; t++) grad[layout.seasonal_start + t] = grad_seasonal_lik[t] + ms_grads.grad_seasonal[t];
+    for (int t = 0; t < n_short; t++) grad[layout.short_term_start + t] = grad_short_lik[t] + ms_grads.grad_short_term[t];
+    if (n_trend > 0) grad[layout.log_sigma2_trend_idx] += ms_grads.grad_log_sigma2_trend;
+    if (n_seasonal > 0) grad[layout.log_sigma2_seasonal_idx] += ms_grads.grad_log_sigma2_seasonal;
+    if (n_short > 0) grad[layout.log_sigma2_short_idx] += ms_grads.grad_log_sigma2_short;
+    if (mst.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0) {
+        grad[layout.logit_rho_short_idx] += ms_grads.grad_logit_rho_short;
+    }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+}
+
+// =====================================================================
+// Spatiotemporal interaction gradient (hand-coded, rows 28-29, 58-59, 90-91)
+// Supports Knorr-Held Type I-IV with ICAR spatial + RW1/RW2 temporal
+// =====================================================================
+
+void compute_gradient_spatiotemporal_handcoded(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
+) {
+    const bool fuse_lp = (log_post_out != nullptr);
+    double obs_log_lik = 0.0;
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    // Extract base parameters
+    const double* beta_num = &params[layout.beta_num_start];
+    const double* beta_denom = &params[layout.beta_denom_start];
+    double sigma_re = layout.has_re ? std::exp(params[layout.log_sigma_re_idx]) : 1.0;
+    const double* re = layout.has_re ? &params[layout.re_start] : nullptr;
+    double phi_num = layout.has_phi_num ? std::exp(params[layout.log_phi_num_idx]) : 1.0;
+    double phi_denom = layout.has_phi_denom ? std::exp(params[layout.log_phi_denom_idx]) : 1.0;
+
+    // Spatial parameters (ICAR/BYM2)
+    double tau_spatial = 0.0;
+    const double* spatial_phi = nullptr;
+    double sigma_bym2 = 0.0, rho_bym2 = 0.0;
+    const double* theta_bym2 = nullptr;
+    if (layout.has_spatial) {
+        tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
+        spatial_phi = &params[layout.spatial_start];
+        if (layout.is_bym2) {
+            sigma_bym2 = std::exp(params[layout.log_sigma_bym2_idx]);
+            rho_bym2 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_bym2_idx]));
+            theta_bym2 = &params[layout.theta_bym2_start];
+        }
+    }
+
+    // Temporal parameters
+    double tau_temporal = 0.0;
+    int T_temporal = 0;
+    const double* phi_temporal = nullptr;
+    double rho_ar1 = 0.5;
+    if (layout.has_temporal) {
+        tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
+        T_temporal = layout.temporal_end - layout.temporal_start;
+        phi_temporal = &params[layout.temporal_start];
+        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
+            rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
+        }
+    }
+
+    // Spatiotemporal interaction parameters
+    const auto& st = data.spatiotemporal_data;
+    int S = st.n_spatial;
+    int T = st.n_times;
+    int ST = st.n_params;
+    double tau_st = std::exp(params[layout.log_tau_st_idx]);
+    double tau_st2 = 1.0;
+    if (layout.log_tau_st2_idx >= 0) tau_st2 = std::exp(params[layout.log_tau_st2_idx]);
+
+    const double* delta = &params[layout.st_delta_start];
+
+    // =========================================================================
+    // Prior gradients for base parameters
+    // =========================================================================
+    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
+    for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
+    for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
+
+    if (layout.has_re && data.n_re_groups > 0) {
+        double ratio = sigma_re / data.sigma_re_scale;
+        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+    }
+
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+
+    // Spatial prior (ICAR: Gamma on tau)
+    if (layout.has_spatial && !layout.is_bym2) {
+        grad[layout.log_tau_spatial_idx] = (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
+    }
+    if (layout.is_bym2) {
+        double ratio_bym2 = sigma_bym2 / data.sigma_re_scale;
+        grad[layout.log_sigma_bym2_idx] = (-2.0 * ratio_bym2 / (data.sigma_re_scale * (1.0 + ratio_bym2 * ratio_bym2)) + 1.0) * sigma_bym2 - data.n_spatial_units;
+        grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
+    }
+
+    // Temporal prior (Gamma on tau, Beta on rho)
+    if (layout.has_temporal) {
+        grad[layout.log_tau_temporal_idx] = (data.tau_temporal_shape - 1.0) - data.tau_temporal_rate * tau_temporal + 1.0;
+        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
+            grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+        }
+    }
+
+    // ST interaction prior on tau_st (PC prior: exponential on sigma_st)
+    {
+        double sigma_st = 1.0 / std::sqrt(tau_st);
+        double lambda = -std::log(data.st_sigma2_prior_alpha) / data.st_sigma2_prior_U;
+        // d log_prior / d log_tau = d/d(tau) * tau
+        // log_prior = log(lambda) - lambda*sigma - log(2*sigma) + log_tau (Jacobian)
+        // sigma = 1/sqrt(tau), d sigma/d tau = -0.5 * tau^{-3/2}
+        // d log_prior / d tau = (lambda/(2*sigma*tau) + 1/(2*sigma^2*tau))* (-sigma/tau ... )
+        // Simpler: work through chain rule
+        // d/d(log_tau) = [lambda * 0.5 * sigma - 0.5] * (-1) + 1
+        // = 0.5 * (1 - lambda * sigma) + 1 - 0.5
+        // = 1.0 - 0.5 * lambda * sigma
+        // Actually, from log_post code:
+        // log p = log(lambda) - lambda*sigma - log(2*sigma) + log_tau
+        // d/d(log_tau) = lambda * (-d sigma/d log_tau) - 1/sigma * (-d sigma/d log_tau) + 1
+        // d sigma/d log_tau = d sigma/d tau * tau = -0.5 * tau^{-3/2} * tau = -0.5/sqrt(tau) = -0.5*sigma
+        // So: d/d(log_tau) = lambda * 0.5 * sigma + (1/sigma) * 0.5 * sigma + 1
+        //                  = 0.5 * lambda * sigma + 0.5 + 1
+        grad[layout.log_tau_st_idx] = 0.5 * lambda * sigma_st + 0.5 + 1.0;
+    }
+    if (layout.log_tau_st2_idx >= 0) {
+        double sigma_st2 = 1.0 / std::sqrt(tau_st2);
+        double lambda = -std::log(data.st_sigma2_prior_alpha) / data.st_sigma2_prior_U;
+        grad[layout.log_tau_st2_idx] = 0.5 * lambda * sigma_st2 + 0.5 + 1.0;
+    }
+
+    // =========================================================================
+    // Likelihood loop
+    // =========================================================================
+    std::vector<double> grad_spatial_lik;
+    if (layout.has_spatial) grad_spatial_lik.assign(data.n_spatial_units, 0.0);
+    std::vector<double> grad_theta_lik;
+    if (layout.is_bym2) grad_theta_lik.assign(data.n_spatial_units, 0.0);
+    std::vector<double> grad_temporal_lik(T_temporal, 0.0);
+    std::vector<double> grad_delta_lik(ST, 0.0);
+
+    for (int i = 0; i < data.N; i++) {
+        double eta_num = 0.0, eta_denom = 0.0;
+        for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
+        for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
+        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+
+        // Spatial effect
+        int s_unit = -1;
+        if (layout.has_spatial && data.spatial_group[i] > 0) {
+            s_unit = data.spatial_group[i] - 1;
+            if (layout.is_bym2) {
+                double spatial_eff = sigma_bym2 * (std::sqrt(rho_bym2 * data.bym2_scale_factor) * spatial_phi[s_unit] + std::sqrt(1.0 - rho_bym2) * theta_bym2[s_unit]);
+                eta_num += spatial_eff; eta_denom += spatial_eff;
+            } else {
+                eta_num += spatial_phi[s_unit]; eta_denom += spatial_phi[s_unit];
+            }
+        }
+
+        // Temporal effect
+        int t_base = -1;
+        if (layout.has_temporal && !data.temporal_time_idx.empty() &&
+            i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+            t_base = data.temporal_time_idx[i] - 1;
+            if (t_base >= 0 && t_base < T_temporal) {
+                if (data.temporal_shared) { eta_num += phi_temporal[t_base]; eta_denom += phi_temporal[t_base]; }
+                else { eta_num += phi_temporal[t_base]; }
+            }
+        }
+
+        // Spatiotemporal interaction effect
+        int st_idx = -1;
+        if (st.st_flat[i] > 0) {
+            st_idx = st.st_flat[i] - 1;
+            double st_effect = delta[st_idx];
+            if (st.shared) { eta_num += st_effect; eta_denom += st_effect; }
+            else { eta_num += st_effect; }
+        }
+
+        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+
+        double dLL_num = 0.0, dLL_denom = 0.0;
+        if (data.model_type == ModelType::BINOMIAL) {
+            double p = 1.0 / (1.0 + std::exp(-eta_num));
+            dLL_num = data.y_num[i] - data.y_denom[i] * p;
+        } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
+            dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        }
+
+        for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] += dLL_num * data.X_num_flat[i * data.p_num + j];
+        for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] += dLL_denom * data.X_denom_flat[i * data.p_denom + j];
+        if (layout.has_re && data.re_group[i] > 0) grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
+
+        double dLL_shared = dLL_num + dLL_denom;
+
+        if (layout.has_spatial && s_unit >= 0) {
+            if (layout.is_bym2) { grad_spatial_lik[s_unit] += dLL_shared; grad_theta_lik[s_unit] += dLL_shared; }
+            else { grad_spatial_lik[s_unit] += dLL_shared; }
+        }
+        if (layout.has_temporal && t_base >= 0 && t_base < T_temporal) {
+            grad_temporal_lik[t_base] += data.temporal_shared ? dLL_shared : dLL_num;
+        }
+        if (st_idx >= 0) {
+            grad_delta_lik[st_idx] += st.shared ? dLL_shared : dLL_num;
+        }
+    }
+
+    // =========================================================================
+    // Spatial GMRF prior gradients (ICAR/BYM2)
+    // =========================================================================
+    if (layout.has_spatial) {
+        int S_sp = data.n_spatial_units;
+        if (layout.is_bym2) {
+            double sqrt_rho_scale = std::sqrt(rho_bym2 * data.bym2_scale_factor);
+            double sqrt_one_minus_rho = std::sqrt(1.0 - rho_bym2);
+            for (int s = 0; s < S_sp; s++) {
+                double icar_grad = 0.0;
+                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
+                    int j = data.adj_col_idx[idx];  // already 0-based from R
+                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
+                }
+                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_bym2 * sqrt_rho_scale + icar_grad;
+                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_bym2 * sqrt_one_minus_rho - theta_bym2[s];
+            }
+            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S_sp), data);
+            grad[layout.log_tau_spatial_idx] = 0.5 * (S_sp - 1) - 0.5 * tau_spatial * icar_qf;
+            grad[layout.log_tau_spatial_idx] += (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
+        } else {
+            for (int s = 0; s < S_sp; s++) {
+                double icar_grad = 0.0;
+                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
+                    int j = data.adj_col_idx[idx];  // already 0-based from R
+                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
+                }
+                grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad;
+            }
+            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S_sp), data);
+            grad[layout.log_tau_spatial_idx] += 0.5 * (S_sp - 1) - 0.5 * tau_spatial * icar_qf;
+        }
+    }
+
+    // =========================================================================
+    // Temporal GMRF prior gradients
+    // =========================================================================
+    if (layout.has_temporal && T_temporal > 0) {
+        for (int t = 0; t < T_temporal; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
+        if (data.temporal_type == TemporalType::RW1) {
+            double qf = 0.0;
+            for (int t = 0; t < T_temporal; t++) {
+                double g = 0.0;
+                if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
+                if (t < T_temporal - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
+                grad[layout.temporal_start + t] += g;
+            }
+            grad[layout.log_tau_temporal_idx] += 0.5 * (T_temporal - 1) - 0.5 * tau_temporal * qf;
+        } else if (data.temporal_type == TemporalType::RW2) {
+            double qf = 0.0;
+            for (int t = 0; t < T_temporal; t++) {
+                double g = 0.0;
+                if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
+                if (t >= 1 && t < T_temporal - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
+                if (t < T_temporal - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
+                grad[layout.temporal_start + t] += g;
+            }
+            for (int t = 2; t < T_temporal; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
+            grad[layout.log_tau_temporal_idx] += 0.5 * (T_temporal - 2) - 0.5 * tau_temporal * qf;
+        } else if (data.temporal_type == TemporalType::AR1) {
+            double omr2 = 1.0 - rho_ar1 * rho_ar1;
+            grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
+            if (T_temporal > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
+            double qf = omr2 * phi_temporal[0] * phi_temporal[0];
+            for (int t = 1; t < T_temporal; t++) {
+                double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
+                double g = -tau_temporal * r;
+                if (t < T_temporal - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
+                grad[layout.temporal_start + t] += g;
+            }
+            grad[layout.log_tau_temporal_idx] += 0.5 * T_temporal - 0.5 * tau_temporal * qf;
+            if (layout.logit_rho_ar1_idx >= 0) {
+                double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
+                for (int t = 1; t < T_temporal; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+                grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
+            }
+        }
+    }
+
+    // =========================================================================
+    // Spatiotemporal interaction prior gradients (Type I-IV)
+    // =========================================================================
+    // delta is stored column-major: delta[s*T + t]
+    if (st.type == STType::TYPE_I) {
+        // IID: log p = 0.5*n*log(tau) - 0.5*tau*sum(delta^2)
+        double qf = 0.0;
+        for (int k = 0; k < ST; k++) {
+            grad[layout.st_delta_start + k] = grad_delta_lik[k] - tau_st * delta[k];
+            qf += delta[k] * delta[k];
+        }
+        grad[layout.log_tau_st_idx] += 0.5 * ST - 0.5 * tau_st * qf;
+
+    } else if (st.type == STType::TYPE_II) {
+        // Structured time per spatial unit: temporal GMRF applied to delta[s,:]
+        double total_qf = 0.0;
+        for (int s = 0; s < S; s++) {
+            // Apply temporal stencil to delta[s*T .. s*T+T-1]
+            const double* delta_s = &delta[s * T];
+            if (st.temporal_type == TemporalType::RW1) {
+                double qf = 0.0;
+                for (int t = 0; t < T; t++) {
+                    double g = 0.0;
+                    if (t > 0) { g += tau_st * (delta_s[t-1] - delta_s[t]); qf += std::pow(delta_s[t] - delta_s[t-1], 2); }
+                    if (t < T - 1) g += tau_st * (delta_s[t+1] - delta_s[t]);
+                    grad[layout.st_delta_start + s * T + t] = grad_delta_lik[s * T + t] + g;
+                }
+                total_qf += qf;
+            } else if (st.temporal_type == TemporalType::RW2) {
+                double qf = 0.0;
+                for (int t = 0; t < T; t++) {
+                    double g = 0.0;
+                    if (t >= 2) g -= tau_st * (delta_s[t-2] - 2.0*delta_s[t-1] + delta_s[t]);
+                    if (t >= 1 && t < T - 1) g += 2.0 * tau_st * (delta_s[t-1] - 2.0*delta_s[t] + delta_s[t+1]);
+                    if (t < T - 2) g -= tau_st * (delta_s[t] - 2.0*delta_s[t+1] + delta_s[t+2]);
+                    grad[layout.st_delta_start + s * T + t] = grad_delta_lik[s * T + t] + g;
+                }
+                for (int t = 2; t < T; t++) qf += std::pow(delta_s[t-2] - 2.0*delta_s[t-1] + delta_s[t], 2);
+                total_qf += qf;
+            }
+        }
+        int rank_per_unit = (st.temporal_type == TemporalType::RW1) ? (T - 1) :
+                            (st.temporal_type == TemporalType::RW2) ? (T - 2) : T;
+        grad[layout.log_tau_st_idx] += 0.5 * S * rank_per_unit - 0.5 * tau_st * total_qf;
+
+    } else if (st.type == STType::TYPE_III) {
+        // Structured space per time point: ICAR applied to delta[:,t]
+        double total_qf = 0.0;
+        for (int t = 0; t < T; t++) {
+            // Apply ICAR stencil to delta[0*T+t, 1*T+t, ..., (S-1)*T+t]
+            for (int s = 0; s < S; s++) {
+                double icar_grad = 0.0;
+                for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
+                    int j = st.adj_col_idx[idx] - 1;
+                    icar_grad += tau_st * (delta[j * T + t] - delta[s * T + t]);
+                }
+                grad[layout.st_delta_start + s * T + t] = grad_delta_lik[s * T + t] + icar_grad;
+            }
+            // Compute ICAR quadratic form for this time slice
+            for (int s = 0; s < S; s++) {
+                for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
+                    int j = st.adj_col_idx[idx] - 1;
+                    if (j > s) {
+                        double diff = delta[s * T + t] - delta[j * T + t];
+                        total_qf += diff * diff;
+                    }
+                }
+            }
+        }
+        int rank_spatial = S - 1;
+        grad[layout.log_tau_st_idx] += 0.5 * T * rank_spatial - 0.5 * tau_st * total_qf;
+
+    } else if (st.type == STType::TYPE_IV) {
+        // Kronecker: Q_delta = Q_s ⊗ Q_t
+        // Step 1: Apply temporal stencil to each spatial unit's series: v[s,t] = (Q_t * delta[s,:])_t
+        std::vector<double> v(S * T, 0.0);
+        if (st.temporal_type == TemporalType::RW1) {
+            for (int s = 0; s < S; s++) {
+                for (int t = 0; t < T; t++) {
+                    double qt_delta = 0.0;
+                    int n_t_neigh = 0;
+                    if (t > 0) { qt_delta -= delta[s * T + t - 1]; n_t_neigh++; }
+                    if (t < T - 1) { qt_delta -= delta[s * T + t + 1]; n_t_neigh++; }
+                    qt_delta += n_t_neigh * delta[s * T + t];
+                    v[s * T + t] = qt_delta;
+                }
+            }
+        } else if (st.temporal_type == TemporalType::RW2) {
+            // RW2 precision matrix action: more complex stencil
+            for (int s = 0; s < S; s++) {
+                const double* d_s = &delta[s * T];
+                for (int t = 0; t < T; t++) {
+                    double qt_delta = 0.0;
+                    // RW2: Q_t is the second-difference precision
+                    // Q_t[t,t] = sum of contributions from all second-differences involving t
+                    for (int k = std::max(0, t - 2); k <= std::min(T - 3, t); k++) {
+                        // Second difference at k: d_s[k] - 2*d_s[k+1] + d_s[k+2]
+                        // Coefficient of d_s[t] in this second difference:
+                        int pos = t - k;  // 0, 1, or 2
+                        double coef = (pos == 1) ? -2.0 : 1.0;
+                        // The quadratic form contributes coef * d2[k] to the gradient
+                        double d2 = d_s[k] - 2.0 * d_s[k + 1] + d_s[k + 2];
+                        qt_delta += coef * d2;
+                    }
+                    v[s * T + t] = qt_delta;
+                }
+            }
+        }
+
+        // Step 2: Apply spatial ICAR stencil to v: result[s,t] = (Q_s * v[:,t])_s
+        // This gives (Q_s ⊗ Q_t) delta
+        double total_qf = 0.0;
+        for (int s = 0; s < S; s++) {
+            for (int t = 0; t < T; t++) {
+                double qs_v = 0.0;
+                for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
+                    int j = st.adj_col_idx[idx] - 1;
+                    qs_v -= v[j * T + t];
+                }
+                int n_neigh = st.adj_row_ptr[s + 1] - st.adj_row_ptr[s];
+                qs_v += n_neigh * v[s * T + t];
+
+                grad[layout.st_delta_start + s * T + t] = grad_delta_lik[s * T + t] - tau_st * tau_st2 * qs_v;
+                total_qf += delta[s * T + t] * qs_v;
+            }
+        }
+
+        int rank_space = S - 1;
+        int rank_time = (st.temporal_type == TemporalType::RW1) ? (T - 1) :
+                        (st.temporal_type == TemporalType::RW2) ? (T - 2) : T;
+        if (st.temporal_cyclic) rank_time = T;
+        int total_rank = rank_space * rank_time;
+
+        grad[layout.log_tau_st_idx] += 0.5 * total_rank - 0.5 * tau_st * tau_st2 * total_qf;
+        if (layout.log_tau_st2_idx >= 0) {
+            grad[layout.log_tau_st2_idx] += 0.5 * total_rank - 0.5 * tau_st * tau_st2 * total_qf;
+        }
+    }
+
+    // Sum-to-zero penalty gradients
+    {
+        double lambda_stz = 0.001;
+        // Marginal over space: for each t, sum_s delta[s*T+t] -> 0
+        for (int t = 0; t < T; t++) {
+            double row_sum = 0.0;
+            for (int s = 0; s < S; s++) row_sum += delta[s * T + t];
+            for (int s = 0; s < S; s++) {
+                grad[layout.st_delta_start + s * T + t] -= lambda_stz * row_sum;
+            }
+        }
+        // Marginal over time: for each s, sum_t delta[s*T+t] -> 0
+        for (int s = 0; s < S; s++) {
+            double col_sum = 0.0;
+            for (int t = 0; t < T; t++) col_sum += delta[s * T + t];
+            for (int t = 0; t < T; t++) {
+                grad[layout.st_delta_start + s * T + t] -= lambda_stz * col_sum;
+            }
+        }
+    }
+
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // Global gradient mode (set by cpp_hmc_fit, used by compute_gradient)
@@ -6042,66 +7158,84 @@ void compute_gradient(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out
 ) {
     // Check explicit mode first
     if (g_gradient_mode == GradientMode::NUMERICAL) {
-        compute_gradient_numerical(params, data, layout, grad);
+        compute_gradient_numerical(params, data, layout, grad, log_post_out);
         return;
     }
 
     if (g_gradient_mode == GradientMode::AUTODIFF_TAPE) {
-        compute_gradient_autodiff(params, data, layout, grad);
+        compute_gradient_autodiff(params, data, layout, grad, log_post_out);
+        return;
+    }
+
+    if (g_gradient_mode == GradientMode::AUTODIFF_ARENA) {
+        compute_gradient_arena(params, data, layout, grad, log_post_out);
         return;
     }
 
     if (g_gradient_mode == GradientMode::AUTODIFF_FORWARD) {
-        compute_gradient_forward(params, data, layout, grad);
+        compute_gradient_forward(params, data, layout, grad, log_post_out);
         return;
     }
 
     // AUTO or HANDCODED mode: use fastest available
-    // Priority: H (hand-coded) > A_t (tape autodiff for high-dim) > A (forward autodiff) > N (numerical)
-    // Note: A_t is O(N), A is O(p×N). For high-dim models (latent), A_t is 35x faster.
+    // Priority: H (hand-coded) > A_r (arena autodiff) > A (forward) > N (numerical)
+    // Note: A_r is O(N) with SoA layout, A is O(p×N), A_t is O(N) but slow due to heap alloc
 
     // Use hand-coded analytical gradients for simple models (fastest, 9x)
     if (can_use_analytical_gradient(data, layout)) {
-        compute_gradient_analytical(params, data, layout, grad);
+        compute_gradient_analytical(params, data, layout, grad, log_post_out);
     } else if (layout.is_hsgp && data.has_hsgp) {
         // HSGP has hand-coded analytical gradients (~50x faster than autodiff)
         // Supports all families: poisson_gamma, negbin_negbin, binomial
-        compute_gradient_hsgp(params, data, layout, grad);
+        compute_gradient_hsgp(params, data, layout, grad, log_post_out);
     } else if (layout.is_gp && data.has_gp && !layout.has_temporal) {
         // Single-scale GP uses hand-coded gradients (~3x faster than autodiff)
-        compute_gradient_gp_handcoded(params, data, layout, grad);
+        compute_gradient_gp_handcoded(params, data, layout, grad, log_post_out);
     } else if (layout.is_multiscale_gp && data.has_multiscale_gp && layout.has_temporal) {
         // Multi-scale GP + temporal uses hand-coded gradients
-        compute_gradient_msgp_temporal_handcoded(params, data, layout, grad);
+        compute_gradient_msgp_temporal_handcoded(params, data, layout, grad, log_post_out);
     } else if (layout.is_multiscale_gp && data.has_multiscale_gp) {
         // Multi-scale GP uses hand-coded gradients (~2-3x faster than autodiff)
-        compute_gradient_msgp_handcoded(params, data, layout, grad);
+        compute_gradient_msgp_handcoded(params, data, layout, grad, log_post_out);
     } else if (layout.is_gp && layout.has_temporal) {
         // GP+temporal uses hand-coded gradients
-        compute_gradient_gp_temporal_handcoded(params, data, layout, grad);
+        compute_gradient_gp_temporal_handcoded(params, data, layout, grad, log_post_out);
     } else if (layout.has_svc && data.has_svc) {
         // SVC uses hand-coded gradients (~3x faster than autodiff)
-        compute_gradient_svc_handcoded(params, data, layout, grad);
+        compute_gradient_svc_handcoded(params, data, layout, grad, log_post_out);
     } else if (layout.has_tvc && data.has_tvc) {
         // TVC uses hand-coded gradients (~3x faster than autodiff)
-        compute_gradient_tvc_handcoded(params, data, layout, grad);
+        compute_gradient_tvc_handcoded(params, data, layout, grad, log_post_out);
+    } else if (layout.has_spatiotemporal && !layout.is_st_gp &&
+               !layout.is_gp && !layout.is_multiscale_gp &&
+               data.spatiotemporal_data.type != STType::NONE &&
+               layout.st_delta_start >= 0 && layout.log_tau_st_idx >= 0) {
+        // Spatiotemporal interaction (Knorr-Held Type I-IV) with hand-coded gradients
+        // Handles base spatial (ICAR/BYM2) + temporal (RW1/RW2/AR1) + ST interaction
+        compute_gradient_spatiotemporal_handcoded(params, data, layout, grad, log_post_out);
     } else if (layout.is_temporal_gp && layout.has_temporal &&
                !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
                data.temporal_gp_data.cov_type == ratiod_temporal_gp::TemporalCovType::EXPONENTIAL) {
         // Temporal GP (standalone, exponential covariance) uses hand-coded gradients
-        compute_gradient_temporal_gp_handcoded(params, data, layout, grad);
+        compute_gradient_temporal_gp_handcoded(params, data, layout, grad, log_post_out);
+    } else if (layout.has_multiscale_temporal && !layout.is_gp && !layout.is_multiscale_gp &&
+               !layout.is_hsgp && !layout.has_svc && !layout.has_tvc &&
+               !layout.has_latent && !layout.has_spatiotemporal) {
+        // Multiscale temporal (trend + seasonal + short-term) with hand-coded gradients
+        // Supports optional ICAR/BYM2 spatial
+        compute_gradient_ms_temporal_handcoded(params, data, layout, grad, log_post_out);
     } else if (layout.has_latent && data.latent_n_factors > 0) {
         // Latent factor models have hand-coded gradients (O(N*K))
-        compute_gradient_latent_handcoded(params, data, layout, grad);
+        compute_gradient_latent_handcoded(params, data, layout, grad, log_post_out);
     } else {
-        // No hand-coded gradients available, low-dimensional fallback
-        // For low-dim models, forward autodiff (A) is faster due to less memory overhead
-        // For high-dim models (>100 params), consider using A_t explicitly
-        compute_gradient_forward(params, data, layout, grad);
+        // No hand-coded gradients available — use arena reverse-mode autodiff
+        // Arena is O(N) with SoA layout, ~10-30x faster than tape, ~2x faster than forward for p>5
+        compute_gradient_arena(params, data, layout, grad, log_post_out);
     }
 }
 
@@ -6110,7 +7244,7 @@ void compute_gradient(
 // =====================================================================
 
 DualAveraging::DualAveraging(double epsilon_init, int n_params, double target_boost)
-  : mu(std::log(epsilon_init)), log_epsilon_bar(std::log(epsilon_init)), H_bar(0.0),
+  : mu(std::log(10.0 * epsilon_init)), log_epsilon_bar(std::log(epsilon_init)), H_bar(0.0),
     gamma(0.05), t0(10.0), kappa(0.75),
     target_accept(compute_target(n_params, target_boost)), m(0) {}
 
@@ -6120,9 +7254,8 @@ double DualAveraging::update(double alpha) {
   H_bar = (1.0 - w) * H_bar + w * (target_accept - alpha);
   double log_epsilon = mu - std::sqrt((double)m) / gamma * H_bar;
   // Clamp log_epsilon to reasonable range
-  // Lower bound: 1e-6 for very challenging posteriors
-  // Upper bound: 0.05 (conservative to avoid divergences)
-  log_epsilon = std::max(-14.0, std::min(log_epsilon, -3.0));
+  // Lower bound: exp(-14) ≈ 8e-7, Upper bound: exp(2) ≈ 7.4
+  log_epsilon = std::max(-14.0, std::min(log_epsilon, 2.0));
   double epsilon = std::exp(log_epsilon);
   double m_w = std::pow((double)m, -kappa);
   log_epsilon_bar = m_w * log_epsilon + (1.0 - m_w) * log_epsilon_bar;
@@ -6171,13 +7304,17 @@ public:
     return var;
   }
 
-  // Get inverse mass matrix (= variance, clamped for stability)
+  // Get inverse mass matrix (= variance, regularized for stability)
   // For HMC: M = diag(1/var), so M^{-1} = diag(var)
   // High variance parameters should move faster in position space
+  // Uses Stan-style Bayesian shrinkage toward unit variance to prevent
+  // extreme mass matrix entries from small sample sizes
   std::vector<double> inv_mass() const {
     auto var = variance();
+    double shrink = (n < 2) ? 0.0 : (double)n / (n + 5.0);
     for (size_t i = 0; i < var.size(); i++) {
-      // Clamp variance to [1e-3, 1e3]
+      var[i] = shrink * var[i] + 1e-3 * (5.0 / (n + 5.0));
+      // Safety clamp for extreme values
       var[i] = std::max(1e-3, std::min(var[i], 1e3));
     }
     return var;
@@ -6186,12 +7323,12 @@ public:
   // Get sqrt of mass matrix for momentum sampling
   // Since M = diag(1/var), sqrt(M) = diag(1/sqrt(var))
   // p ~ N(0, M), so p_i = z_i / sqrt(var_i)
+  // Uses the same regularized variance as inv_mass()
   std::vector<double> sqrt_mass() const {
-    std::vector<double> sqrt_m(mean.size());
-    auto var = variance();
-    for (size_t i = 0; i < var.size(); i++) {
-      double clamped_var = std::max(1e-3, std::min(var[i], 1e3));
-      sqrt_m[i] = 1.0 / std::sqrt(clamped_var);
+    auto inv_m = inv_mass();
+    std::vector<double> sqrt_m(inv_m.size());
+    for (size_t i = 0; i < inv_m.size(); i++) {
+      sqrt_m[i] = 1.0 / std::sqrt(inv_m[i]);
     }
     return sqrt_m;
   }
@@ -6233,9 +7370,8 @@ LeapfrogResult leapfrog_step(
     result.q[i] += epsilon * result.p[i];
   }
 
-  // Half step for momentum
-  result.log_prob = compute_log_post(result.q, data, layout);
-  compute_gradient(result.q, data, layout, grad);
+  // Half step for momentum (fused gradient + log_prob)
+  compute_gradient(result.q, data, layout, grad, &result.log_prob);
   for (int i = 0; i < n; i++) {
     result.p[i] += 0.5 * epsilon * grad[i];
   }
@@ -6310,9 +7446,8 @@ LeapfrogResult leapfrog_step_mass(
     result.q[i] += epsilon * inv_mass[i] * result.p[i];
   }
 
-  // Half step for momentum
-  result.log_prob = compute_log_post(result.q, data, layout);
-  compute_gradient(result.q, data, layout, grad);
+  // Half step for momentum (fused gradient + log_prob)
+  compute_gradient(result.q, data, layout, grad, &result.log_prob);
   for (int i = 0; i < n; i++) {
     result.p[i] += 0.5 * epsilon * grad[i];
   }
@@ -6338,81 +7473,703 @@ double find_reasonable_epsilon(
     const ParamLayout& layout,
     std::mt19937& rng
 ) {
+  // Stan-style algorithm: start at epsilon=1, double or halve until
+  // acceptance probability crosses 0.5
   int n = q.size();
 
-  // Compute gradient norm to scale step size
-  std::vector<double> grad(n);
-  compute_gradient(q, data, layout, grad);
-  double grad_norm = 0.0;
-  double max_grad = 0.0;
-  for (int i = 0; i < n; i++) {
-    grad_norm += grad[i] * grad[i];
-    max_grad = std::max(max_grad, std::abs(grad[i]));
-  }
-  grad_norm = std::sqrt(grad_norm);
-
-  // Conservative step size based on both gradient norm and max gradient
-  // This ensures we don't take too large steps in any direction
-  double eps_by_norm = 1.0 / (grad_norm + 1.0);
-  double eps_by_max = 0.5 / (max_grad + 1.0);
-  double eps_max = std::min(eps_by_norm, eps_by_max);
-  eps_max = std::max(1e-5, std::min(eps_max, 0.01));  // Clamp to [1e-5, 0.01]
-
-  // Start from a conservative initial epsilon
-  double epsilon = eps_max;
-
   std::normal_distribution<double> normal(0.0, 1.0);
-
   std::vector<double> p(n);
   for (int i = 0; i < n; i++) {
     p[i] = normal(rng);
   }
 
-  double log_prob_init = compute_log_post(q, data, layout);
+  // Fused: compute gradient + log_post in a single O(N) pass
+  // (eliminates redundant compute_log_post call)
+  double log_prob_init;
+  std::vector<double> grad_init(n);
+  compute_gradient(q, data, layout, grad_init, &log_prob_init);
   double kinetic_init = 0.5 * ratiod_linalg::norm_squared(p.data(), n);
   double H_init = -log_prob_init + kinetic_init;
+
+  double epsilon = 1.0;
 
   LeapfrogResult lf = leapfrog_step(q, p, epsilon, data, layout);
   double kinetic_new = 0.5 * ratiod_linalg::norm_squared(lf.p.data(), n);
   double H_new = -lf.log_prob + kinetic_new;
-
-  // If initial step is OK, try to increase epsilon
   double delta_H = H_new - H_init;
-  if (std::isfinite(H_new) && delta_H < std::log(0.5)) {
-    // Can potentially increase step size
-    for (int iter = 0; iter < 10; iter++) {
-      double new_eps = epsilon * 2.0;
-      if (new_eps > eps_max * 10) break;  // Don't go too far above eps_max
 
-      lf = leapfrog_step(q, p, new_eps, data, layout);
-      if (!std::isfinite(lf.log_prob)) break;
+  // Determine direction: if accept prob > 0.5, increase; else decrease
+  // accept_prob = exp(-delta_H), so > 0.5 iff delta_H < log(2)
+  int direction = (!std::isfinite(delta_H) || delta_H > std::log(2.0)) ? -1 : 1;
 
-      kinetic_new = 0.5 * ratiod_linalg::norm_squared(lf.p.data(), n);
-      H_new = -lf.log_prob + kinetic_new;
-      delta_H = H_new - H_init;
+  for (int iter = 0; iter < 100; iter++) {
+    if (direction == 1) {
+      epsilon *= 2.0;
+    } else {
+      epsilon *= 0.5;
+    }
 
-      if (delta_H > std::log(0.5)) break;  // Too large
-      epsilon = new_eps;
+    if (epsilon < 1e-10 || epsilon > 1e5) break;
+
+    lf = leapfrog_step(q, p, epsilon, data, layout);
+    if (!std::isfinite(lf.log_prob)) {
+      if (direction == 1) break;  // Was increasing, hit instability
+      continue;  // Was decreasing, keep going
+    }
+
+    kinetic_new = 0.5 * ratiod_linalg::norm_squared(lf.p.data(), n);
+    H_new = -lf.log_prob + kinetic_new;
+    delta_H = H_new - H_init;
+
+    // Stop when we cross the 0.5 acceptance threshold
+    if (direction == 1 && (!std::isfinite(delta_H) || delta_H > std::log(2.0))) break;
+    if (direction == -1 && std::isfinite(delta_H) && delta_H < std::log(2.0)) break;
+  }
+
+  return std::max(1e-10, std::min(epsilon, 1e3));
+}
+
+// Mass-aware version: uses diagonal mass matrix for leapfrog and kinetic energy
+double find_reasonable_epsilon(
+    const std::vector<double>& q,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::mt19937& rng,
+    const std::vector<double>& inv_mass
+) {
+  int n = q.size();
+
+  std::normal_distribution<double> normal(0.0, 1.0);
+  std::vector<double> p(n);
+  // Sample p ~ N(0, M) where M = diag(1/inv_mass)
+  for (int i = 0; i < n; i++) {
+    p[i] = normal(rng) / std::sqrt(inv_mass[i]);
+  }
+
+  // Fused: compute gradient + log_post in a single O(N) pass
+  double log_prob_init;
+  std::vector<double> grad_init(n);
+  compute_gradient(q, data, layout, grad_init, &log_prob_init);
+  double kinetic_init = 0.0;
+  for (int i = 0; i < n; i++) {
+    kinetic_init += p[i] * p[i] * inv_mass[i];
+  }
+  kinetic_init *= 0.5;
+  double H_init = -log_prob_init + kinetic_init;
+
+  double epsilon = 1.0;
+
+  LeapfrogResult lf = leapfrog_step_mass(q, p, epsilon, inv_mass, data, layout);
+  double kinetic_new = 0.0;
+  for (int i = 0; i < n; i++) {
+    kinetic_new += lf.p[i] * lf.p[i] * inv_mass[i];
+  }
+  kinetic_new *= 0.5;
+  double H_new = -lf.log_prob + kinetic_new;
+  double delta_H = H_new - H_init;
+
+  int direction = (!std::isfinite(delta_H) || delta_H > std::log(2.0)) ? -1 : 1;
+
+  for (int iter = 0; iter < 100; iter++) {
+    if (direction == 1) {
+      epsilon *= 2.0;
+    } else {
+      epsilon *= 0.5;
+    }
+
+    if (epsilon < 1e-10 || epsilon > 1e5) break;
+
+    lf = leapfrog_step_mass(q, p, epsilon, inv_mass, data, layout);
+    if (!std::isfinite(lf.log_prob)) {
+      if (direction == 1) break;
+      continue;
+    }
+
+    kinetic_new = 0.0;
+    for (int i = 0; i < n; i++) {
+      kinetic_new += lf.p[i] * lf.p[i] * inv_mass[i];
+    }
+    kinetic_new *= 0.5;
+    H_new = -lf.log_prob + kinetic_new;
+    delta_H = H_new - H_init;
+
+    if (direction == 1 && (!std::isfinite(delta_H) || delta_H > std::log(2.0))) break;
+    if (direction == -1 && std::isfinite(delta_H) && delta_H < std::log(2.0)) break;
+  }
+
+  return std::max(1e-10, std::min(epsilon, 1e3));
+}
+
+// Dense-mass-aware version: uses full DenseMassMatrix for momentum sampling,
+// leapfrog integration, and kinetic energy computation.
+// This ensures the step size is calibrated for the rotated phase space
+// dynamics of the dense mass matrix, not just the diagonal approximation.
+double find_reasonable_epsilon_dense(
+    const std::vector<double>& q,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::mt19937& rng,
+    const DenseMassMatrix& mass
+) {
+  int n = q.size();
+
+  // Sample momentum using the full dense mass matrix: p ~ N(0, M)
+  std::vector<double> p(n);
+  // const_cast is safe here - sample_momentum only reads rng state
+  const_cast<DenseMassMatrix&>(mass).sample_momentum(p.data(), rng);
+
+  // Compute gradient + log_post
+  double log_prob_init;
+  std::vector<double> grad_init(n);
+  compute_gradient(q, data, layout, grad_init, &log_prob_init);
+
+  // Kinetic energy using full dense mass matrix
+  double kinetic_init = mass.kinetic_energy(p.data());
+  double H_init = -log_prob_init + kinetic_init;
+
+  double epsilon = 1.0;
+
+  // Single leapfrog step using dense mass matrix
+  auto do_leapfrog = [&](const std::vector<double>& q_in,
+                         const std::vector<double>& p_in,
+                         double eps) -> std::pair<std::vector<double>, std::vector<double>> {
+    std::vector<double> q_out = q_in;
+    std::vector<double> p_out = p_in;
+    std::vector<double> grad(n);
+    compute_gradient(q_out, data, layout, grad);
+
+    // Half step for momentum
+    for (int i = 0; i < n; i++) p_out[i] += 0.5 * eps * grad[i];
+
+    // Full step for position: q += eps * M^{-1} * p
+    std::vector<double> Mp(n);
+    mass.inv_mass_times_p(p_out.data(), Mp.data());
+    for (int i = 0; i < n; i++) q_out[i] += eps * Mp[i];
+
+    // Compute gradient at new position
+    compute_gradient(q_out, data, layout, grad);
+
+    // Half step for momentum
+    for (int i = 0; i < n; i++) p_out[i] += 0.5 * eps * grad[i];
+
+    return {q_out, p_out};
+  };
+
+  auto [q_new, p_new] = do_leapfrog(q, p, epsilon);
+
+  // Check if log_prob is finite at new position
+  double log_prob_new;
+  std::vector<double> grad_new(n);
+  compute_gradient(q_new, data, layout, grad_new, &log_prob_new);
+
+  double kinetic_new = mass.kinetic_energy(p_new.data());
+  double H_new = -log_prob_new + kinetic_new;
+  double delta_H = H_new - H_init;
+
+  int direction = (!std::isfinite(delta_H) || delta_H > std::log(2.0)) ? -1 : 1;
+
+  for (int iter = 0; iter < 100; iter++) {
+    if (direction == 1) {
+      epsilon *= 2.0;
+    } else {
+      epsilon *= 0.5;
+    }
+
+    if (epsilon < 1e-10 || epsilon > 1e5) break;
+
+    auto [q_try, p_try] = do_leapfrog(q, p, epsilon);
+
+    double lp_try;
+    std::vector<double> grad_try(n);
+    compute_gradient(q_try, data, layout, grad_try, &lp_try);
+
+    if (!std::isfinite(lp_try)) {
+      if (direction == 1) break;
+      continue;
+    }
+
+    kinetic_new = mass.kinetic_energy(p_try.data());
+    H_new = -lp_try + kinetic_new;
+    delta_H = H_new - H_init;
+
+    if (direction == 1 && (!std::isfinite(delta_H) || delta_H > std::log(2.0))) break;
+    if (direction == -1 && std::isfinite(delta_H) && delta_H < std::log(2.0)) break;
+  }
+
+  return std::max(1e-10, std::min(epsilon, 1e3));
+}
+
+// =====================================================================
+// NUTS (No-U-Turn Sampler) helper functions
+// =====================================================================
+
+double nuts_log_sum_exp(double a, double b) {
+  double m = std::max(a, b);
+  if (!std::isfinite(m)) return m;
+  return m + std::log(std::exp(a - m) + std::exp(b - m));
+}
+
+double nuts_compute_hamiltonian(double log_prob, const std::vector<double>& p,
+                                const std::vector<double>& inv_mass, int n) {
+  double kinetic = 0.0;
+  for (int i = 0; i < n; i++) {
+    kinetic += p[i] * p[i] * inv_mass[i];
+  }
+  return -log_prob + 0.5 * kinetic;
+}
+
+bool nuts_check_uturn(const std::vector<double>& q_minus, const std::vector<double>& q_plus,
+                      const std::vector<double>& p_minus, const std::vector<double>& p_plus,
+                      const std::vector<double>& inv_mass, int n) {
+  // Generalized U-turn criterion (Betancourt 2017, Section 3.2)
+  // Check both directions: (q+ - q-) . (M^-1 p-) and (q+ - q-) . (M^-1 p+)
+  double dot_fwd = 0.0, dot_bwd = 0.0;
+  for (int i = 0; i < n; i++) {
+    double dq = q_plus[i] - q_minus[i];
+    dot_fwd += dq * (inv_mass[i] * p_plus[i]);
+    dot_bwd += dq * (inv_mass[i] * p_minus[i]);
+  }
+  return (dot_fwd < 0.0) || (dot_bwd < 0.0);
+}
+
+LeapfrogResultWithGrad leapfrog_step_with_grad(
+    const std::vector<double>& q, const std::vector<double>& p,
+    const std::vector<double>& grad,
+    double epsilon, const std::vector<double>& inv_mass,
+    bool use_mass, const ModelData& data, const ParamLayout& layout) {
+
+  int n = q.size();
+  LeapfrogResultWithGrad result;
+  result.q = q;
+  result.p = p;
+  result.grad.resize(n);
+  result.divergent = false;
+
+  // Half step for momentum using provided gradient
+  for (int i = 0; i < n; i++) {
+    result.p[i] += 0.5 * epsilon * grad[i];
+  }
+
+  // Full step for position
+  if (use_mass) {
+    for (int i = 0; i < n; i++) {
+      result.q[i] += epsilon * inv_mass[i] * result.p[i];
     }
   } else {
-    // Need to decrease step size
-    for (int iter = 0; iter < 20; iter++) {
-      epsilon *= 0.5;
-      if (epsilon < 1e-6) break;
-
-      lf = leapfrog_step(q, p, epsilon, data, layout);
-      if (!std::isfinite(lf.log_prob)) continue;
-
-      kinetic_new = 0.5 * ratiod_linalg::norm_squared(lf.p.data(), n);
-      H_new = -lf.log_prob + kinetic_new;
-      delta_H = H_new - H_init;
-
-      if (delta_H < std::log(0.5)) break;  // Found good step size
+    for (int i = 0; i < n; i++) {
+      result.q[i] += epsilon * result.p[i];
     }
   }
 
-  // Final clamp to ensure numerical stability
-  return std::max(1e-6, std::min(epsilon, 0.01));
+  // Compute gradient and log_prob at new position (fused: single O(N) pass)
+  compute_gradient(result.q, data, layout, result.grad, &result.log_prob);
+
+  // Half step for momentum using new gradient
+  for (int i = 0; i < n; i++) {
+    result.p[i] += 0.5 * epsilon * result.grad[i];
+  }
+
+  // Check for divergence
+  if (!std::isfinite(result.log_prob)) {
+    result.divergent = true;
+  }
+  for (int i = 0; i < n; i++) {
+    if (std::abs(result.q[i]) > 1e10 || !std::isfinite(result.q[i])) {
+      result.divergent = true;
+      break;
+    }
+  }
+
+  return result;
+}
+
+NUTSTreeResult build_tree(const NUTSNode& node, int direction, int depth,
+                          double epsilon, const std::vector<double>& inv_mass,
+                          bool use_mass, double H0, double delta_max,
+                          const ModelData& data, const ParamLayout& layout,
+                          std::mt19937& rng) {
+  int n = node.q.size();
+  NUTSTreeResult result;
+
+  if (depth == 0) {
+    // Base case: single leapfrog step
+    LeapfrogResultWithGrad lf = leapfrog_step_with_grad(
+      node.q, node.p, node.grad,
+      direction * epsilon, inv_mass, use_mass, data, layout
+    );
+
+    double H_new = nuts_compute_hamiltonian(lf.log_prob, lf.p, inv_mass, n);
+    double delta_H = H_new - H0;
+
+    result.left.q = lf.q;
+    result.left.p = lf.p;
+    result.left.grad = lf.grad;
+    result.left.log_prob = lf.log_prob;
+    result.right = result.left;
+
+    result.q_proposal = std::move(lf.q);
+    result.grad_proposal = std::move(lf.grad);
+    result.log_prob_proposal = lf.log_prob;
+
+    // Multinomial weight: log(weight) = -H_new (proportional to exp(-H))
+    result.sum_log_weight = -H_new;
+
+    // Divergence check
+    result.divergent = lf.divergent || (delta_H > delta_max);
+    result.stop = result.divergent;
+
+    // Valid if not divergent
+    result.n_valid = result.divergent ? 0 : 1;
+
+    // Acceptance statistic: min(1, exp(-delta_H))
+    double accept_stat = std::min(1.0, std::exp(-delta_H));
+    if (!std::isfinite(accept_stat)) accept_stat = 0.0;
+    result.sum_accept_prob = accept_stat;
+    result.n_leapfrog = 1;
+
+    return result;
+  }
+
+  // Recursive case: build inner subtree
+  NUTSTreeResult inner = build_tree(node, direction, depth - 1,
+                                     epsilon, inv_mass, use_mass, H0, delta_max,
+                                     data, layout, rng);
+  result = std::move(inner);
+
+  if (result.stop) return result;
+
+  // Build outer subtree from the appropriate endpoint
+  // (read from result, since inner is moved-from)
+  NUTSNode outer_start;
+  if (direction == 1) {
+    outer_start = result.right;
+  } else {
+    outer_start = result.left;
+  }
+
+  NUTSTreeResult outer = build_tree(outer_start, direction, depth - 1,
+                                     epsilon, inv_mass, use_mass, H0, delta_max,
+                                     data, layout, rng);
+
+  // Combine results (use result.xxx since inner was moved into result)
+  result.n_leapfrog += outer.n_leapfrog;
+  result.sum_accept_prob += outer.sum_accept_prob;
+  result.divergent = result.divergent || outer.divergent;
+
+  // Multinomial sampling: accept outer proposal with probability
+  // exp(outer.sum_log_weight) / exp(log_sum_exp(result.sum_log_weight, outer.sum_log_weight))
+  double new_sum_log_weight = nuts_log_sum_exp(result.sum_log_weight, outer.sum_log_weight);
+  double accept_prob_outer = std::exp(outer.sum_log_weight - new_sum_log_weight);
+  if (!std::isfinite(accept_prob_outer)) accept_prob_outer = 0.0;
+
+  std::uniform_real_distribution<double> unif(0.0, 1.0);
+  if (unif(rng) < accept_prob_outer) {
+    result.q_proposal = std::move(outer.q_proposal);
+    result.grad_proposal = std::move(outer.grad_proposal);
+    result.log_prob_proposal = outer.log_prob_proposal;
+  }
+  // else keep inner proposal (already in result from move)
+
+  result.sum_log_weight = new_sum_log_weight;
+  result.n_valid = result.n_valid + outer.n_valid;
+
+  // Update tree endpoints
+  // result already holds inner's data from the move above
+  if (direction == 1) {
+    // result.left is already inner.left (correct from move)
+    result.right = std::move(outer.right);
+  } else {
+    result.left = std::move(outer.left);
+    // result.right is already inner.right (correct from move)
+  }
+
+  // Check U-turn on the combined trajectory
+  result.stop = outer.stop ||
+    nuts_check_uturn(result.left.q, result.right.q,
+                     result.left.p, result.right.p,
+                     inv_mass, n);
+
+  return result;
+}
+
+// =====================================================================
+// Optimized NUTS: zero-allocation infrastructure
+// =====================================================================
+
+// Pointer-based Hamiltonian (avoids std::vector overhead)
+double nuts_compute_hamiltonian_fast(double log_prob, const double* p,
+                                     const DenseMassMatrix& mass, int n) {
+  return -log_prob + mass.kinetic_energy(p);
+}
+
+// Pointer-based U-turn check
+// scratch: temporary buffer of size n (for dense matvec result)
+bool nuts_check_uturn_fast(const double* q_minus, const double* q_plus,
+                           const double* p_minus, const double* p_plus,
+                           const DenseMassMatrix& mass, double* scratch, int n) {
+  if (mass.type == MassMatrixType::DIAG || !mass.adapted) {
+    // Diagonal path (fast, unrolled)
+    double dot_fwd = 0.0, dot_bwd = 0.0;
+    const double* inv_mass = mass.inv_mass_diag.data();
+    int i = 0;
+    for (; i + 3 < n; i += 4) {
+      double dq0 = q_plus[i]   - q_minus[i];
+      double dq1 = q_plus[i+1] - q_minus[i+1];
+      double dq2 = q_plus[i+2] - q_minus[i+2];
+      double dq3 = q_plus[i+3] - q_minus[i+3];
+      dot_fwd += dq0 * (inv_mass[i]   * p_plus[i])
+               + dq1 * (inv_mass[i+1] * p_plus[i+1])
+               + dq2 * (inv_mass[i+2] * p_plus[i+2])
+               + dq3 * (inv_mass[i+3] * p_plus[i+3]);
+      dot_bwd += dq0 * (inv_mass[i]   * p_minus[i])
+               + dq1 * (inv_mass[i+1] * p_minus[i+1])
+               + dq2 * (inv_mass[i+2] * p_minus[i+2])
+               + dq3 * (inv_mass[i+3] * p_minus[i+3]);
+    }
+    for (; i < n; i++) {
+      double dq = q_plus[i] - q_minus[i];
+      dot_fwd += dq * (inv_mass[i] * p_plus[i]);
+      dot_bwd += dq * (inv_mass[i] * p_minus[i]);
+    }
+    return (dot_fwd < 0.0) || (dot_bwd < 0.0);
+  } else {
+    // Dense path: compute (q+ - q-) . (C * p+) and (q+ - q-) . (C * p-)
+    // Use scratch for C * p
+    mass.inv_mass_times_p(p_plus, scratch);
+    double dot_fwd = 0.0;
+    for (int i = 0; i < n; i++) {
+      dot_fwd += (q_plus[i] - q_minus[i]) * scratch[i];
+    }
+    mass.inv_mass_times_p(p_minus, scratch);
+    double dot_bwd = 0.0;
+    for (int i = 0; i < n; i++) {
+      dot_bwd += (q_plus[i] - q_minus[i]) * scratch[i];
+    }
+    return (dot_fwd < 0.0) || (dot_bwd < 0.0);
+  }
+}
+
+// In-place leapfrog step operating on a workspace slot
+// Mutates q, p, grad in the slot directly — zero heap allocation
+LeapfrogInPlaceResult leapfrog_step_inplace(
+    NUTSWorkspace& ws, int slot, double epsilon,
+    const DenseMassMatrix& mass,
+    const ModelData& data, const ParamLayout& layout) {
+
+  double* q = ws.q_at(slot);
+  double* p = ws.p_at(slot);
+  double* grad = ws.grad_at(slot);
+  int n = ws.n;
+
+  LeapfrogInPlaceResult result;
+  result.divergent = false;
+
+  // Half step for momentum using current gradient
+  ratiod_linalg::axpy(0.5 * epsilon, grad, p, n);
+
+  // Full step for position: q += eps * C * p
+  if (!mass.adapted) {
+    // Identity mass: q += eps * p
+    ratiod_linalg::axpy(epsilon, p, q, n);
+  } else if (mass.type == MassMatrixType::DIAG) {
+    // Diagonal: q[i] += eps * inv_mass[i] * p[i]
+    ratiod_linalg::axpy_weighted(epsilon, mass.inv_mass_diag.data(), p, q, n);
+  } else {
+    // Dense: q += eps * C * p  (uses scratch buffer in workspace)
+    ratiod_linalg::axpy_matvec(epsilon, mass.inv_mass_dense.data(), p, q, n);
+  }
+
+  // Compute gradient + log_prob at new position (fused: single O(N) pass)
+  // Need to go through std::vector interface for compute_gradient
+  std::memcpy(ws.params_buf.data(), q, n * sizeof(double));
+  compute_gradient(ws.params_buf, data, layout, ws.grad_buf, &ws.logp_at(slot));
+  std::memcpy(grad, ws.grad_buf.data(), n * sizeof(double));
+  result.log_prob = ws.logp_at(slot);
+
+  // Half step for momentum using new gradient
+  ratiod_linalg::axpy(0.5 * epsilon, grad, p, n);
+
+  // Divergence check
+  if (!std::isfinite(result.log_prob)) {
+    result.divergent = true;
+  }
+  for (int i = 0; i < n; i++) {
+    if (std::abs(q[i]) > 1e10 || !std::isfinite(q[i])) {
+      result.divergent = true;
+      break;
+    }
+  }
+
+  return result;
+}
+
+// Zero-allocation recursive tree builder
+// Uses workspace slot indices instead of vector copies
+TreeStats build_tree_fast(
+    NUTSWorkspace& ws, int input_slot, int direction, int depth,
+    double epsilon, const DenseMassMatrix& mass,
+    double H0, double delta_max,
+    const ModelData& data, const ParamLayout& layout,
+    std::mt19937& rng) {
+
+  int n = ws.n;
+  TreeStats stats;
+
+  if (depth == 0) {
+    // Base case: single leapfrog step in-place on input_slot
+    LeapfrogInPlaceResult lf = leapfrog_step_inplace(
+      ws, input_slot, direction * epsilon, mass, data, layout
+    );
+
+    double H_new = nuts_compute_hamiltonian_fast(
+      lf.log_prob, ws.p_at(input_slot), mass, n
+    );
+    double delta_H = H_new - H0;
+
+    // Both endpoints are the same slot (single node)
+    stats.left_slot = input_slot;
+    stats.right_slot = input_slot;
+    stats.proposal_slot = input_slot;
+    stats.log_prob_proposal = lf.log_prob;
+
+    // Multinomial weight: log(weight) = H0 - H_new (relative, Stan-style)
+    stats.sum_log_weight = H0 - H_new;
+
+    // Divergence check
+    stats.divergent = lf.divergent || (delta_H > delta_max);
+    stats.stop = stats.divergent;
+    stats.n_valid = stats.divergent ? 0 : 1;
+
+    // Acceptance statistic
+    double accept_stat = std::min(1.0, std::exp(-delta_H));
+    if (!std::isfinite(accept_stat)) accept_stat = 0.0;
+    stats.sum_accept_prob = accept_stat;
+    stats.n_leapfrog = 1;
+
+    // Generalized U-turn: track rho, p_sharp, p at this leaf
+    const double* p_ptr = ws.p_at(input_slot);
+    stats.rho.resize(n);
+    stats.p_beg.resize(n);
+    stats.p_end.resize(n);
+    stats.p_sharp_beg.resize(n);
+    stats.p_sharp_end.resize(n);
+
+    std::memcpy(stats.rho.data(), p_ptr, n * sizeof(double));
+    std::memcpy(stats.p_beg.data(), p_ptr, n * sizeof(double));
+    std::memcpy(stats.p_end.data(), p_ptr, n * sizeof(double));
+
+    // p_sharp = diag(M^{-1}) * p  — always use diagonal for U-turn robustness.
+    // Dense mass is used for leapfrog/momentum, but the U-turn criterion is more
+    // robust with diagonal p_sharp (avoids noise from off-diagonal estimates).
+    mass.inv_mass_diag_times_p(p_ptr, stats.p_sharp_beg.data());
+    std::memcpy(stats.p_sharp_end.data(), stats.p_sharp_beg.data(), n * sizeof(double));
+
+    return stats;
+  }
+
+  // Recursive case: build inner subtree
+  TreeStats inner = build_tree_fast(
+    ws, input_slot, direction, depth - 1,
+    epsilon, mass, H0, delta_max, data, layout, rng
+  );
+
+  stats = std::move(inner);
+
+  if (stats.stop) return stats;
+
+  // Copy the appropriate endpoint to a fresh slot for outer start
+  int start_slot = ws.alloc_slot();
+  if (start_slot < 0) {
+    stats.stop = true;
+    return stats;
+  }
+  if (direction == 1) {
+    ws.copy_node(start_slot, stats.right_slot);
+  } else {
+    ws.copy_node(start_slot, stats.left_slot);
+  }
+
+  // Build outer subtree from the copy
+  TreeStats outer = build_tree_fast(
+    ws, start_slot, direction, depth - 1,
+    epsilon, mass, H0, delta_max, data, layout, rng
+  );
+
+  // Combine results
+  stats.n_leapfrog += outer.n_leapfrog;
+  stats.sum_accept_prob += outer.sum_accept_prob;
+  stats.divergent = stats.divergent || outer.divergent;
+
+  // Multinomial sampling
+  double new_sum_log_weight = nuts_log_sum_exp(stats.sum_log_weight, outer.sum_log_weight);
+  double accept_prob_outer = std::exp(outer.sum_log_weight - new_sum_log_weight);
+  if (!std::isfinite(accept_prob_outer)) accept_prob_outer = 0.0;
+
+  std::uniform_real_distribution<double> unif(0.0, 1.0);
+  if (unif(rng) < accept_prob_outer) {
+    stats.proposal_slot = outer.proposal_slot;
+    stats.log_prob_proposal = outer.log_prob_proposal;
+  }
+
+  stats.sum_log_weight = new_sum_log_weight;
+  stats.n_valid = stats.n_valid + outer.n_valid;
+
+  // === SAVE BOUNDARY VALUES AS COPIES BEFORE MOVES ===
+  // "init" = inner (built first), "final" = outer (extends from init)
+  // These copies are needed because moves below invalidate the originals
+  std::vector<double> p_init_end = (direction == 1) ? stats.p_end : stats.p_beg;
+  std::vector<double> p_sharp_init_end = (direction == 1) ? stats.p_sharp_end : stats.p_sharp_beg;
+  std::vector<double> rho_init(stats.rho);  // inner's rho before combining
+
+  // Pointers to final's boundary (safe: these outer members are NOT moved)
+  const double* p_final_beg_ptr = (direction == 1) ? outer.p_beg.data() : outer.p_end.data();
+  const double* p_sharp_final_beg_ptr = (direction == 1) ? outer.p_sharp_beg.data() : outer.p_sharp_end.data();
+
+  // === UPDATE TREE ENDPOINTS (moves invalidate init's boundary refs) ===
+  if (direction == 1) {
+    stats.right_slot = outer.right_slot;
+    stats.p_sharp_end = std::move(outer.p_sharp_end);
+    stats.p_end = std::move(outer.p_end);
+  } else {
+    stats.left_slot = outer.left_slot;
+    stats.p_sharp_beg = std::move(outer.p_sharp_beg);
+    stats.p_beg = std::move(outer.p_beg);
+  }
+
+  // Combine rho = rho_init + rho_final
+  for (int i = 0; i < n; i++) {
+    stats.rho[i] = rho_init[i] + outer.rho[i];
+  }
+
+  // === GENERALIZED U-TURN CRITERION (Stan-style, 3 juncture checks) ===
+  // Check 1: Full merged trajectory — merged endpoints vs merged rho
+  bool persist = compute_criterion(stats.p_sharp_beg.data(), stats.p_sharp_end.data(),
+                                   stats.rho.data(), n);
+
+  // After moves, far endpoints depend on direction:
+  // direction == 1: init's far = stats.beg (left, unchanged), final's far = stats.end (right, moved)
+  // direction == -1: init's far = stats.end (right, unchanged), final's far = stats.beg (left, moved)
+  const double* init_far_psharp = (direction == 1) ? stats.p_sharp_beg.data() : stats.p_sharp_end.data();
+  const double* final_far_psharp = (direction == 1) ? stats.p_sharp_end.data() : stats.p_sharp_beg.data();
+
+  // Check 2: Init subtree + seam from final (rho = rho_init + p_final_beg)
+  std::vector<double> rho_check(n);
+  for (int i = 0; i < n; i++) {
+    rho_check[i] = rho_init[i] + p_final_beg_ptr[i];
+  }
+  persist &= compute_criterion(init_far_psharp, p_sharp_final_beg_ptr,
+                                rho_check.data(), n);
+
+  // Check 3: Seam from init + final subtree (rho = rho_final + p_init_end)
+  for (int i = 0; i < n; i++) {
+    rho_check[i] = outer.rho[i] + p_init_end[i];
+  }
+  persist &= compute_criterion(p_sharp_init_end.data(), final_far_psharp,
+                                rho_check.data(), n);
+
+  stats.stop = outer.stop || !persist;
+
+  return stats;
 }
 
 // =====================================================================
@@ -6429,20 +8186,26 @@ HMCResultCpp run_hmc_chain_cpp(
     int L,
     int chain_id,
     unsigned int seed,
-    bool verbose
+    bool verbose,
+    int max_treedepth,
+    MassMatrixType metric_type
 ) {
   int n_params = q_init.size();
   int n_sample = n_iter - n_warmup;
+  bool use_nuts = (L == 0);
 
   HMCResultCpp result;
-  result.samples.resize(n_sample, std::vector<double>(n_params));
+  result.n_params_stored = n_params;
+  result.samples_flat.resize(static_cast<size_t>(n_sample) * n_params);
   result.log_prob.resize(n_sample);
   result.accept_prob.resize(n_sample);
   result.n_leapfrog.resize(n_sample, L);
   result.divergent.resize(n_sample, 0);
+  result.treedepth.resize(n_sample, 0);
   result.n_warmup = n_warmup;
   result.n_sample = n_sample;
   result.chain_id = chain_id;
+  result.n_max_treedepth = 0;
 
   std::mt19937 rng(seed + chain_id * 12345);
   std::normal_distribution<double> normal(0.0, 1.0);
@@ -6450,7 +8213,14 @@ HMCResultCpp run_hmc_chain_cpp(
 
   std::vector<double> q = q_init;
 
-  double log_prob_current = compute_log_post(q, data, layout);
+  // For NUTS: fuse initial log_post + gradient into single O(N) pass
+  std::vector<double> current_grad(n_params);
+  double log_prob_current;
+  if (use_nuts) {
+    compute_gradient(q, data, layout, current_grad, &log_prob_current);
+  } else {
+    log_prob_current = compute_log_post(q, data, layout);
+  }
 
   double epsilon = find_reasonable_epsilon(q, data, layout, rng);
 
@@ -6470,12 +8240,26 @@ HMCResultCpp run_hmc_chain_cpp(
   }
   DualAveraging da(epsilon, n_params, target_boost);
 
+  // For NUTS, use fixed 0.80 target acceptance (Stan default)
+  if (use_nuts) {
+    da.target_accept = 0.80;
+  }
+
+  // current_grad already computed above (fused with log_prob for NUTS)
+
   // Mass matrix adaptation
-  // For M = diag(1/var), inv_mass = M^{-1} = diag(var)
-  // sqrt_mass_diag = sqrt(M) = diag(1/sqrt(var)) for momentum sampling
-  std::vector<double> inv_mass(n_params, 1.0);  // Starts as identity
-  std::vector<double> sqrt_mass_diag(n_params, 1.0);  // For p ~ N(0, M)
-  WelfordStats mass_stats(n_params);
+  // Auto-fallback for large p: dense → diagonal
+  MassMatrixType effective_metric = metric_type;
+  if (effective_metric == MassMatrixType::DENSE && n_params > 500) {
+    effective_metric = MassMatrixType::DIAG;
+    // Note: warning emitted from R side
+  }
+
+  DenseMassMatrix mass;
+  mass.init(n_params, effective_metric);
+
+  WelfordStats mass_stats(n_params);              // Always track diagonal
+  WelfordCovStats cov_stats(n_params);            // Only used when dense
   bool use_mass_matrix = false;
 
   // L-BFGS mass matrix adaptation (warmup-only)
@@ -6492,37 +8276,125 @@ HMCResultCpp run_hmc_chain_cpp(
     grad_prev.resize(n_params);
   }
 
-  // Warmup windows for mass matrix adaptation
-  // Window 1 (0 to 50%): collect samples with identity mass
-  // Window 2 (50% to 75%): use estimated mass, continue adapting
-  // Window 3 (75% to 100%): final mass, adapt epsilon only
-  int warmup_window1 = n_warmup / 2;
-  int warmup_window2 = (3 * n_warmup) / 4;
+  // Stan-style expanding warmup windows for mass matrix adaptation
+  // Phase 1: [0, init_buffer) - step size adaptation only
+  // Phase 2: [init_buffer, n_warmup - term_buffer) - mass matrix adaptation
+  //   Windows double in size: 25, 50, 100, 200, ...
+  //   Last window extends to fill remaining space
+  // Phase 3: [n_warmup - term_buffer, n_warmup) - final step size tuning
+  int init_buffer = 75;
+  int term_buffer = 50;
+  int init_window = 25;
+
+  // Adjust for short warmup
+  if (n_warmup < init_buffer + term_buffer + init_window) {
+    init_buffer = std::max(1, n_warmup / 5);
+    term_buffer = std::max(1, n_warmup / 10);
+    init_window = std::max(1, n_warmup - init_buffer - term_buffer);
+  }
+
+  // Compute mass adaptation window endpoints
+  std::vector<int> mass_window_ends;
+  {
+    int adapt_end = n_warmup - term_buffer;
+    if (adapt_end <= init_buffer) {
+      // No room for mass adaptation windows
+      mass_window_ends.push_back(std::max(1, adapt_end));
+    } else {
+      int next_end = init_buffer + init_window;
+      int win_size = init_window;
+      while (next_end < adapt_end) {
+        int next_win = 2 * win_size;
+        if (next_end + next_win > adapt_end) {
+          // Extend current window to fill remaining space
+          mass_window_ends.push_back(adapt_end);
+          break;
+        }
+        mass_window_ends.push_back(next_end);
+        win_size = next_win;
+        next_end += win_size;
+      }
+      if (mass_window_ends.empty() || mass_window_ends.back() < adapt_end) {
+        mass_window_ends.push_back(adapt_end);
+      }
+    }
+  }
+  int next_window_idx = 0;
+
+  // Pre-allocate NUTS workspace (zero-allocation tree building)
+  NUTSWorkspace nuts_ws;
+  std::vector<double> _nuts_p;              // Momentum sampling buffer
+  std::vector<double> _nuts_q_proposal;     // Persistent proposal (survives tree resets)
+  std::vector<double> _nuts_grad_proposal;  // Persistent proposal gradient
+  if (use_nuts) {
+    nuts_ws.init(n_params, max_treedepth);
+    _nuts_p.resize(n_params);
+    _nuts_q_proposal.resize(n_params);
+    _nuts_grad_proposal.resize(n_params);
+  }
 
   int sample_idx = 0;
   int n_accept = 0;
   int n_divergent = 0;
+  // Adaptive NUTS→fixed-L switching: monitor early sampling for max treedepth
+  int nuts_probe_window = std::min(20, n_sample);  // Check first 20 sampling iterations
+  int nuts_probe_maxd = 0;  // Count of maxd hits in probe window
+  bool nuts_probing = use_nuts && (L == 0);  // Only probe when using NUTS by default
 
   for (int iter = 0; iter < n_iter; iter++) {
     bool is_warmup = (iter < n_warmup);
-
-    // Check if we should update mass matrix
-    if (iter == warmup_window1 && mass_stats.n >= 10) {
-      // End of window 1: compute initial mass matrix
-      inv_mass = mass_stats.inv_mass();
-      sqrt_mass_diag = mass_stats.sqrt_mass();
-      use_mass_matrix = true;
-      mass_stats.reset();  // Reset for next window
-      // Reinitialize epsilon for new mass matrix
-      epsilon = find_reasonable_epsilon(q, data, layout, rng);
+    // Check if we've reached a mass adaptation window boundary
+    if (is_warmup && next_window_idx < (int)mass_window_ends.size() &&
+        iter == mass_window_ends[next_window_idx]) {
+      bool dense_covariance_set = false;  // Track if DENSE covariance (not just diagonal) succeeded this window
+      // Dense mass matrix: try full covariance first
+      if (mass.type == MassMatrixType::DENSE && cov_stats.n >= n_params + 5) {
+        auto cov = cov_stats.covariance();
+        if (mass.update_from_covariance(cov.data(), cov_stats.n)) {
+          use_mass_matrix = true;
+          dense_covariance_set = true;
+        } else {
+          // Cholesky failed — mass auto-degraded to DIAG, use diagonal stats
+          if (mass_stats.n >= 10) {
+            mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
+            use_mass_matrix = true;
+          }
+        }
+      } else if (mass.type == MassMatrixType::DENSE) {
+        // Not enough samples for dense yet — use diagonal as interim
+        if (mass_stats.n >= 10) {
+          mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
+          use_mass_matrix = true;
+        }
+      } else if (mass_stats.n >= 10) {
+        // Diagonal path
+        mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
+        use_mass_matrix = true;
+      }
+      mass_stats.reset();
+      // For dense: only reset cov_stats when full covariance was successfully
+      // computed THIS window. Otherwise keep accumulating across windows until
+      // we have enough samples (n >= n_params + 5). This prevents the
+      // chicken-and-egg problem where short windows never collect enough.
+      // NOTE: We use dense_covariance_set (not mass.adapted) because
+      // set_diagonal() also sets adapted=true, which would incorrectly
+      // trigger a reset when we're still building up covariance samples.
+      if (mass.type != MassMatrixType::DENSE || dense_covariance_set) {
+        cov_stats.reset();
+      }
+      // Re-initialize step size with current mass matrix (A3)
+      // Use dense-aware version when dense mass is adapted, so the step size
+      // is calibrated for the rotated phase space (not just the diagonal).
+      if (use_mass_matrix && mass.type == MassMatrixType::DENSE && mass.adapted) {
+        epsilon = find_reasonable_epsilon_dense(q, data, layout, rng, mass);
+      } else if (use_mass_matrix) {
+        epsilon = find_reasonable_epsilon(q, data, layout, rng, mass.inv_mass_diag);
+      } else {
+        epsilon = find_reasonable_epsilon(q, data, layout, rng);
+      }
       da = DualAveraging(epsilon, n_params, target_boost);
-    } else if (iter == warmup_window2 && mass_stats.n >= 10) {
-      // End of window 2: final mass matrix update
-      inv_mass = mass_stats.inv_mass();
-      sqrt_mass_diag = mass_stats.sqrt_mass();
-      // Reinitialize epsilon for final mass matrix
-      epsilon = find_reasonable_epsilon(q, data, layout, rng);
-      da = DualAveraging(epsilon, n_params, target_boost);
+      if (use_nuts) da.target_accept = 0.80;
+      next_window_idx++;
     }
 
     // L-BFGS: transition from L-BFGS to standard HMC at end of warmup
@@ -6533,183 +8405,404 @@ HMCResultCpp run_hmc_chain_cpp(
       double gamma = lbfgs_state.gamma;
       if (gamma > 0.01 && gamma < 100.0) {
         // Set inv_mass = gamma * I (larger gamma = larger variance = larger step in that direction)
-        for (int i = 0; i < n_params; i++) {
-          inv_mass[i] = gamma;
-          sqrt_mass_diag[i] = 1.0 / std::sqrt(gamma);
-        }
+        std::vector<double> inv_m(n_params, gamma);
+        std::vector<double> sqrt_m(n_params, 1.0 / std::sqrt(gamma));
+        mass.set_diagonal(inv_m, sqrt_m);
         use_mass_matrix = true;
       }
       lbfgs_warmup_done = true;
     }
 
-    // Sample momentum and compute kinetic energy
-    std::vector<double> p(n_params);
-    double kinetic_current = 0.0;
-    double H_current;
-
-    if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
-      // L-BFGS: Sample p ~ N(0, B) where B ≈ 1/gamma * I (warmup only)
-      std::vector<double> sqrt_diag = lbfgs_state.get_sqrt_B_diag();
-      if ((int)sqrt_diag.size() == n_params) {
-        for (int i = 0; i < n_params; i++) {
-          p[i] = normal(rng) * sqrt_diag[i];
-        }
-        kinetic_current = lbfgs_state.kinetic_energy(p);
-        H_current = -log_prob_current + kinetic_current;
-      } else {
-        // Fallback to standard sampling
-        for (int i = 0; i < n_params; i++) {
-          p[i] = normal(rng) * sqrt_mass_diag[i];
-        }
-        for (int i = 0; i < n_params; i++) {
-          kinetic_current += p[i] * p[i] * inv_mass[i];
-        }
-        kinetic_current *= 0.5;
-        H_current = -log_prob_current + kinetic_current;
-      }
-    } else {
-      // Standard: p ~ N(0, M) where M = diag(1/var)
-      for (int i = 0; i < n_params; i++) {
-        p[i] = normal(rng) * sqrt_mass_diag[i];
-      }
-      for (int i = 0; i < n_params; i++) {
-        kinetic_current += p[i] * p[i] * inv_mass[i];
-      }
-      kinetic_current *= 0.5;
-      H_current = -log_prob_current + kinetic_current;
-    }
-
-    // Leapfrog integration
-    std::vector<double> q_prop = q;
-    std::vector<double> p_prop = p;
+    // =========================================================================
+    // NUTS or fixed-trajectory HMC
+    // =========================================================================
+    double alpha = 0.0;
     bool divergent = false;
+    int iter_n_leapfrog = L;
+    int iter_treedepth = 0;
 
-    if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
-      // L-BFGS leapfrog: position update uses H*p instead of p (warmup only)
-      std::vector<double> grad(n_params);
-      compute_gradient(q_prop, data, layout, grad);
+    if (use_nuts && !(use_lbfgs && !lbfgs_warmup_done)) {
+      // -----------------------------------------------------------------
+      // NUTS: No-U-Turn Sampler (optimized zero-allocation path)
+      // -----------------------------------------------------------------
 
-      for (int l = 0; l < L; l++) {
-        // Half step in momentum
-        for (int i = 0; i < n_params; i++) {
-          p_prop[i] += 0.5 * epsilon * grad[i];
+      auto& p = _nuts_p;
+
+      // Sample momentum p ~ N(0, M) where M = C^{-1}
+      mass.sample_momentum(p.data(), rng);
+
+      // Initial Hamiltonian (pointer-based, no vector overhead)
+      double H0 = nuts_compute_hamiltonian_fast(
+        log_prob_current, p.data(), mass, n_params
+      );
+      double delta_max = 1000.0;
+
+      // Load current state into workspace persistent slots
+      nuts_ws.load_node(NUTSWorkspace::NODE_LEFT_SLOT,
+                        q.data(), p.data(), current_grad.data(), log_prob_current);
+      nuts_ws.load_node(NUTSWorkspace::NODE_RIGHT_SLOT,
+                        q.data(), p.data(), current_grad.data(), log_prob_current);
+
+      // Initialize persistent proposal buffers (pre-allocated, no per-iter malloc)
+      auto& q_proposal_data = _nuts_q_proposal;
+      auto& grad_proposal_data = _nuts_grad_proposal;
+      std::memcpy(q_proposal_data.data(), q.data(), n_params * sizeof(double));
+      std::memcpy(grad_proposal_data.data(), current_grad.data(), n_params * sizeof(double));
+      double log_prob_proposal = log_prob_current;
+      double sum_log_weight = 0.0;  // Relative weights: log(exp(H0 - H0)) = 0
+
+      int total_leapfrog = 0;
+      double sum_accept_prob = 0.0;
+      divergent = false;
+
+      // Generalized U-turn tracking at top level (Stan-style)
+      // rho = total momentum sum. rho_bck/rho_fwd = halves for 3-juncture checks.
+      // At each iteration the entire old trajectory becomes one half,
+      // the new subtree becomes the other half (Stan's approach).
+      std::vector<double> rho(n_params);
+      std::memcpy(rho.data(), p.data(), n_params * sizeof(double));
+      std::vector<double> rho_bck(n_params, 0.0), rho_fwd(n_params, 0.0);
+
+      // p_sharp = diag(M^{-1}) * p at initial point — diagonal for robust U-turn
+      std::vector<double> p_sharp_init(n_params);
+      mass.inv_mass_diag_times_p(p.data(), p_sharp_init.data());
+
+      // Boundary momenta: _end = far endpoint, _beg = origin-facing boundary
+      // Stan naming: bck_end=bck_bck, bck_beg=bck_fwd, fwd_beg=fwd_bck, fwd_end=fwd_fwd
+      std::vector<double> p_fwd_beg(p.begin(), p.end()), p_fwd_end(p.begin(), p.end());
+      std::vector<double> p_bck_beg(p.begin(), p.end()), p_bck_end(p.begin(), p.end());
+      std::vector<double> p_sharp_fwd_beg(p_sharp_init), p_sharp_fwd_end(p_sharp_init);
+      std::vector<double> p_sharp_bck_beg(p_sharp_init), p_sharp_bck_end(p_sharp_init);
+
+      // Build tree until U-turn or max depth
+      for (int j = 0; j < max_treedepth; j++) {
+        std::uniform_int_distribution<int> dir_dist(0, 1);
+        int direction = 2 * dir_dist(rng) - 1;
+
+        nuts_ws.reset_tree();
+
+        int start_slot = nuts_ws.alloc_slot();
+        if (start_slot < 0) break;
+        if (direction == 1) {
+          nuts_ws.copy_node(start_slot, NUTSWorkspace::NODE_RIGHT_SLOT);
+        } else {
+          nuts_ws.copy_node(start_slot, NUTSWorkspace::NODE_LEFT_SLOT);
         }
 
-        // Full step in position: q += epsilon * H * p
-        std::vector<double> Hp(n_params);
-        lbfgs_state.multiply_H(p_prop, Hp);
+        // Stan: relabel halves before building subtree
+        // Entire old trajectory becomes one half; new subtree is the other
+        if (direction == 1) {
+          // Extending forward: old trajectory → backward half
+          rho_bck = rho;
+          p_bck_beg = p_fwd_end;              // old fwd endpoint → bck's origin boundary
+          p_sharp_bck_beg = p_sharp_fwd_end;
+        } else {
+          // Extending backward: old trajectory → forward half
+          rho_fwd = rho;
+          p_fwd_beg = p_bck_end;              // old bck endpoint → fwd's origin boundary
+          p_sharp_fwd_beg = p_sharp_bck_end;
+        }
+
+        TreeStats subtree = build_tree_fast(
+          nuts_ws, start_slot, direction, j,
+          epsilon, mass, H0, delta_max,
+          data, layout, rng
+        );
+
+        total_leapfrog += subtree.n_leapfrog;
+        sum_accept_prob += subtree.sum_accept_prob;
+
+        if (subtree.divergent) {
+          divergent = true;
+        }
+
+        if (!subtree.stop) {
+          // Multinomial acceptance
+          double log_sum_weight_subtree = subtree.sum_log_weight;
+          double new_sum_log_weight = nuts_log_sum_exp(sum_log_weight, log_sum_weight_subtree);
+
+          double accept_prob_subtree;
+          if (log_sum_weight_subtree > new_sum_log_weight) {
+            accept_prob_subtree = 1.0;
+          } else {
+            accept_prob_subtree = std::exp(log_sum_weight_subtree - new_sum_log_weight);
+          }
+          if (!std::isfinite(accept_prob_subtree)) accept_prob_subtree = 0.0;
+
+          std::uniform_real_distribution<double> unif01(0.0, 1.0);
+          if (unif01(rng) < accept_prob_subtree) {
+            std::memcpy(q_proposal_data.data(), nuts_ws.q_at(subtree.proposal_slot),
+                        n_params * sizeof(double));
+            std::memcpy(grad_proposal_data.data(), nuts_ws.grad_at(subtree.proposal_slot),
+                        n_params * sizeof(double));
+            log_prob_proposal = subtree.log_prob_proposal;
+          }
+
+          sum_log_weight = new_sum_log_weight;
+        }
+
+        // Update direction endpoints and rho half from subtree
+        if (direction == 1) {
+          nuts_ws.copy_node(NUTSWorkspace::NODE_RIGHT_SLOT, subtree.right_slot);
+          rho_fwd = std::move(subtree.rho);
+          p_fwd_beg = std::move(subtree.p_beg);
+          p_fwd_end = std::move(subtree.p_end);
+          p_sharp_fwd_beg = std::move(subtree.p_sharp_beg);
+          p_sharp_fwd_end = std::move(subtree.p_sharp_end);
+        } else {
+          nuts_ws.copy_node(NUTSWorkspace::NODE_LEFT_SLOT, subtree.left_slot);
+          rho_bck = std::move(subtree.rho);
+          p_bck_beg = std::move(subtree.p_beg);
+          p_bck_end = std::move(subtree.p_end);
+          p_sharp_bck_beg = std::move(subtree.p_sharp_beg);
+          p_sharp_bck_end = std::move(subtree.p_sharp_end);
+        }
+
+        // Combine rho = rho_bck + rho_fwd
         for (int i = 0; i < n_params; i++) {
-          q_prop[i] += epsilon * Hp[i];
-          if (!std::isfinite(q_prop[i])) {
-            divergent = true;
-            break;
+          rho[i] = rho_bck[i] + rho_fwd[i];
+        }
+
+        iter_treedepth = j + 1;
+
+        // Generalized U-turn check at top level (3 junctures)
+        if (subtree.stop) break;
+
+        // Check 1: Full trajectory — far endpoints vs total rho
+        bool persist = compute_criterion(p_sharp_bck_end.data(), p_sharp_fwd_end.data(),
+                                         rho.data(), n_params);
+
+        // Check 2: Backward half + seam from forward (rho = rho_bck + p_fwd_beg)
+        std::vector<double> rho_seam(n_params);
+        for (int i = 0; i < n_params; i++) {
+          rho_seam[i] = rho_bck[i] + p_fwd_beg[i];
+        }
+        persist &= compute_criterion(p_sharp_bck_end.data(), p_sharp_fwd_beg.data(),
+                                      rho_seam.data(), n_params);
+
+        // Check 3: Seam from backward + forward half (rho = rho_fwd + p_bck_beg)
+        for (int i = 0; i < n_params; i++) {
+          rho_seam[i] = rho_fwd[i] + p_bck_beg[i];
+        }
+        persist &= compute_criterion(p_sharp_bck_beg.data(), p_sharp_fwd_end.data(),
+                                      rho_seam.data(), n_params);
+
+        if (!persist) break;
+      }
+
+      // Accept proposal: copy from persistent proposal buffers (memcpy, no alloc)
+      std::memcpy(q.data(), q_proposal_data.data(), n_params * sizeof(double));
+      std::memcpy(current_grad.data(), grad_proposal_data.data(), n_params * sizeof(double));
+      log_prob_current = log_prob_proposal;
+      n_accept++;
+
+      // Average acceptance statistic for dual averaging
+      alpha = (total_leapfrog > 0) ? (sum_accept_prob / total_leapfrog) : 0.0;
+      iter_n_leapfrog = total_leapfrog;
+
+      if (divergent) n_divergent++;
+      if (iter_treedepth >= max_treedepth) result.n_max_treedepth++;
+
+      // Adaptation during warmup
+      if (is_warmup) {
+        epsilon = da.update(alpha);
+        if (iter >= init_buffer && iter < n_warmup - term_buffer) {
+          mass_stats.update(q);
+          if (mass.type == MassMatrixType::DENSE) {
+            cov_stats.update(q);
           }
         }
-        if (divergent) break;
+        if (iter == n_warmup - 1) {
+          epsilon = da.final_epsilon();
+        }
+      }
 
-        // Recompute gradient at new position
+      // Adaptive NUTS→fixed-L probe: check early sampling iterations
+      if (nuts_probing && !is_warmup && sample_idx < nuts_probe_window) {
+        if (iter_treedepth >= max_treedepth) nuts_probe_maxd++;
+        if (sample_idx == nuts_probe_window - 1 &&
+            nuts_probe_maxd >= (nuts_probe_window * 8 + 9) / 10) {
+          // >=80% of probe iterations hit max treedepth — NUTS is struggling.
+          // Switch to fixed-L HMC (L=10) for remaining iterations.
+          use_nuts = false;
+          L = 10;
+          result.sampler = "NUTS->HMC(L=10)";
+          nuts_probing = false;
+          if (verbose) {
+            Rcpp::Rcerr << "  NUTS hit max treedepth on all " << nuts_probe_window
+                        << " initial sampling iterations. "
+                        << "Switching to fixed-L HMC (L=10)."
+                        << std::endl;
+          }
+        }
+      }
+    } else {
+      // -----------------------------------------------------------------
+      // Fixed-trajectory HMC (original code)
+      // -----------------------------------------------------------------
+
+      // Sample momentum and compute kinetic energy
+      std::vector<double> p(n_params);
+      double kinetic_current = 0.0;
+      double H_current;
+
+      if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
+        // L-BFGS: Sample p ~ N(0, B) where B ≈ 1/gamma * I (warmup only)
+        std::vector<double> sqrt_diag = lbfgs_state.get_sqrt_B_diag();
+        if ((int)sqrt_diag.size() == n_params) {
+          for (int i = 0; i < n_params; i++) {
+            p[i] = normal(rng) * sqrt_diag[i];
+          }
+          kinetic_current = lbfgs_state.kinetic_energy(p);
+          H_current = -log_prob_current + kinetic_current;
+        } else {
+          mass.sample_momentum(p.data(), rng);
+          kinetic_current = mass.kinetic_energy(p.data());
+          H_current = -log_prob_current + kinetic_current;
+        }
+      } else {
+        mass.sample_momentum(p.data(), rng);
+        kinetic_current = mass.kinetic_energy(p.data());
+        H_current = -log_prob_current + kinetic_current;
+      }
+
+      // Leapfrog integration
+      std::vector<double> q_prop = q;
+      std::vector<double> p_prop = p;
+
+      // Determine effective L for this iteration
+      int L_eff = L;
+      if (use_nuts && use_lbfgs && !lbfgs_warmup_done) {
+        // During L-BFGS warmup with NUTS mode, use fixed L=20
+        L_eff = 20;
+      }
+
+      if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
+        // L-BFGS leapfrog
+        std::vector<double> grad(n_params);
         compute_gradient(q_prop, data, layout, grad);
 
-        // Half step in momentum
-        for (int i = 0; i < n_params; i++) {
-          p_prop[i] += 0.5 * epsilon * grad[i];
+        for (int l = 0; l < L_eff; l++) {
+          for (int i = 0; i < n_params; i++) {
+            p_prop[i] += 0.5 * epsilon * grad[i];
+          }
+          std::vector<double> Hp(n_params);
+          lbfgs_state.multiply_H(p_prop, Hp);
+          for (int i = 0; i < n_params; i++) {
+            q_prop[i] += epsilon * Hp[i];
+            if (!std::isfinite(q_prop[i])) {
+              divergent = true;
+              break;
+            }
+          }
+          if (divergent) break;
+          compute_gradient(q_prop, data, layout, grad);
+          for (int i = 0; i < n_params; i++) {
+            p_prop[i] += 0.5 * epsilon * grad[i];
+          }
+          for (int i = 0; i < n_params; i++) {
+            if (!std::isfinite(p_prop[i]) || std::abs(p_prop[i]) > 1e10) {
+              divergent = true;
+              break;
+            }
+          }
+          if (divergent) break;
         }
-
-        // Check for divergence
-        for (int i = 0; i < n_params; i++) {
-          if (!std::isfinite(p_prop[i]) || std::abs(p_prop[i]) > 1e10) {
+      } else {
+        // Standard leapfrog
+        for (int l = 0; l < L_eff; l++) {
+          LeapfrogResult lf;
+          if (use_mass_matrix) {
+            lf = leapfrog_step_mass(q_prop, p_prop, epsilon, mass.inv_mass_diag, data, layout);
+          } else {
+            lf = leapfrog_step(q_prop, p_prop, epsilon, data, layout);
+          }
+          q_prop = lf.q;
+          p_prop = lf.p;
+          if (lf.divergent) {
             divergent = true;
             break;
           }
         }
-        if (divergent) break;
       }
-    } else {
-      // Standard leapfrog
-      for (int l = 0; l < L; l++) {
-        LeapfrogResult lf;
-        if (use_mass_matrix) {
-          lf = leapfrog_step_mass(q_prop, p_prop, epsilon, inv_mass, data, layout);
-        } else {
-          lf = leapfrog_step(q_prop, p_prop, epsilon, data, layout);
+
+      // Compute proposed Hamiltonian
+      double log_prob_prop = compute_log_post(q_prop, data, layout);
+      double kinetic_prop = 0.0;
+
+      if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
+        kinetic_prop = lbfgs_state.kinetic_energy(p_prop);
+      } else {
+        kinetic_prop = mass.kinetic_energy(p_prop.data());
+      }
+      double H_prop = -log_prob_prop + kinetic_prop;
+
+      // Metropolis accept/reject
+      alpha = std::min(1.0, std::exp(H_current - H_prop));
+      if (!std::isfinite(alpha)) alpha = 0.0;
+
+      std::uniform_real_distribution<double> unif01(0.0, 1.0);
+      bool accepted = (unif01(rng) < alpha) && !divergent;
+      if (accepted) {
+        q = q_prop;
+        log_prob_current = log_prob_prop;
+        n_accept++;
+        // Update cached gradient for transition to NUTS after L-BFGS warmup
+        if (use_nuts) {
+          compute_gradient(q, data, layout, current_grad);
         }
-        q_prop = lf.q;
-        p_prop = lf.p;
-        if (lf.divergent) {
-          divergent = true;
-          break;
+      }
+      if (divergent) n_divergent++;
+
+      // Adaptation during warmup
+      if (is_warmup) {
+        epsilon = da.update(alpha);
+        // Only collect mass stats during mass adaptation phase (A5)
+        if (iter >= init_buffer && iter < n_warmup - term_buffer) {
+          mass_stats.update(q);
+          if (mass.type == MassMatrixType::DENSE) {
+            cov_stats.update(q);
+          }
+        }
+        // On last warmup iteration, use averaged step size for sampling (A1)
+        if (iter == n_warmup - 1) {
+          epsilon = da.final_epsilon();
         }
       }
-    }
 
-    // Compute proposed Hamiltonian
-    double log_prob_prop = compute_log_post(q_prop, data, layout);
-    double kinetic_prop = 0.0;
+      // L-BFGS update: collect (s, y) pairs from accepted samples (warmup only)
+      if (use_lbfgs && !lbfgs_warmup_done) {
+        std::vector<double> grad_current(n_params);
+        compute_gradient(q, data, layout, grad_current);
 
-    if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
-      kinetic_prop = lbfgs_state.kinetic_energy(p_prop);
-    } else {
-      for (int i = 0; i < n_params; i++) {
-        kinetic_prop += p_prop[i] * p_prop[i] * inv_mass[i];
-      }
-      kinetic_prop *= 0.5;
-    }
-    double H_prop = -log_prob_prop + kinetic_prop;
-
-    // Metropolis accept/reject
-    double alpha = std::min(1.0, std::exp(H_current - H_prop));
-    if (!std::isfinite(alpha)) alpha = 0.0;
-
-    bool accepted = (unif(rng) < alpha) && !divergent;
-    if (accepted) {
-      q = q_prop;
-      log_prob_current = log_prob_prop;
-      n_accept++;
-    }
-    if (divergent) n_divergent++;
-
-    // Adaptation during warmup
-    if (is_warmup) {
-      epsilon = da.update(alpha);
-      // Collect samples for mass matrix estimation
-      mass_stats.update(q);
-    }
-
-    // L-BFGS update: collect (s, y) pairs from accepted samples (warmup only)
-    if (use_lbfgs && !lbfgs_warmup_done) {
-      std::vector<double> grad_current(n_params);
-      compute_gradient(q, data, layout, grad_current);
-
-      if (!lbfgs_initialized) {
-        // Initialize with first position and gradient
-        q_prev = q;
-        grad_prev = grad_current;
-        lbfgs_initialized = true;
-      } else if (accepted) {
-        // Compute differences
-        std::vector<double> s(n_params), y(n_params);
-        for (int i = 0; i < n_params; i++) {
-          s[i] = q[i] - q_prev[i];
-          y[i] = grad_current[i] - grad_prev[i];
+        if (!lbfgs_initialized) {
+          q_prev = q;
+          grad_prev = grad_current;
+          lbfgs_initialized = true;
+        } else if (accepted) {
+          std::vector<double> s(n_params), y(n_params);
+          for (int i = 0; i < n_params; i++) {
+            s[i] = q[i] - q_prev[i];
+            y[i] = grad_current[i] - grad_prev[i];
+          }
+          lbfgs_state.add_pair(s, y);
+          q_prev = q;
+          grad_prev = grad_current;
         }
-
-        // Add pair to L-BFGS (will be skipped if curvature condition not met)
-        lbfgs_state.add_pair(s, y);
-
-        // Update previous values
-        q_prev = q;
-        grad_prev = grad_current;
       }
-    }
 
-    // Store sample
+      iter_n_leapfrog = L_eff;
+    }  // end fixed-trajectory HMC
+
+    // Store sample (flat row-major storage, single memcpy)
     if (!is_warmup) {
-      for (int i = 0; i < n_params; i++) {
-        result.samples[sample_idx][i] = q[i];
-      }
+      std::memcpy(result.sample_row(sample_idx), q.data(),
+                  n_params * sizeof(double));
       result.log_prob[sample_idx] = log_prob_current;
       result.accept_prob[sample_idx] = alpha;
+      result.n_leapfrog[sample_idx] = iter_n_leapfrog;
       result.divergent[sample_idx] = divergent ? 1 : 0;
+      result.treedepth[sample_idx] = iter_treedepth;
       sample_idx++;
     }
 
@@ -6732,11 +8825,13 @@ HMCResult run_hmc_chain(
     int L,
     int chain_id,
     unsigned int seed,
-    bool verbose
+    bool verbose,
+    int max_treedepth,
+    MassMatrixType metric_type
 ) {
   // Run C++ version - pass verbose through for debugging
   HMCResultCpp cpp_result = run_hmc_chain_cpp(
-    q_init, data, layout, n_iter, n_warmup, L, chain_id, seed, verbose
+    q_init, data, layout, n_iter, n_warmup, L, chain_id, seed, verbose, max_treedepth, metric_type
   );
 
   // Convert to R result
@@ -6767,7 +8862,9 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     int L,
     int n_chains,
     unsigned int seed,
-    bool verbose
+    bool verbose,
+    int max_treedepth,
+    MassMatrixType metric_type
 ) {
   ParamLayout layout = compute_param_layout(data);
   int n_params = layout.total_params;
@@ -6786,14 +8883,14 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     for (int c = 0; c < n_chains; c++) {
       cpp_results[c] = run_hmc_chain_cpp(
         q_init, data, layout,
-        n_iter, n_warmup, L, c, seed, false  // verbose=false in parallel
+        n_iter, n_warmup, L, c, seed, false, max_treedepth, metric_type
       );
     }
   } else {
     // Single chain - run sequentially with verbose output
     cpp_results[0] = run_hmc_chain_cpp(
       q_init, data, layout,
-      n_iter, n_warmup, L, 0, seed, verbose
+      n_iter, n_warmup, L, 0, seed, verbose, max_treedepth, metric_type
     );
   }
 #else
@@ -6801,7 +8898,7 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   for (int c = 0; c < n_chains; c++) {
     cpp_results[c] = run_hmc_chain_cpp(
       q_init, data, layout,
-      n_iter, n_warmup, L, c, seed, verbose
+      n_iter, n_warmup, L, c, seed, verbose, max_treedepth, metric_type
     );
   }
 #endif
@@ -6866,13 +8963,18 @@ Rcpp::List cpp_hmc_fit(
     unsigned int seed,
     int n_threads,
     bool verbose,
-    std::string gradient_mode_str = "auto"
+    std::string gradient_mode_str = "auto",
+    int max_treedepth = 10,
+    std::string metric_str = "diag"
 ) {
   using namespace ratiod_hmc;
 
   // Set global gradient mode from R parameter
   GradientMode grad_mode = parse_gradient_mode(gradient_mode_str);
   set_gradient_mode(grad_mode);
+
+  // Parse metric type
+  MassMatrixType metric_type = parse_metric_type(metric_str);
 
   // =========================================================================
   // Extract bundled parameters from lists with defensive checks
@@ -7175,7 +9277,12 @@ Rcpp::List cpp_hmc_fit(
 
   // Zero-inflation structure
   data.zi_type = ratiod_zi::parse_zi_type(zi_type_str);
-  data.p_zi = X_zi.ncol();
+  // Use explicit p_zi from R (not X_zi.ncol()) because OI-only models
+  // pass a 1-column placeholder X_zi but p_zi=0
+  {
+    SEXP p_zi_sexp = zi_params["p_zi"];
+    data.p_zi = (!Rf_isNull(p_zi_sexp)) ? Rcpp::as<int>(p_zi_sexp) : X_zi.ncol();
+  }
   data.zi_prior_sd = zi_prior_sd;
   data.X_zi_flat.resize(data.N * data.p_zi);
   for (int i = 0; i < data.N; i++) {
@@ -7243,21 +9350,22 @@ Rcpp::List cpp_hmc_fit(
     double st_sigma2_prior_U = Rcpp::as<double>(st_params["sigma2_prior_U"]);
     double st_sigma2_prior_alpha = Rcpp::as<double>(st_params["sigma2_prior_alpha"]);
 
-    // Parse ST type
-    if (st_type_str == "type_i") {
+    // Parse ST type (accept both R-side "I"/"IV" and legacy "type_i"/"type_iv")
+    if (st_type_str == "I" || st_type_str == "type_i") {
       data.spatiotemporal_data.type = STType::TYPE_I;
-    } else if (st_type_str == "type_ii") {
+    } else if (st_type_str == "II" || st_type_str == "type_ii") {
       data.spatiotemporal_data.type = STType::TYPE_II;
-    } else if (st_type_str == "type_iii") {
+    } else if (st_type_str == "III" || st_type_str == "type_iii") {
       data.spatiotemporal_data.type = STType::TYPE_III;
-    } else if (st_type_str == "type_iv") {
+    } else if (st_type_str == "IV" || st_type_str == "type_iv") {
       data.spatiotemporal_data.type = STType::TYPE_IV;
     } else if (st_type_str == "separable") {
       data.spatiotemporal_data.type = STType::SEPARABLE;
     } else if (st_type_str == "nonsep_gp") {
       data.spatiotemporal_data.type = STType::NONSEP_GP;
     } else {
-      data.spatiotemporal_data.type = STType::NONE;
+      Rcpp::stop("Unknown spatiotemporal type: '%s'. Expected one of: I, II, III, IV, separable, nonsep_gp",
+                 st_type_str.c_str());
     }
 
     data.spatiotemporal_data.shared = st_shared;
@@ -7412,7 +9520,7 @@ Rcpp::List cpp_hmc_fit(
   if (n_chains == 1) {
     ParamLayout layout = compute_param_layout(data);
     HMCResult result = run_hmc_chain(
-      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose
+      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose, max_treedepth, metric_type
     );
 
     return Rcpp::List::create(
@@ -7420,16 +9528,20 @@ Rcpp::List cpp_hmc_fit(
       Rcpp::Named("log_prob") = result.log_prob,
       Rcpp::Named("accept_prob") = result.accept_prob,
       Rcpp::Named("n_leapfrog") = result.n_leapfrog,
+      Rcpp::Named("treedepth") = result.treedepth,
       Rcpp::Named("divergent") = result.divergent,
       Rcpp::Named("epsilon") = result.epsilon,
       Rcpp::Named("n_warmup") = result.n_warmup,
       Rcpp::Named("n_sample") = result.n_sample,
-      Rcpp::Named("n_chains") = 1
+      Rcpp::Named("n_chains") = 1,
+      Rcpp::Named("sampler") = result.sampler.empty()
+        ? ((L == 0) ? std::string("NUTS") : std::string("HMC"))
+        : result.sampler
     );
   } else {
     // Multiple chains
     std::vector<HMCResult> results = run_hmc_parallel_chains(
-      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose
+      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose, max_treedepth, metric_type
     );
 
     // Combine results
@@ -7439,26 +9551,38 @@ Rcpp::List cpp_hmc_fit(
     Rcpp::List samples_list(n_chains);
     Rcpp::List log_prob_list(n_chains);
     Rcpp::List accept_prob_list(n_chains);
+    Rcpp::List n_leapfrog_list(n_chains);
+    Rcpp::List treedepth_list(n_chains);
     Rcpp::List divergent_list(n_chains);
     Rcpp::NumericVector epsilon_vec(n_chains);
 
+    // Determine sampler name: if any chain switched, report it
+    std::string sampler_name = (L == 0) ? "NUTS" : "HMC";
     for (int c = 0; c < n_chains; c++) {
       samples_list[c] = results[c].samples;
       log_prob_list[c] = results[c].log_prob;
       accept_prob_list[c] = results[c].accept_prob;
+      n_leapfrog_list[c] = results[c].n_leapfrog;
+      treedepth_list[c] = results[c].treedepth;
       divergent_list[c] = results[c].divergent;
       epsilon_vec[c] = results[c].epsilon;
+      if (!results[c].sampler.empty()) {
+        sampler_name = results[c].sampler;
+      }
     }
 
     return Rcpp::List::create(
       Rcpp::Named("samples") = samples_list,
       Rcpp::Named("log_prob") = log_prob_list,
       Rcpp::Named("accept_prob") = accept_prob_list,
+      Rcpp::Named("n_leapfrog") = n_leapfrog_list,
+      Rcpp::Named("treedepth") = treedepth_list,
       Rcpp::Named("divergent") = divergent_list,
       Rcpp::Named("epsilon") = epsilon_vec,
       Rcpp::Named("n_warmup") = n_warmup,
       Rcpp::Named("n_sample") = n_sample,
-      Rcpp::Named("n_chains") = n_chains
+      Rcpp::Named("n_chains") = n_chains,
+      Rcpp::Named("sampler") = sampler_name
     );
   }
 }
@@ -7506,7 +9630,8 @@ Rcpp::List cpp_hmc_fit_gp(
     int n_chains,
     unsigned int seed,
     int n_threads,
-    bool verbose
+    bool verbose,
+    int max_treedepth = 10
 ) {
   // Force all Rcpp parameter extractions into eagerly-copied std::vectors FIRST
   // This prevents R garbage collection from invalidating lazy Rcpp views during C++ execution
@@ -7845,7 +9970,7 @@ Rcpp::List cpp_hmc_fit_gp(
     data.rsr_n = 0;
   }
 
-  // Zero-inflation structure
+  // Zero-inflation structure (GP interface: no OI support, use matrix directly)
   data.zi_type = ratiod_zi::parse_zi_type(zi_type_str);
   data.p_zi = X_zi.ncol();
   data.zi_prior_sd = zi_prior_sd;
@@ -7892,7 +10017,7 @@ Rcpp::List cpp_hmc_fit_gp(
   if (n_chains == 1) {
     ParamLayout layout = compute_param_layout(data);
     HMCResult result = run_hmc_chain(
-      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose
+      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose, max_treedepth
     );
 
     return Rcpp::List::create(
@@ -7900,16 +10025,20 @@ Rcpp::List cpp_hmc_fit_gp(
       Rcpp::Named("log_prob") = result.log_prob,
       Rcpp::Named("accept_prob") = result.accept_prob,
       Rcpp::Named("n_leapfrog") = result.n_leapfrog,
+      Rcpp::Named("treedepth") = result.treedepth,
       Rcpp::Named("divergent") = result.divergent,
       Rcpp::Named("epsilon") = result.epsilon,
       Rcpp::Named("n_warmup") = result.n_warmup,
       Rcpp::Named("n_sample") = result.n_sample,
-      Rcpp::Named("n_chains") = 1
+      Rcpp::Named("n_chains") = 1,
+      Rcpp::Named("sampler") = result.sampler.empty()
+        ? ((L == 0) ? std::string("NUTS") : std::string("HMC"))
+        : result.sampler
     );
   } else {
     // Multiple chains
     std::vector<HMCResult> results = run_hmc_parallel_chains(
-      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose
+      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose, max_treedepth
     );
 
     // Combine results
@@ -7919,26 +10048,37 @@ Rcpp::List cpp_hmc_fit_gp(
     Rcpp::List samples_list(n_chains);
     Rcpp::List log_prob_list(n_chains);
     Rcpp::List accept_prob_list(n_chains);
+    Rcpp::List n_leapfrog_list(n_chains);
+    Rcpp::List treedepth_list(n_chains);
     Rcpp::List divergent_list(n_chains);
     Rcpp::NumericVector epsilon_vec(n_chains);
 
+    std::string sampler_name = (L == 0) ? "NUTS" : "HMC";
     for (int c = 0; c < n_chains; c++) {
       samples_list[c] = results[c].samples;
       log_prob_list[c] = results[c].log_prob;
       accept_prob_list[c] = results[c].accept_prob;
+      n_leapfrog_list[c] = results[c].n_leapfrog;
+      treedepth_list[c] = results[c].treedepth;
       divergent_list[c] = results[c].divergent;
       epsilon_vec[c] = results[c].epsilon;
+      if (!results[c].sampler.empty()) {
+        sampler_name = results[c].sampler;
+      }
     }
 
     return Rcpp::List::create(
       Rcpp::Named("samples") = samples_list,
       Rcpp::Named("log_prob") = log_prob_list,
       Rcpp::Named("accept_prob") = accept_prob_list,
+      Rcpp::Named("n_leapfrog") = n_leapfrog_list,
+      Rcpp::Named("treedepth") = treedepth_list,
       Rcpp::Named("divergent") = divergent_list,
       Rcpp::Named("epsilon") = epsilon_vec,
       Rcpp::Named("n_warmup") = n_warmup,
       Rcpp::Named("n_sample") = n_sample,
-      Rcpp::Named("n_chains") = n_chains
+      Rcpp::Named("n_chains") = n_chains,
+      Rcpp::Named("sampler") = sampler_name
     );
   }
 }
@@ -7977,6 +10117,10 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
   unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
   int n_threads = Rcpp::as<int>(args["n_threads"]);
   bool verbose = Rcpp::as<bool>(args["verbose"]);
+  int max_treedepth = 10;
+  if (args.containsElementNamed("max_treedepth")) {
+    max_treedepth = Rcpp::as<int>(args["max_treedepth"]);
+  }
 
   // Delegate to the original implementation
   return cpp_hmc_fit_gp(
@@ -7985,6 +10129,6 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
     model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params,
     sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate,
     zi_type_str, X_zi, zi_prior_sd,
-    n_iter, n_warmup, L, n_chains, seed, n_threads, verbose
+    n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth
   );
 }

@@ -18,11 +18,13 @@ fit_hmc(
   warmup = floor(iter/2),
   chains = 4,
   cores = NULL,
-  L = 20,
+  L = 0,
+  max_treedepth = 10,
   seed = NULL,
   verbose = TRUE,
   gradient_mode = "auto",
-  re_param = "noncentered"
+  re_param = "noncentered",
+  metric = "diag"
 )
 }
 \arguments{

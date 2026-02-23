@@ -74,9 +74,15 @@
 #' @param gradient_mode Gradient computation method for HMC backend:
 #'   `"auto"` (default) selects fastest available;
 #'   `"H"` hand-coded analytical gradients (fastest);
-#'   `"A"` forward-mode autodiff (fast, ~10x over tape);
-#'   `"A_t"` tape-based reverse-mode autodiff (slow);
+#'   `"A_r"` arena-based reverse-mode autodiff (fast, O(N));
+#'   `"A"` forward-mode autodiff (O(p*N), thread-safe);
+#'   `"A_t"` tape-based reverse-mode autodiff (slow, legacy);
 #'   `"N"` numerical finite differences (slowest, always works).
+#' @param metric Mass matrix type for NUTS:
+#'   `"diag"` (default) diagonal mass matrix;
+#'   `"dense"` full dense mass matrix (better for correlated posteriors
+#'   like random slopes, BYM2, HSGP models). Auto-falls back to diagonal
+#'   when p > 500.
 #' @param re_param Random effects parameterization:
 #'   `"noncentered"` (default) stores z ~ N(0,1) and computes re = σ*z (or re = diag(σ)*L*z for correlated).
 #'     Better for weakly-informed random effects or small group sizes.
@@ -162,20 +168,24 @@ ratiod <- function(formula,
                   vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
                   refresh = NULL,
                   verbose = TRUE,
-                  gradient_mode = c("auto", "N", "A", "A_t", "H"),
+                  gradient_mode = c("auto", "N", "A", "A_r", "A_t", "H"),
                   re_param = c("noncentered", "centered"),
+                  max_treedepth = 10,
+                  metric = c("diag", "dense"),
                   ...) {
 
   mode <- match.arg(mode)
   vi_variant <- match.arg(vi_variant)
   gradient_mode <- match.arg(gradient_mode)
   re_param <- match.arg(re_param)
+  metric <- match.arg(metric)
 
-  # Handle verbose from ... for backwards compatibility
+  # Handle verbose and L from ... for backwards compatibility
   extra_args <- list(...)
   if ("verbose" %in% names(extra_args)) {
     verbose <- extra_args$verbose
   }
+  L <- if ("L" %in% names(extra_args)) as.integer(extra_args$L) else 0L
 
   # Validate temporal specification
   if (!is.null(temporal)) {
@@ -238,6 +248,24 @@ ratiod <- function(formula,
       spatiotemporal <- validate_st_gp(spatiotemporal, data)
     } else {
       spatiotemporal <- validate_spatiotemporal(spatiotemporal, data)
+    }
+
+    # Auto-extract main spatial/temporal effects from spatiotemporal if not
+    # provided separately. The Knorr-Held decomposition requires main effects
+    # (phi_s, phi_t) alongside the interaction (delta_st).
+    if (is.null(spatial) && !is.null(spatiotemporal$spatial)) {
+      spatial <- spatiotemporal$spatial
+      # validate_spatial() just checks, returns invisible(NULL) — don't reassign
+      if (!is.null(spatial) && !inherits(spatial, c("ratiod_gp", "ratiod_multiscale"))) {
+        validate_spatial(spatial, data)
+      }
+    }
+    if (is.null(temporal) && !is.null(spatiotemporal$temporal)) {
+      temporal <- spatiotemporal$temporal
+      # validate_temporal() returns the validated object — reassign
+      if (!is.null(temporal)) {
+        temporal <- validate_temporal(temporal, data)
+      }
     }
   }
 
@@ -437,10 +465,13 @@ ratiod <- function(formula,
       warmup = warmup,
       chains = chains,
       cores = cores,
+      L = L,
+      max_treedepth = max_treedepth,
       seed = seed,
       verbose = verbose,
       gradient_mode = gradient_mode,
-      re_param = re_param
+      re_param = re_param,
+      metric = metric
     )
 
     # Add mode information

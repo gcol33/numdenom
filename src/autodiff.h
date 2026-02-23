@@ -10,6 +10,7 @@
 #include <cmath>
 #include <memory>
 #include <functional>
+#include "portable_math.h"
 
 namespace ratiod {
 namespace ad {
@@ -496,13 +497,14 @@ inline Var inv_logit(const Var& a) {
 inline Var lgamma(const Var& a) {
   Tape* tape = a.tape;
   double a_val = a.val();
-  Var result(tape, R::lgammafn(a_val));
+  Var result(tape, std::lgamma(a_val));
 
   size_t a_idx = a.idx;
   size_t r_idx = result.idx;
 
-  tape->nodes[r_idx].backward = [a_idx, r_idx, a_val](Tape* t) {
-    double digamma_val = R::digamma(a_val);
+  // Capture digamma value eagerly to avoid R:: call during backward pass
+  double digamma_val = ratiod::math::portable_digamma(a_val);
+  tape->nodes[r_idx].backward = [a_idx, r_idx, digamma_val](Tape* t) {
     t->nodes[a_idx].adjoint += t->nodes[r_idx].adjoint * digamma_val;
   };
 

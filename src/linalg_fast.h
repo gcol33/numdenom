@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <cmath>
+#include <cstring>
 #include <algorithm>
 #include <numeric>
 
@@ -95,6 +96,41 @@ inline void scale(double a, double* x, int n) {
   for (; i < n; i++) {
     x[i] *= a;
   }
+}
+
+// Weighted axpy: y[i] += a * w[i] * x[i]  (mass-scaled momentum update)
+inline void axpy_weighted(double a, const double* w, const double* x, double* y, int n) {
+  int i = 0;
+  for (; i + 3 < n; i += 4) {
+    y[i]   += a * w[i]   * x[i];
+    y[i+1] += a * w[i+1] * x[i+1];
+    y[i+2] += a * w[i+2] * x[i+2];
+    y[i+3] += a * w[i+3] * x[i+3];
+  }
+  for (; i < n; i++) {
+    y[i] += a * w[i] * x[i];
+  }
+}
+
+// Weighted norm squared: sum(x[i]^2 * w[i])  (for kinetic energy)
+inline double weighted_norm_squared(const double* x, const double* w, int n) {
+  double sum = 0.0;
+  int i = 0;
+  for (; i + 3 < n; i += 4) {
+    sum += x[i]   * x[i]   * w[i]
+         + x[i+1] * x[i+1] * w[i+1]
+         + x[i+2] * x[i+2] * w[i+2]
+         + x[i+3] * x[i+3] * w[i+3];
+  }
+  for (; i < n; i++) {
+    sum += x[i] * x[i] * w[i];
+  }
+  return sum;
+}
+
+// Copy n doubles from src to dst (thin wrapper over memcpy for clarity)
+inline void vec_copy(const double* src, double* dst, int n) {
+  std::memcpy(dst, src, n * sizeof(double));
 }
 
 // ============================================================================
@@ -606,6 +642,70 @@ inline auto make_diagonal_precond(
       result[i] = v[i] / diag[i];
     }
   };
+}
+
+// ============================================================================
+// Dense matrix operations (column-major storage, for mass matrix support)
+// ============================================================================
+
+// Symmetric matrix-vector product: y = A * x
+// A is n×n symmetric, stored column-major (only uses lower triangle logic
+// but reads full matrix for simplicity since it's symmetric)
+inline void symmatvec(const double* A, const double* x, double* y, int n) {
+  for (int i = 0; i < n; i++) {
+    double sum = 0.0;
+    for (int j = 0; j < n; j++) {
+      sum += A[j * n + i] * x[j];  // column-major: A[i,j] = A[j*n + i]
+    }
+    y[i] = sum;
+  }
+}
+
+// Quadratic form: x^T * A * x (A symmetric n×n, column-major)
+inline double quadratic_form(const double* x, const double* A, int n) {
+  double result = 0.0;
+  for (int i = 0; i < n; i++) {
+    double Ax_i = 0.0;
+    for (int j = 0; j < n; j++) {
+      Ax_i += A[j * n + i] * x[j];
+    }
+    result += x[i] * Ax_i;
+  }
+  return result;
+}
+
+// Forward substitution: solve L*y = b (L lower triangular, column-major)
+inline void tri_solve_lower(const double* L, const double* b, double* y, int n) {
+  for (int i = 0; i < n; i++) {
+    double sum = b[i];
+    for (int j = 0; j < i; j++) {
+      sum -= L[j * n + i] * y[j];  // L[i,j] = L[j*n + i]
+    }
+    y[i] = sum / L[i * n + i];  // L[i,i] = L[i*n + i]
+  }
+}
+
+// Back substitution: solve L^T*y = b (L lower triangular, column-major)
+inline void tri_solve_upper_transpose(const double* L, const double* b, double* y, int n) {
+  for (int i = n - 1; i >= 0; i--) {
+    double sum = b[i];
+    for (int j = i + 1; j < n; j++) {
+      sum -= L[i * n + j] * y[j];  // L^T[i,j] = L[j,i] = L[i*n + j]
+    }
+    y[i] = sum / L[i * n + i];  // L^T[i,i] = L[i,i] = L[i*n + i]
+  }
+}
+
+// Fused scale + matvec + add: y += alpha * A * x (A symmetric n×n, column-major)
+inline void axpy_matvec(double alpha, const double* A, const double* x,
+                        double* y, int n) {
+  for (int i = 0; i < n; i++) {
+    double Ax_i = 0.0;
+    for (int j = 0; j < n; j++) {
+      Ax_i += A[j * n + i] * x[j];
+    }
+    y[i] += alpha * Ax_i;
+  }
 }
 
 }  // namespace ratiod_linalg

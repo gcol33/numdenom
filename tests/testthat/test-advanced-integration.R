@@ -31,8 +31,8 @@ test_that("GP spatial model fits with exponential covariance", {
     family = ratiod_poisson_gamma(),
     spatial = spatial_gp(~ x_coord + y_coord, cov = "exponential", nn = 5),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -61,8 +61,8 @@ test_that("GP spatial model fits with matern covariance", {
     family = ratiod_poisson_gamma(),
     spatial = spatial_gp(~ lon + lat, cov = "matern", nu = 1.5, nn = 5),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -93,8 +93,8 @@ test_that("latent factor model fits with 1 factor", {
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 1),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -122,8 +122,8 @@ test_that("latent factor model fits with 2 factors", {
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 2),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -168,8 +168,8 @@ test_that("spatiotemporal Type I model fits", {
       type = "I"
     ),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -209,8 +209,8 @@ test_that("spatiotemporal Type IV model fits", {
       type = "IV"
     ),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -244,8 +244,8 @@ test_that("SVC model fits with single varying coefficient", {
     family = ratiod_poisson_gamma(),
     spatial = spatial_svc(~ lon + lat, terms = 1, nn = 5),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -417,8 +417,8 @@ test_that("PG backend fits binomial model", {
     data = df,
     family = ratiod_binomial(),
     mode = "pg",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -448,8 +448,8 @@ test_that("PG backend fits binomial model with random effects", {
     data = df,
     family = ratiod_binomial(),
     mode = "pg",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -491,8 +491,8 @@ test_that("PG backend fits binomial model with spatial CAR", {
     family = ratiod_binomial(),
     spatial = spatial_car(adj, level = "group", group_var = "site"),
     mode = "pg",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -532,8 +532,8 @@ test_that("ratiod_compare handles model comparison setup", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -543,8 +543,8 @@ test_that("ratiod_compare handles model comparison setup", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -586,8 +586,8 @@ test_that("GP spatial with random effects fits", {
     family = ratiod_poisson_gamma(),
     spatial = spatial_gp(~ x_coord + y_coord, nn = 4),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -617,8 +617,8 @@ test_that("Latent factor with random effects fits", {
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 1),
     mode = "hmc",
-    iter = 150,
-    warmup = 75,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )

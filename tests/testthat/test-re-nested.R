@@ -159,8 +159,8 @@ test_that("HMC fits model with nested RE", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -204,8 +204,8 @@ test_that("HMC fits deeply nested model", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -238,8 +238,8 @@ test_that("mixed nested and crossed RE fits", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )

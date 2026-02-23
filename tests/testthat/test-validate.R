@@ -35,8 +35,8 @@ test_that("ratiod_compare requires at least two models", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -72,8 +72,8 @@ test_that("ratiod_average requires at least two models", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 

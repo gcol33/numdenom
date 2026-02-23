@@ -16,6 +16,7 @@
 #include <vector>
 #include <algorithm>
 #include <Rcpp.h>
+#include "portable_math.h"
 
 namespace fwd {
 
@@ -309,12 +310,12 @@ inline Dual logit(const Dual& x) {
 
 inline Dual lgamma(const Dual& x) {
     // d(lgamma(x)) = digamma(x)
-    return Dual(R::lgammafn(x.val), R::digamma(x.val) * x.grad);
+    return Dual(std::lgamma(x.val), ratiod::math::portable_digamma(x.val) * x.grad);
 }
 
 inline Dual digamma(const Dual& x) {
     // d(digamma(x)) = trigamma(x)
-    return Dual(R::digamma(x.val), R::trigamma(x.val) * x.grad);
+    return Dual(ratiod::math::portable_digamma(x.val), ratiod::math::portable_trigamma(x.val) * x.grad);
 }
 
 inline Dual abs(const Dual& x) {

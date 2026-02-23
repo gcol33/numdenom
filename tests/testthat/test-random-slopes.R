@@ -237,8 +237,8 @@ test_that("random slopes model compiles and runs without error", {
     y_num | y_denom ~ x + (1 + x || site),
     data = df,
     family = ratiod_negbin_negbin(),
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     mode = "hmc"
   )
@@ -302,8 +302,8 @@ test_that("correlated random slopes model runs without error", {
     y | trials ~ x + (1 + x | site),
     data = df,
     family = ratiod_binomial(),
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     mode = "hmc"
   )

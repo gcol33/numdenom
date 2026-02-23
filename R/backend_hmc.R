@@ -72,11 +72,13 @@ fit_hmc <- function(formula,
                     warmup = floor(iter / 2),
                     chains = 4,
                     cores = NULL,
-                    L = 20,
+                    L = 0,
+                    max_treedepth = 10,
                     seed = NULL,
                     verbose = TRUE,
                     gradient_mode = "auto",
-                    re_param = "noncentered") {
+                    re_param = "noncentered",
+                    metric = "diag") {
 
   # Set cores
   if (is.null(cores)) {
@@ -248,11 +250,13 @@ fit_hmc <- function(formula,
 
   # Initialize parameters
   q_init <- initialize_hmc_params_full(
-    hmc_data, model_type, spatial_info, temporal_info, zi_info, latent_info, svc_info
+    hmc_data, model_type, spatial_info, temporal_info, zi_info, latent_info, svc_info,
+    spatiotemporal_info
   )
 
   if (verbose) {
-    message("Running HMC sampler...")
+    sampler_name <- if (L == 0) "NUTS" else paste0("HMC (L=", L, ")")
+    message("Running ", sampler_name, " sampler...")
     message("  Parameters: ", length(q_init))
     message("  Iterations: ", iter, " (warmup: ", warmup, ")")
     message("  Chains: ", chains, " (cores: ", cores, ")")
@@ -435,7 +439,8 @@ fit_hmc <- function(formula,
       seed = as.integer(seed),
       n_threads = n_threads_within,
       verbose = verbose,
-      gradient_mode_str = gradient_mode
+      gradient_mode_str = gradient_mode,
+      max_treedepth = as.integer(max_treedepth)
     ))
   } else {
     # Bundle parameters into lists to stay under R's 65-argument limit for .Call
@@ -611,8 +616,21 @@ fit_hmc <- function(formula,
       seed = as.integer(seed),
       n_threads = n_threads_within,
       verbose = verbose,
-      gradient_mode_str = gradient_mode
+      gradient_mode_str = gradient_mode,
+      max_treedepth = as.integer(max_treedepth),
+      metric_str = metric
     )
+  }
+
+  # Post-fit warnings
+  if (verbose && L == 0) {
+    # NUTS diagnostics
+    n_div <- fit_raw$n_divergent %||%
+      sum(unlist(lapply(fit_raw$divergent, function(x) sum(x))))
+    if (n_div > 0) {
+      warning(n_div, " divergent transition(s) after warmup.",
+              " Increase max_treedepth or reparameterize.", call. = FALSE)
+    }
   }
 
   # Convert to ratiod_fit
@@ -1039,12 +1057,16 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
     all_samples <- do.call(rbind, fit_raw$samples)
     all_log_prob <- unlist(fit_raw$log_prob)
     all_accept <- unlist(fit_raw$accept_prob)
+    all_n_leapfrog <- unlist(fit_raw$n_leapfrog)
+    all_treedepth <- unlist(fit_raw$treedepth)
     all_divergent <- unlist(fit_raw$divergent)
     epsilon <- mean(fit_raw$epsilon)
   } else {
     all_samples <- fit_raw$samples
     all_log_prob <- fit_raw$log_prob
     all_accept <- fit_raw$accept_prob
+    all_n_leapfrog <- fit_raw$n_leapfrog
+    all_treedepth <- fit_raw$treedepth
     all_divergent <- fit_raw$divergent
     epsilon <- fit_raw$epsilon
   }
@@ -1078,7 +1100,7 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
     temporal = temporal_info,
     spatiotemporal = spatiotemporal_info,
     backend = "hmc",
-    algorithm = "HMC",
+    algorithm = fit_raw$sampler %||% "HMC",
     re_param = re_param,
     iter = iter,
     warmup = warmup,
@@ -1086,9 +1108,13 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
     n_save = n_samples,
     epsilon = epsilon,
     diagnostics = list(
+      algorithm = fit_raw$sampler %||% "HMC",
       n_divergent = n_divergent,
       avg_accept_prob = avg_accept,
-      divergent = all_divergent
+      n_leapfrog = all_n_leapfrog,
+      treedepth = all_treedepth,
+      divergent = all_divergent,
+      log_posterior = all_log_prob
     ),
     log_prob = all_log_prob,
     .internal = list(
@@ -1668,7 +1694,8 @@ prepare_zi_for_hmc <- function(zi, data, N) {
 #' @keywords internal
 initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
                                         temporal_info, zi_info, latent_info = NULL,
-                                        svc_info = NULL) {
+                                        svc_info = NULL,
+                                        spatiotemporal_info = NULL) {
   # Start building parameter vector with data-driven initialization
   q_init <- numeric(0)
   idx <- 1
@@ -1872,6 +1899,39 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
     q_init <- c(q_init, rep(0.0, K + N * K))
   }
 
+  # Spatiotemporal interaction (Knorr-Held Type I-IV)
+  if (!is.null(spatiotemporal_info) &&
+      isTRUE(spatiotemporal_info$has_spatiotemporal)) {
+    st_type <- spatiotemporal_info$type %||% "none"
+    if (st_type != "none") {
+      n_st_spatial <- spatiotemporal_info$n_spatial %||% 0L
+      n_st_times <- spatiotemporal_info$n_times %||% 0L
+      n_st_delta <- spatiotemporal_info$n_params %||% (n_st_spatial * n_st_times)
+
+      # log_tau_st (precision for interaction)
+      q_init <- c(q_init, 0.0)
+
+      # log_tau_st2 for Type IV (Kronecker)
+      if (st_type == "IV") {
+        q_init <- c(q_init, 0.0)
+      }
+
+      # logit_rho_st for AR1 temporal in ST
+      st_temporal_type <- spatiotemporal_info$temporal_type %||% "rw1"
+      if (st_temporal_type == "ar1") {
+        q_init <- c(q_init, 0.0)
+      }
+
+      # GP range parameters for separable/non-separable GP
+      if (st_type %in% c("separable", "nonsep_gp")) {
+        q_init <- c(q_init, 0.0, 0.0)  # log_phi_space, log_phi_time
+      }
+
+      # ST interaction effects delta[S*T]
+      q_init <- c(q_init, rep(0.0, n_st_delta))
+    }
+  }
+
   # SVC (Spatially-Varying Coefficients)
   if (!is.null(svc_info) && isTRUE(svc_info$has_svc)) {
     n_svc <- svc_info$n_svc %||% 0L
@@ -1902,12 +1962,16 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     all_samples <- do.call(rbind, fit_raw$samples)
     all_log_prob <- unlist(fit_raw$log_prob)
     all_accept <- unlist(fit_raw$accept_prob)
+    all_n_leapfrog <- unlist(fit_raw$n_leapfrog)
+    all_treedepth <- unlist(fit_raw$treedepth)
     all_divergent <- unlist(fit_raw$divergent)
     epsilon <- mean(fit_raw$epsilon)
   } else {
     all_samples <- fit_raw$samples
     all_log_prob <- fit_raw$log_prob
     all_accept <- fit_raw$accept_prob
+    all_n_leapfrog <- fit_raw$n_leapfrog
+    all_treedepth <- fit_raw$treedepth
     all_divergent <- fit_raw$divergent
     epsilon <- fit_raw$epsilon
   }
@@ -1963,7 +2027,7 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     zi = zi_info,
     latent = latent_info,
     backend = "hmc",
-    algorithm = "HMC",
+    algorithm = fit_raw$sampler %||% "HMC",
     re_param = re_param,
     iter = iter,
     warmup = warmup,
@@ -1971,9 +2035,13 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     n_save = n_samples,
     epsilon = epsilon,
     diagnostics = list(
+      algorithm = fit_raw$sampler %||% "HMC",
       n_divergent = n_divergent,
       avg_accept_prob = avg_accept,
-      divergent = all_divergent
+      n_leapfrog = all_n_leapfrog,
+      treedepth = all_treedepth,
+      divergent = all_divergent,
+      log_posterior = all_log_prob
     ),
     log_prob = all_log_prob,
     .internal = list(
@@ -2909,7 +2977,9 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       # Solver config (HSGP uses Cholesky internally, but keep consistent interface)
       solver = "cholesky",
       cg_tol = 1e-6,
-      cg_maxiter = 100L
+      cg_maxiter = 100L,
+      gp_obs_to_loc = integer(0),
+      n_unique = 0L
     ))
   }
 

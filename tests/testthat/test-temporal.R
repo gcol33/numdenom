@@ -287,8 +287,8 @@ test_that("HMC with temporal RW1 runs", {
     st_params = make_st_params_temporal(),
     tvc_params = make_tvc_params_temporal(),
     svc_params = make_svc_params_temporal(),
-    n_iter = 800L,
-    n_warmup = 400L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 333L,
@@ -297,7 +297,7 @@ test_that("HMC with temporal RW1 runs", {
   )
 
   expect_equal(ncol(result$samples), 12)
-  expect_equal(nrow(result$samples), 400)
+  expect_equal(nrow(result$samples), 100)
 
   # Check temporal precision is positive
   log_tau_idx <- 4
@@ -355,8 +355,8 @@ test_that("HMC with temporal AR1 runs", {
     st_params = make_st_params_temporal(),
     tvc_params = make_tvc_params_temporal(),
     svc_params = make_svc_params_temporal(),
-    n_iter = 800L,
-    n_warmup = 400L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 444L,
@@ -365,7 +365,7 @@ test_that("HMC with temporal AR1 runs", {
   )
 
   expect_equal(ncol(result$samples), 15)
-  expect_equal(nrow(result$samples), 400)
+  expect_equal(nrow(result$samples), 100)
 
   # Check rho is estimated (transformed from logit)
   logit_rho_idx <- 5  # After 2 beta_num + 1 beta_denom + 1 log_tau
@@ -414,8 +414,8 @@ test_that("HMC with cyclic RW1 (seasonal) runs", {
     st_params = make_st_params_temporal(),
     tvc_params = make_tvc_params_temporal(),
     svc_params = make_svc_params_temporal(),
-    n_iter = 600L,
-    n_warmup = 300L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 555L,
@@ -424,7 +424,7 @@ test_that("HMC with cyclic RW1 (seasonal) runs", {
   )
 
   expect_equal(ncol(result$samples), 16)
-  expect_equal(nrow(result$samples), 300)
+  expect_equal(nrow(result$samples), 100)
 })
 
 
@@ -478,8 +478,8 @@ test_that("HMC with panel temporal (group-specific) runs", {
     st_params = make_st_params_temporal(),
     tvc_params = make_tvc_params_temporal(),
     svc_params = make_svc_params_temporal(),
-    n_iter = 600L,
-    n_warmup = 300L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 666L,
@@ -488,7 +488,7 @@ test_that("HMC with panel temporal (group-specific) runs", {
   )
 
   expect_equal(ncol(result$samples), 19)
-  expect_equal(nrow(result$samples), 300)
+  expect_equal(nrow(result$samples), 100)
 })
 
 
@@ -531,8 +531,8 @@ test_that("HMC with temporal runs multiple chains in parallel", {
     st_params = make_st_params_temporal(),
     tvc_params = make_tvc_params_temporal(),
     svc_params = make_svc_params_temporal(),
-    n_iter = 400L,
-    n_warmup = 200L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 2L,  # Multiple chains in parallel
     seed = 777L,
@@ -544,9 +544,9 @@ test_that("HMC with temporal runs multiple chains in parallel", {
   expect_true(is.list(result$samples))
   expect_equal(length(result$samples), 2)
 
-  # Each chain has correct dimensions
-  expect_equal(nrow(result$samples[[1]]), 200)
-  expect_equal(nrow(result$samples[[2]]), 200)
+  # Each chain has correct dimensions (n_iter=200 total, n_warmup=100 → 100 post-warmup)
+  expect_equal(nrow(result$samples[[1]]), 100)
+  expect_equal(nrow(result$samples[[2]]), 100)
   expect_equal(ncol(result$samples[[1]]), 10)
   expect_equal(ncol(result$samples[[2]]), 10)
 

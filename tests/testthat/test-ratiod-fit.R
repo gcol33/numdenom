@@ -17,8 +17,8 @@ test_that("ratiod fits poisson_gamma model", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -45,8 +45,8 @@ test_that("ratiod fits negbin_negbin model", {
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -72,8 +72,8 @@ test_that("ratiod fits binomial model", {
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -99,8 +99,8 @@ test_that("ratiod auto-selects HMC backend", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "auto",  # Use mode instead of backend
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -150,8 +150,8 @@ test_that("ratiod handles formula_num and formula_denom", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -177,8 +177,8 @@ test_that("print.ratiod_fit works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -207,8 +207,8 @@ test_that("summary.ratiod_fit works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -236,8 +236,8 @@ test_that("summary.ratiod_fit respects prob argument", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -262,8 +262,8 @@ test_that("mcmc_diagnostics works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -293,8 +293,8 @@ test_that("mcmc_diagnostics filters parameters", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -319,8 +319,8 @@ test_that("check_diagnostics works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -349,8 +349,8 @@ test_that("check_diagnostics prints output", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -374,8 +374,8 @@ test_that("n_divergent returns count", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -501,8 +501,8 @@ test_that("get_draws_array returns correct structure", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 

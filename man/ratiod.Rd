@@ -28,8 +28,10 @@ ratiod(
   vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
   refresh = NULL,
   verbose = TRUE,
-  gradient_mode = c("auto", "N", "A", "A_t", "H"),
+  gradient_mode = c("auto", "N", "A", "A_r", "A_t", "H"),
   re_param = c("noncentered", "centered"),
+  max_treedepth = 10,
+  metric = c("diag", "dense"),
   ...
 )
 }
@@ -125,8 +127,9 @@ See \code{\link[=inference_mode_info]{inference_mode_info()}} for details on the
 \item{gradient_mode}{Gradient computation method for HMC backend:
 \code{"auto"} (default) selects fastest available;
 \code{"H"} hand-coded analytical gradients (fastest);
-\code{"A"} forward-mode autodiff (fast, ~10x over tape);
-\code{"A_t"} tape-based reverse-mode autodiff (slow);
+\code{"A_r"} arena-based reverse-mode autodiff (fast, O(N));
+\code{"A"} forward-mode autodiff (O(p*N), thread-safe);
+\code{"A_t"} tape-based reverse-mode autodiff (slow, legacy);
 \code{"N"} numerical finite differences (slowest, always works).}
 
 \item{re_param}{Random effects parameterization:
@@ -134,6 +137,12 @@ See \code{\link[=inference_mode_info]{inference_mode_info()}} for details on the
 Better for weakly-informed random effects or small group sizes.
 \code{"centered"} stores re directly with re ~ N(0,σ²) prior.
 Better for strongly-informed random effects or large group sizes.}
+
+\item{metric}{Mass matrix type for NUTS:
+\code{"diag"} (default) diagonal mass matrix;
+\code{"dense"} full dense mass matrix (better for correlated posteriors
+like random slopes, BYM2, HSGP models). Auto-falls back to diagonal
+when p > 500.}
 
 \item{...}{Additional arguments passed to the sampler.}
 }

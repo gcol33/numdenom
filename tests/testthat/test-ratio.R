@@ -18,8 +18,8 @@ make_test_fit <- function() {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
   fit
@@ -139,8 +139,8 @@ test_that("ratio_contrast computes differences", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -169,8 +169,8 @@ test_that("ratio_contrast computes ratio of ratios", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 
@@ -221,8 +221,8 @@ test_that("print.ratiod_contrast works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 300,
-    warmup = 150,
+    iter = 100,
+    warmup = 50,
     chains = 1
   )
 

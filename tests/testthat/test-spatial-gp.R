@@ -265,8 +265,8 @@ test_that("GP model fits with duplicate coordinates", {
     family = ratiod_binomial(),
     spatial = spatial_gp(~ lon + lat, nn = 5),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )

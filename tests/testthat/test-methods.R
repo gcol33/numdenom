@@ -16,8 +16,8 @@ test_that("plot.ratiod_fit works with base graphics", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -43,8 +43,8 @@ test_that("plot.ratiod_fit respects pars argument", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -70,8 +70,8 @@ test_that("plot.ratiod_fit errors with no matching parameters", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -186,8 +186,8 @@ test_that("as.data.frame.ratiod_fit works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -212,8 +212,8 @@ test_that("compute_fitted_values dispatches correctly", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -241,8 +241,8 @@ test_that("compute_fitted_hmc works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -276,8 +276,8 @@ test_that("predict.ratiod_fit works with newdata", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -306,8 +306,8 @@ test_that("predict.ratiod_fit returns draws when summary=FALSE", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -336,8 +336,8 @@ test_that("predict.ratiod_fit returns fitted when no newdata", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -384,8 +384,8 @@ test_that("build_prediction_data works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -418,8 +418,8 @@ test_that("compute_predictions_hmc works", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 
@@ -454,8 +454,8 @@ test_that("compute_predictions_hmc works with link scale", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 80,
+    warmup = 40,
     chains = 1
   )
 

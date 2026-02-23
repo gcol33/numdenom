@@ -1,5 +1,6 @@
 // autodiff_utils.h
-// Templated math functions that work with double, ad::Var (tape), and fwd::Dual (forward)
+// Templated math functions that work with double, ad::Var (tape), fwd::Dual (forward),
+// and arena::Var (arena reverse-mode)
 // Enables single implementation of compute_log_post for both evaluation and gradient
 
 #ifndef RATIOD_AUTODIFF_UTILS_H
@@ -10,12 +11,15 @@
 #include <Rcpp.h>
 #include "autodiff.h"
 #include "autodiff_fwd.h"
+#include "autodiff_arena.h"
 
 namespace ratiod {
 namespace math {
 
+// Portable math functions are in portable_math.h (included by autodiff headers)
+
 // ============================================================================
-// Type traits to detect ad::Var (tape-based) and fwd::Dual (forward-mode)
+// Type traits to detect ad::Var (tape), fwd::Dual (forward), arena::Var (arena)
 // ============================================================================
 
 template<typename T>
@@ -30,9 +34,16 @@ struct is_fwd_dual : std::false_type {};
 template<>
 struct is_fwd_dual<fwd::Dual> : std::true_type {};
 
-// Helper: is either autodiff type
 template<typename T>
-struct is_autodiff : std::integral_constant<bool, is_ad_var<T>::value || is_fwd_dual<T>::value> {};
+struct is_arena_var : std::false_type {};
+
+template<>
+struct is_arena_var<arena::Var> : std::true_type {};
+
+// Helper: is any autodiff type
+template<typename T>
+struct is_autodiff : std::integral_constant<bool,
+    is_ad_var<T>::value || is_fwd_dual<T>::value || is_arena_var<T>::value> {};
 
 // ============================================================================
 // Basic math functions - dispatch to std:: or ad::
@@ -69,6 +80,13 @@ safe_exp(const T& x) {
     return fwd::Dual(e, e * x.grad);
 }
 
+// exp - arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+safe_exp(const T& x) {
+    return arena::exp(x);
+}
+
 // log - double version
 template<typename T>
 inline typename std::enable_if<!is_autodiff<T>::value, T>::type
@@ -90,6 +108,13 @@ inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
 safe_log(const T& x) {
     if (x.val <= 0.0) return fwd::Dual(-1e10, 0.0);
     return fwd::Dual(std::log(x.val), x.grad / x.val);
+}
+
+// log - arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+safe_log(const T& x) {
+    return arena::log(x);
 }
 
 // sqrt - double version
@@ -114,6 +139,13 @@ safe_sqrt(const T& x) {
     if (x.val < 0.0) return fwd::Dual(0.0, 0.0);
     double s = std::sqrt(x.val);
     return fwd::Dual(s, 0.5 * x.grad / s);
+}
+
+// sqrt - arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+safe_sqrt(const T& x) {
+    return arena::sqrt(x);
 }
 
 // max - double version (returns the larger of a and b)
@@ -147,11 +179,22 @@ safe_max(const T& a, const T& b) {
     }
 }
 
+// max - arena::Var version (subgradient: return the active branch)
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+safe_max(const T& a, const T& b) {
+    if (a.val() >= b.val()) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
 // lgamma (log of gamma function) - double version
 template<typename T>
 inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 lgamma_fn(T x) {
-    return R::lgammafn(x);
+    return std::lgamma(x);  // thread-safe, no R stack checking
 }
 
 // lgamma - ad::Var (tape) version
@@ -166,14 +209,21 @@ template<typename T>
 inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
 lgamma_fn(const T& x) {
     // d(lgamma(x)) = digamma(x)
-    return fwd::Dual(R::lgammafn(x.val), R::digamma(x.val) * x.grad);
+    return fwd::Dual(std::lgamma(x.val), portable_digamma(x.val) * x.grad);
+}
+
+// lgamma - arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+lgamma_fn(const T& x) {
+    return arena::lgamma(x);
 }
 
 // digamma (derivative of lgamma) - double version
 template<typename T>
 inline typename std::enable_if<!is_autodiff<T>::value, T>::type
 digamma_fn(T x) {
-    return R::digamma(x);
+    return portable_digamma(x);  // thread-safe, no R stack checking
 }
 
 // digamma - fwd::Dual version
@@ -181,10 +231,17 @@ template<typename T>
 inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
 digamma_fn(const T& x) {
     // d(digamma(x)) = trigamma(x)
-    return fwd::Dual(R::digamma(x.val), R::trigamma(x.val) * x.grad);
+    return fwd::Dual(portable_digamma(x.val), portable_trigamma(x.val) * x.grad);
 }
 
 // For ad::Var, digamma is handled internally by lgamma's backward pass
+
+// digamma - arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+digamma_fn(const T& x) {
+    return arena::digamma(x);
+}
 
 // inv_logit (logistic function) - double version
 template<typename T>
@@ -213,6 +270,13 @@ inv_logit(const T& x) {
     return fwd::inv_logit(x);
 }
 
+// inv_logit - arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+inv_logit(const T& x) {
+    return arena::inv_logit(x);
+}
+
 // log1p - double version
 template<typename T>
 inline typename std::enable_if<!is_autodiff<T>::value, T>::type
@@ -232,6 +296,13 @@ template<typename T>
 inline typename std::enable_if<is_fwd_dual<T>::value, T>::type
 log1p_fn(const T& x) {
     return fwd::log1p(x);
+}
+
+// log1p - arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, T>::type
+log1p_fn(const T& x) {
+    return arena::log1p(x);
 }
 
 // ============================================================================
@@ -259,8 +330,15 @@ get_value(const T& x) {
     return x.val;
 }
 
+// arena::Var version
+template<typename T>
+inline typename std::enable_if<is_arena_var<T>::value, double>::type
+get_value(const T& x) {
+    return x.val();
+}
+
 // ============================================================================
-// Dot product that works with both types
+// Dot product that works with all types
 // ============================================================================
 
 template<typename T>
@@ -326,7 +404,7 @@ inline T log_lik_binomial(int y, int n, const T& p) {
     // y * log(p) + (n-y) * log(1-p) + lchoose(n, y)
     // lchoose is constant w.r.t. p
     T log_lik = y * safe_log(p) + (n - y) * safe_log(T(1.0) - p);
-    log_lik = log_lik + R::lchoose(n, y);  // constant
+    log_lik = log_lik + portable_lchoose(n, y);  // constant
     return log_lik;
 }
 
@@ -474,7 +552,7 @@ inline T log_lik_beta_binomial(int y, int n, const T& mu, const T& phi) {
 
     T ll = lgamma_fn(T(y) + alpha) + lgamma_fn(T(n - y) + beta) - lgamma_fn(T(n) + alpha + beta);
     ll = ll - lgamma_fn(alpha) - lgamma_fn(beta) + lgamma_fn(alpha + beta);
-    ll = ll + R::lchoose(n, y);  // constant w.r.t. parameters
+    ll = ll + portable_lchoose(n, y);  // constant w.r.t. parameters
 
     return ll;
 }

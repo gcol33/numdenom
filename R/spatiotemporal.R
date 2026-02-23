@@ -462,11 +462,10 @@ prepare_spatial_precision <- function(spatial) {
     adj <- as.matrix(spatial$adjacency)
     n <- nrow(adj)
 
-    # Build CSR format
-    row_ptr <- integer(n + 1)
+    # Build CSR format (0-based row_ptr, 1-based col_idx — C++ does -1)
+    row_ptr <- integer(n + 1)  # initialized to 0 (0-based CSR)
     col_idx <- integer(0)
 
-    row_ptr[1] <- 1L
     for (i in seq_len(n)) {
       neighbors <- which(adj[i, ] > 0)
       col_idx <- c(col_idx, neighbors)

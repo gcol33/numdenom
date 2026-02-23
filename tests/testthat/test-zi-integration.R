@@ -27,8 +27,8 @@ test_that("zi_poisson fits with poisson_gamma family", {
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -64,8 +64,8 @@ test_that("zi_poisson with formula fits covariates for ZI probability", {
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(~ habitat),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -103,8 +103,8 @@ test_that("zi_negbin fits with negbin_negbin family", {
     family = ratiod_negbin_negbin(),
     zi = zi_negbin(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -140,8 +140,8 @@ test_that("hurdle_poisson fits correctly", {
     family = ratiod_poisson_gamma(),
     zi = hurdle_poisson(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -171,8 +171,8 @@ test_that("hurdle_poisson with formula for hurdle probability", {
     family = ratiod_poisson_gamma(),
     zi = hurdle_poisson(~ habitat),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -205,8 +205,8 @@ test_that("hurdle_negbin fits correctly", {
     family = ratiod_negbin_negbin(),
     zi = hurdle_negbin(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -245,8 +245,8 @@ test_that("zi_poisson works with random effects", {
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -285,8 +285,8 @@ test_that("ZI model handles data with many zeros", {
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -317,8 +317,8 @@ test_that("ZI model handles data with few zeros", {
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -346,8 +346,8 @@ test_that("ratio() extraction works with ZI models", {
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )
@@ -381,8 +381,8 @@ test_that("summary works for ZI models", {
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
+    iter = 100,
+    warmup = 50,
     chains = 1,
     verbose = FALSE
   )

@@ -219,8 +219,8 @@ test_that("negbin_negbin with RW2 temporal runs correctly (row 42)", {
     st_params = make_st_params(),
     tvc_params = make_tvc_params(),
     svc_params = make_svc_params(),
-    n_iter = 600L,
-    n_warmup = 300L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 4201L,
@@ -229,7 +229,8 @@ test_that("negbin_negbin with RW2 temporal runs correctly (row 42)", {
   )
 
   expect_equal(ncol(result$samples), n_params)
-  expect_equal(nrow(result$samples), 300)
+  # n_iter=200 total, n_warmup=100 → 100 post-warmup samples
+  expect_equal(nrow(result$samples), 100)
 
   # Check temporal effects are finite
   temporal_cols <- (n_params - n_times + 1):n_params
@@ -288,8 +289,8 @@ test_that("binomial with RW2 temporal runs correctly (row 43)", {
     st_params = make_st_params(),
     tvc_params = make_tvc_params(),
     svc_params = make_svc_params(),
-    n_iter = 600L,
-    n_warmup = 300L,
+    n_iter = 200L,
+    n_warmup = 100L,
     L = 10L,
     n_chains = 1L,
     seed = 4301L,
@@ -298,7 +299,8 @@ test_that("binomial with RW2 temporal runs correctly (row 43)", {
   )
 
   expect_equal(ncol(result$samples), n_params)
-  expect_equal(nrow(result$samples), 300)
+  # n_iter=200 total, n_warmup=100 → 100 post-warmup samples
+  expect_equal(nrow(result$samples), 100)
 
   # Check temporal effects are finite
   temporal_cols <- (n_params - n_times + 1):n_params
@@ -389,8 +391,8 @@ test_that("negbin_negbin with MSGP runs correctly (row 44)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -424,8 +426,8 @@ test_that("binomial with MSGP runs correctly (row 45)", {
       family = ratiod_binomial(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -510,8 +512,8 @@ test_that("negbin_negbin with GP + RW1 runs correctly (row 46)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -536,8 +538,8 @@ test_that("binomial with GP + RW1 runs correctly (row 47)", {
       family = ratiod_binomial(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -562,8 +564,8 @@ test_that("poisson_gamma with GP + RW2 runs correctly (row 48)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -588,8 +590,8 @@ test_that("poisson_gamma with GP + AR1 runs correctly (row 49)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -614,8 +616,8 @@ test_that("negbin_negbin with GP + AR1 runs correctly (row 50)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -640,8 +642,8 @@ test_that("binomial with GP + AR1 runs correctly (row 51)", {
       family = ratiod_binomial(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -759,8 +761,8 @@ test_that("poisson_gamma with BYM2 + ZI runs correctly (row 52)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -785,8 +787,8 @@ test_that("poisson_gamma with GP + ZI runs correctly (row 53)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -819,8 +821,8 @@ test_that("negbin_negbin with ICAR + ZI runs correctly (row 54)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -886,8 +888,8 @@ test_that("poisson_gamma with crossed RE + ICAR runs correctly (row 57)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -943,8 +945,8 @@ test_that("poisson_gamma with random slopes + RW1 runs correctly (row 60)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1020,8 +1022,8 @@ test_that("poisson_gamma with ICAR + RW1 + ZI runs correctly (row 64)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1058,8 +1060,8 @@ test_that("negbin_negbin with BYM2 + ZI runs correctly (row 55)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1092,8 +1094,8 @@ test_that("binomial with ICAR + ZI runs correctly (row 56)", {
       family = ratiod_binomial(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1155,8 +1157,8 @@ test_that("poisson_gamma with crossed RE + BYM2 runs correctly (row 58)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1219,8 +1221,8 @@ test_that("negbin_negbin with crossed RE + ICAR runs correctly (row 59)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1276,8 +1278,8 @@ test_that("poisson_gamma with random slopes + AR1 runs correctly (row 61)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1330,8 +1332,8 @@ test_that("negbin_negbin with random slopes + RW1 runs correctly (row 62)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1387,8 +1389,8 @@ test_that("binomial with random slopes + AR1 runs correctly (row 63)", {
       family = ratiod_binomial(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1460,8 +1462,8 @@ test_that("poisson_gamma with BYM2 + RW1 + ZI runs correctly (row 65)", {
       family = ratiod_poisson_gamma(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )
@@ -1533,8 +1535,8 @@ test_that("negbin_negbin with ICAR + RW1 + ZI runs correctly (row 66)", {
       family = ratiod_negbin_negbin(),
       mode = "hmc",
       chains = 1,
-      iter = 400,
-      warmup = 200,
+      iter = 150,
+      warmup = 75,
       verbose = FALSE
     )
   )

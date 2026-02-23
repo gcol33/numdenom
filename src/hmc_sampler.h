@@ -8,7 +8,9 @@
 #include <Rcpp.h>
 #include <vector>
 #include <cmath>
+#include <cstring>
 #include <random>
+#include "linalg_fast.h"
 #include "hmc_temporal.h"
 #include "hmc_temporal_gp.h"
 #include "hmc_zi.h"
@@ -47,21 +49,32 @@ enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA, GAMMA_GAMMA, LOGN
 enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP, HSGP };
 
 // Gradient computation methods
-// AUTO: Use fastest available (H > A > A_t > N)
+// AUTO: Use fastest available (H > A_r > A > A_t > N)
 // NUMERICAL (N): Finite differences - slow but always works
 // AUTODIFF_TAPE (A_t): Tape-based reverse-mode - slow due to heap allocation
-// AUTODIFF_FORWARD (A): Forward-mode dual numbers - fast, ~10x over A_t
+// AUTODIFF_ARENA (A_r): Arena-based reverse-mode - fast O(N), ~10-30x over A_t
+// AUTODIFF_FORWARD (A): Forward-mode dual numbers - O(p*N), thread-safe
 // HANDCODED (H): Analytical gradients - fastest when available
-enum class GradientMode { AUTO, NUMERICAL, AUTODIFF_TAPE, AUTODIFF_FORWARD, HANDCODED };
+enum class GradientMode { AUTO, NUMERICAL, AUTODIFF_TAPE, AUTODIFF_ARENA, AUTODIFF_FORWARD, HANDCODED };
+
+// Mass matrix type for NUTS
+enum class MassMatrixType { DIAG, DENSE };
 
 // Parse gradient mode from string
 inline GradientMode parse_gradient_mode(const std::string& mode_str) {
     if (mode_str == "auto" || mode_str == "AUTO") return GradientMode::AUTO;
     if (mode_str == "N" || mode_str == "numerical") return GradientMode::NUMERICAL;
     if (mode_str == "A_t" || mode_str == "autodiff_tape") return GradientMode::AUTODIFF_TAPE;
+    if (mode_str == "A_r" || mode_str == "arena" || mode_str == "autodiff_arena") return GradientMode::AUTODIFF_ARENA;
     if (mode_str == "A" || mode_str == "autodiff" || mode_str == "forward") return GradientMode::AUTODIFF_FORWARD;
     if (mode_str == "H" || mode_str == "handcoded" || mode_str == "analytical") return GradientMode::HANDCODED;
     return GradientMode::AUTO;  // Default
+}
+
+// Parse metric type from string
+inline MassMatrixType parse_metric_type(const std::string& metric_str) {
+    if (metric_str == "dense" || metric_str == "DENSE") return MassMatrixType::DENSE;
+    return MassMatrixType::DIAG;  // Default
 }
 
 // Set global gradient mode (defined in hmc_sampler.cpp)
@@ -372,18 +385,24 @@ int get_n_params(const ModelData& data);
 // =====================================================================
 
 // Main log-posterior function
+// When skip_obs_loop=true, returns only prior+structural terms (O(p+S+T)),
+// skipping the O(N) observation loop. Used by fused gradient+log_post computation.
 double compute_log_post(
     const std::vector<double>& params,
     const ModelData& data,
-    const ParamLayout& layout
+    const ParamLayout& layout,
+    bool skip_obs_loop = false
 );
 
-// Numerical gradient (central difference)
+// Gradient computation (with optional fused log-posterior)
+// When log_post_out is non-null, the log-posterior is computed alongside
+// the gradient in a single pass, avoiding redundant O(N) computation.
 void compute_gradient(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    std::vector<double>& grad
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
 );
 
 // Compute ICAR quadratic form: phi' Q phi
@@ -401,6 +420,355 @@ struct LeapfrogResult {
   std::vector<double> p;
   double log_prob;
   bool divergent;
+};
+
+// NUTS-specific structures
+struct LeapfrogResultWithGrad {
+  std::vector<double> q, p, grad;
+  double log_prob;
+  bool divergent;
+};
+
+struct NUTSNode {
+  std::vector<double> q, p, grad;
+  double log_prob;
+};
+
+struct NUTSTreeResult {
+  NUTSNode left, right;
+  std::vector<double> q_proposal;
+  std::vector<double> grad_proposal;
+  double log_prob_proposal;
+  int n_valid;
+  bool divergent, stop;
+  double sum_accept_prob;
+  int n_leapfrog;
+  double sum_log_weight;
+};
+
+// =====================================================================
+// Optimized NUTS infrastructure (zero-allocation tree building)
+// =====================================================================
+
+// Result from in-place leapfrog (no vectors allocated)
+struct LeapfrogInPlaceResult {
+  double log_prob;
+  bool divergent;
+};
+
+// Lightweight tree statistics (returned by build_tree_fast)
+// Endpoints tracked via workspace slot indices, not owned vectors
+struct TreeStats {
+  int left_slot;            // Workspace slot index for left endpoint
+  int right_slot;           // Workspace slot index for right endpoint
+  int proposal_slot;        // Workspace slot index for proposal
+  double sum_log_weight;
+  double sum_accept_prob;
+  double log_prob_proposal;
+  int n_valid;
+  int n_leapfrog;
+  bool divergent;
+  bool stop;
+
+  // Generalized U-turn criterion (Betancourt 2017, Stan implementation)
+  std::vector<double> rho;          // Cumulative momentum sum across trajectory
+  std::vector<double> p_sharp_beg;  // M^{-1} * p at trajectory beginning
+  std::vector<double> p_sharp_end;  // M^{-1} * p at trajectory end
+  std::vector<double> p_beg;        // Raw momentum at trajectory beginning
+  std::vector<double> p_end;        // Raw momentum at trajectory end
+};
+
+// Generalized U-turn criterion: check if momenta are aligned with integrated direction
+// Returns true if trajectory should CONTINUE (no U-turn detected)
+inline bool compute_criterion(const double* p_sharp_minus, const double* p_sharp_plus,
+                              const double* rho, int n) {
+  double dot_fwd = 0.0, dot_bwd = 0.0;
+  for (int i = 0; i < n; i++) {
+    dot_fwd += p_sharp_plus[i] * rho[i];
+    dot_bwd += p_sharp_minus[i] * rho[i];
+  }
+  return (dot_fwd > 0.0) && (dot_bwd > 0.0);
+}
+
+// Pre-allocated buffer pool for NUTS tree building
+// Eliminates all heap allocations in the build_tree hot path
+struct NUTSWorkspace {
+  int n;                    // n_params
+  int max_depth;
+  int stride;               // 3 * n (q + p + grad per slot)
+  int total_slots;
+
+  // Contiguous pool: [slot][q|p|grad], each n doubles wide
+  std::vector<double> pool;
+  std::vector<double> log_probs;  // One per slot
+
+  // Slot allocator (stack-based, reset per top-level build_tree call)
+  int next_slot;
+
+  // Working buffers for compute_gradient (needs std::vector interface)
+  std::vector<double> params_buf;
+  std::vector<double> grad_buf;
+
+  // Scratch buffer for dense mass matrix matvec (p doubles)
+  std::vector<double> dense_scratch;
+
+  // Slot layout:
+  //   Slots 0, 1: persistent trajectory endpoints (node_left, node_right)
+  //   Slots 2+: allocated by build_tree_fast via alloc_slot()
+  static constexpr int NODE_LEFT_SLOT = 0;
+  static constexpr int NODE_RIGHT_SLOT = 1;
+  static constexpr int TREE_START_SLOT = 2;
+
+  void init(int np, int max_d) {
+    n = np;
+    max_depth = max_d;
+    stride = 3 * np;
+    // Max slots: 2 persistent + 2^max_depth for tree (generous upper bound)
+    total_slots = 2 + (1 << max_d);
+    pool.resize(static_cast<size_t>(total_slots) * stride);
+    log_probs.resize(total_slots);
+    params_buf.resize(np);
+    grad_buf.resize(np);
+    dense_scratch.resize(np);
+    next_slot = TREE_START_SLOT;
+  }
+
+  // Allocate a fresh slot (stack-based, no deallocation)
+  // Returns -1 if workspace is exhausted
+  int alloc_slot() {
+    if (next_slot >= total_slots) return -1;
+    return next_slot++;
+  }
+
+  // Reset allocator for new top-level build_tree call
+  // Preserves persistent slots 0 and 1
+  void reset_tree() {
+    next_slot = TREE_START_SLOT;
+  }
+
+  // Access helpers (raw pointers into contiguous pool)
+  double* q_at(int slot) { return &pool[slot * stride]; }
+  double* p_at(int slot) { return &pool[slot * stride + n]; }
+  double* grad_at(int slot) { return &pool[slot * stride + 2 * n]; }
+  double& logp_at(int slot) { return log_probs[slot]; }
+
+  // Copy full node (q + p + grad + log_prob) between slots
+  void copy_node(int dst, int src) {
+    std::memcpy(&pool[dst * stride], &pool[src * stride],
+                stride * sizeof(double));
+    log_probs[dst] = log_probs[src];
+  }
+
+  // Load node data from std::vector sources into a slot
+  void load_node(int slot, const double* q, const double* p,
+                 const double* grad, double log_prob) {
+    std::memcpy(q_at(slot), q, n * sizeof(double));
+    std::memcpy(p_at(slot), p, n * sizeof(double));
+    std::memcpy(grad_at(slot), grad, n * sizeof(double));
+    log_probs[slot] = log_prob;
+  }
+};
+
+// =====================================================================
+// Dense mass matrix for NUTS (encapsulates diag + dense state)
+// =====================================================================
+
+struct DenseMassMatrix {
+  int n = 0;                              // Dimension
+  MassMatrixType type = MassMatrixType::DIAG;
+  bool adapted = false;
+
+  // Diagonal (always available, used as fallback)
+  std::vector<double> inv_mass_diag;      // M^{-1} diagonal = variance
+  std::vector<double> sqrt_mass_diag;     // sqrt(M) diagonal = 1/sqrt(variance) for p sampling
+
+  // Dense (only when type == DENSE)
+  std::vector<double> inv_mass_dense;     // Full p×p M^{-1} = regularized sample covariance (column-major)
+  std::vector<double> L_inv_mass;         // Cholesky factor L where LL^T = M^{-1} (column-major)
+
+  // Scratch buffer for dense matvec results (avoids per-call allocation)
+  std::vector<double> scratch;
+
+  void init(int dim, MassMatrixType t) {
+    n = dim;
+    type = t;
+    adapted = false;
+    inv_mass_diag.assign(dim, 1.0);
+    sqrt_mass_diag.assign(dim, 1.0);
+    scratch.resize(dim);
+    if (t == MassMatrixType::DENSE) {
+      inv_mass_dense.assign(static_cast<size_t>(dim) * dim, 0.0);
+      L_inv_mass.assign(static_cast<size_t>(dim) * dim, 0.0);
+      // Initialize as identity
+      for (int i = 0; i < dim; i++) {
+        inv_mass_dense[static_cast<size_t>(i) * dim + i] = 1.0;
+        L_inv_mass[static_cast<size_t>(i) * dim + i] = 1.0;
+      }
+    }
+  }
+
+  // Update dense mass matrix from sample covariance
+  // Returns true on success, false on Cholesky failure (degrades to diagonal)
+  // Uses Eigen LLT for Cholesky decomposition
+  bool update_from_covariance(const double* cov, int n_samples);
+
+  // Sample momentum: p ~ N(0, M) where M = C^{-1}
+  // DIAG: p[i] = z * sqrt_mass_diag[i]
+  // DENSE: solve L^T * p = z  (back-substitution)
+  void sample_momentum(double* p, std::mt19937& rng) const {
+    std::normal_distribution<double> normal(0.0, 1.0);
+    if (type == MassMatrixType::DIAG || !adapted) {
+      for (int i = 0; i < n; i++) {
+        p[i] = normal(rng) * sqrt_mass_diag[i];
+      }
+    } else {
+      // Dense: p = L^{-T} z where LL^T = C (inv_mass)
+      // We need p ~ N(0, C^{-1}), so sample z ~ N(0, I), then p = L^{-T} z
+      std::vector<double> z(n);
+      for (int i = 0; i < n; i++) {
+        z[i] = normal(rng);
+      }
+      ratiod_linalg::tri_solve_upper_transpose(L_inv_mass.data(), z.data(), p, n);
+    }
+  }
+
+  // Kinetic energy: 0.5 * p^T * C * p  where C = M^{-1}
+  double kinetic_energy(const double* p) const {
+    if (type == MassMatrixType::DIAG || !adapted) {
+      return 0.5 * ratiod_linalg::weighted_norm_squared(p, inv_mass_diag.data(), n);
+    } else {
+      return 0.5 * ratiod_linalg::quadratic_form(p, inv_mass_dense.data(), n);
+    }
+  }
+
+  // Compute C * p (for leapfrog position update: q += eps * C * p)
+  // Result written to `result` buffer
+  void inv_mass_times_p(const double* p, double* result) const {
+    if (type == MassMatrixType::DIAG || !adapted) {
+      for (int i = 0; i < n; i++) {
+        result[i] = inv_mass_diag[i] * p[i];
+      }
+    } else {
+      ratiod_linalg::symmatvec(inv_mass_dense.data(), p, result, n);
+    }
+  }
+
+  // Compute diag(C) * p — always uses diagonal, even when dense is available.
+  // Used for the NUTS U-turn criterion (p_sharp), which is more robust with
+  // diagonal preconditioning than with a noisy dense estimate.
+  void inv_mass_diag_times_p(const double* p, double* result) const {
+    for (int i = 0; i < n; i++) {
+      result[i] = inv_mass_diag[i] * p[i];
+    }
+  }
+
+  // Set diagonal mass from WelfordStats output (same interface as before)
+  // When type==DENSE, also populate the dense matrices as diagonal so that
+  // the dense code paths (sample_momentum, kinetic_energy, inv_mass_times_p)
+  // produce correct results even before full covariance is available.
+  void set_diagonal(const std::vector<double>& inv_m, const std::vector<double>& sqrt_m) {
+    inv_mass_diag = inv_m;
+    sqrt_mass_diag = sqrt_m;
+    adapted = true;
+
+    if (type == MassMatrixType::DENSE && !inv_mass_dense.empty()) {
+      // Populate dense matrices as diagonal so dense code paths work correctly
+      std::fill(inv_mass_dense.begin(), inv_mass_dense.end(), 0.0);
+      std::fill(L_inv_mass.begin(), L_inv_mass.end(), 0.0);
+      for (int i = 0; i < n; i++) {
+        inv_mass_dense[static_cast<size_t>(i) * n + i] = inv_m[i];
+        // L where LL^T = inv_mass (diagonal): L[i,i] = sqrt(inv_mass[i])
+        L_inv_mass[static_cast<size_t>(i) * n + i] = std::sqrt(inv_m[i]);
+      }
+    }
+  }
+};
+
+// =====================================================================
+// Online full covariance estimator (Welford's algorithm for outer products)
+// =====================================================================
+
+class WelfordCovStats {
+public:
+  int dim;
+  int n;
+  std::vector<double> mean;
+  std::vector<double> M2;  // dim×dim: running sum of (x - mean_old)(x - mean_new)^T
+
+  WelfordCovStats() : dim(0), n(0) {}
+
+  explicit WelfordCovStats(int d) : dim(d), n(0),
+    mean(d, 0.0), M2(static_cast<size_t>(d) * d, 0.0) {}
+
+  void update(const std::vector<double>& x) {
+    n++;
+    std::vector<double> delta(dim);
+    for (int i = 0; i < dim; i++) {
+      delta[i] = x[i] - mean[i];
+      mean[i] += delta[i] / n;
+    }
+    // Outer product update: M2 += (x - mean_new) * delta^T
+    for (int i = 0; i < dim; i++) {
+      double dx_new = x[i] - mean[i];
+      for (int j = 0; j <= i; j++) {
+        double val = dx_new * delta[j];
+        M2[static_cast<size_t>(j) * dim + i] += val;
+        if (i != j) {
+          M2[static_cast<size_t>(i) * dim + j] += val;  // Symmetric
+        }
+      }
+    }
+  }
+
+  // Get regularized sample covariance with dimension-aware shrinkage
+  // C_reg = shrink * C_sample + (1 - shrink) * diag(C_sample) + reg * I
+  //
+  // Shrinkage is stronger when n/dim is small (high-dimensional regime):
+  //   shrink = n / (n + max(5, dim))
+  // This is a Ledoit-Wolf-style regularization that prevents noisy
+  // off-diagonal entries from corrupting the mass matrix estimate.
+  // For n >> dim: shrink → 1 (use full covariance)
+  // For n ≈ dim: shrink ≈ 0.5 (heavy shrinkage toward diagonal)
+  std::vector<double> covariance() const {
+    std::vector<double> cov(static_cast<size_t>(dim) * dim, 0.0);
+    if (n < 2) {
+      // Return identity
+      for (int i = 0; i < dim; i++) {
+        cov[static_cast<size_t>(i) * dim + i] = 1.0;
+      }
+      return cov;
+    }
+
+    // Dimension-aware shrinkage: when n/dim is small, shrink toward diagonal
+    double shrink_scale = std::max(5.0, static_cast<double>(dim));
+    double shrink = static_cast<double>(n) / (n + shrink_scale);
+    double reg = 1e-3 * shrink_scale / (n + shrink_scale);
+
+    // C_sample = M2 / (n - 1)
+    double inv_nm1 = 1.0 / (n - 1);
+
+    for (int i = 0; i < dim; i++) {
+      for (int j = 0; j < dim; j++) {
+        double c_sample = M2[static_cast<size_t>(j) * dim + i] * inv_nm1;
+        if (i == j) {
+          // Diagonal: shrink * c_sample + (1 - shrink) * c_sample + reg
+          // = c_sample + reg
+          cov[static_cast<size_t>(j) * dim + i] = std::max(1e-6, c_sample) + reg;
+        } else {
+          // Off-diagonal: shrink * c_sample
+          cov[static_cast<size_t>(j) * dim + i] = shrink * c_sample;
+        }
+      }
+    }
+
+    return cov;
+  }
+
+  void reset() {
+    n = 0;
+    std::fill(mean.begin(), mean.end(), 0.0);
+    std::fill(M2.begin(), M2.end(), 0.0);
+  }
 };
 
 struct DualAveraging {
@@ -446,15 +814,23 @@ struct ChainState {
 
 // Pure C++ result struct (safe for OpenMP parallel regions)
 struct HMCResultCpp {
-  std::vector<std::vector<double>> samples;  // [sample_idx][param_idx]
+  std::vector<double> samples_flat;  // n_sample × n_params, row-major contiguous
+  int n_params_stored = 0;
   std::vector<double> log_prob;
   std::vector<double> accept_prob;
   std::vector<int> n_leapfrog;
   std::vector<int> divergent;
+  std::vector<int> treedepth;    // Actual tree depth per iteration (NUTS only)
   double epsilon;
   int n_warmup;
   int n_sample;
   int chain_id;
+  int n_max_treedepth = 0;       // Count of iterations hitting max treedepth
+  std::string sampler;           // Sampler name (e.g., "NUTS", "HMC", "NUTS->HMC(L=10)")
+
+  // Row access for flat storage
+  double* sample_row(int i) { return &samples_flat[i * n_params_stored]; }
+  const double* sample_row(int i) const { return &samples_flat[i * n_params_stored]; }
 };
 
 // R-compatible result struct (create outside parallel regions)
@@ -463,11 +839,13 @@ struct HMCResult {
   Rcpp::NumericVector log_prob;
   Rcpp::NumericVector accept_prob;
   Rcpp::IntegerVector n_leapfrog;
+  Rcpp::IntegerVector treedepth;
   Rcpp::IntegerVector divergent;
   double epsilon;
   int n_warmup;
   int n_sample;
   int chain_id;
+  std::string sampler;
 };
 
 // Convert C++ result to R result (call outside parallel region)
@@ -477,24 +855,67 @@ inline HMCResult cpp_to_r_result(const HMCResultCpp& cpp_result, int n_params) {
   r_result.log_prob = Rcpp::NumericVector(cpp_result.n_sample);
   r_result.accept_prob = Rcpp::NumericVector(cpp_result.n_sample);
   r_result.n_leapfrog = Rcpp::IntegerVector(cpp_result.n_sample);
+  r_result.treedepth = Rcpp::IntegerVector(cpp_result.n_sample);
   r_result.divergent = Rcpp::IntegerVector(cpp_result.n_sample);
   r_result.epsilon = cpp_result.epsilon;
   r_result.n_warmup = cpp_result.n_warmup;
   r_result.n_sample = cpp_result.n_sample;
   r_result.chain_id = cpp_result.chain_id;
+  r_result.sampler = cpp_result.sampler;
 
   for (int i = 0; i < cpp_result.n_sample; i++) {
+    const double* row = cpp_result.sample_row(i);
     for (int j = 0; j < n_params; j++) {
-      r_result.samples(i, j) = cpp_result.samples[i][j];
+      r_result.samples(i, j) = row[j];
     }
     r_result.log_prob[i] = cpp_result.log_prob[i];
     r_result.accept_prob[i] = cpp_result.accept_prob[i];
     r_result.n_leapfrog[i] = cpp_result.n_leapfrog[i];
+    r_result.treedepth[i] = cpp_result.treedepth[i];
     r_result.divergent[i] = cpp_result.divergent[i];
   }
 
   return r_result;
 }
+
+// NUTS helper function declarations
+double nuts_log_sum_exp(double a, double b);
+double nuts_compute_hamiltonian(double log_prob, const std::vector<double>& p,
+                                const std::vector<double>& inv_mass, int n);
+bool nuts_check_uturn(const std::vector<double>& q_minus, const std::vector<double>& q_plus,
+                      const std::vector<double>& p_minus, const std::vector<double>& p_plus,
+                      const std::vector<double>& inv_mass, int n);
+LeapfrogResultWithGrad leapfrog_step_with_grad(
+    const std::vector<double>& q, const std::vector<double>& p,
+    const std::vector<double>& grad,
+    double epsilon, const std::vector<double>& inv_mass,
+    bool use_mass, const ModelData& data, const ParamLayout& layout);
+NUTSTreeResult build_tree(const NUTSNode& node, int direction, int depth,
+                          double epsilon, const std::vector<double>& inv_mass,
+                          bool use_mass, double H0, double delta_max,
+                          const ModelData& data, const ParamLayout& layout,
+                          std::mt19937& rng);
+
+// Optimized NUTS: zero-allocation in-place leapfrog + buffer pool tree building
+// Pointer-based Hamiltonian (no vector overhead)
+double nuts_compute_hamiltonian_fast(double log_prob, const double* p,
+                                     const DenseMassMatrix& mass, int n);
+// Pointer-based U-turn check
+bool nuts_check_uturn_fast(const double* q_minus, const double* q_plus,
+                           const double* p_minus, const double* p_plus,
+                           const DenseMassMatrix& mass, double* scratch, int n);
+// In-place leapfrog step operating on workspace slot
+LeapfrogInPlaceResult leapfrog_step_inplace(
+    NUTSWorkspace& ws, int slot, double epsilon,
+    const DenseMassMatrix& mass,
+    const ModelData& data, const ParamLayout& layout);
+// Zero-allocation recursive tree builder
+TreeStats build_tree_fast(
+    NUTSWorkspace& ws, int input_slot, int direction, int depth,
+    double epsilon, const DenseMassMatrix& mass,
+    double H0, double delta_max,
+    const ModelData& data, const ParamLayout& layout,
+    std::mt19937& rng);
 
 // =====================================================================
 // Sampler functions
@@ -517,6 +938,24 @@ double find_reasonable_epsilon(
     std::mt19937& rng
 );
 
+// Mass-aware version: uses diagonal mass matrix for leapfrog and kinetic energy
+double find_reasonable_epsilon(
+    const std::vector<double>& q,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::mt19937& rng,
+    const std::vector<double>& inv_mass
+);
+
+// Dense-mass-aware version: uses full DenseMassMatrix for momentum, leapfrog, and kinetic energy
+double find_reasonable_epsilon_dense(
+    const std::vector<double>& q,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::mt19937& rng,
+    const DenseMassMatrix& mass
+);
+
 // Run single HMC chain (C++ version - safe for parallel)
 HMCResultCpp run_hmc_chain_cpp(
     const std::vector<double>& q_init,
@@ -527,7 +966,9 @@ HMCResultCpp run_hmc_chain_cpp(
     int L,
     int chain_id,
     unsigned int seed,
-    bool verbose
+    bool verbose,
+    int max_treedepth = 10,
+    MassMatrixType metric_type = MassMatrixType::DIAG
 );
 
 // Run single HMC chain (R wrapper)
@@ -540,7 +981,9 @@ HMCResult run_hmc_chain(
     int L,
     int chain_id,
     unsigned int seed,
-    bool verbose
+    bool verbose,
+    int max_treedepth = 10,
+    MassMatrixType metric_type = MassMatrixType::DIAG
 );
 
 // Run multiple chains in parallel (across-chain parallelization)
@@ -552,7 +995,9 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     int L,
     int n_chains,
     unsigned int seed,
-    bool verbose
+    bool verbose,
+    int max_treedepth = 10,
+    MassMatrixType metric_type = MassMatrixType::DIAG
 );
 
 } // namespace ratiod_hmc

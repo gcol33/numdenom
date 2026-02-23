@@ -894,19 +894,24 @@ build_prediction_data <- function(object, newdata, re_formula, allow_new_levels)
   }
 
   # Build design matrix for denominator
-  denom_terms <- formula$denominator$terms
-  if (is.null(denom_terms)) {
-    X_denom <- model.matrix(~ 1, data = newdata)
-    colnames_orig <- colnames(object$.internal$hmc_data$X_denom)
-    if (ncol(X_denom) != length(colnames_orig)) {
-      pred_vars <- setdiff(colnames_orig, "(Intercept)")
-      if (length(pred_vars) > 0) {
-        fmla <- as.formula(paste("~", paste(pred_vars, collapse = " + ")))
-        X_denom <- model.matrix(fmla, data = newdata)
-      }
-    }
+  # For binomial/beta_binomial, denominator is fixed trials - no design matrix
+  if (object$.internal$hmc_data$p_denom == 0) {
+    X_denom <- matrix(numeric(0), nrow = nrow(newdata), ncol = 0)
   } else {
-    X_denom <- model.matrix(denom_terms, data = newdata)
+    denom_terms <- formula$denominator$terms
+    if (is.null(denom_terms)) {
+      X_denom <- model.matrix(~ 1, data = newdata)
+      colnames_orig <- colnames(object$.internal$hmc_data$X_denom)
+      if (ncol(X_denom) != length(colnames_orig)) {
+        pred_vars <- setdiff(colnames_orig, "(Intercept)")
+        if (length(pred_vars) > 0) {
+          fmla <- as.formula(paste("~", paste(pred_vars, collapse = " + ")))
+          X_denom <- model.matrix(fmla, data = newdata)
+        }
+      }
+    } else {
+      X_denom <- model.matrix(denom_terms, data = newdata)
+    }
   }
 
   # Handle random effects
@@ -1713,14 +1718,20 @@ compute_predictions_hmc <- function(object, pred_data, type) {
 
   for (s in seq_len(n_samples)) {
     eta_num[s, ] <- as.numeric(pred_data$X_num %*% beta_num[s, ])
-    eta_denom[s, ] <- as.numeric(pred_data$X_denom %*% beta_denom[s, ])
+    if (hmc_data$p_denom > 0) {
+      eta_denom[s, ] <- as.numeric(pred_data$X_denom %*% beta_denom[s, ])
+    } else {
+      eta_denom[s, ] <- 0
+    }
 
     if (!is.null(re)) {
       for (i in seq_len(N)) {
         g <- pred_data$re_group[i]
         if (g > 0) {
           eta_num[s, i] <- eta_num[s, i] + re[s, g]
-          eta_denom[s, i] <- eta_denom[s, i] + re[s, g]
+          if (hmc_data$p_denom > 0) {
+            eta_denom[s, i] <- eta_denom[s, i] + re[s, g]
+          }
         }
       }
     }
