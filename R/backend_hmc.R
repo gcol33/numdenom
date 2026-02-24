@@ -73,12 +73,14 @@ fit_hmc <- function(formula,
                     chains = 4,
                     cores = NULL,
                     L = 0,
+                    adapt_delta = NULL,
                     max_treedepth = 10,
                     seed = NULL,
                     verbose = TRUE,
                     gradient_mode = "auto",
                     re_param = "noncentered",
-                    metric = "diag") {
+                    metric = "auto",
+                    riemannian = NULL) {
 
   # Set cores
   if (is.null(cores)) {
@@ -89,6 +91,12 @@ fit_hmc <- function(formula,
   if (is.null(seed)) {
     seed <- sample.int(.Machine$integer.max, 1)
   }
+
+  # Resolve adapt_delta: NULL → -1.0 (C++ sentinel for auto-selection)
+  adapt_delta_value <- if (is.null(adapt_delta)) -1.0 else as.double(adapt_delta)
+
+  # Resolve riemannian: NULL → -1 (auto), TRUE → 1, FALSE → 0
+  riemannian_value <- if (is.null(riemannian)) -1L else as.integer(riemannian)
 
   # Get model type
   model_type <- get_hmc_model_type(family)
@@ -440,7 +448,8 @@ fit_hmc <- function(formula,
       n_threads = n_threads_within,
       verbose = verbose,
       gradient_mode_str = gradient_mode,
-      max_treedepth = as.integer(max_treedepth)
+      max_treedepth = as.integer(max_treedepth),
+      adapt_delta = adapt_delta_value
     ))
   } else {
     # Bundle parameters into lists to stay under R's 65-argument limit for .Call
@@ -618,7 +627,9 @@ fit_hmc <- function(formula,
       verbose = verbose,
       gradient_mode_str = gradient_mode,
       max_treedepth = as.integer(max_treedepth),
-      metric_str = metric
+      metric_str = metric,
+      adapt_delta = adapt_delta_value,
+      riemannian = riemannian_value
     )
   }
 
@@ -1036,7 +1047,7 @@ initialize_hmc_params_spatial <- function(hmc_data, model_type, spatial_info) {
   if (spatial_info$type == "icar") {
     n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
   } else if (spatial_info$type == "bym2") {
-    # log_sigma + logit_rho + phi_scaled + theta
+    # log_sigma_total + logit_rho + phi_scaled + theta
     n_params <- n_params + 2 + 2 * spatial_info$n_units
   }
 
@@ -1186,11 +1197,19 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
       idx <- idx + 1
     }
   } else if (spatial_info$type == "bym2") {
-    draws_list[["sigma_spatial"]] <- exp(samples[, idx])
+    # Riebler parameterization: log_sigma_total, logit_rho
+    sigma_total <- exp(samples[, idx])
     idx <- idx + 1
-    logit_rho <- samples[, idx]
-    draws_list[["rho_spatial"]] <- 1 / (1 + exp(-logit_rho))
+    rho <- 1 / (1 + exp(-samples[, idx]))
     idx <- idx + 1
+
+    sigma_s <- sigma_total * sqrt(rho)
+    sigma_u <- sigma_total * sqrt(1 - rho)
+
+    draws_list[["sigma_spatial"]] <- sigma_total
+    draws_list[["rho_spatial"]] <- rho
+    draws_list[["sigma_s_spatial"]] <- sigma_s
+    draws_list[["sigma_u_spatial"]] <- sigma_u
 
     # phi_scaled
     for (s in seq_len(spatial_info$n_units)) {
@@ -1286,23 +1305,23 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
     phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
     spatial_effect <- phi_spatial
   } else if (spatial_info$type == "bym2") {
-    sigma_spatial <- exp(samples[, idx])
+    # Riebler parameterization: log_sigma_total, logit_rho
+    sigma_total <- exp(samples[, idx])
     idx <- idx + 1
-    logit_rho <- samples[, idx]
-    rho <- 1 / (1 + exp(-logit_rho))
+    rho <- 1 / (1 + exp(-samples[, idx]))
     idx <- idx + 1
+    sigma_s <- sigma_total * sqrt(rho)
+    sigma_u <- sigma_total * sqrt(1 - rho)
 
     phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
     idx <- idx + spatial_info$n_units
     theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
 
-    # Compute combined spatial effect
+    # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
     spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
     for (s in seq_len(n_samples)) {
-      spatial_effect[s, ] <- sigma_spatial[s] * (
-        sqrt(rho[s]) * phi_scaled[s, ] * spatial_info$bym2_scale +
-        sqrt(1 - rho[s]) * theta[s, ]
-      )
+      spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
+        sigma_u[s] * theta[s, ]
     }
   } else if (spatial_info$type == "gp") {
     idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp
@@ -1615,7 +1634,7 @@ initialize_hmc_params_spatial_temporal <- function(hmc_data, model_type,
   if (spatial_info$type == "icar") {
     n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
   } else if (spatial_info$type == "bym2") {
-    # log_sigma + logit_rho + phi_scaled + theta
+    # log_sigma_total + logit_rho + phi_scaled + theta
     n_params <- n_params + 2 + 2 * spatial_info$n_units
   }
 
@@ -2185,7 +2204,7 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
             # L = [[1, 0], [L21, sqrt(1-L21^2)]]
             sigma1 <- sigma_values[[t]][[1]]
             sigma2 <- sigma_values[[t]][[2]]
-            L21 <- chol_values[[t]][[1]]
+            L21 <- tanh(chol_values[[t]][[1]])  # tanh parameterization: raw -> L
             L22 <- sqrt(1 - L21^2)
             z1 <- z_vals[[1]]
             z2 <- z_vals[[2]]
@@ -2324,11 +2343,19 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
       idx <- idx + 1
     }
   } else if (spatial_info$type == "bym2") {
-    draws_list[["sigma_spatial"]] <- exp(samples[, idx])
+    # Riebler parameterization: log_sigma_total, logit_rho
+    sigma_total <- exp(samples[, idx])
     idx <- idx + 1
-    logit_rho <- samples[, idx]
-    draws_list[["rho_spatial"]] <- 1 / (1 + exp(-logit_rho))
+    rho <- 1 / (1 + exp(-samples[, idx]))
     idx <- idx + 1
+
+    sigma_s <- sigma_total * sqrt(rho)
+    sigma_u <- sigma_total * sqrt(1 - rho)
+
+    draws_list[["sigma_spatial"]] <- sigma_total
+    draws_list[["rho_spatial"]] <- rho
+    draws_list[["sigma_s_spatial"]] <- sigma_s
+    draws_list[["sigma_u_spatial"]] <- sigma_u
 
     # phi_scaled
     for (s in seq_len(spatial_info$n_units)) {
@@ -2602,7 +2629,7 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
             z2 <- re_params[, base_col + 1]
             sigma1 <- sigma_values[[t]][[1]]
             sigma2 <- sigma_values[[t]][[2]]
-            L21 <- chol_values[[t]][[1]]
+            L21 <- tanh(chol_values[[t]][[1]])  # tanh parameterization: raw -> L
             L22 <- sqrt(pmax(0, 1 - L21^2))  # pmax to avoid numerical issues
             re_multi[[t]][, g] <- sigma1 * z1  # Intercept
             re_slopes_multi[[t]][, g, 1] <- sigma2 * (L21 * z1 + L22 * z2)  # Slope
@@ -2708,24 +2735,24 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
     spatial_effect <- phi_spatial
     idx <- idx + spatial_info$n_units
   } else if (spatial_info$type == "bym2") {
-    sigma_spatial <- exp(samples[, idx])
+    # Riebler parameterization: log_sigma_total, logit_rho
+    sigma_total <- exp(samples[, idx])
     idx <- idx + 1
-    logit_rho <- samples[, idx]
-    rho <- 1 / (1 + exp(-logit_rho))
+    rho <- 1 / (1 + exp(-samples[, idx]))
     idx <- idx + 1
+    sigma_s <- sigma_total * sqrt(rho)
+    sigma_u <- sigma_total * sqrt(1 - rho)
 
     phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
     idx <- idx + spatial_info$n_units
     theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
     idx <- idx + spatial_info$n_units
 
-    # Compute combined spatial effect
+    # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
     spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
     for (s in seq_len(n_samples)) {
-      spatial_effect[s, ] <- sigma_spatial[s] * (
-        sqrt(rho[s]) * phi_scaled[s, ] * spatial_info$bym2_scale +
-        sqrt(1 - rho[s]) * theta[s, ]
-      )
+      spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
+        sigma_u[s] * theta[s, ]
     }
   } else if (spatial_info$type == "gp") {
     idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp

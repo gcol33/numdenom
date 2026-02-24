@@ -58,7 +58,7 @@ enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP, HSGP };
 enum class GradientMode { AUTO, NUMERICAL, AUTODIFF_TAPE, AUTODIFF_ARENA, AUTODIFF_FORWARD, HANDCODED };
 
 // Mass matrix type for NUTS
-enum class MassMatrixType { DIAG, DENSE };
+enum class MassMatrixType { DIAG, DENSE, AUTO };
 
 // Parse gradient mode from string
 inline GradientMode parse_gradient_mode(const std::string& mode_str) {
@@ -74,6 +74,7 @@ inline GradientMode parse_gradient_mode(const std::string& mode_str) {
 // Parse metric type from string
 inline MassMatrixType parse_metric_type(const std::string& metric_str) {
     if (metric_str == "dense" || metric_str == "DENSE") return MassMatrixType::DENSE;
+    if (metric_str == "auto" || metric_str == "AUTO") return MassMatrixType::AUTO;
     return MassMatrixType::DIAG;  // Default
 }
 
@@ -253,7 +254,7 @@ struct ModelData {
 
 // Parameter vector layout (order matters for cache efficiency):
 // [beta_num, beta_denom, log_sigma_re?, re?, log_phi_num?, log_phi_denom?,
-//  log_tau_spatial?, spatial?, log_sigma_bym2?, log_rho_bym2?, theta_bym2?]
+//  log_tau_spatial?, spatial?, log_sigma_bym2?, logit_rho_bym2?, theta_bym2?]
 
 struct ParamLayout {
   int beta_num_start, beta_num_end;
@@ -285,9 +286,10 @@ struct ParamLayout {
   int log_phi_denom_idx;
   int log_tau_spatial_idx;
   int spatial_start, spatial_end;
-  // BYM2 extras
-  int log_sigma_bym2_idx;
-  int logit_rho_bym2_idx;
+  // BYM2 extras (Riebler reparameterization: sigma_total, rho)
+  // sigma_s = sigma_total * sqrt(rho), sigma_u = sigma_total * sqrt(1-rho)
+  int log_sigma_bym2_idx;     // log(sigma_total): total spatial SD
+  int logit_rho_bym2_idx;     // logit(rho): mixing parameter (structured fraction)
   int theta_bym2_start, theta_bym2_end;
 
   // Temporal parameters
@@ -512,6 +514,28 @@ struct NUTSWorkspace {
   // Scratch buffer for dense mass matrix matvec (p doubles)
   std::vector<double> dense_scratch;
 
+  // Pre-allocated merge buffers for build_tree_fast (depth-indexed, no per-merge alloc)
+  // 4 buffers per depth level: rho_init, p_init_end, p_sharp_init_end, rho_check
+  std::vector<double> merge_pool;
+  static constexpr int MERGE_RHO_INIT = 0;
+  static constexpr int MERGE_P_INIT_END = 1;
+  static constexpr int MERGE_PSHARP_INIT_END = 2;
+  static constexpr int MERGE_RHO_CHECK = 3;
+  static constexpr int MERGE_BUFS_PER_DEPTH = 4;
+
+  double* merge_buf(int depth, int buf_idx) {
+    return &merge_pool[static_cast<size_t>(depth * MERGE_BUFS_PER_DEPTH + buf_idx) * n];
+  }
+
+  // Pre-allocated iteration-level vectors (reused across NUTS iterations)
+  std::vector<double> iter_rho, iter_rho_bck, iter_rho_fwd;
+  std::vector<double> iter_p_sharp_init;
+  std::vector<double> iter_p_fwd_beg, iter_p_fwd_end;
+  std::vector<double> iter_p_bck_beg, iter_p_bck_end;
+  std::vector<double> iter_p_sharp_fwd_beg, iter_p_sharp_fwd_end;
+  std::vector<double> iter_p_sharp_bck_beg, iter_p_sharp_bck_end;
+  std::vector<double> iter_rho_seam;
+
   // Slot layout:
   //   Slots 0, 1: persistent trajectory endpoints (node_left, node_right)
   //   Slots 2+: allocated by build_tree_fast via alloc_slot()
@@ -531,6 +555,22 @@ struct NUTSWorkspace {
     grad_buf.resize(np);
     dense_scratch.resize(np);
     next_slot = TREE_START_SLOT;
+    // Pre-allocate merge buffers: 4 per depth level
+    merge_pool.resize(static_cast<size_t>(MERGE_BUFS_PER_DEPTH) * max_d * np, 0.0);
+    // Pre-allocate iteration-level vectors
+    iter_rho.resize(np);
+    iter_rho_bck.resize(np);
+    iter_rho_fwd.resize(np);
+    iter_p_sharp_init.resize(np);
+    iter_p_fwd_beg.resize(np);
+    iter_p_fwd_end.resize(np);
+    iter_p_bck_beg.resize(np);
+    iter_p_bck_end.resize(np);
+    iter_p_sharp_fwd_beg.resize(np);
+    iter_p_sharp_fwd_end.resize(np);
+    iter_p_sharp_bck_beg.resize(np);
+    iter_p_sharp_bck_end.resize(np);
+    iter_rho_seam.resize(np);
   }
 
   // Allocate a fresh slot (stack-based, no deallocation)
@@ -653,13 +693,26 @@ struct DenseMassMatrix {
     }
   }
 
-  // Compute diag(C) * p — always uses diagonal, even when dense is available.
-  // Used for the NUTS U-turn criterion (p_sharp), which is more robust with
-  // diagonal preconditioning than with a noisy dense estimate.
+  // Compute diag(C) * p — uses diagonal only, even when dense is available.
+  // Kept for backwards compatibility / debugging. The NUTS U-turn criterion
+  // now uses inv_mass_times_p() for correct geometry with dense mass.
   void inv_mass_diag_times_p(const double* p, double* result) const {
     for (int i = 0; i < n; i++) {
       result[i] = inv_mass_diag[i] * p[i];
     }
+  }
+
+  // Set metric directly from precomputed G^{-1} and its Cholesky L.
+  // Used by SoftAbs per-trajectory metric retry. No shrinkage applied.
+  void set_from_metric(const std::vector<double>& g_inv,
+                       const std::vector<double>& l_g_inv) {
+    inv_mass_dense = g_inv;
+    L_inv_mass = l_g_inv;
+    for (int i = 0; i < n; i++) {
+      inv_mass_diag[i] = g_inv[static_cast<size_t>(i) * n + i];
+      sqrt_mass_diag[i] = 1.0 / std::sqrt(std::max(inv_mass_diag[i], 1e-10));
+    }
+    adapted = true;
   }
 
   // Set diagonal mass from WelfordStats output (same interface as before)
@@ -720,15 +773,19 @@ public:
     }
   }
 
-  // Get regularized sample covariance with dimension-aware shrinkage
-  // C_reg = shrink * C_sample + (1 - shrink) * diag(C_sample) + reg * I
+  // Get covariance with Oracle Approximating Shrinkage (OAS)
+  // (Chen, Wiesel, Eldar, Hero 2010)
   //
-  // Shrinkage is stronger when n/dim is small (high-dimensional regime):
-  //   shrink = n / (n + max(5, dim))
-  // This is a Ledoit-Wolf-style regularization that prevents noisy
-  // off-diagonal entries from corrupting the mass matrix estimate.
-  // For n >> dim: shrink → 1 (use full covariance)
-  // For n ≈ dim: shrink ≈ 0.5 (heavy shrinkage toward diagonal)
+  // Σ_shrunk = (1 - ρ) * S + ρ * (tr(S)/p) * I
+  //
+  // OAS automatically adapts shrinkage intensity:
+  //   - When n < p (rank-deficient): ρ → 1, shrinks heavily toward scaled identity
+  //   - When n >> p: ρ → 0, recovers the unregularized sample covariance
+  // Guarantees positive definiteness when ρ > 0.
+  //
+  // shrinkage_intensity is set as a side-effect for logging.
+  mutable double shrinkage_intensity = 0.0;
+
   std::vector<double> covariance() const {
     std::vector<double> cov(static_cast<size_t>(dim) * dim, 0.0);
     if (n < 2) {
@@ -736,27 +793,74 @@ public:
       for (int i = 0; i < dim; i++) {
         cov[static_cast<size_t>(i) * dim + i] = 1.0;
       }
+      shrinkage_intensity = 1.0;
       return cov;
     }
 
-    // Dimension-aware shrinkage: when n/dim is small, shrink toward diagonal
-    double shrink_scale = std::max(5.0, static_cast<double>(dim));
-    double shrink = static_cast<double>(n) / (n + shrink_scale);
-    double reg = 1e-3 * shrink_scale / (n + shrink_scale);
-
-    // C_sample = M2 / (n - 1)
+    // Step 1: Compute sample covariance S = M2 / (n - 1)
     double inv_nm1 = 1.0 / (n - 1);
-
     for (int i = 0; i < dim; i++) {
       for (int j = 0; j < dim; j++) {
-        double c_sample = M2[static_cast<size_t>(j) * dim + i] * inv_nm1;
+        cov[static_cast<size_t>(j) * dim + i] =
+            M2[static_cast<size_t>(j) * dim + i] * inv_nm1;
+      }
+      // Ensure diagonal is positive
+      double& diag = cov[static_cast<size_t>(i) * dim + i];
+      diag = std::max(1e-6, diag);
+    }
+
+    // Step 2: Compute OAS shrinkage intensity
+    // tr(S) and tr(S^2)
+    double trS = 0.0;
+    double trS2 = 0.0;
+    for (int i = 0; i < dim; i++) {
+      trS += cov[static_cast<size_t>(i) * dim + i];
+    }
+    // tr(S^2) = sum of all S_ij^2 (Frobenius norm squared)
+    for (int i = 0; i < dim; i++) {
+      for (int j = 0; j < dim; j++) {
+        double s_ij = cov[static_cast<size_t>(j) * dim + i];
+        trS2 += s_ij * s_ij;
+      }
+    }
+
+    // OAS formula (Eq. 23 from Chen et al. 2010):
+    // ρ = clamp( ((1 - 2/p) * tr(S²) + tr(S)²) /
+    //            ((n + 1 - 2/p) * (tr(S²) - tr(S)²/p)), 0, 1 )
+    double p = static_cast<double>(dim);
+    double nf = static_cast<double>(n);
+    double trS_sq = trS * trS;
+    double numer = (1.0 - 2.0 / p) * trS2 + trS_sq;
+    double denom = (nf + 1.0 - 2.0 / p) * (trS2 - trS_sq / p);
+
+    double rho;
+    if (std::abs(denom) < 1e-12) {
+      // Denominator ~0 means S ≈ c*I already, minimal shrinkage needed
+      rho = 0.0;
+    } else {
+      rho = std::max(0.0, std::min(1.0, numer / denom));
+    }
+
+    // When n < p, sample covariance is rank-deficient (rank n-1 < p).
+    // OAS can underestimate the needed shrinkage for singular matrices.
+    // Floor ρ at (1 - n/p) to fill the rank gap: this ensures the
+    // p-(n-1) zero eigenvalues get lifted to ρ * tr(S)/p > 0.
+    if (n < dim) {
+      double rho_floor = 1.0 - nf / p;
+      rho = std::max(rho, rho_floor);
+    }
+    shrinkage_intensity = rho;
+
+    // Step 3: Apply shrinkage: Σ = (1 - ρ) * S + ρ * (tr(S)/p) * I
+    double target_diag = trS / p;  // Scaled identity target
+    double one_minus_rho = 1.0 - rho;
+    for (int i = 0; i < dim; i++) {
+      for (int j = 0; j < dim; j++) {
+        size_t idx = static_cast<size_t>(j) * dim + i;
         if (i == j) {
-          // Diagonal: shrink * c_sample + (1 - shrink) * c_sample + reg
-          // = c_sample + reg
-          cov[static_cast<size_t>(j) * dim + i] = std::max(1e-6, c_sample) + reg;
+          cov[idx] = one_minus_rho * cov[idx] + rho * target_diag;
         } else {
-          // Off-diagonal: shrink * c_sample
-          cov[static_cast<size_t>(j) * dim + i] = shrink * c_sample;
+          cov[idx] = one_minus_rho * cov[idx];
         }
       }
     }
@@ -957,6 +1061,8 @@ double find_reasonable_epsilon_dense(
 );
 
 // Run single HMC chain (C++ version - safe for parallel)
+// riemannian: -1=auto (retry divergences with SoftAbs for BYM2/ICAR),
+//              1=force on, 0=force off
 HMCResultCpp run_hmc_chain_cpp(
     const std::vector<double>& q_init,
     const ModelData& data,
@@ -968,7 +1074,9 @@ HMCResultCpp run_hmc_chain_cpp(
     unsigned int seed,
     bool verbose,
     int max_treedepth = 10,
-    MassMatrixType metric_type = MassMatrixType::DIAG
+    MassMatrixType metric_type = MassMatrixType::DIAG,
+    double adapt_delta = -1.0,
+    int riemannian = -1
 );
 
 // Run single HMC chain (R wrapper)
@@ -983,7 +1091,9 @@ HMCResult run_hmc_chain(
     unsigned int seed,
     bool verbose,
     int max_treedepth = 10,
-    MassMatrixType metric_type = MassMatrixType::DIAG
+    MassMatrixType metric_type = MassMatrixType::DIAG,
+    double adapt_delta = -1.0,
+    int riemannian = -1
 );
 
 // Run multiple chains in parallel (across-chain parallelization)
@@ -997,7 +1107,35 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     unsigned int seed,
     bool verbose,
     int max_treedepth = 10,
-    MassMatrixType metric_type = MassMatrixType::DIAG
+    MassMatrixType metric_type = MassMatrixType::DIAG,
+    double adapt_delta = -1.0,
+    int riemannian = -1
+);
+
+// =====================================================================
+// SoftAbs per-trajectory metric (Riemannian-like divergence retry)
+// =====================================================================
+
+// Compute full Hessian via finite differences of the H-mode gradient.
+// H[i,j] = (grad_j(q + h*e_i) - grad_j(q)) / h
+// Cost: (p+1) gradient evaluations.
+void compute_hessian_finite_diff(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& hessian,
+    double h = 1e-5
+);
+
+// Compute SoftAbs metric from negative Hessian.
+// G = Q diag(f(λ_i)) Q^T where f(λ) = λ * coth(α * λ)
+// Returns G^{-1} and its Cholesky L. Returns false on failure.
+bool compute_softabs_metric(
+    const std::vector<double>& neg_hessian,
+    int p,
+    double alpha,
+    std::vector<double>& G_inv,
+    std::vector<double>& L_G_inv
 );
 
 } // namespace ratiod_hmc

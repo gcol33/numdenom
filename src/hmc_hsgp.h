@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <cmath>
+#include <RcppEigen.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -152,7 +153,8 @@ inline void setup_hsgp_2d(
     }
 }
 
-// Evaluate HSGP spatial effects: f = Phi * sqrt(S) * beta
+// Evaluate HSGP spatial effects: f = Phi * (sqrt(S) ⊙ beta)
+// Vectorized with Eigen matrix-vector product (BLAS/SIMD)
 inline void hsgp_evaluate(
     const std::vector<double>& beta,
     double sigma2,
@@ -160,23 +162,22 @@ inline void hsgp_evaluate(
     const HSGPData& data,
     std::vector<double>& f
 ) {
-    f.assign(data.n_obs, 0.0);
+    const int N = data.n_obs;
+    const int M = data.m_total;
+    f.resize(N);
 
-    // Precompute sqrt(S) for each basis
-    std::vector<double> sqrt_S(data.m_total);
-    for (int j = 0; j < data.m_total; j++) {
+    // scaled_beta[j] = sqrt(S[j]) * beta[j]
+    Eigen::VectorXd scaled_beta(M);
+    for (int j = 0; j < M; j++) {
         double S = spectral_density_se(data.eigenvalues[j], sigma2, lengthscale);
-        sqrt_S[j] = std::sqrt(S);
+        scaled_beta(j) = std::sqrt(S) * beta[j];
     }
 
-    // f_i = sum_j phi[i,j] * sqrt(S[j]) * beta[j]
-    for (int i = 0; i < data.n_obs; i++) {
-        double fi = 0.0;
-        for (int j = 0; j < data.m_total; j++) {
-            fi += data.phi_flat[i * data.m_total + j] * sqrt_S[j] * beta[j];
-        }
-        f[i] = fi;
-    }
+    // f = Phi * scaled_beta  (single BLAS matvec)
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        Phi(data.phi_flat.data(), N, M);
+    Eigen::Map<Eigen::VectorXd> f_vec(f.data(), N);
+    f_vec.noalias() = Phi * scaled_beta;
 }
 
 // Log prior on beta: N(0, I)
@@ -195,7 +196,7 @@ struct HSGPGradients {
     double grad_log_lengthscale;    // Gradient w.r.t. log(lengthscale)
 };
 
-// Compute HSGP gradients analytically
+// Compute HSGP gradients analytically (vectorized with Eigen)
 // grad_f: gradient of log-likelihood w.r.t. f (computed from likelihood)
 inline void hsgp_compute_gradients(
     const std::vector<double>& beta,
@@ -205,70 +206,49 @@ inline void hsgp_compute_gradients(
     const std::vector<double>& grad_f,  // d(log_lik)/d(f_i)
     HSGPGradients& grads
 ) {
-    int m_total = data.m_total;
-    grads.grad_beta.assign(m_total, 0.0);
+    const int N = data.n_obs;
+    const int M = data.m_total;
+    grads.grad_beta.resize(M);
     grads.grad_log_sigma2 = 0.0;
     grads.grad_log_lengthscale = 0.0;
 
-    // Precompute sqrt(S) and derivatives
-    std::vector<double> sqrt_S(m_total);
-    std::vector<double> dsqrtS_dsigma2(m_total);
-    std::vector<double> dsqrtS_dlengthscale(m_total);
+    // Map Phi as Eigen matrix (N × M, row-major to match phi_flat layout)
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        Phi(data.phi_flat.data(), N, M);
+    Eigen::Map<const Eigen::VectorXd> gf(grad_f.data(), N);
 
-    for (int j = 0; j < m_total; j++) {
+    // Phi^T * grad_f  (single BLAS matvec, reused for all 3 gradient components)
+    Eigen::VectorXd PhiT_gf = Phi.transpose() * gf;
+
+    // Precompute sqrt(S) and derivatives
+    Eigen::VectorXd sqrt_S(M);
+    Eigen::VectorXd dsqrtS_dsigma2(M);
+    Eigen::VectorXd dsqrtS_dlengthscale(M);
+
+    for (int j = 0; j < M; j++) {
         double omega_sq = data.eigenvalues[j];
         double S = spectral_density_se(omega_sq, sigma2, lengthscale);
-        sqrt_S[j] = std::sqrt(S);
+        sqrt_S(j) = std::sqrt(S);
 
-        // Numerical safeguard: avoid division by very small sqrt_S
         const double eps = 1e-10;
-        double sqrt_S_safe = std::max(sqrt_S[j], eps);
+        double sqrt_S_safe = std::max(sqrt_S(j), eps);
 
-        // d(sqrt(S))/d(sigma2) = 0.5 / sqrt(S) * dS/d(sigma2) = 0.5 / sqrt(S) * S/sigma2
-        //                      = 0.5 * sqrt(S) / sigma2
-        dsqrtS_dsigma2[j] = 0.5 * sqrt_S_safe / sigma2;
+        dsqrtS_dsigma2(j) = 0.5 * sqrt_S_safe / sigma2;
 
-        // d(sqrt(S))/d(ell) = 0.5 / sqrt(S) * dS/d(ell)
         double dS_dell = dS_dlengthscale(omega_sq, sigma2, lengthscale);
-        dsqrtS_dlengthscale[j] = 0.5 * dS_dell / sqrt_S_safe;
+        dsqrtS_dlengthscale(j) = 0.5 * dS_dell / sqrt_S_safe;
     }
 
-    // Gradient w.r.t. beta: sum_i grad_f[i] * phi[i,j] * sqrt(S[j])
-    // NOTE: Prior contribution is handled by the caller, not here
-    for (int j = 0; j < m_total; j++) {
-        double grad_j = 0.0;
-        for (int i = 0; i < data.n_obs; i++) {
-            grad_j += grad_f[i] * data.phi_flat[i * m_total + j] * sqrt_S[j];
-        }
-        grads.grad_beta[j] = grad_j;  // Likelihood only, prior handled by caller
-    }
+    // grad_beta[j] = sqrt_S[j] * (Phi^T * grad_f)[j]
+    Eigen::Map<Eigen::VectorXd> gb(grads.grad_beta.data(), M);
+    gb = sqrt_S.cwiseProduct(PhiT_gf);
 
-    // Gradient w.r.t. log(sigma2):
-    // d(log_lik)/d(log_sigma2) = d(log_lik)/d(sigma2) * sigma2
-    // d(log_lik)/d(sigma2) = sum_i grad_f[i] * d(f_i)/d(sigma2)
-    //                      = sum_i grad_f[i] * sum_j phi[i,j] * d(sqrt(S[j]))/d(sigma2) * beta[j]
-    double grad_sigma2 = 0.0;
-    for (int i = 0; i < data.n_obs; i++) {
-        double df_dsigma2 = 0.0;
-        for (int j = 0; j < m_total; j++) {
-            df_dsigma2 += data.phi_flat[i * m_total + j] * dsqrtS_dsigma2[j] * beta[j];
-        }
-        grad_sigma2 += grad_f[i] * df_dsigma2;
-    }
-    grads.grad_log_sigma2 = grad_sigma2 * sigma2;  // Chain rule
-    // NOTE: Prior contribution is handled by the caller, not here
+    // grad_log_sigma2 = sigma2 * (dsqrtS_dsigma2 ⊙ beta) · (Phi^T * grad_f)
+    Eigen::Map<const Eigen::VectorXd> beta_vec(beta.data(), M);
+    grads.grad_log_sigma2 = sigma2 * dsqrtS_dsigma2.cwiseProduct(beta_vec).dot(PhiT_gf);
 
-    // Gradient w.r.t. log(lengthscale):
-    double grad_ell = 0.0;
-    for (int i = 0; i < data.n_obs; i++) {
-        double df_dell = 0.0;
-        for (int j = 0; j < m_total; j++) {
-            df_dell += data.phi_flat[i * m_total + j] * dsqrtS_dlengthscale[j] * beta[j];
-        }
-        grad_ell += grad_f[i] * df_dell;
-    }
-    grads.grad_log_lengthscale = grad_ell * lengthscale;  // Chain rule
-    // NOTE: Prior contribution is handled by the caller, not here
+    // grad_log_lengthscale = lengthscale * (dsqrtS_dlengthscale ⊙ beta) · (Phi^T * grad_f)
+    grads.grad_log_lengthscale = lengthscale * dsqrtS_dlengthscale.cwiseProduct(beta_vec).dot(PhiT_gf);
 }
 
 } // namespace ratiod_hsgp

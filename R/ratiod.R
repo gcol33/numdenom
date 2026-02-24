@@ -78,11 +78,22 @@
 #'   `"A"` forward-mode autodiff (O(p*N), thread-safe);
 #'   `"A_t"` tape-based reverse-mode autodiff (slow, legacy);
 #'   `"N"` numerical finite differences (slowest, always works).
+#' @param adapt_delta Target average acceptance probability for NUTS step size
+#'   adaptation. Higher values produce smaller step sizes, reducing divergences
+#'   but slowing sampling. `NULL` (default) selects automatically based on model
+#'   complexity: 0.80 for simple models, 0.85 for ICAR, 0.90 for BYM2 and
+#'   correlated random slopes. Manual range: 0.80--0.99.
+#' @param riemannian Logical or NULL. Enable per-trajectory SoftAbs metric
+#'   retry for divergent transitions. When a NUTS trajectory diverges,
+#'   computes a local Hessian-based metric and retries the trajectory.
+#'   `NULL` (default) enables automatically for BYM2 and ICAR spatial models
+#'   with dense mass matrix. `TRUE` forces on, `FALSE` forces off.
+#'   Cost: ~(p+1) gradient evaluations per divergent trajectory only.
 #' @param metric Mass matrix type for NUTS:
-#'   `"diag"` (default) diagonal mass matrix;
-#'   `"dense"` full dense mass matrix (better for correlated posteriors
-#'   like random slopes, BYM2, HSGP models). Auto-falls back to diagonal
-#'   when p > 500.
+#'   `"dense"` (default) full dense mass matrix with Ledoit-Wolf shrinkage
+#'   (handles correlated posteriors: random slopes, BYM2, HSGP, TVC models);
+#'   `"diag"` diagonal mass matrix (faster per step but may require deeper trees).
+#'   Auto-falls back to diagonal when p > 2000.
 #' @param re_param Random effects parameterization:
 #'   `"noncentered"` (default) stores z ~ N(0,1) and computes re = σ*z (or re = diag(σ)*L*z for correlated).
 #'     Better for weakly-informed random effects or small group sizes.
@@ -170,8 +181,10 @@ ratiod <- function(formula,
                   verbose = TRUE,
                   gradient_mode = c("auto", "N", "A", "A_r", "A_t", "H"),
                   re_param = c("noncentered", "centered"),
+                  adapt_delta = NULL,
                   max_treedepth = 10,
-                  metric = c("diag", "dense"),
+                  metric = c("auto", "dense", "diag"),
+                  riemannian = NULL,
                   ...) {
 
   mode <- match.arg(mode)
@@ -179,6 +192,23 @@ ratiod <- function(formula,
   gradient_mode <- match.arg(gradient_mode)
   re_param <- match.arg(re_param)
   metric <- match.arg(metric)
+
+  # Validate adapt_delta
+  if (!is.null(adapt_delta)) {
+    if (!is.numeric(adapt_delta) || length(adapt_delta) != 1 ||
+        adapt_delta < 0.5 || adapt_delta > 0.99) {
+      stop("adapt_delta must be a single number between 0.5 and 0.99, got ",
+           deparse(adapt_delta), call. = FALSE)
+    }
+  }
+
+  # Validate riemannian
+  if (!is.null(riemannian)) {
+    if (!is.logical(riemannian) || length(riemannian) != 1 || is.na(riemannian)) {
+      stop("riemannian must be TRUE, FALSE, or NULL, got ",
+           deparse(riemannian), call. = FALSE)
+    }
+  }
 
   # Handle verbose and L from ... for backwards compatibility
   extra_args <- list(...)
@@ -466,12 +496,14 @@ ratiod <- function(formula,
       chains = chains,
       cores = cores,
       L = L,
+      adapt_delta = adapt_delta,
       max_treedepth = max_treedepth,
       seed = seed,
       verbose = verbose,
       gradient_mode = gradient_mode,
       re_param = re_param,
-      metric = metric
+      metric = metric,
+      riemannian = riemannian
     )
 
     # Add mode information

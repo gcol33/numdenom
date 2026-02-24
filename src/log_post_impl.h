@@ -102,8 +102,8 @@ T compute_log_post_impl(
     // Spatial effects
     std::vector<T> phi_spatial;
     T tau_spatial = T(1.0);
-    T sigma_bym2 = T(1.0);
-    T rho_bym2 = T(0.5);
+    T sigma_s_bym2 = T(1.0);
+    T sigma_u_bym2 = T(1.0);
     std::vector<T> theta_bym2;
 
     if (layout.has_spatial) {
@@ -114,9 +114,12 @@ T compute_log_post_impl(
         }
 
         if (layout.is_bym2) {
-            sigma_bym2 = safe_exp(params[layout.log_sigma_bym2_idx]);
-            T logit_rho = params[layout.logit_rho_bym2_idx];
-            rho_bym2 = inv_logit(logit_rho);
+            // Riebler reparameterization: sigma_total, rho -> sigma_s, sigma_u
+            T sigma_total_bym2 = safe_exp(params[layout.log_sigma_bym2_idx]);
+            T logit_rho_val = params[layout.logit_rho_bym2_idx];
+            T rho_bym2 = T(1.0) / (T(1.0) + safe_exp(-logit_rho_val));
+            sigma_s_bym2 = sigma_total_bym2 * sqrt(rho_bym2);
+            sigma_u_bym2 = sigma_total_bym2 * sqrt(T(1.0) - rho_bym2);
 
             theta_bym2.resize(n_spatial);
             for (int s = 0; s < n_spatial; s++) {
@@ -216,14 +219,16 @@ T compute_log_post_impl(
     // Spatial priors
     if (layout.has_spatial) {
         if (layout.is_bym2) {
-            // BYM2: Half-Cauchy on sigma, Beta on rho
+            // BYM2 Riebler: Half-Cauchy on sigma_total
             T log_sigma = params[layout.log_sigma_bym2_idx];
             log_post = log_post + log_prior_half_cauchy(log_sigma, data.sigma_re_scale);
 
-            // Beta(0.5, 0.5) prior on rho
-            T logit_rho = params[layout.logit_rho_bym2_idx];
-            log_post = log_post + T(-0.5) * safe_log(rho_bym2) + T(-0.5) * safe_log(T(1.0) - rho_bym2);
-            log_post = log_post + safe_log(rho_bym2) + safe_log(T(1.0) - rho_bym2);  // Jacobian
+            // Uniform(0,1) = Beta(1,1) on rho with logit Jacobian:
+            // log p(logit_rho) = log(rho) + log(1-rho)
+            T logit_rho_val = params[layout.logit_rho_bym2_idx];
+            T rho_bym2_prior = T(1.0) / (T(1.0) + safe_exp(-logit_rho_val));
+            log_post = log_post + log(rho_bym2_prior)
+                                + log(T(1.0) - rho_bym2_prior);
 
             // ICAR prior on phi_spatial
             T quad_form = T(0.0);
@@ -608,10 +613,7 @@ T compute_log_post_impl(
 
             if (layout.is_bym2) {
                 T scaled_phi = phi_spatial[s] * T(data.bym2_scale_factor);
-                spatial_effect = sigma_bym2 * (
-                    safe_sqrt(rho_bym2) * scaled_phi +
-                    safe_sqrt(T(1.0) - rho_bym2) * theta_bym2[s]
-                );
+                spatial_effect = sigma_s_bym2 * scaled_phi + sigma_u_bym2 * theta_bym2[s];
             } else {
                 spatial_effect = phi_spatial[s];
             }

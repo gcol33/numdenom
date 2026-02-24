@@ -228,7 +228,7 @@ ParamLayout compute_param_layout(const ModelData& data) {
 
   if (layout.has_spatial) {
     if (layout.is_bym2) {
-      // BYM2: log_sigma, logit_rho, phi_scaled, theta
+      // BYM2 Riebler: log_sigma_total, logit_rho, phi_scaled, theta
       layout.log_sigma_bym2_idx = idx++;
       layout.logit_rho_bym2_idx = idx++;
       layout.spatial_start = idx;
@@ -690,16 +690,20 @@ double compute_log_post(
 
   // Spatial parameters
   double tau_spatial = 1.0, log_tau_spatial = 0.0;
-  double sigma_bym2 = 1.0, rho_bym2 = 0.5;
+  double sigma_s_bym2 = 1.0, sigma_u_bym2 = 1.0;
+  double rho_bym2 = 0.5;  // Riebler mixing parameter
   const double* phi_spatial = nullptr;
   const double* theta_bym2 = nullptr;
 
   if (layout.has_spatial) {
     phi_spatial = &params[layout.spatial_start];
     if (layout.is_bym2) {
-      sigma_bym2 = std::exp(params[layout.log_sigma_bym2_idx]);
+      // Riebler reparameterization: sigma_total, rho -> sigma_s, sigma_u
+      double sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
       double logit_rho = params[layout.logit_rho_bym2_idx];
       rho_bym2 = 1.0 / (1.0 + std::exp(-logit_rho));
+      sigma_s_bym2 = sigma_total * std::sqrt(rho_bym2);
+      sigma_u_bym2 = sigma_total * std::sqrt(1.0 - rho_bym2);
       theta_bym2 = &params[layout.theta_bym2_start];
     } else {
       log_tau_spatial = params[layout.log_tau_spatial_idx];
@@ -721,6 +725,9 @@ double compute_log_post(
   }
 
   // Random effects priors (supports multiple crossed RE terms with slopes)
+  // Non-centered parameterization: params store z ~ N(0,1), re = sigma * (L * z)
+  // Pre-compute actual RE values from z for use in the likelihood loop.
+  std::vector<double> re_nc_flat(params.size(), 0.0);
   if (layout.has_re) {
     int n_terms = (data.n_re_terms > 0) ? data.n_re_terms : 1;
 
@@ -757,33 +764,37 @@ double compute_log_post(
         int chol_start = layout.chol_re_start_multi[t];
         int n_chol = n_coefs * (n_coefs - 1) / 2;
 
-        // Build L matrix: diagonal = 1, off-diagonal from params
-        // We use a spherical parameterization for numerical stability
-        // L[i,i] = sqrt(1 - sum(L[i,j]^2 for j<i)) for i>0, L[0,0] = 1
+        // Build L matrix: tanh parameterization for unconstrained HMC
+        // Raw parameters are unconstrained; tanh maps them to (-1, 1)
+        // L[i,j] = tanh(raw[idx]) for off-diagonal, L[i,i] = sqrt(1 - sum_j L[i,j]^2)
+        // This eliminates hard boundaries that cause gradient explosions
         L_flat.resize(n_coefs * n_coefs, 0.0);
 
+        double log_jac_tanh = 0.0;  // Jacobian for raw -> L transformation
         int chol_idx = 0;
         for (int i = 0; i < n_coefs; i++) {
           double row_sum_sq = 0.0;
           for (int j = 0; j < i; j++) {
-            // Off-diagonal elements: unconstrained parameters
-            double l_ij = params[chol_start + chol_idx];
-            // Transform to ensure positive definiteness: use tanh to bound
-            // Actually, for LKJ we use a different parameterization
-            // Use partial correlations / spherical coordinates
+            double raw_ij = params[chol_start + chol_idx];
+            double l_ij = std::tanh(raw_ij);
             L_flat[i * n_coefs + j] = l_ij;
             row_sum_sq += l_ij * l_ij;
+            // Jacobian: log|d(tanh)/d(raw)| = log(1 - tanh^2) = log(sech^2)
+            double sech2 = 1.0 - l_ij * l_ij;
+            log_jac_tanh += std::log(std::max(1e-300, sech2));
             chol_idx++;
           }
-          // Diagonal: ensure positive definiteness
-          // L[i,i] = sqrt(1 - sum_{j<i} L[i,j]^2), but need to handle numerically
+          // Diagonal: guaranteed positive since tanh^2 < 1
           double diag_sq = 1.0 - row_sum_sq;
           if (diag_sq < 1e-10) {
-            // Invalid: correlation matrix not positive definite
+            // Safety guard (shouldn't trigger with tanh)
             return -std::numeric_limits<double>::infinity();
           }
           L_flat[i * n_coefs + i] = std::sqrt(diag_sq);
         }
+
+        // Tanh Jacobian: maps unconstrained raw to bounded L elements
+        log_post += log_jac_tanh;
 
         // LKJ(eta) prior: p(L) propto det(L*L')^(eta-1)
         // For eta=1 (uniform): log_prior = 0
@@ -804,54 +815,37 @@ double compute_log_post(
       // Get RE parameters for this term
       int re_start = (n_terms > 1 || layout.has_re_slopes) ? layout.re_start_multi[t] : layout.re_start;
 
-      // Random effects prior: depends on correlation structure
+      // Non-centered parameterization for correlated slopes:
+      // Params store z ~ N(0,1), compute re = diag(sigma) * L * z
+      // This eliminates the funnel geometry that plagues centered parameterization.
+      // For uncorrelated slopes, params store z ~ N(0,1), re = sigma * z
       if (is_correlated && n_coefs > 1) {
-        // Multivariate normal with covariance Sigma = diag(sigma) * L * L' * diag(sigma)
-        // For efficiency, we work with standardized RE: z = diag(1/sigma) * L^{-1} * re
-        // and put N(0, I) prior on z
-
+        // Pre-compute re from z for all groups: re[g] = diag(sigma) * L * z[g]
+        // Store in re_nc_flat for use in likelihood loop
         for (int g = 0; g < n_groups; g++) {
-          // Extract RE vector for this group
-          std::vector<double> re_g(n_coefs);
           for (int c = 0; c < n_coefs; c++) {
-            re_g[c] = params[re_start + g * n_coefs + c];
-          }
-
-          // Compute z = L^{-1} * diag(1/sigma) * re using forward substitution
-          std::vector<double> scaled_re(n_coefs);
-          for (int c = 0; c < n_coefs; c++) {
-            scaled_re[c] = re_g[c] / sigmas[c];
-          }
-
-          std::vector<double> z(n_coefs);
-          for (int i = 0; i < n_coefs; i++) {
-            double sum = scaled_re[i];
-            for (int j = 0; j < i; j++) {
-              sum -= L_flat[i * n_coefs + j] * z[j];
+            double Lz_c = 0.0;
+            for (int k = 0; k <= c; k++) {
+              Lz_c += L_flat[c * n_coefs + k] * params[re_start + g * n_coefs + k];
             }
-            z[i] = sum / L_flat[i * n_coefs + i];
+            re_nc_flat[re_start + g * n_coefs + c] = sigmas[c] * Lz_c;
           }
+        }
 
-          // N(0, I) prior on z
+        // N(0, I) prior on z (trivial in non-centered)
+        for (int g = 0; g < n_groups; g++) {
           for (int c = 0; c < n_coefs; c++) {
-            log_post -= 0.5 * z[c] * z[c];
+            double z_gc = params[re_start + g * n_coefs + c];
+            log_post -= 0.5 * z_gc * z_gc;
           }
         }
-
-        // Log-determinant contribution: |Sigma|^{-n_groups/2}
-        // |Sigma| = prod(sigma_c^2) * |L|^2 = prod(sigma_c^2) * prod(L_kk)^2
-        double log_det = 0.0;
-        for (int c = 0; c < n_coefs; c++) {
-          log_det += 2.0 * std::log(sigmas[c]);
-        }
-        for (int k = 0; k < n_coefs; k++) {
-          log_det += 2.0 * std::log(L_flat[k * n_coefs + k]);
-        }
-        log_post -= 0.5 * n_groups * log_det;
-        log_post -= 0.5 * n_groups * n_coefs * std::log(2.0 * M_PI);
+        // No log-determinant term: in non-centered parameterization,
+        // the |det(diag(sigma)*L)| from the change of variables cancels exactly
+        // with the |Sigma|^{-1/2} normalization of the MVN density.
 
       } else {
-        // Uncorrelated case: independent N(0, sigma_c^2) for each coefficient type
+        // Uncorrelated case: centered parameterization (unchanged)
+        // params store actual re values, prior is N(0, sigma_c^2)
         for (int g = 0; g < n_groups; g++) {
           for (int c = 0; c < n_coefs; c++) {
             double re_val = params[re_start + g * n_coefs + c];
@@ -880,15 +874,15 @@ double compute_log_post(
     int J = data.n_spatial_units;
 
     if (layout.is_bym2) {
-      // BYM2 prior
-      // sigma ~ Half-Cauchy (Jacobian for log transform)
-      double sigma_ratio = sigma_bym2 / data.sigma_re_scale;
-      log_post -= std::log(1.0 + sigma_ratio * sigma_ratio);
-      log_post += params[layout.log_sigma_bym2_idx];
+      // BYM2 Riebler: Half-Cauchy on sigma_total
+      double sigma_total = sigma_s_bym2 / std::sqrt(rho_bym2);  // recover sigma_total
+      double ratio = sigma_total / data.sigma_re_scale;
+      log_post -= std::log(1.0 + ratio * ratio);
+      log_post += params[layout.log_sigma_bym2_idx];  // Jacobian for log transform
 
-      // rho ~ Beta(0.5, 0.5) (Jacobian for logit transform)
-      log_post += -0.5 * std::log(rho_bym2) - 0.5 * std::log(1.0 - rho_bym2);
-      log_post += std::log(rho_bym2) + std::log(1.0 - rho_bym2);  // Jacobian
+      // Uniform(0,1) = Beta(1,1) on rho with logit Jacobian:
+      // log p(logit_rho) = log(rho) + log(1-rho)
+      log_post += std::log(rho_bym2) + std::log(1.0 - rho_bym2);
 
       // phi_scaled ~ N(0, Q^{-1}) with soft sum-to-zero
       std::vector<double> phi_vec(phi_spatial, phi_spatial + J);
@@ -1512,17 +1506,17 @@ double compute_log_post(
             int g = group_idx - 1;
             int n_coefs = layout.re_n_coefs_multi[t];
             int re_base = layout.re_start_multi[t] + g * n_coefs;
+            bool is_corr_t = layout.re_correlated_multi[t] && n_coefs > 1;
 
-            // Intercept contribution (coefficient 0)
-            double re_contrib = params[re_base];
+            // For correlated slopes: use pre-computed non-centered re
+            // For uncorrelated slopes: params store re directly (centered)
+            double re_contrib = is_corr_t ? re_nc_flat[re_base] : params[re_base];
 
-            // Slope contributions (coefficients 1, 2, ...)
-            int n_slopes = n_coefs - 1;  // Assuming intercept is always first
+            int n_slopes = n_coefs - 1;
             if (n_slopes > 0 && !data.re_slope_matrices[t].empty()) {
               for (int s = 0; s < n_slopes; s++) {
-                // Slope design matrix is stored as [N x n_slopes] flattened row-major
                 double x_slope = data.re_slope_matrices[t][i * n_slopes + s];
-                double re_slope = params[re_base + 1 + s];
+                double re_slope = is_corr_t ? re_nc_flat[re_base + 1 + s] : params[re_base + 1 + s];
                 re_contrib += re_slope * x_slope;
               }
             }
@@ -1532,7 +1526,7 @@ double compute_log_post(
           }
         }
       } else if (n_terms > 1) {
-        // Multiple RE terms (intercept only)
+        // Multiple RE terms (intercept only): params store re directly (centered)
         for (int t = 0; t < n_terms; t++) {
           int group_idx = data.re_group_multi[t][i];
           if (group_idx > 0) {
@@ -1558,12 +1552,9 @@ double compute_log_post(
       double spatial_effect;
 
       if (layout.is_bym2) {
-        // BYM2: u = sigma * (sqrt(rho)*phi_scaled*scale + sqrt(1-rho)*theta)
+        // BYM2: u = sigma_s * scale * phi + sigma_u * theta
         double scaled_phi = phi_spatial[s] * data.bym2_scale_factor;
-        spatial_effect = sigma_bym2 * (
-          std::sqrt(rho_bym2) * scaled_phi +
-          std::sqrt(1.0 - rho_bym2) * theta_bym2[s]
-        );
+        spatial_effect = sigma_s_bym2 * scaled_phi + sigma_u_bym2 * theta_bym2[s];
       } else {
         spatial_effect = phi_spatial[s];
       }
@@ -1947,6 +1938,12 @@ void compute_gradient_analytical(
   std::vector<std::vector<double>> grad_re_slopes_lik;  // [term][g*n_coefs+c] likelihood contributions
   int n_re_terms_slopes = 0;
 
+  // Non-centered slopes: pre-computed RE values for observation loop
+  std::vector<double> re_nc_flat;
+  // Per-term storage for non-centered chain rule in write-back
+  std::vector<std::vector<double>> nc_L_flats;   // [term] -> L_flat
+  std::vector<std::vector<double>> nc_sigmas_vec; // [term] -> sigmas
+
   if (layout.has_re && layout.has_re_slopes && !layout.has_re_correlated_slopes) {
     // ============ Uncorrelated random slopes prior gradients ============
     // Each coefficient type c has independent N(0, sigma_c^2) prior
@@ -2010,7 +2007,8 @@ void compute_gradient_analytical(
       }
 
       if (is_correlated && n_coefs > 1) {
-        // Build Cholesky factor L
+        // Build Cholesky factor L with tanh parameterization
+        // Must match compute_log_post: L[i,j] = tanh(raw[idx])
         int chol_start = layout.chol_re_start_multi[t];
         std::vector<double> L_flat(n_coefs * n_coefs, 0.0);
 
@@ -2018,13 +2016,14 @@ void compute_gradient_analytical(
         for (int i = 0; i < n_coefs; i++) {
           double row_sum_sq = 0.0;
           for (int j = 0; j < i; j++) {
-            L_flat[i * n_coefs + j] = params[chol_start + chol_idx];
+            double raw_ij = params[chol_start + chol_idx];
+            L_flat[i * n_coefs + j] = std::tanh(raw_ij);
             row_sum_sq += L_flat[i * n_coefs + j] * L_flat[i * n_coefs + j];
             chol_idx++;
           }
           double diag_sq = 1.0 - row_sum_sq;
           if (diag_sq < 1e-10) {
-            // Invalid state - gradients are undefined
+            // Safety guard (shouldn't trigger with tanh)
             return;
           }
           L_flat[i * n_coefs + i] = std::sqrt(diag_sq);
@@ -2054,93 +2053,55 @@ void compute_gradient_analytical(
           }
         }
 
-        // Accumulate RE prior gradients for all groups
-        // For each group g: z = L^{-1} * y where y[c] = re[c] / sigma[c]
-        // Prior contribution: -0.5 * ||z||^2
-        // Gradient w.r.t. re[c]: -w[c] / sigma[c] where w = L^{-T} * z
-        std::vector<double> sigma_grad_from_prior(n_coefs, 0.0);
-        std::vector<double> chol_grad_from_prior(n_chol, 0.0);
+        // ---- Non-centered parameterization ----
+        // Params store z ~ N(0,1). Compute re = diag(sigma) * L * z for observation loop.
 
+        // Allocate re_nc_flat if needed
+        if (re_nc_flat.empty()) {
+          re_nc_flat.assign(params.size(), 0.0);
+        }
+
+        // Pre-compute re from z for all groups
         for (int g = 0; g < n_groups; g++) {
-          // Extract RE vector for this group
-          std::vector<double> re_g(n_coefs);
           for (int c = 0; c < n_coefs; c++) {
-            re_g[c] = params[re_start_t + g * n_coefs + c];
-          }
-
-          // Compute y = diag(1/sigma) * re
-          std::vector<double> y(n_coefs);
-          for (int c = 0; c < n_coefs; c++) {
-            y[c] = re_g[c] / sigmas[c];
-          }
-
-          // Forward substitution: z = L^{-1} * y
-          std::vector<double> z(n_coefs);
-          for (int i = 0; i < n_coefs; i++) {
-            double sum = y[i];
-            for (int j = 0; j < i; j++) {
-              sum -= L_flat[i * n_coefs + j] * z[j];
+            double Lz_c = 0.0;
+            for (int k = 0; k <= c; k++) {
+              Lz_c += L_flat[c * n_coefs + k] * params[re_start_t + g * n_coefs + k];
             }
-            z[i] = sum / L_flat[i * n_coefs + i];
+            re_nc_flat[re_start_t + g * n_coefs + c] = sigmas[c] * Lz_c;
           }
+        }
 
-          // Backward substitution: w = L^{-T} * z
-          std::vector<double> w(n_coefs);
-          for (int i = n_coefs - 1; i >= 0; i--) {
-            double sum = z[i];
-            for (int j = i + 1; j < n_coefs; j++) {
-              sum -= L_flat[j * n_coefs + i] * w[j];
-            }
-            w[i] = sum / L_flat[i * n_coefs + i];
-          }
+        // Save term data for write-back chain rule
+        nc_L_flats.resize(n_re_terms_slopes);
+        nc_sigmas_vec.resize(n_re_terms_slopes);
+        nc_L_flats[t] = L_flat;
+        nc_sigmas_vec[t] = sigmas;
 
-          // RE gradients: d(prior)/d(re[c]) = -w[c] / sigma[c]
+        // Prior on z: N(0, I) -> grad[z_idx] = -z[g,c]
+        for (int g = 0; g < n_groups; g++) {
           for (int c = 0; c < n_coefs; c++) {
-            grad[re_start_t + g * n_coefs + c] = -w[c] / sigmas[c];
+            grad[re_start_t + g * n_coefs + c] = -params[re_start_t + g * n_coefs + c];
           }
+        }
 
-          // Sigma gradients from this group's prior contribution
-          // d(-0.5*||z||^2)/d(log_sigma[c]) uses chain rule
-          // d(y[c])/d(log_sigma[c]) = -re[c]/sigma[c] = -y[c]
-          // Result: d(||z||^2)/d(log_sigma[c]) = -2 * y[c] * w[c]
-          for (int c = 0; c < n_coefs; c++) {
-            sigma_grad_from_prior[c] += y[c] * w[c];
-          }
+        // Sigma: Half-Cauchy prior already written above. No centered contribution.
+        // In non-centered, the log-det of Jacobian (re = diag(sigma)*L*z)
+        // cancels with the |Sigma|^{-1/2} normalization, so no -n_groups term.
 
-          // Cholesky gradients from this group's prior contribution
-          // d(-0.5*||z||^2)/d(L[i,j]) = -z' * dz/d(L[i,j])
-          // Using chain rule: d(||z||^2)/d(L[i,j]) = -2 * w[i] * z[j] / L[i,i] for j < i
+        // Cholesky: write LKJ prior gradient only (with tanh chain rule)
+        // No centered prior contribution in non-centered parameterization
+        {
+          int cidx = 0;
           for (int i = 1; i < n_coefs; i++) {
-            double L_ii = L_flat[i * n_coefs + i];
-            int chol_base = i * (i - 1) / 2;
             for (int j = 0; j < i; j++) {
-              chol_grad_from_prior[chol_base + j] += w[i] * z[j] / L_ii;
+              double raw_val = params[chol_start + cidx];
+              double l_val = std::tanh(raw_val);
+              double sech2 = 1.0 - l_val * l_val;
+              grad[chol_start + cidx] = grad_chol[cidx] * sech2 - 2.0 * l_val;
+              cidx++;
             }
           }
-        }
-
-        // Add sigma gradients from prior (with log-determinant contribution)
-        // Log-det: -0.5 * n_groups * (2*sum(log(sigma)) + 2*sum(log(L[k,k])))
-        // d/d(log_sigma[c]) of -n_groups * log(sigma[c]) = -n_groups
-        for (int c = 0; c < n_coefs; c++) {
-          int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
-          grad[log_sigma_idx] += sigma_grad_from_prior[c] - n_groups;
-        }
-
-        // Add Cholesky gradients from prior (with log-determinant contribution)
-        // d/d(L[k,j]) of -n_groups * log(L[k,k]) = n_groups * L[k,j] / L[k,k]^2
-        for (int k = 1; k < n_coefs; k++) {
-          double L_kk = L_flat[k * n_coefs + k];
-          int chol_base = k * (k - 1) / 2;
-          for (int j = 0; j < k; j++) {
-            double L_kj = L_flat[k * n_coefs + j];
-            chol_grad_from_prior[chol_base + j] += n_groups * L_kj / (L_kk * L_kk);
-          }
-        }
-
-        // Write Cholesky gradients
-        for (int idx = 0; idx < n_chol; idx++) {
-          grad[chol_start + idx] = grad_chol[idx] + chol_grad_from_prior[idx];
         }
       } else {
         // Uncorrelated term within a mixed model (fallback)
@@ -2218,8 +2179,8 @@ void compute_gradient_analytical(
 
   // ============ Spatial prior gradients (ICAR and BYM2) ============
   double log_tau_spatial = 0.0, tau_spatial = 1.0;
-  double log_sigma_bym2 = 0.0, sigma_bym2 = 1.0;
-  double logit_rho_bym2 = 0.0, rho_bym2 = 0.5;
+  double sigma_s_bym2 = 1.0, sigma_u_bym2 = 1.0;
+  double rho_bym2 = 0.5;  // Riebler mixing parameter
   int n_spatial = 0;
   const double* phi_spatial = nullptr;
   const double* theta_bym2 = nullptr;
@@ -2231,23 +2192,22 @@ void compute_gradient_analytical(
     grad_spatial_lik.assign(n_spatial, 0.0);
 
     if (data.spatial_type == SpatialType::BYM2) {
-      // BYM2: extract sigma, rho, theta
-      log_sigma_bym2 = params[layout.log_sigma_bym2_idx];
-      sigma_bym2 = std::exp(log_sigma_bym2);
-      logit_rho_bym2 = params[layout.logit_rho_bym2_idx];
-      rho_bym2 = 1.0 / (1.0 + std::exp(-logit_rho_bym2));
+      // BYM2 Riebler: derive sigma_s, sigma_u from sigma_total, rho
+      double sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
+      double logit_rho = params[layout.logit_rho_bym2_idx];
+      rho_bym2 = 1.0 / (1.0 + std::exp(-logit_rho));
+      sigma_s_bym2 = sigma_total * std::sqrt(rho_bym2);
+      sigma_u_bym2 = sigma_total * std::sqrt(1.0 - rho_bym2);
       theta_bym2 = &params[layout.theta_bym2_start];
 
-      // Half-Cauchy prior on sigma: d/d(log_sigma) = -2*(sigma/scale)^2/(1+(sigma/scale)^2) + 1
-      double ratio_s = sigma_bym2 / data.sigma_re_scale;
-      double ratio_s_sq = ratio_s * ratio_s;
-      grad[layout.log_sigma_bym2_idx] = -2.0 * ratio_s_sq / (1.0 + ratio_s_sq) + 1.0;
+      // Half-Cauchy prior on sigma_total
+      double ratio = sigma_total / data.sigma_re_scale;
+      double ratio_sq = ratio * ratio;
+      grad[layout.log_sigma_bym2_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
 
-      // Beta(0.5, 0.5) prior on rho: d/d(logit_rho) = -0.5/(rho) + 0.5/(1-rho) + Jacobian
-      // = -0.5*(1-2*rho)/(rho*(1-rho)) + rho*(1-rho) (Jacobian)
-      // Simplifies to: -(0.5-rho) + rho*(1-rho) = rho - 0.5 + rho - rho^2 = 2*rho - 0.5 - rho^2
-      grad[layout.logit_rho_bym2_idx] = -0.5 / rho_bym2 + 0.5 / (1.0 - rho_bym2);
-      grad[layout.logit_rho_bym2_idx] += 1.0;  // Jacobian d(rho)/d(logit_rho) = rho*(1-rho), but we want grad wrt logit
+      // Uniform(0,1) = Beta(1,1) on rho with logit Jacobian:
+      // d/d(logit_rho) [log(rho) + log(1-rho)] = (1-rho) - rho = 1 - 2*rho
+      grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
 
       // Initialize theta gradients (N(0,1) prior: d/d(theta) = -theta)
       for (int s = 0; s < n_spatial; s++) {
@@ -2343,8 +2303,14 @@ void compute_gradient_analytical(
             re_n_coefs_i = layout.re_n_coefs_multi[0];
             int re_base = layout.re_start_multi[0] + g * re_n_coefs_i;
 
+            // For correlated slopes: use pre-computed non-centered re
+            // For uncorrelated slopes: params store re directly (centered)
+            bool is_corr_t = !re_nc_flat.empty() &&
+                             layout.re_correlated_multi.size() > 0 &&
+                             layout.re_correlated_multi[0] && re_n_coefs_i > 1;
+
             // Intercept contribution
-            double re_contrib = params[re_base];
+            double re_contrib = is_corr_t ? re_nc_flat[re_base] : params[re_base];
 
             // Slope contributions
             int n_slopes = re_n_coefs_i - 1;
@@ -2353,7 +2319,7 @@ void compute_gradient_analytical(
               for (int s = 0; s < n_slopes; s++) {
                 double x_slope = data.re_slope_matrices[0][i * n_slopes + s];
                 re_slope_x_i[s] = x_slope;
-                double re_slope = params[re_base + 1 + s];
+                double re_slope = is_corr_t ? re_nc_flat[re_base + 1 + s] : params[re_base + 1 + s];
                 re_contrib += re_slope * x_slope;
               }
             }
@@ -2408,13 +2374,11 @@ void compute_gradient_analytical(
         s_idx = data.spatial_group[i] - 1;
         double spatial_effect;
         if (data.spatial_type == SpatialType::BYM2) {
-          // BYM2: spatial_effect = sigma * (sqrt(rho) * scaled_phi + sqrt(1-rho) * theta)
+          // BYM2: spatial_effect = sigma_s * scale * phi + sigma_u * theta
           double scaled_phi = phi_spatial[s_idx] * data.bym2_scale_factor;
-          double sqrt_rho = std::sqrt(rho_bym2);
-          double sqrt_1m_rho = std::sqrt(1.0 - rho_bym2);
-          spatial_effect = sigma_bym2 * (sqrt_rho * scaled_phi + sqrt_1m_rho * theta_bym2[s_idx]);
-          d_spatial_d_phi = sigma_bym2 * sqrt_rho * data.bym2_scale_factor;
-          d_spatial_d_theta = sigma_bym2 * sqrt_1m_rho;
+          spatial_effect = sigma_s_bym2 * scaled_phi + sigma_u_bym2 * theta_bym2[s_idx];
+          d_spatial_d_phi = sigma_s_bym2 * data.bym2_scale_factor;
+          d_spatial_d_theta = sigma_u_bym2;
         } else {
           // ICAR: spatial_effect = phi_spatial
           spatial_effect = phi_spatial[s_idx];
@@ -3060,9 +3024,75 @@ void compute_gradient_analytical(
       int n_groups = data.re_n_groups_multi[t];
       int n_coefs = layout.re_n_coefs_multi[t];
       int re_start_t = layout.re_start_multi[t];
-      for (int g = 0; g < n_groups; g++) {
+      bool is_nc = (t < (int)nc_L_flats.size() && !nc_L_flats[t].empty());
+
+      if (is_nc) {
+        // Non-centered correlated slopes: chain rule transformation
+        // grad_re_slopes_lik[t] contains dLL/d(re), but params store z.
+        // Need to transform to dLL/d(z) and add sigma/chol gradients.
+        const auto& L_flat = nc_L_flats[t];
+        const auto& sigmas = nc_sigmas_vec[t];
+
+        // 1. Transform grad_re_lik to grad_z via chain rule:
+        //    dLL/dz[g,k] = sum_{c>=k} dLL/dre[g,c] * sigma[c] * L[c,k]
+        for (int g = 0; g < n_groups; g++) {
+          for (int k = 0; k < n_coefs; k++) {
+            double grad_z_lik = 0.0;
+            for (int c = k; c < n_coefs; c++) {
+              grad_z_lik += grad_re_slopes_lik[t][g * n_coefs + c] *
+                            sigmas[c] * L_flat[c * n_coefs + k];
+            }
+            grad[re_start_t + g * n_coefs + k] += grad_z_lik;
+          }
+        }
+
+        // 2. Sigma gradient from likelihood:
+        //    dLL/d(log_sigma[c]) = sum_g dLL/dre[g,c] * re_nc[g,c]
         for (int c = 0; c < n_coefs; c++) {
-          grad[re_start_t + g * n_coefs + c] += grad_re_slopes_lik[t][g * n_coefs + c];
+          double sigma_lik_grad = 0.0;
+          for (int g = 0; g < n_groups; g++) {
+            sigma_lik_grad += grad_re_slopes_lik[t][g * n_coefs + c] *
+                              re_nc_flat[re_start_t + g * n_coefs + c];
+          }
+          int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
+          grad[log_sigma_idx] += sigma_lik_grad;
+        }
+
+        // 3. Cholesky gradient from likelihood:
+        //    dLL/dL[i,j] = sigma[i] * (S_ij - S_ii * L[i,j] / L[i,i])
+        //    where S_ik = sum_g dLL/dre[g,i] * z[g,k]
+        //    Then apply tanh chain rule: grad_raw += grad_L * sech^2
+        int chol_start = layout.chol_re_start_multi[t];
+        for (int ii = 1; ii < n_coefs; ii++) {
+          double L_ii = L_flat[ii * n_coefs + ii];
+          // Compute S_i_k for k = 0..ii
+          std::vector<double> S_i(ii + 1, 0.0);
+          for (int k = 0; k <= ii; k++) {
+            for (int g = 0; g < n_groups; g++) {
+              S_i[k] += grad_re_slopes_lik[t][g * n_coefs + ii] *
+                        params[re_start_t + g * n_coefs + k];  // z[g,k]
+            }
+          }
+
+          int chol_base = ii * (ii - 1) / 2;
+          for (int j = 0; j < ii; j++) {
+            double L_ij = L_flat[ii * n_coefs + j];
+            double grad_L_ij = sigmas[ii] * (S_i[j] - S_i[ii] * L_ij / L_ii);
+
+            // Apply tanh chain rule and ADD to existing chol gradient
+            double raw_val = params[chol_start + chol_base + j];
+            double l_val = std::tanh(raw_val);
+            double sech2 = 1.0 - l_val * l_val;
+            grad[chol_start + chol_base + j] += grad_L_ij * sech2;
+          }
+        }
+
+      } else {
+        // Uncorrelated or centered: add grad_re_slopes_lik directly
+        for (int g = 0; g < n_groups; g++) {
+          for (int c = 0; c < n_coefs; c++) {
+            grad[re_start_t + g * n_coefs + c] += grad_re_slopes_lik[t][g * n_coefs + c];
+          }
         }
       }
     }
@@ -3192,38 +3222,24 @@ void compute_gradient_analytical(
     }
 
     if (data.spatial_type == SpatialType::BYM2) {
-      // BYM2: additional gradients for sigma and rho from likelihood
-      // spatial_effect = sigma * (sqrt(rho) * scale * phi + sqrt(1-rho) * theta)
-      // d(spatial_effect)/d(sigma) = spatial_effect / sigma
-      // d(spatial_effect)/d(rho) = sigma * (0.5/sqrt(rho) * scale * phi - 0.5/sqrt(1-rho) * theta)
-
-      double sqrt_rho = std::sqrt(rho_bym2);
-      double sqrt_1m_rho = std::sqrt(1.0 - rho_bym2);
-      double grad_sigma_lik = 0.0;
-      double grad_rho_lik = 0.0;
+      // BYM2 Riebler: transform (grad_sigma_s, grad_sigma_u) to (grad_log_sigma, grad_logit_rho)
+      // grad_sigma_s_lik = d(LL)/d(sigma_s) * sigma_s  (chain rule for log)
+      // grad_sigma_u_lik = d(LL)/d(sigma_u) * sigma_u
+      double grad_sigma_s_lik = 0.0;
+      double grad_sigma_u_lik = 0.0;
 
       for (int s = 0; s < n_spatial; s++) {
         double scaled_phi = phi_spatial[s] * data.bym2_scale_factor;
-        // The likelihood gradient flows through the spatial effect
-        // We already accumulated theta gradients in the loop, but need sigma and rho gradients
-        double lik_grad_s = grad_spatial_lik[s] / (sigma_bym2 * sqrt_rho * data.bym2_scale_factor);  // This is the likelihood contribution per unit of phi
-
-        // Actually, let me reconsider. grad_spatial_lik[s] already has d(LL)/d(spatial_effect) * d(spatial_effect)/d(phi)
-        // What I need is d(LL)/d(spatial_effect) which is grad_spatial_lik[s] / d_spatial_d_phi
-        double d_LL_d_spatial = grad_spatial_lik[s] / (sigma_bym2 * sqrt_rho * data.bym2_scale_factor);
-
-        // d(spatial_effect)/d(log_sigma) = spatial_effect (chain rule for log transform)
-        double spatial_eff = sigma_bym2 * (sqrt_rho * scaled_phi + sqrt_1m_rho * theta_bym2[s]);
-        grad_sigma_lik += d_LL_d_spatial * spatial_eff;
-
-        // d(spatial_effect)/d(logit_rho) = d(spatial)/d(rho) * d(rho)/d(logit_rho)
-        // d(spatial)/d(rho) = sigma * (0.5/sqrt(rho) * scale * phi - 0.5/sqrt(1-rho) * theta)
-        double d_spatial_d_rho = sigma_bym2 * (0.5 / sqrt_rho * scaled_phi - 0.5 / sqrt_1m_rho * theta_bym2[s]);
-        grad_rho_lik += d_LL_d_spatial * d_spatial_d_rho * rho_bym2 * (1.0 - rho_bym2);
+        double d_LL_d_spatial = grad_spatial_lik[s] / (sigma_s_bym2 * data.bym2_scale_factor);
+        grad_sigma_s_lik += d_LL_d_spatial * sigma_s_bym2 * scaled_phi;
+        grad_sigma_u_lik += d_LL_d_spatial * sigma_u_bym2 * theta_bym2[s];
       }
 
-      grad[layout.log_sigma_bym2_idx] += grad_sigma_lik;
-      grad[layout.logit_rho_bym2_idx] += grad_rho_lik;
+      // grad[log_sigma] = grad_sigma_s_lik + grad_sigma_u_lik
+      grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
+      // grad[logit_rho] = 0.5 * ((1-rho)*grad_sigma_s_lik - rho*grad_sigma_u_lik)
+      grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
+                                                  - rho_bym2 * grad_sigma_u_lik);
 
     } else {
       // Plain ICAR: tau gradient
@@ -3240,6 +3256,7 @@ void compute_gradient_analytical(
   if (log_post_out) {
     *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
   }
+
 }
 
 // =====================================================================
@@ -6467,14 +6484,18 @@ void compute_gradient_ms_temporal_handcoded(
     // Spatial parameters (ICAR/BYM2 if present)
     double tau_spatial = 0.0;
     const double* spatial_phi = nullptr;
-    double sigma_bym2 = 0.0, rho_bym2 = 0.0;
+    double sigma_s_bym2 = 0.0, sigma_u_bym2 = 0.0;
+    double rho_bym2 = 0.5;
     const double* theta_bym2 = nullptr;
     if (layout.has_spatial) {
-        tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
+        if (!layout.is_bym2) tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
         spatial_phi = &params[layout.spatial_start];
         if (layout.is_bym2) {
-            sigma_bym2 = std::exp(params[layout.log_sigma_bym2_idx]);
-            rho_bym2 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_bym2_idx]));
+            double sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
+            double logit_rho = params[layout.logit_rho_bym2_idx];
+            rho_bym2 = 1.0 / (1.0 + std::exp(-logit_rho));
+            sigma_s_bym2 = sigma_total * std::sqrt(rho_bym2);
+            sigma_u_bym2 = sigma_total * std::sqrt(1.0 - rho_bym2);
             theta_bym2 = &params[layout.theta_bym2_start];
         }
     }
@@ -6522,10 +6543,11 @@ void compute_gradient_ms_temporal_handcoded(
         grad[layout.log_tau_spatial_idx] = (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
     }
     if (layout.is_bym2) {
-        // BYM2 prior gradients
-        double ratio_bym2 = sigma_bym2 / data.sigma_re_scale;
-        grad[layout.log_sigma_bym2_idx] = (-2.0 * ratio_bym2 / (data.sigma_re_scale * (1.0 + ratio_bym2 * ratio_bym2)) + 1.0) * sigma_bym2 - data.n_spatial_units;
-        grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
+        // BYM2 Riebler prior gradients
+        double sigma_total = sigma_s_bym2 / std::sqrt(rho_bym2);
+        double ratio = sigma_total / data.sigma_re_scale;
+        grad[layout.log_sigma_bym2_idx] = -2.0 * ratio * ratio / (1.0 + ratio * ratio) + 1.0;
+        grad[layout.logit_rho_bym2_idx] = 0.5 * (1.0 - 2.0 * rho_bym2);
     }
 
     // PC priors on multiscale temporal variances
@@ -6569,7 +6591,7 @@ void compute_gradient_ms_temporal_handcoded(
         if (layout.has_spatial && data.spatial_group[i] > 0) {
             s_unit = data.spatial_group[i] - 1;
             if (layout.is_bym2) {
-                double spatial_eff = sigma_bym2 * (std::sqrt(rho_bym2 * data.bym2_scale_factor) * spatial_phi[s_unit] + std::sqrt(1.0 - rho_bym2) * theta_bym2[s_unit]);
+                double spatial_eff = sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s_unit] + sigma_u_bym2 * theta_bym2[s_unit];
                 eta_num += spatial_eff; eta_denom += spatial_eff;
             } else {
                 eta_num += spatial_phi[s_unit]; eta_denom += spatial_phi[s_unit];
@@ -6641,21 +6663,28 @@ void compute_gradient_ms_temporal_handcoded(
     if (layout.has_spatial) {
         int S = data.n_spatial_units;
         if (layout.is_bym2) {
-            double sqrt_rho_scale = std::sqrt(rho_bym2 * data.bym2_scale_factor);
-            double sqrt_one_minus_rho = std::sqrt(1.0 - rho_bym2);
-            // ICAR prior on spatial_phi
+            // BYM2 (separate variance): phi and theta gradients
+            // ICAR prior on spatial_phi (no tau_spatial for BYM2 — using unit precision)
             for (int s = 0; s < S; s++) {
                 double icar_grad = 0.0;
                 for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
                     int j = data.adj_col_idx[idx];  // already 0-based from R
-                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
+                    icar_grad += (spatial_phi[j] - spatial_phi[s]);
                 }
-                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_bym2 * sqrt_rho_scale + icar_grad;
-                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_bym2 * sqrt_one_minus_rho - theta_bym2[s];
+                // d(LL)/d(phi[s]) = d(LL)/d(spatial) * d(spatial)/d(phi) = dLL_shared * sigma_s * scale
+                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad;
+                // d(LL)/d(theta[s]) = d(LL)/d(spatial) * d(spatial)/d(theta) = dLL_shared * sigma_u
+                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
             }
-            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S), data);
-            grad[layout.log_tau_spatial_idx] = 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
-            grad[layout.log_tau_spatial_idx] += (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
+            // Riebler: transform (grad_sigma_s, grad_sigma_u) -> (grad_log_sigma, grad_logit_rho)
+            double grad_sigma_s_lik = 0.0, grad_sigma_u_lik = 0.0;
+            for (int s = 0; s < S; s++) {
+                grad_sigma_s_lik += grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s];
+                grad_sigma_u_lik += grad_theta_lik[s] * sigma_u_bym2 * theta_bym2[s];
+            }
+            grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
+            grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
+                                                        - rho_bym2 * grad_sigma_u_lik);
         } else {
             // ICAR
             for (int s = 0; s < S; s++) {
@@ -6723,14 +6752,18 @@ void compute_gradient_spatiotemporal_handcoded(
     // Spatial parameters (ICAR/BYM2)
     double tau_spatial = 0.0;
     const double* spatial_phi = nullptr;
-    double sigma_bym2 = 0.0, rho_bym2 = 0.0;
+    double sigma_s_bym2 = 0.0, sigma_u_bym2 = 0.0;
+    double rho_bym2 = 0.5;
     const double* theta_bym2 = nullptr;
     if (layout.has_spatial) {
-        tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
+        if (!layout.is_bym2) tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
         spatial_phi = &params[layout.spatial_start];
         if (layout.is_bym2) {
-            sigma_bym2 = std::exp(params[layout.log_sigma_bym2_idx]);
-            rho_bym2 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_bym2_idx]));
+            double sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
+            double logit_rho = params[layout.logit_rho_bym2_idx];
+            rho_bym2 = 1.0 / (1.0 + std::exp(-logit_rho));
+            sigma_s_bym2 = sigma_total * std::sqrt(rho_bym2);
+            sigma_u_bym2 = sigma_total * std::sqrt(1.0 - rho_bym2);
             theta_bym2 = &params[layout.theta_bym2_start];
         }
     }
@@ -6782,9 +6815,11 @@ void compute_gradient_spatiotemporal_handcoded(
         grad[layout.log_tau_spatial_idx] = (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
     }
     if (layout.is_bym2) {
-        double ratio_bym2 = sigma_bym2 / data.sigma_re_scale;
-        grad[layout.log_sigma_bym2_idx] = (-2.0 * ratio_bym2 / (data.sigma_re_scale * (1.0 + ratio_bym2 * ratio_bym2)) + 1.0) * sigma_bym2 - data.n_spatial_units;
-        grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
+        // BYM2 Riebler prior gradients
+        double sigma_total = sigma_s_bym2 / std::sqrt(rho_bym2);
+        double ratio = sigma_total / data.sigma_re_scale;
+        grad[layout.log_sigma_bym2_idx] = -2.0 * ratio * ratio / (1.0 + ratio * ratio) + 1.0;
+        grad[layout.logit_rho_bym2_idx] = 0.5 * (1.0 - 2.0 * rho_bym2);
     }
 
     // Temporal prior (Gamma on tau, Beta on rho)
@@ -6842,7 +6877,7 @@ void compute_gradient_spatiotemporal_handcoded(
         if (layout.has_spatial && data.spatial_group[i] > 0) {
             s_unit = data.spatial_group[i] - 1;
             if (layout.is_bym2) {
-                double spatial_eff = sigma_bym2 * (std::sqrt(rho_bym2 * data.bym2_scale_factor) * spatial_phi[s_unit] + std::sqrt(1.0 - rho_bym2) * theta_bym2[s_unit]);
+                double spatial_eff = sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s_unit] + sigma_u_bym2 * theta_bym2[s_unit];
                 eta_num += spatial_eff; eta_denom += spatial_eff;
             } else {
                 eta_num += spatial_phi[s_unit]; eta_denom += spatial_phi[s_unit];
@@ -6909,20 +6944,25 @@ void compute_gradient_spatiotemporal_handcoded(
     if (layout.has_spatial) {
         int S_sp = data.n_spatial_units;
         if (layout.is_bym2) {
-            double sqrt_rho_scale = std::sqrt(rho_bym2 * data.bym2_scale_factor);
-            double sqrt_one_minus_rho = std::sqrt(1.0 - rho_bym2);
+            // BYM2 (separate variance): phi and theta gradients
             for (int s = 0; s < S_sp; s++) {
                 double icar_grad = 0.0;
                 for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
                     int j = data.adj_col_idx[idx];  // already 0-based from R
-                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
+                    icar_grad += (spatial_phi[j] - spatial_phi[s]);
                 }
-                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_bym2 * sqrt_rho_scale + icar_grad;
-                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_bym2 * sqrt_one_minus_rho - theta_bym2[s];
+                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad;
+                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
             }
-            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S_sp), data);
-            grad[layout.log_tau_spatial_idx] = 0.5 * (S_sp - 1) - 0.5 * tau_spatial * icar_qf;
-            grad[layout.log_tau_spatial_idx] += (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
+            // Riebler: transform (grad_sigma_s, grad_sigma_u) -> (grad_log_sigma, grad_logit_rho)
+            double grad_sigma_s_lik = 0.0, grad_sigma_u_lik = 0.0;
+            for (int s = 0; s < S_sp; s++) {
+                grad_sigma_s_lik += grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s];
+                grad_sigma_u_lik += grad_theta_lik[s] * sigma_u_bym2 * theta_bym2[s];
+            }
+            grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
+            grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
+                                                        - rho_bym2 * grad_sigma_u_lik);
         } else {
             for (int s = 0; s < S_sp; s++) {
                 double icar_grad = 0.0;
@@ -8058,10 +8098,11 @@ TreeStats build_tree_fast(
     std::memcpy(stats.p_beg.data(), p_ptr, n * sizeof(double));
     std::memcpy(stats.p_end.data(), p_ptr, n * sizeof(double));
 
-    // p_sharp = diag(M^{-1}) * p  — always use diagonal for U-turn robustness.
-    // Dense mass is used for leapfrog/momentum, but the U-turn criterion is more
-    // robust with diagonal p_sharp (avoids noise from off-diagonal estimates).
-    mass.inv_mass_diag_times_p(p_ptr, stats.p_sharp_beg.data());
+    // p_sharp = M^{-1} * p  — use full mass matrix for U-turn criterion.
+    // Dense mass captures correlation structure; using diagonal p_sharp would
+    // make NUTS unable to detect turns in correlated directions, causing
+    // trees to grow to max depth on correlated posteriors (slopes, BYM2, HSGP).
+    mass.inv_mass_times_p(p_ptr, stats.p_sharp_beg.data());
     std::memcpy(stats.p_sharp_end.data(), stats.p_sharp_beg.data(), n * sizeof(double));
 
     return stats;
@@ -8117,9 +8158,17 @@ TreeStats build_tree_fast(
   // === SAVE BOUNDARY VALUES AS COPIES BEFORE MOVES ===
   // "init" = inner (built first), "final" = outer (extends from init)
   // These copies are needed because moves below invalidate the originals
-  std::vector<double> p_init_end = (direction == 1) ? stats.p_end : stats.p_beg;
-  std::vector<double> p_sharp_init_end = (direction == 1) ? stats.p_sharp_end : stats.p_sharp_beg;
-  std::vector<double> rho_init(stats.rho);  // inner's rho before combining
+  // Uses pre-allocated depth-indexed merge buffers (no per-merge heap allocation)
+  double* p_init_end = ws.merge_buf(depth, NUTSWorkspace::MERGE_P_INIT_END);
+  double* p_sharp_init_end = ws.merge_buf(depth, NUTSWorkspace::MERGE_PSHARP_INIT_END);
+  double* rho_init = ws.merge_buf(depth, NUTSWorkspace::MERGE_RHO_INIT);
+  double* rho_check = ws.merge_buf(depth, NUTSWorkspace::MERGE_RHO_CHECK);
+
+  const double* src_p = (direction == 1) ? stats.p_end.data() : stats.p_beg.data();
+  std::memcpy(p_init_end, src_p, n * sizeof(double));
+  const double* src_ps = (direction == 1) ? stats.p_sharp_end.data() : stats.p_sharp_beg.data();
+  std::memcpy(p_sharp_init_end, src_ps, n * sizeof(double));
+  std::memcpy(rho_init, stats.rho.data(), n * sizeof(double));
 
   // Pointers to final's boundary (safe: these outer members are NOT moved)
   const double* p_final_beg_ptr = (direction == 1) ? outer.p_beg.data() : outer.p_end.data();
@@ -8153,23 +8202,117 @@ TreeStats build_tree_fast(
   const double* final_far_psharp = (direction == 1) ? stats.p_sharp_end.data() : stats.p_sharp_beg.data();
 
   // Check 2: Init subtree + seam from final (rho = rho_init + p_final_beg)
-  std::vector<double> rho_check(n);
   for (int i = 0; i < n; i++) {
     rho_check[i] = rho_init[i] + p_final_beg_ptr[i];
   }
   persist &= compute_criterion(init_far_psharp, p_sharp_final_beg_ptr,
-                                rho_check.data(), n);
+                                rho_check, n);
 
   // Check 3: Seam from init + final subtree (rho = rho_final + p_init_end)
   for (int i = 0; i < n; i++) {
     rho_check[i] = outer.rho[i] + p_init_end[i];
   }
-  persist &= compute_criterion(p_sharp_init_end.data(), final_far_psharp,
-                                rho_check.data(), n);
+  persist &= compute_criterion(p_sharp_init_end, final_far_psharp,
+                                rho_check, n);
 
   stats.stop = outer.stop || !persist;
 
   return stats;
+}
+
+// =====================================================================
+// SoftAbs per-trajectory metric (Riemannian-like divergence retry)
+// =====================================================================
+
+void compute_hessian_finite_diff(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& hessian,
+    double h
+) {
+  int p = static_cast<int>(params.size());
+  hessian.resize(static_cast<size_t>(p) * p);
+
+  // Base gradient
+  std::vector<double> grad_base(p);
+  compute_gradient(params, data, layout, grad_base);
+
+  // Perturb each parameter and compute column of Hessian
+  std::vector<double> params_pert = params;
+  std::vector<double> grad_pert(p);
+  for (int i = 0; i < p; i++) {
+    double orig = params_pert[i];
+    double hi = std::max(h, h * std::abs(orig));  // relative step for large params
+    params_pert[i] = orig + hi;
+    compute_gradient(params_pert, data, layout, grad_pert);
+    for (int j = 0; j < p; j++) {
+      hessian[static_cast<size_t>(i) * p + j] = (grad_pert[j] - grad_base[j]) / hi;
+    }
+    params_pert[i] = orig;
+  }
+
+  // Symmetrize: H = 0.5 * (H + H^T)
+  for (int i = 0; i < p; i++) {
+    for (int j = i + 1; j < p; j++) {
+      double avg = 0.5 * (hessian[static_cast<size_t>(i) * p + j] +
+                          hessian[static_cast<size_t>(j) * p + i]);
+      hessian[static_cast<size_t>(i) * p + j] = avg;
+      hessian[static_cast<size_t>(j) * p + i] = avg;
+    }
+  }
+}
+
+bool compute_softabs_metric(
+    const std::vector<double>& neg_hessian,
+    int p,
+    double alpha,
+    std::vector<double>& G_inv,
+    std::vector<double>& L_G_inv
+) {
+  // Map to Eigen (column-major)
+  Eigen::Map<const Eigen::MatrixXd> H_map(neg_hessian.data(), p, p);
+
+  // Eigendecomposition (symmetric)
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigen(H_map);
+  if (eigen.info() != Eigen::Success) return false;
+
+  const auto& lambdas = eigen.eigenvalues();
+  const auto& Q = eigen.eigenvectors();
+
+  // Apply SoftAbs: f(λ) = λ * coth(α * λ)
+  // Properties: always positive, f(|λ|>>0) ≈ |λ|, f(0) → 1/α
+  Eigen::VectorXd softabs_inv_eig(p);
+  for (int i = 0; i < p; i++) {
+    double lam = lambdas(i);
+    double al = alpha * lam;
+    double f;
+    if (std::abs(al) > 20.0) {
+      f = std::abs(lam);
+    } else if (std::abs(al) < 1e-10) {
+      f = 1.0 / alpha;
+    } else {
+      f = lam * std::cosh(al) / std::sinh(al);
+    }
+    f = std::max(f, 1e-6);  // floor to ensure positive definiteness
+    softabs_inv_eig(i) = 1.0 / f;
+  }
+
+  // Reconstruct G^{-1} = Q diag(1/f(λ)) Q^T
+  Eigen::MatrixXd G_inv_mat = Q * softabs_inv_eig.asDiagonal() * Q.transpose();
+
+  // Cholesky of G^{-1}
+  Eigen::LLT<Eigen::MatrixXd> llt(G_inv_mat);
+  if (llt.info() != Eigen::Success) return false;
+  Eigen::MatrixXd L_mat = llt.matrixL();
+
+  // Copy to output (column-major)
+  G_inv.resize(static_cast<size_t>(p) * p);
+  L_G_inv.resize(static_cast<size_t>(p) * p);
+  Eigen::Map<Eigen::MatrixXd>(G_inv.data(), p, p) = G_inv_mat;
+  Eigen::Map<Eigen::MatrixXd>(L_G_inv.data(), p, p) = L_mat;
+
+  return true;
 }
 
 // =====================================================================
@@ -8188,7 +8331,9 @@ HMCResultCpp run_hmc_chain_cpp(
     unsigned int seed,
     bool verbose,
     int max_treedepth,
-    MassMatrixType metric_type
+    MassMatrixType metric_type,
+    double adapt_delta,
+    int riemannian
 ) {
   int n_params = q_init.size();
   int n_sample = n_iter - n_warmup;
@@ -8240,23 +8385,85 @@ HMCResultCpp run_hmc_chain_cpp(
   }
   DualAveraging da(epsilon, n_params, target_boost);
 
-  // For NUTS, use fixed 0.80 target acceptance (Stan default)
+  // For NUTS: model-adaptive target acceptance
+  // Store in nuts_target_accept for reuse at mass window boundaries (avoids bug
+  // where da.target_accept was reset to 0.80 at each window reset).
+  double nuts_target_accept = 0.80;
   if (use_nuts) {
-    da.target_accept = 0.80;
+    if (adapt_delta > 0) {
+      // User override
+      nuts_target_accept = adapt_delta;
+    } else {
+      // Auto-select based on model complexity
+      nuts_target_accept = 0.80;  // Stan default base
+
+      // BYM2: high correlation between ICAR phi + unstructured theta
+      if (data.spatial_type == SpatialType::BYM2) {
+        nuts_target_accept = 0.90;
+      }
+      // ICAR: correlated spatial params, less severe than BYM2
+      else if (data.spatial_type == SpatialType::ICAR) {
+        nuts_target_accept = 0.85;
+      }
+
+      // Correlated random slopes add funnel geometry
+      if (data.has_re_correlated_slopes) {
+        nuts_target_accept = std::max(nuts_target_accept, 0.90);
+      }
+
+      nuts_target_accept = std::min(0.99, nuts_target_accept);
+    }
+    da.target_accept = nuts_target_accept;
   }
 
   // current_grad already computed above (fused with log_prob for NUTS)
 
   // Mass matrix adaptation
-  // Auto-fallback for large p: dense → diagonal
+  // Resolve AUTO metric: select dense vs diagonal based on model complexity.
+  // Dense mass helps when posterior has strong parameter correlations that
+  // reparameterization alone cannot decorrelate (GP covariance params, SVC).
+  // Models with effective reparameterizations (Riebler BYM2, NC+tanh slopes,
+  // HSGP spectral, TVC) work equally well or better with diagonal mass.
+  constexpr int DENSE_MAX_PARAMS = 200;
   MassMatrixType effective_metric = metric_type;
-  if (effective_metric == MassMatrixType::DENSE && n_params > 500) {
+  if (effective_metric == MassMatrixType::AUTO) {
+    bool needs_dense = layout.is_gp ||
+                       layout.is_multiscale_gp ||
+                       layout.is_temporal_gp ||
+                       layout.has_multiscale_temporal ||
+                       layout.has_svc ||
+                       layout.has_spatiotemporal ||
+                       layout.has_latent;
+    effective_metric = needs_dense ? MassMatrixType::DENSE : MassMatrixType::DIAG;
+    if (verbose) {
+      REprintf("  [METRIC] auto → %s (p=%d)\n",
+               effective_metric == MassMatrixType::DENSE ? "dense" : "diag", n_params);
+    }
+  }
+  // Auto-downgrade dense to diagonal when n_params too large
+  // Dense needs O(p^2) storage and O(p^3) Cholesky; also needs p+5 warmup samples
+  if (effective_metric == MassMatrixType::DENSE && n_params > DENSE_MAX_PARAMS) {
+    if (verbose) {
+      REprintf("  [DENSE] n_params=%d > %d: auto-downgrading to diagonal mass matrix\n",
+               n_params, DENSE_MAX_PARAMS);
+    }
     effective_metric = MassMatrixType::DIAG;
-    // Note: warning emitted from R side
   }
 
   DenseMassMatrix mass;
-  mass.init(n_params, effective_metric);
+  try {
+    mass.init(n_params, effective_metric);
+  } catch (const std::bad_alloc&) {
+    if (effective_metric == MassMatrixType::DENSE) {
+      if (verbose) {
+        REprintf("  [DENSE] Allocation failed for p=%d, falling back to diagonal\n", n_params);
+      }
+      effective_metric = MassMatrixType::DIAG;
+      mass.init(n_params, effective_metric);
+    } else {
+      throw;
+    }
+  }
 
   WelfordStats mass_stats(n_params);              // Always track diagonal
   WelfordCovStats cov_stats(n_params);            // Only used when dense
@@ -8285,6 +8492,12 @@ HMCResultCpp run_hmc_chain_cpp(
   int init_buffer = 75;
   int term_buffer = 50;
   int init_window = 25;
+
+  // Dense mass models with many params need longer step size tuning
+  // after the dense mass is set. Scale term_buffer proportionally.
+  if (effective_metric == MassMatrixType::DENSE && n_params > 100) {
+    term_buffer = 75;  // 50% more final adaptation
+  }
 
   // Adjust for short warmup
   if (n_warmup < init_buffer + term_buffer + init_window) {
@@ -8341,6 +8554,34 @@ HMCResultCpp run_hmc_chain_cpp(
   int nuts_probe_maxd = 0;  // Count of maxd hits in probe window
   bool nuts_probing = use_nuts && (L == 0);  // Only probe when using NUTS by default
 
+  // SoftAbs divergence retry: compute local Hessian-based metric on divergent
+  // trajectories and retry. Only active for BYM2/ICAR + dense mass (auto) or
+  // when explicitly forced on.
+  bool use_softabs_retry = false;
+  if (riemannian == 1) {
+    use_softabs_retry = true;
+  } else if (riemannian == -1) {
+    // Auto: enable for BYM2/ICAR with dense mass
+    use_softabs_retry = (mass.type == MassMatrixType::DENSE &&
+                         (data.spatial_type == SpatialType::BYM2 ||
+                          data.spatial_type == SpatialType::ICAR));
+  }
+  // Disable if not using NUTS (SoftAbs retry only makes sense with NUTS)
+  if (!use_nuts) use_softabs_retry = false;
+  int softabs_retries = 0;
+  int softabs_successes = 0;
+  constexpr int SOFTABS_MAX_RETRIES = 3;  // Up to 3 retry attempts per divergence
+
+  // Persistent SoftAbs metric (improvement #2): once computed, reuse for
+  // all subsequent trajectories. Initialized at warmup→sampling transition
+  // (improvement #4) or on first divergence, whichever comes first.
+  bool softabs_metric_active = false;
+  DenseMassMatrix softabs_persistent_mass;
+  double softabs_persistent_eps = 0.0;
+  if (use_softabs_retry) {
+    softabs_persistent_mass.init(n_params, MassMatrixType::DENSE);
+  }
+
   for (int iter = 0; iter < n_iter; iter++) {
     bool is_warmup = (iter < n_warmup);
     // Check if we've reached a mass adaptation window boundary
@@ -8348,13 +8589,28 @@ HMCResultCpp run_hmc_chain_cpp(
         iter == mass_window_ends[next_window_idx]) {
       bool dense_covariance_set = false;  // Track if DENSE covariance (not just diagonal) succeeded this window
       // Dense mass matrix: try full covariance first
-      if (mass.type == MassMatrixType::DENSE && cov_stats.n >= n_params + 5) {
+      // OAS shrinkage guarantees PD even when n < p, so we can lower the
+      // threshold from n_params+5.  For large p the original threshold is
+      // unreachable during warmup (e.g. p=159, need 164 but only get 125).
+      // New threshold: min(p+5, max(50, p/2))  — for p=159 this is 79.
+      int dense_threshold = std::min(n_params + 5,
+                                     std::max(50, n_params / 2));
+      if (mass.type == MassMatrixType::DENSE && cov_stats.n >= dense_threshold) {
         auto cov = cov_stats.covariance();
         if (mass.update_from_covariance(cov.data(), cov_stats.n)) {
           use_mass_matrix = true;
           dense_covariance_set = true;
+          if (verbose) {
+            REprintf("  [DENSE] Window %d (iter %d): dense mass SET (n=%d, p=%d, OAS shrinkage=%.3f)\n",
+                     next_window_idx, iter, cov_stats.n, n_params,
+                     cov_stats.shrinkage_intensity);
+          }
         } else {
           // Cholesky failed — mass auto-degraded to DIAG, use diagonal stats
+          if (verbose) {
+            REprintf("  [DENSE] Window %d (iter %d): Cholesky FAILED (cov_stats.n=%d, p=%d)\n",
+                     next_window_idx, iter, cov_stats.n, n_params);
+          }
           if (mass_stats.n >= 10) {
             mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
             use_mass_matrix = true;
@@ -8362,6 +8618,10 @@ HMCResultCpp run_hmc_chain_cpp(
         }
       } else if (mass.type == MassMatrixType::DENSE) {
         // Not enough samples for dense yet — use diagonal as interim
+        if (verbose) {
+          REprintf("  [DENSE] Window %d (iter %d): not enough samples (cov_stats.n=%d, need=%d)\n",
+                   next_window_idx, iter, cov_stats.n, dense_threshold);
+        }
         if (mass_stats.n >= 10) {
           mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
           use_mass_matrix = true;
@@ -8374,8 +8634,8 @@ HMCResultCpp run_hmc_chain_cpp(
       mass_stats.reset();
       // For dense: only reset cov_stats when full covariance was successfully
       // computed THIS window. Otherwise keep accumulating across windows until
-      // we have enough samples (n >= n_params + 5). This prevents the
-      // chicken-and-egg problem where short windows never collect enough.
+      // we have enough samples. This prevents the chicken-and-egg problem
+      // where short windows never collect enough.
       // NOTE: We use dense_covariance_set (not mass.adapted) because
       // set_diagonal() also sets adapted=true, which would incorrectly
       // trigger a reset when we're still building up covariance samples.
@@ -8393,7 +8653,7 @@ HMCResultCpp run_hmc_chain_cpp(
         epsilon = find_reasonable_epsilon(q, data, layout, rng);
       }
       da = DualAveraging(epsilon, n_params, target_boost);
-      if (use_nuts) da.target_accept = 0.80;
+      if (use_nuts) da.target_accept = nuts_target_accept;  // Preserve model-adaptive target
       next_window_idx++;
     }
 
@@ -8428,6 +8688,15 @@ HMCResultCpp run_hmc_chain_cpp(
 
       auto& p = _nuts_p;
 
+      // Step size jitter (improvement #5): ±20% random noise per trajectory
+      // Prevents systematic step-size resonances that cause divergences.
+      // Only during post-warmup sampling — warmup needs stable epsilon for adaptation.
+      double eps_iter = epsilon;
+      if (!is_warmup) {
+        double jitter = 1.0 + 0.2 * (2.0 * unif(rng) - 1.0);  // U[0.8, 1.2]
+        eps_iter = epsilon * jitter;
+      }
+
       // Sample momentum p ~ N(0, M) where M = C^{-1}
       mass.sample_momentum(p.data(), rng);
 
@@ -8459,20 +8728,36 @@ HMCResultCpp run_hmc_chain_cpp(
       // rho = total momentum sum. rho_bck/rho_fwd = halves for 3-juncture checks.
       // At each iteration the entire old trajectory becomes one half,
       // the new subtree becomes the other half (Stan's approach).
-      std::vector<double> rho(n_params);
+      // Uses pre-allocated workspace vectors (no per-iteration heap allocation).
+      auto& rho = nuts_ws.iter_rho;
       std::memcpy(rho.data(), p.data(), n_params * sizeof(double));
-      std::vector<double> rho_bck(n_params, 0.0), rho_fwd(n_params, 0.0);
+      auto& rho_bck = nuts_ws.iter_rho_bck;
+      auto& rho_fwd = nuts_ws.iter_rho_fwd;
+      std::fill(rho_bck.begin(), rho_bck.end(), 0.0);
+      std::fill(rho_fwd.begin(), rho_fwd.end(), 0.0);
 
-      // p_sharp = diag(M^{-1}) * p at initial point — diagonal for robust U-turn
-      std::vector<double> p_sharp_init(n_params);
-      mass.inv_mass_diag_times_p(p.data(), p_sharp_init.data());
+      // p_sharp = M^{-1} * p at initial point — full mass for correct U-turn geometry
+      auto& p_sharp_init = nuts_ws.iter_p_sharp_init;
+      mass.inv_mass_times_p(p.data(), p_sharp_init.data());
 
       // Boundary momenta: _end = far endpoint, _beg = origin-facing boundary
       // Stan naming: bck_end=bck_bck, bck_beg=bck_fwd, fwd_beg=fwd_bck, fwd_end=fwd_fwd
-      std::vector<double> p_fwd_beg(p.begin(), p.end()), p_fwd_end(p.begin(), p.end());
-      std::vector<double> p_bck_beg(p.begin(), p.end()), p_bck_end(p.begin(), p.end());
-      std::vector<double> p_sharp_fwd_beg(p_sharp_init), p_sharp_fwd_end(p_sharp_init);
-      std::vector<double> p_sharp_bck_beg(p_sharp_init), p_sharp_bck_end(p_sharp_init);
+      auto& p_fwd_beg = nuts_ws.iter_p_fwd_beg;
+      auto& p_fwd_end = nuts_ws.iter_p_fwd_end;
+      auto& p_bck_beg = nuts_ws.iter_p_bck_beg;
+      auto& p_bck_end = nuts_ws.iter_p_bck_end;
+      std::memcpy(p_fwd_beg.data(), p.data(), n_params * sizeof(double));
+      std::memcpy(p_fwd_end.data(), p.data(), n_params * sizeof(double));
+      std::memcpy(p_bck_beg.data(), p.data(), n_params * sizeof(double));
+      std::memcpy(p_bck_end.data(), p.data(), n_params * sizeof(double));
+      auto& p_sharp_fwd_beg = nuts_ws.iter_p_sharp_fwd_beg;
+      auto& p_sharp_fwd_end = nuts_ws.iter_p_sharp_fwd_end;
+      auto& p_sharp_bck_beg = nuts_ws.iter_p_sharp_bck_beg;
+      auto& p_sharp_bck_end = nuts_ws.iter_p_sharp_bck_end;
+      std::memcpy(p_sharp_fwd_beg.data(), p_sharp_init.data(), n_params * sizeof(double));
+      std::memcpy(p_sharp_fwd_end.data(), p_sharp_init.data(), n_params * sizeof(double));
+      std::memcpy(p_sharp_bck_beg.data(), p_sharp_init.data(), n_params * sizeof(double));
+      std::memcpy(p_sharp_bck_end.data(), p_sharp_init.data(), n_params * sizeof(double));
 
       // Build tree until U-turn or max depth
       for (int j = 0; j < max_treedepth; j++) {
@@ -8493,19 +8778,19 @@ HMCResultCpp run_hmc_chain_cpp(
         // Entire old trajectory becomes one half; new subtree is the other
         if (direction == 1) {
           // Extending forward: old trajectory → backward half
-          rho_bck = rho;
-          p_bck_beg = p_fwd_end;              // old fwd endpoint → bck's origin boundary
-          p_sharp_bck_beg = p_sharp_fwd_end;
+          std::memcpy(rho_bck.data(), rho.data(), n_params * sizeof(double));
+          std::memcpy(p_bck_beg.data(), p_fwd_end.data(), n_params * sizeof(double));
+          std::memcpy(p_sharp_bck_beg.data(), p_sharp_fwd_end.data(), n_params * sizeof(double));
         } else {
           // Extending backward: old trajectory → forward half
-          rho_fwd = rho;
-          p_fwd_beg = p_bck_end;              // old bck endpoint → fwd's origin boundary
-          p_sharp_fwd_beg = p_sharp_bck_end;
+          std::memcpy(rho_fwd.data(), rho.data(), n_params * sizeof(double));
+          std::memcpy(p_fwd_beg.data(), p_bck_end.data(), n_params * sizeof(double));
+          std::memcpy(p_sharp_fwd_beg.data(), p_sharp_bck_end.data(), n_params * sizeof(double));
         }
 
         TreeStats subtree = build_tree_fast(
           nuts_ws, start_slot, direction, j,
-          epsilon, mass, H0, delta_max,
+          eps_iter, mass, H0, delta_max,
           data, layout, rng
         );
 
@@ -8542,20 +8827,21 @@ HMCResultCpp run_hmc_chain_cpp(
         }
 
         // Update direction endpoints and rho half from subtree
+        // Use memcpy instead of std::move to preserve pre-allocated buffers
         if (direction == 1) {
           nuts_ws.copy_node(NUTSWorkspace::NODE_RIGHT_SLOT, subtree.right_slot);
-          rho_fwd = std::move(subtree.rho);
-          p_fwd_beg = std::move(subtree.p_beg);
-          p_fwd_end = std::move(subtree.p_end);
-          p_sharp_fwd_beg = std::move(subtree.p_sharp_beg);
-          p_sharp_fwd_end = std::move(subtree.p_sharp_end);
+          std::memcpy(rho_fwd.data(), subtree.rho.data(), n_params * sizeof(double));
+          std::memcpy(p_fwd_beg.data(), subtree.p_beg.data(), n_params * sizeof(double));
+          std::memcpy(p_fwd_end.data(), subtree.p_end.data(), n_params * sizeof(double));
+          std::memcpy(p_sharp_fwd_beg.data(), subtree.p_sharp_beg.data(), n_params * sizeof(double));
+          std::memcpy(p_sharp_fwd_end.data(), subtree.p_sharp_end.data(), n_params * sizeof(double));
         } else {
           nuts_ws.copy_node(NUTSWorkspace::NODE_LEFT_SLOT, subtree.left_slot);
-          rho_bck = std::move(subtree.rho);
-          p_bck_beg = std::move(subtree.p_beg);
-          p_bck_end = std::move(subtree.p_end);
-          p_sharp_bck_beg = std::move(subtree.p_sharp_beg);
-          p_sharp_bck_end = std::move(subtree.p_sharp_end);
+          std::memcpy(rho_bck.data(), subtree.rho.data(), n_params * sizeof(double));
+          std::memcpy(p_bck_beg.data(), subtree.p_beg.data(), n_params * sizeof(double));
+          std::memcpy(p_bck_end.data(), subtree.p_end.data(), n_params * sizeof(double));
+          std::memcpy(p_sharp_bck_beg.data(), subtree.p_sharp_beg.data(), n_params * sizeof(double));
+          std::memcpy(p_sharp_bck_end.data(), subtree.p_sharp_end.data(), n_params * sizeof(double));
         }
 
         // Combine rho = rho_bck + rho_fwd
@@ -8573,7 +8859,7 @@ HMCResultCpp run_hmc_chain_cpp(
                                          rho.data(), n_params);
 
         // Check 2: Backward half + seam from forward (rho = rho_bck + p_fwd_beg)
-        std::vector<double> rho_seam(n_params);
+        auto& rho_seam = nuts_ws.iter_rho_seam;
         for (int i = 0; i < n_params; i++) {
           rho_seam[i] = rho_bck[i] + p_fwd_beg[i];
         }
@@ -8588,6 +8874,188 @@ HMCResultCpp run_hmc_chain_cpp(
                                       rho_seam.data(), n_params);
 
         if (!persist) break;
+      }
+
+      // SoftAbs divergence retry (improvements #1, #2): if trajectory diverged,
+      // compute local Hessian-based metric and retry up to SOFTABS_MAX_RETRIES
+      // times, halving step size each attempt. On first successful metric
+      // computation, persist it for all subsequent trajectories.
+      if (divergent && !is_warmup && use_softabs_retry) {
+        softabs_retries++;
+
+        // Compute fresh Hessian at current position (p+1 gradient evals)
+        std::vector<double> hessian_buf;
+        compute_hessian_finite_diff(q, data, layout, hessian_buf);
+        for (auto& v : hessian_buf) v = -v;  // Negate: -H = curvature
+
+        std::vector<double> G_inv_buf, L_G_inv_buf;
+        bool metric_ok = compute_softabs_metric(
+          hessian_buf, n_params, 1.0, G_inv_buf, L_G_inv_buf
+        );
+
+        if (metric_ok) {
+          // Update persistent SoftAbs metric for retry use only (improvement #2).
+          // Do NOT override main mass/epsilon — warmup-adapted values work better
+          // for general trajectories. SoftAbs is rescue-only.
+          softabs_persistent_mass.set_from_metric(G_inv_buf, L_G_inv_buf);
+          double eps_base = find_reasonable_epsilon_dense(
+            q, data, layout, rng, softabs_persistent_mass);
+          softabs_persistent_eps = eps_base;
+          softabs_metric_active = true;
+
+          // Multiple retry attempts (improvement #1): try up to 3 times
+          // with halving step size each attempt
+          for (int retry_attempt = 0; retry_attempt < SOFTABS_MAX_RETRIES; retry_attempt++) {
+            double eps_retry = eps_base * std::pow(0.5, retry_attempt);
+
+            // Sample new momentum and re-run NUTS trajectory
+            softabs_persistent_mass.sample_momentum(p.data(), rng);
+            double H0_retry = nuts_compute_hamiltonian_fast(
+              log_prob_current, p.data(), softabs_persistent_mass, n_params
+            );
+
+            // Load current state into workspace
+            nuts_ws.load_node(NUTSWorkspace::NODE_LEFT_SLOT,
+                              q.data(), p.data(), current_grad.data(), log_prob_current);
+            nuts_ws.load_node(NUTSWorkspace::NODE_RIGHT_SLOT,
+                              q.data(), p.data(), current_grad.data(), log_prob_current);
+
+            std::memcpy(q_proposal_data.data(), q.data(), n_params * sizeof(double));
+            std::memcpy(grad_proposal_data.data(), current_grad.data(), n_params * sizeof(double));
+            log_prob_proposal = log_prob_current;
+            sum_log_weight = 0.0;
+            total_leapfrog = 0;
+            sum_accept_prob = 0.0;
+            bool retry_divergent = false;
+
+            // Full NUTS tree with SoftAbs metric + 3-juncture U-turn
+            std::memcpy(rho.data(), p.data(), n_params * sizeof(double));
+            std::fill(rho_bck.begin(), rho_bck.end(), 0.0);
+            std::fill(rho_fwd.begin(), rho_fwd.end(), 0.0);
+            softabs_persistent_mass.inv_mass_times_p(p.data(), p_sharp_init.data());
+            std::copy(p.begin(), p.end(), p_fwd_beg.begin());
+            std::copy(p.begin(), p.end(), p_fwd_end.begin());
+            std::copy(p.begin(), p.end(), p_bck_beg.begin());
+            std::copy(p.begin(), p.end(), p_bck_end.begin());
+            std::copy(p_sharp_init.begin(), p_sharp_init.end(), p_sharp_fwd_beg.begin());
+            std::copy(p_sharp_init.begin(), p_sharp_init.end(), p_sharp_fwd_end.begin());
+            std::copy(p_sharp_init.begin(), p_sharp_init.end(), p_sharp_bck_beg.begin());
+            std::copy(p_sharp_init.begin(), p_sharp_init.end(), p_sharp_bck_end.begin());
+
+            int retry_treedepth = 0;
+            for (int j = 0; j < max_treedepth; j++) {
+              std::uniform_int_distribution<int> dir_dist(0, 1);
+              int direction = 2 * dir_dist(rng) - 1;
+
+              nuts_ws.reset_tree();
+              int start_slot = nuts_ws.alloc_slot();
+              if (start_slot < 0) break;
+              if (direction == 1) {
+                nuts_ws.copy_node(start_slot, NUTSWorkspace::NODE_RIGHT_SLOT);
+              } else {
+                nuts_ws.copy_node(start_slot, NUTSWorkspace::NODE_LEFT_SLOT);
+              }
+
+              if (direction == 1) {
+                std::memcpy(rho_bck.data(), rho.data(), n_params * sizeof(double));
+                std::memcpy(p_bck_beg.data(), p_fwd_end.data(), n_params * sizeof(double));
+                std::memcpy(p_sharp_bck_beg.data(), p_sharp_fwd_end.data(), n_params * sizeof(double));
+              } else {
+                std::memcpy(rho_fwd.data(), rho.data(), n_params * sizeof(double));
+                std::memcpy(p_fwd_beg.data(), p_bck_end.data(), n_params * sizeof(double));
+                std::memcpy(p_sharp_fwd_beg.data(), p_sharp_bck_end.data(), n_params * sizeof(double));
+              }
+
+              TreeStats subtree = build_tree_fast(
+                nuts_ws, start_slot, direction, j,
+                eps_retry, softabs_persistent_mass, H0_retry, 1000.0,
+                data, layout, rng
+              );
+
+              total_leapfrog += subtree.n_leapfrog;
+              sum_accept_prob += subtree.sum_accept_prob;
+              if (subtree.divergent) retry_divergent = true;
+
+              if (!subtree.stop) {
+                double log_sum_weight_subtree = subtree.sum_log_weight;
+                double new_sum_log_weight = nuts_log_sum_exp(sum_log_weight, log_sum_weight_subtree);
+                double accept_prob_subtree;
+                if (log_sum_weight_subtree > new_sum_log_weight) {
+                  accept_prob_subtree = 1.0;
+                } else {
+                  accept_prob_subtree = std::exp(log_sum_weight_subtree - new_sum_log_weight);
+                }
+                if (!std::isfinite(accept_prob_subtree)) accept_prob_subtree = 0.0;
+
+                std::uniform_real_distribution<double> unif01(0.0, 1.0);
+                if (unif01(rng) < accept_prob_subtree) {
+                  std::memcpy(q_proposal_data.data(), nuts_ws.q_at(subtree.proposal_slot),
+                              n_params * sizeof(double));
+                  std::memcpy(grad_proposal_data.data(), nuts_ws.grad_at(subtree.proposal_slot),
+                              n_params * sizeof(double));
+                  log_prob_proposal = subtree.log_prob_proposal;
+                }
+                sum_log_weight = new_sum_log_weight;
+              }
+
+              if (direction == 1) {
+                nuts_ws.copy_node(NUTSWorkspace::NODE_RIGHT_SLOT, subtree.right_slot);
+                std::memcpy(rho_fwd.data(), subtree.rho.data(), n_params * sizeof(double));
+                std::memcpy(p_fwd_beg.data(), subtree.p_beg.data(), n_params * sizeof(double));
+                std::memcpy(p_fwd_end.data(), subtree.p_end.data(), n_params * sizeof(double));
+                std::memcpy(p_sharp_fwd_beg.data(), subtree.p_sharp_beg.data(), n_params * sizeof(double));
+                std::memcpy(p_sharp_fwd_end.data(), subtree.p_sharp_end.data(), n_params * sizeof(double));
+              } else {
+                nuts_ws.copy_node(NUTSWorkspace::NODE_LEFT_SLOT, subtree.left_slot);
+                std::memcpy(rho_bck.data(), subtree.rho.data(), n_params * sizeof(double));
+                std::memcpy(p_bck_beg.data(), subtree.p_beg.data(), n_params * sizeof(double));
+                std::memcpy(p_bck_end.data(), subtree.p_end.data(), n_params * sizeof(double));
+                std::memcpy(p_sharp_bck_beg.data(), subtree.p_sharp_beg.data(), n_params * sizeof(double));
+                std::memcpy(p_sharp_bck_end.data(), subtree.p_sharp_end.data(), n_params * sizeof(double));
+              }
+
+              for (int i = 0; i < n_params; i++) {
+                rho[i] = rho_bck[i] + rho_fwd[i];
+              }
+              retry_treedepth = j + 1;
+
+              if (subtree.stop) break;
+
+              bool persist = compute_criterion(p_sharp_bck_end.data(), p_sharp_fwd_end.data(),
+                                               rho.data(), n_params);
+              auto& rho_seam_retry = nuts_ws.iter_rho_seam;
+              for (int i = 0; i < n_params; i++) {
+                rho_seam_retry[i] = rho_bck[i] + p_fwd_beg[i];
+              }
+              persist &= compute_criterion(p_sharp_bck_end.data(), p_sharp_fwd_beg.data(),
+                                            rho_seam_retry.data(), n_params);
+              for (int i = 0; i < n_params; i++) {
+                rho_seam_retry[i] = rho_fwd[i] + p_bck_beg[i];
+              }
+              persist &= compute_criterion(p_sharp_bck_beg.data(), p_sharp_fwd_end.data(),
+                                            rho_seam_retry.data(), n_params);
+              if (!persist) break;
+            }
+
+            // If retry succeeded (no divergence), accept and stop retrying
+            if (!retry_divergent) {
+              divergent = false;
+              iter_treedepth = retry_treedepth;
+              softabs_successes++;
+              alpha = (total_leapfrog > 0) ? (sum_accept_prob / total_leapfrog) : 0.0;
+              iter_n_leapfrog = total_leapfrog;
+              break;  // Success — stop retry loop
+            }
+            // Otherwise: try again with halved step size (next iteration)
+          }  // end retry_attempt loop
+
+          // If all retries failed, update stats from last attempt
+          if (divergent) {
+            alpha = (total_leapfrog > 0) ? (sum_accept_prob / total_leapfrog) : 0.0;
+            iter_n_leapfrog = total_leapfrog;
+          }
+        }
+        // else: metric computation failed, keep original divergent result
       }
 
       // Accept proposal: copy from persistent proposal buffers (memcpy, no alloc)
@@ -8614,6 +9082,39 @@ HMCResultCpp run_hmc_chain_cpp(
         }
         if (iter == n_warmup - 1) {
           epsilon = da.final_epsilon();
+          if (verbose) {
+            REprintf("  [DENSE] Warmup done: epsilon=%.6f, mass.type=%s, mass.adapted=%d\n",
+                     epsilon, (mass.type == MassMatrixType::DENSE ? "DENSE" : "DIAG"),
+                     (int)mass.adapted);
+          }
+          // Proactive SoftAbs at warmup→sampling transition (improvement #4):
+          // Pre-compute SoftAbs metric so it's ready for retry attempts.
+          // Do NOT override main mass/epsilon — warmup-adapted values are better
+          // for general sampling. SoftAbs is only used as rescue on divergences.
+          if (use_softabs_retry && !softabs_metric_active) {
+            std::vector<double> hessian_warmup_end;
+            compute_hessian_finite_diff(q, data, layout, hessian_warmup_end);
+            for (auto& v : hessian_warmup_end) v = -v;
+
+            std::vector<double> G_inv_init, L_G_inv_init;
+            if (compute_softabs_metric(hessian_warmup_end, n_params, 1.0,
+                                       G_inv_init, L_G_inv_init)) {
+              softabs_persistent_mass.set_from_metric(G_inv_init, L_G_inv_init);
+              softabs_persistent_eps = find_reasonable_epsilon_dense(
+                q, data, layout, rng, softabs_persistent_mass);
+              softabs_metric_active = true;
+              // Note: main mass and epsilon are NOT overridden
+              if (verbose) {
+                REprintf("  [SoftAbs] Proactive metric pre-computed at warmup end: retry_eps=%.6f\n",
+                         softabs_persistent_eps);
+              }
+            }
+          }
+        }
+        // Print tree depth for last 10 warmup iterations
+        if (verbose && iter >= n_warmup - 10) {
+          REprintf("  [DENSE] warmup iter %d: treedepth=%d, epsilon=%.6f\n",
+                   iter, iter_treedepth, epsilon);
         }
       }
 
@@ -8812,6 +9313,14 @@ HMCResultCpp run_hmc_chain_cpp(
 
   result.epsilon = da.final_epsilon();
 
+  if (verbose && (softabs_retries > 0 || softabs_metric_active)) {
+    REprintf("  [SoftAbs] Chain %d: metric=%s, %d divergent retried (up to %d attempts), %d resolved (%d remained)\n",
+             chain_id + 1,
+             softabs_metric_active ? "active" : "inactive",
+             softabs_retries, SOFTABS_MAX_RETRIES, softabs_successes,
+             softabs_retries - softabs_successes);
+  }
+
   return result;
 }
 
@@ -8827,11 +9336,13 @@ HMCResult run_hmc_chain(
     unsigned int seed,
     bool verbose,
     int max_treedepth,
-    MassMatrixType metric_type
+    MassMatrixType metric_type,
+    double adapt_delta,
+    int riemannian
 ) {
   // Run C++ version - pass verbose through for debugging
   HMCResultCpp cpp_result = run_hmc_chain_cpp(
-    q_init, data, layout, n_iter, n_warmup, L, chain_id, seed, verbose, max_treedepth, metric_type
+    q_init, data, layout, n_iter, n_warmup, L, chain_id, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
   );
 
   // Convert to R result
@@ -8864,7 +9375,9 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     unsigned int seed,
     bool verbose,
     int max_treedepth,
-    MassMatrixType metric_type
+    MassMatrixType metric_type,
+    double adapt_delta,
+    int riemannian
 ) {
   ParamLayout layout = compute_param_layout(data);
   int n_params = layout.total_params;
@@ -8883,14 +9396,14 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     for (int c = 0; c < n_chains; c++) {
       cpp_results[c] = run_hmc_chain_cpp(
         q_init, data, layout,
-        n_iter, n_warmup, L, c, seed, false, max_treedepth, metric_type
+        n_iter, n_warmup, L, c, seed, false, max_treedepth, metric_type, adapt_delta, riemannian
       );
     }
   } else {
     // Single chain - run sequentially with verbose output
     cpp_results[0] = run_hmc_chain_cpp(
       q_init, data, layout,
-      n_iter, n_warmup, L, 0, seed, verbose, max_treedepth, metric_type
+      n_iter, n_warmup, L, 0, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
     );
   }
 #else
@@ -8898,7 +9411,7 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   for (int c = 0; c < n_chains; c++) {
     cpp_results[c] = run_hmc_chain_cpp(
       q_init, data, layout,
-      n_iter, n_warmup, L, c, seed, verbose, max_treedepth, metric_type
+      n_iter, n_warmup, L, c, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
     );
   }
 #endif
@@ -8965,7 +9478,9 @@ Rcpp::List cpp_hmc_fit(
     bool verbose,
     std::string gradient_mode_str = "auto",
     int max_treedepth = 10,
-    std::string metric_str = "diag"
+    std::string metric_str = "auto",
+    double adapt_delta = -1.0,
+    int riemannian = -1
 ) {
   using namespace ratiod_hmc;
 
@@ -9520,7 +10035,7 @@ Rcpp::List cpp_hmc_fit(
   if (n_chains == 1) {
     ParamLayout layout = compute_param_layout(data);
     HMCResult result = run_hmc_chain(
-      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose, max_treedepth, metric_type
+      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
     );
 
     return Rcpp::List::create(
@@ -9541,7 +10056,7 @@ Rcpp::List cpp_hmc_fit(
   } else {
     // Multiple chains
     std::vector<HMCResult> results = run_hmc_parallel_chains(
-      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose, max_treedepth, metric_type
+      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
     );
 
     // Combine results
@@ -9631,7 +10146,8 @@ Rcpp::List cpp_hmc_fit_gp(
     unsigned int seed,
     int n_threads,
     bool verbose,
-    int max_treedepth = 10
+    int max_treedepth = 10,
+    double adapt_delta = -1.0
 ) {
   // Force all Rcpp parameter extractions into eagerly-copied std::vectors FIRST
   // This prevents R garbage collection from invalidating lazy Rcpp views during C++ execution
@@ -10017,7 +10533,8 @@ Rcpp::List cpp_hmc_fit_gp(
   if (n_chains == 1) {
     ParamLayout layout = compute_param_layout(data);
     HMCResult result = run_hmc_chain(
-      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose, max_treedepth
+      q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose, max_treedepth,
+      MassMatrixType::DIAG, adapt_delta, -1
     );
 
     return Rcpp::List::create(
@@ -10038,7 +10555,8 @@ Rcpp::List cpp_hmc_fit_gp(
   } else {
     // Multiple chains
     std::vector<HMCResult> results = run_hmc_parallel_chains(
-      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose, max_treedepth
+      q0, data, n_iter, n_warmup, L, n_chains, seed, verbose, max_treedepth,
+      MassMatrixType::DIAG, adapt_delta, -1
     );
 
     // Combine results
@@ -10121,6 +10639,10 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
   if (args.containsElementNamed("max_treedepth")) {
     max_treedepth = Rcpp::as<int>(args["max_treedepth"]);
   }
+  double adapt_delta = -1.0;
+  if (args.containsElementNamed("adapt_delta")) {
+    adapt_delta = Rcpp::as<double>(args["adapt_delta"]);
+  }
 
   // Delegate to the original implementation
   return cpp_hmc_fit_gp(
@@ -10129,6 +10651,6 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
     model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params,
     sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate,
     zi_type_str, X_zi, zi_prior_sd,
-    n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth
+    n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta
   );
 }
