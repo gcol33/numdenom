@@ -100,7 +100,8 @@ struct ModelData {
 
   // Multi-term RE structure
   int n_re_terms;                              // Number of RE terms (0 if none)
-  std::vector<std::vector<int>> re_group_multi; // [term][obs] -> group index (1-based)
+  std::vector<std::vector<int>> re_group_multi; // [term][obs] -> group index (1-based) LEGACY
+  std::vector<int> re_group_multi_flat;        // [term * N + obs] -> group index (1-based), contiguous
   std::vector<int> re_n_groups_multi;          // Groups per term
   std::vector<int> re_offsets;                 // Offset in flattened RE parameter vector per term
   int total_re_groups;                         // Sum of all groups across terms

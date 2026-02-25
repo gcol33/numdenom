@@ -1501,7 +1501,7 @@ double compute_log_post(
       if (layout.has_re_slopes) {
         // Random slopes case
         for (int t = 0; t < n_terms; t++) {
-          int group_idx = data.re_group_multi[t][i];
+          int group_idx = data.re_group_multi_flat[t * data.N + i];
           if (group_idx > 0) {
             int g = group_idx - 1;
             int n_coefs = layout.re_n_coefs_multi[t];
@@ -1528,7 +1528,7 @@ double compute_log_post(
       } else if (n_terms > 1) {
         // Multiple RE terms (intercept only): params store re directly (centered)
         for (int t = 0; t < n_terms; t++) {
-          int group_idx = data.re_group_multi[t][i];
+          int group_idx = data.re_group_multi_flat[t * data.N + i];
           if (group_idx > 0) {
             int g = group_idx - 1;
             double re_val = params[layout.re_start_multi[t] + g];
@@ -2272,11 +2272,20 @@ void compute_gradient_analytical(
     double local_grad_phi_num = 0.0;
     double local_grad_phi_denom = 0.0;
     std::vector<double> local_grad_re(layout.has_re ? data.n_re_groups : 0, 0.0);
+    // Thread-local buffer for crossed RE gradients (all terms combined)
+    std::vector<double> local_grad_re_crossed(
+        (layout.has_re && data.n_re_terms > 1) ? data.total_re_groups : 0, 0.0);
     double local_obs_ll = 0.0;  // Fused log-likelihood accumulator
+    // Pre-allocated per-obs group index buffer for crossed RE (reused across iterations)
+    std::vector<int> re_idx_multi_buf(
+        (layout.has_re && data.n_re_terms > 1) ? data.n_re_terms : 0, -1);
 
     #pragma omp for schedule(static)
     for (int i = 0; i < data.N; i++) {
   #else
+    // Pre-allocated per-obs group index buffer for crossed RE
+    std::vector<int> re_idx_multi_buf(
+        (layout.has_re && data.n_re_terms > 1) ? data.n_re_terms : 0, -1);
     for (int i = 0; i < data.N; i++) {
   #endif
       // Compute linear predictors
@@ -2291,13 +2300,12 @@ void compute_gradient_analytical(
       int re_group_idx = -1;
       int re_n_coefs_i = 1;
       std::vector<double> re_slope_x_i;  // Slope design values for this obs
-      std::vector<int> re_idx_multi;  // Group indices for each crossed RE term
       int n_crossed_terms = 0;
       if (layout.has_re) {
         if (layout.has_re_slopes && n_re_terms_slopes > 0) {
           // Random slopes case: handle first term only (single RE term for H gradients)
           re_term_idx = 0;
-          re_group_idx = data.re_group_multi[0][i];
+          re_group_idx = data.re_group_multi_flat[0 * data.N + i];
           if (re_group_idx > 0) {
             int g = re_group_idx - 1;
             re_n_coefs_i = layout.re_n_coefs_multi[0];
@@ -2332,17 +2340,18 @@ void compute_gradient_analytical(
         } else if (data.n_re_terms > 1) {
           // Crossed RE (multiple intercept-only terms)
           n_crossed_terms = data.n_re_terms;
-          re_idx_multi.resize(n_crossed_terms, -1);
           for (int t = 0; t < n_crossed_terms; t++) {
-            int group_idx = data.re_group_multi[t][i];
+            int group_idx = data.re_group_multi_flat[t * data.N + i];
             if (group_idx > 0) {
               int g = group_idx - 1;
-              re_idx_multi[t] = g;
+              re_idx_multi_buf[t] = g;
               double re_val = params[layout.re_start_multi[t] + g];
               eta_num += re_val;
               if (data.model_type != ModelType::BINOMIAL) {
                 eta_denom += re_val;
               }
+            } else {
+              re_idx_multi_buf[t] = -1;
             }
           }
         } else if (data.re_group[i] > 0) {
@@ -2829,12 +2838,12 @@ void compute_gradient_analytical(
           re_grad_i += resid_denom;
         }
         for (int t = 0; t < n_crossed_terms; t++) {
-          if (re_idx_multi[t] >= 0) {
+          if (re_idx_multi_buf[t] >= 0) {
             #ifdef _OPENMP
-            #pragma omp atomic
-            grad[layout.re_start_multi[t] + re_idx_multi[t]] += re_grad_i;
+            // Thread-local accumulation (reduced at end of parallel block)
+            local_grad_re_crossed[data.re_offsets[t] + re_idx_multi_buf[t]] += re_grad_i;
             #else
-            grad[layout.re_start_multi[t] + re_idx_multi[t]] += re_grad_i;
+            grad[layout.re_start_multi[t] + re_idx_multi_buf[t]] += re_grad_i;
             #endif
           }
         }
@@ -2982,6 +2991,14 @@ void compute_gradient_analytical(
       grad_phi_denom_lik += local_grad_phi_denom;
       for (int g = 0; g < (int)local_grad_re.size(); g++) {
         grad[layout.re_start + g] += local_grad_re[g];
+      }
+      // Reduce crossed RE thread-local buffers to scattered grad positions
+      for (int t = 0; t < (int)data.re_n_groups_multi.size(); t++) {
+        int re_start_t = layout.re_start_multi[t];
+        int offset_t = data.re_offsets[t];
+        for (int g = 0; g < data.re_n_groups_multi[t]; g++) {
+          grad[re_start_t + g] += local_grad_re_crossed[offset_t + g];
+        }
       }
       obs_log_lik += local_obs_ll;
     }
@@ -8421,13 +8438,16 @@ HMCResultCpp run_hmc_chain_cpp(
   // Mass matrix adaptation
   // Resolve AUTO metric: select dense vs diagonal based on model complexity.
   // Dense mass helps when posterior has strong parameter correlations that
-  // reparameterization alone cannot decorrelate (GP covariance params, SVC).
-  // Models with effective reparameterizations (Riebler BYM2, NC+tanh slopes,
-  // HSGP spectral, TVC) work equally well or better with diagonal mass.
+  // reparameterization alone cannot decorrelate (correlated slopes, BYM2, HSGP, GP, SVC).
+  // Models with effective reparameterizations (TVC) work equally well or better
+  // with diagonal mass.
   constexpr int DENSE_MAX_PARAMS = 200;
   MassMatrixType effective_metric = metric_type;
   if (effective_metric == MassMatrixType::AUTO) {
-    bool needs_dense = layout.is_gp ||
+    bool needs_dense = layout.has_re_correlated_slopes ||
+                       layout.is_bym2 ||
+                       layout.is_hsgp ||
+                       layout.is_gp ||
                        layout.is_multiscale_gp ||
                        layout.is_temporal_gp ||
                        layout.has_multiscale_temporal ||
@@ -9702,6 +9722,14 @@ Rcpp::List cpp_hmc_fit(
       }
     }
     data.total_re_groups = offset;
+
+    // Build contiguous flat array: re_group_multi_flat[t * N + i]
+    data.re_group_multi_flat.resize(n_re_terms * data.N);
+    for (int t = 0; t < n_re_terms; t++) {
+      for (int i = 0; i < data.N; i++) {
+        data.re_group_multi_flat[t * data.N + i] = data.re_group_multi[t][i];
+      }
+    }
     data.total_re_params = total_re_params;
     data.total_sigma_params = total_sigma_params;
     data.total_chol_params = total_chol_params;
