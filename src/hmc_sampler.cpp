@@ -578,6 +578,13 @@ inline double log_lik_gamma(double y, double shape, double mu) {
        - rate * y - std::lgamma(shape);
 }
 
+// Include vectorized gradient header AFTER log_lik_* functions and hmc_sampler.h
+// so all types and helpers are defined.
+#include "hmc_gradient_vectorized.h"
+
+// Thread-local vectorized gradient workspace (avoids per-call allocation)
+static thread_local vectorized::VecGradWorkspace vec_grad_ws;
+
 // =====================================================================
 // Observation log-likelihood helper (fused with gradient computation)
 // Matches compute_log_post observation loop exactly. Used by specialized
@@ -727,7 +734,12 @@ double compute_log_post(
   // Random effects priors (supports multiple crossed RE terms with slopes)
   // Non-centered parameterization: params store z ~ N(0,1), re = sigma * (L * z)
   // Pre-compute actual RE values from z for use in the likelihood loop.
-  std::vector<double> re_nc_flat(params.size(), 0.0);
+  // Only allocate when the observation loop will run (skip_obs_loop=true avoids
+  // this heap allocation on every gradient call — saves ~100ns per call).
+  std::vector<double> re_nc_flat;
+  if (!skip_obs_loop) {
+    re_nc_flat.assign(params.size(), 0.0);
+  }
   if (layout.has_re) {
     int n_terms = (data.n_re_terms > 0) ? data.n_re_terms : 1;
 
@@ -821,14 +833,16 @@ double compute_log_post(
       // For uncorrelated slopes, params store z ~ N(0,1), re = sigma * z
       if (is_correlated && n_coefs > 1) {
         // Pre-compute re from z for all groups: re[g] = diag(sigma) * L * z[g]
-        // Store in re_nc_flat for use in likelihood loop
-        for (int g = 0; g < n_groups; g++) {
-          for (int c = 0; c < n_coefs; c++) {
-            double Lz_c = 0.0;
-            for (int k = 0; k <= c; k++) {
-              Lz_c += L_flat[c * n_coefs + k] * params[re_start + g * n_coefs + k];
+        // Store in re_nc_flat for use in likelihood loop only
+        if (!skip_obs_loop) {
+          for (int g = 0; g < n_groups; g++) {
+            for (int c = 0; c < n_coefs; c++) {
+              double Lz_c = 0.0;
+              for (int k = 0; k <= c; k++) {
+                Lz_c += L_flat[c * n_coefs + k] * params[re_start + g * n_coefs + k];
+              }
+              re_nc_flat[re_start + g * n_coefs + c] = sigmas[c] * Lz_c;
             }
-            re_nc_flat[re_start + g * n_coefs + c] = sigmas[c] * Lz_c;
           }
         }
 
@@ -979,8 +993,8 @@ double compute_log_post(
         double logit_rho = params[layout.logit_rho_ar1_idx];
         rho_ar1 = 1.0 / (1.0 + std::exp(-logit_rho));
 
-        // rho ~ Uniform(-1, 1) via transformed prior
-        log_post += std::log(rho_ar1 + 1.0) + std::log(1.0 - rho_ar1);
+        // rho ~ Uniform(0,1) prior with logit Jacobian
+        log_post += std::log(rho_ar1) + std::log(1.0 - rho_ar1);
       }
 
       // Temporal effects prior (per group)
@@ -2171,8 +2185,7 @@ void compute_gradient_analytical(
     if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
       logit_rho_ar1 = params[layout.logit_rho_ar1_idx];
       rho_ar1 = 1.0 / (1.0 + std::exp(-logit_rho_ar1));
-      // Beta(2,2) prior on rho: d/d(rho) = (2-1)/(rho) - (2-1)/(1-rho) = (1-2*rho)/(rho*(1-rho))
-      // With logit transform Jacobian: grad = 1 - 2*rho
+      // Uniform(0,1) prior on rho with logit Jacobian: grad = 1 - 2*rho
       grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
     }
   }
@@ -2258,6 +2271,22 @@ void compute_gradient_analytical(
 
   // ============ Likelihood gradients (O(n)) ============
 
+  // Try fused single-pass gradient first (best for small p <= 4).
+  // Then fall back to 3-pass vectorized (better for larger p with Eigen).
+  // Finally fall back to scalar loop for complex models (ZI, slopes, etc.).
+  bool used_vectorized = vectorized::dispatch_fused_gradient(
+      params, data, layout, grad, obs_log_lik,
+      compute_lp, grad_temporal_lik, grad_spatial_lik, vec_grad_ws);
+
+  // Fall back to 3-pass vectorized for p > 4 (Eigen matvec is beneficial)
+  if (!used_vectorized) {
+    used_vectorized = vectorized::dispatch_vectorized_gradient(
+        params, data, layout, grad, obs_log_lik,
+        compute_lp, grad_temporal_lik, grad_spatial_lik, vec_grad_ws);
+  }
+
+  if (!used_vectorized) {
+
   // Accumulators for beta gradients (will be added via X' * residual)
   std::vector<double> grad_beta_num(data.p_num, 0.0);
   std::vector<double> grad_beta_denom(data.p_denom, 0.0);
@@ -2291,8 +2320,10 @@ void compute_gradient_analytical(
       // Compute linear predictors
       double eta_num = ratiod_linalg::dot_product(
           &data.X_num_flat[i * data.p_num], beta_num, data.p_num);
-      double eta_denom = ratiod_linalg::dot_product(
-          &data.X_denom_flat[i * data.p_denom], beta_denom, data.p_denom);
+      double eta_denom = (data.p_denom > 0) ?
+          ratiod_linalg::dot_product(
+              &data.X_denom_flat[i * data.p_denom], beta_denom, data.p_denom) :
+          0.0;
 
       // Add RE if present
       int re_idx = -1;
@@ -2363,7 +2394,6 @@ void compute_gradient_analytical(
           }
         }
       }
-
       // Add temporal effect if present
       int t_idx = -1;
       if (layout.has_temporal && !data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
@@ -3115,6 +3145,8 @@ void compute_gradient_analytical(
     }
   }
 
+  } // end if (!used_vectorized)
+
   // ============ Temporal GMRF prior gradients ============
   if (layout.has_temporal && T_len > 0) {
     // Initialize temporal gradients with likelihood contribution
@@ -3139,6 +3171,11 @@ void compute_gradient_analytical(
       }
       // tau gradient: 0.5*(T-1)*log(tau) - 0.5*tau*quad => d/d(log_tau) = 0.5*(T-1) - 0.5*tau*quad
       grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * quad_form;
+      // Sum-to-zero penalty gradient: d/d(phi[t]) of [-0.5*lambda*sum(phi)^2] = -lambda*sum(phi)
+      { double sum_phi = 0.0;
+        for (int t = 0; t < T_len; t++) sum_phi += phi_temporal[t];
+        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sum_phi;
+      }
 
     } else if (data.temporal_type == TemporalType::RW2) {
       // RW2: second-order differences
@@ -3165,9 +3202,14 @@ void compute_gradient_analytical(
         quad_form += d2 * d2;
       }
       grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * quad_form;
+      // Sum-to-zero penalty gradient
+      { double sum_phi = 0.0;
+        for (int t = 0; t < T_len; t++) sum_phi += phi_temporal[t];
+        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sum_phi;
+      }
 
     } else if (data.temporal_type == TemporalType::AR1) {
-      // AR1: phi[0] ~ N(0, 1/(tau*(1-rho^2))), phi[t] | phi[t-1] ~ N(rho*phi[t-1], 1/tau)
+      // Centered AR1: phi[0] ~ N(0, 1/(tau*(1-rho^2))), phi[t] | phi[t-1] ~ N(rho*phi[t-1], 1/tau)
       double one_minus_rho2 = 1.0 - rho_ar1 * rho_ar1;
 
       // Gradient for phi[0]: d/d(phi[0]) = -tau*(1-rho^2)*phi[0] + tau*rho*(phi[1] - rho*phi[0])
@@ -3815,6 +3857,8 @@ void compute_gradient_gp_temporal_handcoded(
             grad[layout.temporal_start + t] += g;
         }
         grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
+        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
+          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
     } else if (data.temporal_type == TemporalType::RW2) {
         double qf = 0.0;
         for (int t = 0; t < T_len; t++) {
@@ -3826,6 +3870,8 @@ void compute_gradient_gp_temporal_handcoded(
         }
         for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
         grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
+        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
+          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
     } else if (data.temporal_type == TemporalType::AR1) {
         double omr2 = 1.0 - rho_ar1 * rho_ar1;
         grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
@@ -4309,6 +4355,8 @@ void compute_gradient_msgp_temporal_handcoded(
             grad[layout.temporal_start + t] += g;
         }
         grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
+        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
+          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
     } else if (data.temporal_type == TemporalType::RW2) {
         double qf = 0.0;
         for (int t = 0; t < T_len; t++) {
@@ -4320,6 +4368,8 @@ void compute_gradient_msgp_temporal_handcoded(
         }
         for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
         grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
+        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
+          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
     } else if (data.temporal_type == TemporalType::AR1) {
         double omr2 = 1.0 - rho_ar1 * rho_ar1;
         grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
@@ -4659,17 +4709,17 @@ void compute_gradient_tvc_handcoded(
         phi_denom = std::exp(log_phi_denom);
     }
 
-    // TVC parameters
+    // TVC parameters (use pre-allocated workspace buffers)
     int n_tvc = data.tvc_data.n_tvc;
     int n_times = data.tvc_data.n_times;
     int n_groups = data.tvc_data.n_groups;
     int n_w = n_groups * n_tvc * n_times;
 
-    std::vector<double> tvc_tau(n_tvc), tvc_rho(n_tvc);
+    double* tvc_tau = data.tvc_data.tau_ws.data();
+    double* tvc_rho = data.tvc_data.rho_ws.data();
     for (int j = 0; j < n_tvc; j++) {
         tvc_tau[j] = std::exp(params[layout.log_tau_tvc_start + j]);
         if (data.tvc_data.structure == ratiod_temporal::TemporalType::AR1) {
-            // logit_rho to rho: rho = 2*invlogit(x) - 1
             double logit_rho = params[layout.logit_rho_tvc_start + j];
             double u = 1.0 / (1.0 + std::exp(-logit_rho));
             tvc_rho[j] = 2.0 * u - 1.0;
@@ -4678,8 +4728,8 @@ void compute_gradient_tvc_handcoded(
         }
     }
 
-    // Extract TVC w values
-    std::vector<double> tvc_w_flat(n_w);
+    // Extract TVC w values into pre-allocated buffer
+    double* tvc_w_flat = data.tvc_data.w_flat_ws.data();
     for (int k = 0; k < n_w; k++) {
         tvc_w_flat[k] = params[layout.tvc_w_start + k];
     }
@@ -4745,28 +4795,36 @@ void compute_gradient_tvc_handcoded(
     }
 
     // =========================================================================
-    // Compute TVC prior gradients using hand-coded analytical formulas
+    // Compute TVC prior gradients using zero-allocation workspace version
     // =========================================================================
-    ratiod_tvc::TVCGradients tvc_grads;
-    ratiod_tvc::tvc_prior_gradients(tvc_w_flat, data.tvc_data, tvc_tau, tvc_rho, tvc_grads);
+    ratiod_tvc::TVCGradientWS tvc_ws;
+    tvc_ws.grad_w = data.tvc_data.grad_w_ws.data();
+    tvc_ws.grad_log_tau = data.tvc_data.grad_log_tau_ws.data();
+    tvc_ws.grad_logit_rho = data.tvc_data.grad_logit_rho_ws.data();
+    tvc_ws.grad_w_jg = data.tvc_data.grad_w_jg_ws.data();
+    tvc_ws.d_buf = data.tvc_data.d_ws.data();
+    tvc_ws.n_w = n_w;
+    tvc_ws.n_tvc = n_tvc;
+    ratiod_tvc::tvc_prior_gradients_ws(tvc_w_flat, data.tvc_data, tvc_tau, tvc_rho, tvc_ws);
 
     // Add TVC prior gradient contributions
     for (int k = 0; k < n_w; k++) {
-        grad[layout.tvc_w_start + k] += tvc_grads.grad_w[k];
+        grad[layout.tvc_w_start + k] += tvc_ws.grad_w[k];
     }
     for (int j = 0; j < n_tvc; j++) {
-        grad[layout.log_tau_tvc_start + j] += tvc_grads.grad_log_tau[j];
+        grad[layout.log_tau_tvc_start + j] += tvc_ws.grad_log_tau[j];
     }
     if (data.tvc_data.structure == ratiod_temporal::TemporalType::AR1) {
         for (int j = 0; j < n_tvc; j++) {
-            grad[layout.logit_rho_tvc_start + j] += tvc_grads.grad_logit_rho[j];
+            grad[layout.logit_rho_tvc_start + j] += tvc_ws.grad_logit_rho[j];
         }
     }
 
     // =========================================================================
-    // Precompute TVC contribution to linear predictor
+    // Precompute TVC contribution to linear predictor (pre-allocated buffer)
     // =========================================================================
-    std::vector<double> tvc_eta(data.N, 0.0);
+    double* tvc_eta = data.tvc_data.eta_ws.data();
+    std::fill(tvc_eta, tvc_eta + data.N, 0.0);
     for (int i = 0; i < data.N; i++) {
         int t = data.tvc_data.time_index[i] - 1;  // 0-based
         int g = data.tvc_data.group_index[i] - 1;  // 0-based
@@ -6438,6 +6496,8 @@ void compute_gradient_hsgp(
         grad[layout.temporal_start + t] += g;
       }
       grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
+      { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
+        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
     } else if (data.temporal_type == TemporalType::RW2) {
       double qf = 0.0;
       for (int t = 0; t < T_len; t++) {
@@ -6449,6 +6509,8 @@ void compute_gradient_hsgp(
       }
       for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
       grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
+      { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
+        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
     } else if (data.temporal_type == TemporalType::AR1) {
       double omr2 = 1.0 - rho_ar1 * rho_ar1;
       grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
@@ -6567,23 +6629,25 @@ void compute_gradient_ms_temporal_handcoded(
         grad[layout.logit_rho_bym2_idx] = 0.5 * (1.0 - 2.0 * rho_bym2);
     }
 
-    // PC priors on multiscale temporal variances
+    // PC priors on multiscale temporal variances + Jacobian (+1 for log_sigma2 = log(exp(·)))
     if (n_trend > 0) {
         grad[layout.log_sigma2_trend_idx] = ratiod_temporal_grad::pc_prior_grad_log_sigma2(
-            sigma2_trend, data.ms_sigma2_trend_prior_U, data.ms_sigma2_trend_prior_alpha);
+            sigma2_trend, data.ms_sigma2_trend_prior_U, data.ms_sigma2_trend_prior_alpha) + 1.0;
     }
     if (n_seasonal > 0) {
         grad[layout.log_sigma2_seasonal_idx] = ratiod_temporal_grad::pc_prior_grad_log_sigma2(
-            sigma2_seasonal, data.ms_sigma2_seasonal_prior_U, data.ms_sigma2_seasonal_prior_alpha);
+            sigma2_seasonal, data.ms_sigma2_seasonal_prior_U, data.ms_sigma2_seasonal_prior_alpha) + 1.0;
     }
     if (n_short > 0) {
         grad[layout.log_sigma2_short_idx] = ratiod_temporal_grad::pc_prior_grad_log_sigma2(
-            sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha);
+            sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha) + 1.0;
     }
     if (mst.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0) {
-        // Beta(2,2) prior on (rho+1)/2 → gradient = 1 - 2*u where u = (rho+1)/2
+        // Beta(2,2) prior on u=(rho+1)/2: log p(u) = log(u) + log(1-u)
+        // Jacobian for logit transform: log|drho/d(logit_rho)| = log(u) + log(1-u) + const
+        // Total: 2*log(u) + 2*log(1-u), gradient = 2*(1 - 2*u)
         double u = (rho_short + 1.0) / 2.0;
-        grad[layout.logit_rho_short_idx] = 1.0 - 2.0 * u;
+        grad[layout.logit_rho_short_idx] = 2.0 * (1.0 - 2.0 * u);
     }
 
     // =========================================================================
@@ -7008,6 +7072,8 @@ void compute_gradient_spatiotemporal_handcoded(
                 grad[layout.temporal_start + t] += g;
             }
             grad[layout.log_tau_temporal_idx] += 0.5 * (T_temporal - 1) - 0.5 * tau_temporal * qf;
+            { double sp = 0.0; for (int t = 0; t < T_temporal; t++) sp += phi_temporal[t];
+              for (int t = 0; t < T_temporal; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
         } else if (data.temporal_type == TemporalType::RW2) {
             double qf = 0.0;
             for (int t = 0; t < T_temporal; t++) {
@@ -7019,6 +7085,8 @@ void compute_gradient_spatiotemporal_handcoded(
             }
             for (int t = 2; t < T_temporal; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
             grad[layout.log_tau_temporal_idx] += 0.5 * (T_temporal - 2) - 0.5 * tau_temporal * qf;
+            { double sp = 0.0; for (int t = 0; t < T_temporal; t++) sp += phi_temporal[t];
+              for (int t = 0; t < T_temporal; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
         } else if (data.temporal_type == TemporalType::AR1) {
             double omr2 = 1.0 - rho_ar1 * rho_ar1;
             grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
@@ -7297,6 +7365,61 @@ void compute_gradient(
 }
 
 // =====================================================================
+// Resolve gradient function pointer (called once at sampling start)
+// Same dispatch logic as compute_gradient(), but returns a function pointer
+// to eliminate per-call branching during leapfrog steps.
+// =====================================================================
+
+GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const ParamLayout& layout) {
+    // Explicit mode overrides
+    if (mode == GradientMode::NUMERICAL)
+        return &compute_gradient_numerical;
+    if (mode == GradientMode::AUTODIFF_TAPE)
+        return &compute_gradient_autodiff;
+    if (mode == GradientMode::AUTODIFF_ARENA)
+        return &compute_gradient_arena;
+    if (mode == GradientMode::AUTODIFF_FORWARD)
+        return &compute_gradient_forward;
+
+    // AUTO or HANDCODED: use fastest available (H > A_r > A > N)
+    if (can_use_analytical_gradient(data, layout)) {
+        return &compute_gradient_analytical;
+    }
+    if (layout.is_hsgp && data.has_hsgp)
+        return &compute_gradient_hsgp;
+    if (layout.is_gp && data.has_gp && !layout.has_temporal)
+        return &compute_gradient_gp_handcoded;
+    if (layout.is_multiscale_gp && data.has_multiscale_gp && layout.has_temporal)
+        return &compute_gradient_msgp_temporal_handcoded;
+    if (layout.is_multiscale_gp && data.has_multiscale_gp)
+        return &compute_gradient_msgp_handcoded;
+    if (layout.is_gp && layout.has_temporal)
+        return &compute_gradient_gp_temporal_handcoded;
+    if (layout.has_svc && data.has_svc)
+        return &compute_gradient_svc_handcoded;
+    if (layout.has_tvc && data.has_tvc)
+        return &compute_gradient_tvc_handcoded;
+    if (layout.has_spatiotemporal && !layout.is_st_gp &&
+        !layout.is_gp && !layout.is_multiscale_gp &&
+        data.spatiotemporal_data.type != STType::NONE &&
+        layout.st_delta_start >= 0 && layout.log_tau_st_idx >= 0)
+        return &compute_gradient_spatiotemporal_handcoded;
+    if (layout.is_temporal_gp && layout.has_temporal &&
+        !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
+        data.temporal_gp_data.cov_type == ratiod_temporal_gp::TemporalCovType::EXPONENTIAL)
+        return &compute_gradient_temporal_gp_handcoded;
+    if (layout.has_multiscale_temporal && !layout.is_gp && !layout.is_multiscale_gp &&
+        !layout.is_hsgp && !layout.has_svc && !layout.has_tvc &&
+        !layout.has_latent && !layout.has_spatiotemporal)
+        return &compute_gradient_ms_temporal_handcoded;
+    if (layout.has_latent && data.latent_n_factors > 0)
+        return &compute_gradient_latent_handcoded;
+
+    // Fallback: arena autodiff
+    return &compute_gradient_arena;
+}
+
+// =====================================================================
 // Dual averaging for step size adaptation
 // =====================================================================
 
@@ -7559,7 +7682,7 @@ double find_reasonable_epsilon(
   // accept_prob = exp(-delta_H), so > 0.5 iff delta_H < log(2)
   int direction = (!std::isfinite(delta_H) || delta_H > std::log(2.0)) ? -1 : 1;
 
-  for (int iter = 0; iter < 100; iter++) {
+  for (int iter = 0; iter < 50; iter++) {
     if (direction == 1) {
       epsilon *= 2.0;
     } else {
@@ -7627,7 +7750,7 @@ double find_reasonable_epsilon(
 
   int direction = (!std::isfinite(delta_H) || delta_H > std::log(2.0)) ? -1 : 1;
 
-  for (int iter = 0; iter < 100; iter++) {
+  for (int iter = 0; iter < 50; iter++) {
     if (direction == 1) {
       epsilon *= 2.0;
     } else {
@@ -7725,7 +7848,7 @@ double find_reasonable_epsilon_dense(
 
   int direction = (!std::isfinite(delta_H) || delta_H > std::log(2.0)) ? -1 : 1;
 
-  for (int iter = 0; iter < 100; iter++) {
+  for (int iter = 0; iter < 50; iter++) {
     if (direction == 1) {
       epsilon *= 2.0;
     } else {
@@ -8037,9 +8160,9 @@ LeapfrogInPlaceResult leapfrog_step_inplace(
   }
 
   // Compute gradient + log_prob at new position (fused: single O(N) pass)
-  // Need to go through std::vector interface for compute_gradient
+  // Uses pre-resolved function pointer to skip 15+ branch dispatch per leapfrog step
   std::memcpy(ws.params_buf.data(), q, n * sizeof(double));
-  compute_gradient(ws.params_buf, data, layout, ws.grad_buf, &ws.logp_at(slot));
+  ws.gradient_fn(ws.params_buf, data, layout, ws.grad_buf, &ws.logp_at(slot));
   std::memcpy(grad, ws.grad_buf.data(), n * sizeof(double));
   result.log_prob = ws.logp_at(slot);
 
@@ -8212,9 +8335,9 @@ TreeStats build_tree_fast(
   bool persist = compute_criterion(stats.p_sharp_beg.data(), stats.p_sharp_end.data(),
                                    stats.rho.data(), n);
 
-  // After moves, far endpoints depend on direction:
-  // direction == 1: init's far = stats.beg (left, unchanged), final's far = stats.end (right, moved)
-  // direction == -1: init's far = stats.end (right, unchanged), final's far = stats.beg (left, moved)
+  // After update, far endpoints depend on direction:
+  // direction == 1: init's far = stats.beg (left, unchanged), final's far = stats.end (right, updated)
+  // direction == -1: init's far = stats.end (right, unchanged), final's far = stats.beg (left, updated)
   const double* init_far_psharp = (direction == 1) ? stats.p_sharp_beg.data() : stats.p_sharp_end.data();
   const double* final_far_psharp = (direction == 1) ? stats.p_sharp_end.data() : stats.p_sharp_beg.data();
 
@@ -8441,10 +8564,22 @@ HMCResultCpp run_hmc_chain_cpp(
   // reparameterization alone cannot decorrelate (correlated slopes, BYM2, HSGP, GP, SVC).
   // Models with effective reparameterizations (TVC) work equally well or better
   // with diagonal mass.
+  //
+  // BENCHMARKED 2026-02-27: Attempted removing has_re, has_temporal, is_hsgp,
+  // is_temporal_gp, has_tvc from needs_dense. Result: ALL models got WORSE
+  // (row 2 pg+RE: 1.25s→4.2s, row 27 pg+TVC: 68→87s, row 38 nb+HSGP: 210→266s).
+  // Dense metric is essential even for non-centered RE — NUTS compensates for
+  // missing correlation info with longer trajectories, net negative.
   constexpr int DENSE_MAX_PARAMS = 200;
   MassMatrixType effective_metric = metric_type;
   if (effective_metric == MassMatrixType::AUTO) {
-    bool needs_dense = layout.has_re_correlated_slopes ||
+    // Dense mass matrix needed when posterior has strong parameter correlations:
+    // - Any RE model has residual sigma_re ↔ likelihood correlation that
+    //   non-centered parameterization doesn't fully remove.
+    // - Temporal, spatial, and other structured effects also benefit from dense.
+    bool needs_dense = layout.has_re ||
+                       layout.has_re_correlated_slopes ||
+                       layout.has_temporal ||
                        layout.is_bym2 ||
                        layout.is_hsgp ||
                        layout.is_gp ||
@@ -8453,11 +8588,28 @@ HMCResultCpp run_hmc_chain_cpp(
                        layout.has_multiscale_temporal ||
                        layout.has_svc ||
                        layout.has_spatiotemporal ||
-                       layout.has_latent;
+                       layout.has_latent ||
+                       layout.has_tvc;
     effective_metric = needs_dense ? MassMatrixType::DENSE : MassMatrixType::DIAG;
     if (verbose) {
-      REprintf("  [METRIC] auto → %s (p=%d)\n",
+      REprintf("  [METRIC] auto -> %s (p=%d",
                effective_metric == MassMatrixType::DENSE ? "dense" : "diag", n_params);
+      if (needs_dense) {
+        if (layout.has_re) REprintf(", re");
+        if (layout.has_re_correlated_slopes) REprintf(", correlated_slopes");
+        if (layout.has_temporal) REprintf(", temporal");
+        if (layout.is_bym2) REprintf(", bym2");
+        if (layout.is_hsgp) REprintf(", hsgp");
+        if (layout.is_gp) REprintf(", gp");
+        if (layout.is_multiscale_gp) REprintf(", msgp");
+        if (layout.is_temporal_gp) REprintf(", temporal_gp");
+        if (layout.has_multiscale_temporal) REprintf(", ms_temporal");
+        if (layout.has_svc) REprintf(", svc");
+        if (layout.has_spatiotemporal) REprintf(", spatiotemporal");
+        if (layout.has_latent) REprintf(", latent");
+        if (layout.has_tvc) REprintf(", tvc");
+      }
+      REprintf(")\n");
     }
   }
   // Auto-downgrade dense to diagonal when n_params too large
@@ -8561,6 +8713,7 @@ HMCResultCpp run_hmc_chain_cpp(
   std::vector<double> _nuts_grad_proposal;  // Persistent proposal gradient
   if (use_nuts) {
     nuts_ws.init(n_params, max_treedepth);
+    nuts_ws.gradient_fn = resolve_gradient_fn(g_gradient_mode, data, layout);
     _nuts_p.resize(n_params);
     _nuts_q_proposal.resize(n_params);
     _nuts_grad_proposal.resize(n_params);
@@ -8601,6 +8754,8 @@ HMCResultCpp run_hmc_chain_cpp(
   if (use_softabs_retry) {
     softabs_persistent_mass.init(n_params, MassMatrixType::DENSE);
   }
+
+  int warmup_total_leapfrog = 0;  // TEMP: diagnostic counter
 
   for (int iter = 0; iter < n_iter; iter++) {
     bool is_warmup = (iter < n_warmup);
@@ -9138,22 +9293,20 @@ HMCResultCpp run_hmc_chain_cpp(
         }
       }
 
-      // Adaptive NUTS→fixed-L probe: check early sampling iterations
+      // Adaptive NUTS probe: warn if most early iterations hit max treedepth
+      // (Stan's approach: warn but keep NUTS running — truncated NUTS picks
+      // from up to 2^depth candidates, far better than HMC(L=10) with tiny epsilon)
       if (nuts_probing && !is_warmup && sample_idx < nuts_probe_window) {
         if (iter_treedepth >= max_treedepth) nuts_probe_maxd++;
-        if (sample_idx == nuts_probe_window - 1 &&
-            nuts_probe_maxd >= (nuts_probe_window * 8 + 9) / 10) {
-          // >=80% of probe iterations hit max treedepth — NUTS is struggling.
-          // Switch to fixed-L HMC (L=10) for remaining iterations.
-          use_nuts = false;
-          L = 10;
-          result.sampler = "NUTS->HMC(L=10)";
-          nuts_probing = false;
-          if (verbose) {
-            Rcpp::Rcerr << "  NUTS hit max treedepth on all " << nuts_probe_window
-                        << " initial sampling iterations. "
-                        << "Switching to fixed-L HMC (L=10)."
-                        << std::endl;
+        if (sample_idx == nuts_probe_window - 1) {
+          nuts_probing = false;  // Probe window complete
+          if (nuts_probe_maxd >= (nuts_probe_window * 8 + 9) / 10) {
+            result.n_max_treedepth += 0;  // Already counted above
+            if (verbose) {
+              REprintf("  [NUTS] %d/%d initial sampling iterations hit max treedepth (%d). "
+                       "Consider increasing max_treedepth or reparameterizing.\n",
+                       nuts_probe_maxd, nuts_probe_window, max_treedepth);
+            }
           }
         }
       }
@@ -9325,6 +9478,8 @@ HMCResultCpp run_hmc_chain_cpp(
       result.divergent[sample_idx] = divergent ? 1 : 0;
       result.treedepth[sample_idx] = iter_treedepth;
       sample_idx++;
+    } else {
+      warmup_total_leapfrog += iter_n_leapfrog;  // TEMP: diagnostic
     }
 
     // Note: verbose output disabled in parallel - not thread-safe
@@ -9332,6 +9487,15 @@ HMCResultCpp run_hmc_chain_cpp(
   }
 
   result.epsilon = da.final_epsilon();
+
+  // TEMP: diagnostic - warmup leapfrog count
+  {
+    int sampling_total_lf = 0;
+    for (int i = 0; i < result.n_sample; i++) sampling_total_lf += result.n_leapfrog[i];
+    REprintf("  [DIAG] Chain %d: warmup_LF=%d, sampling_LF=%d, total_LF=%d, epsilon=%.4f\n",
+             chain_id + 1, warmup_total_leapfrog, sampling_total_lf,
+             warmup_total_leapfrog + sampling_total_lf, result.epsilon);
+  }
 
   if (verbose && (softabs_retries > 0 || softabs_metric_active)) {
     REprintf("  [SoftAbs] Chain %d: metric=%s, %d divergent retried (up to %d attempts), %d resolved (%d remained)\n",
@@ -9990,6 +10154,9 @@ Rcpp::List cpp_hmc_fit(
     // Prior parameters
     data.tvc_tau_shape = tvc_tau_shape;
     data.tvc_tau_rate = tvc_tau_rate;
+
+    // Pre-allocate gradient workspace buffers (avoids per-call heap allocation)
+    data.tvc_data.init_workspace();
   } else {
     data.tvc_data.n_tvc = 0;
     data.tvc_data.n_times = 0;

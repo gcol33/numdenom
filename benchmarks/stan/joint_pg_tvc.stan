@@ -1,27 +1,36 @@
-// Joint Poisson-Gamma model with Time-Varying Coefficients (TVC)
-// Matches numdenom ratiod_poisson_gamma() with temporal_tvc()
+// Joint Poisson-Gamma model with Random Effects + Time-Varying Coefficients (TVC)
+// Matches numdenom ratiod_poisson_gamma() with RE + temporal_tvc()
 // Row 27 in gradient_methods.md
 //
 // TVC: coefficient for covariate x varies over time via RW1 prior
 // The TVC effect is SHARED between numerator and denominator
+// RE: shared random intercepts across groups (matches numdenom default)
 
 data {
   int<lower=1> N;
   array[N] int<lower=0> y_num;         // Numerator counts (Poisson)
   vector<lower=0>[N] y_denom;          // Denominator (Gamma-distributed effort)
-  int<lower=1> p;                      // Number of fixed predictors (intercept only)
+  int<lower=1> p;                      // Number of fixed predictors
   matrix[N, p] X;                      // Design matrix for fixed effects
   vector[N] x_tvc;                     // Covariate with time-varying effect
 
   // Temporal structure
   int<lower=2> T;                      // Number of time points
   array[N] int<lower=1,upper=T> time_idx;  // Time point for each obs
+
+  // Random effects
+  int<lower=1> n_groups;               // Number of RE groups
+  array[N] int<lower=1,upper=n_groups> group_idx;  // Group index for each obs
 }
 
 parameters {
   vector[p] beta_num;                  // Numerator fixed effects
   vector[p] beta_denom;                // Denominator fixed effects
   real<lower=0> shape;                 // Gamma shape parameter
+
+  // Random effects (shared between num and denom)
+  vector[n_groups] re;                 // Random intercepts
+  real<lower=0> sigma_re;              // RE standard deviation
 
   // Time-varying coefficient (RW1 prior)
   vector[T] beta_tvc;                  // TVC coefficient at each time point
@@ -32,11 +41,15 @@ model {
   vector[N] eta_num;
   vector[N] eta_denom;
 
-  // Linear predictors with TVC
+  // Linear predictors with RE + TVC
   eta_num = X * beta_num;
   eta_denom = X * beta_denom;
 
   for (n in 1:N) {
+    // Shared random effect
+    eta_num[n] += re[group_idx[n]];
+    eta_denom[n] += re[group_idx[n]];
+
     // Add time-varying coefficient effect (SHARED)
     real tvc_effect = beta_tvc[time_idx[n]] * x_tvc[n];
     eta_num[n] += tvc_effect;
@@ -47,6 +60,10 @@ model {
   beta_num ~ normal(0, 10);
   beta_denom ~ normal(0, 10);
   shape ~ gamma(2, 0.1);
+
+  // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
+  sigma_re ~ cauchy(0, 2.5);
+  re ~ normal(0, sigma_re);
 
   // TVC prior: RW1
   sigma_tvc ~ exponential(1);
@@ -75,8 +92,8 @@ generated quantities {
 
   for (n in 1:N) {
     real tvc_effect = beta_tvc[time_idx[n]] * x_tvc[n];
-    real eta_num_n = X[n] * beta_num + tvc_effect;
-    real eta_denom_n = X[n] * beta_denom + tvc_effect;
+    real eta_num_n = X[n] * beta_num + re[group_idx[n]] + tvc_effect;
+    real eta_denom_n = X[n] * beta_denom + re[group_idx[n]] + tvc_effect;
     real mu_num_n = exp(eta_num_n);
     real mu_denom_n = exp(eta_denom_n);
 

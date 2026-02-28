@@ -51,9 +51,10 @@ inline double rw1_grad_log_sigma2(const double* phi, int n, double sigma2) {
         double diff = phi[t] - phi[t-1];
         quad += diff * diff;
     }
-    // d/d(log_sigma2) = -0.5 * (n-1) + 0.5 / sigma2 * quad
-    // Jacobian: sigma2 = exp(log_sigma2), so multiply by sigma2
-    return (-0.5 * (n - 1) + 0.5 * quad / sigma2) * sigma2;
+    // d/d(sigma2) [log_GMRF] = -0.5*(n-1)/sigma2 + 0.5*quad/sigma2^2
+    // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
+    //           = -0.5*(n-1) + 0.5*quad/sigma2
+    return -0.5 * (n - 1) + 0.5 * quad / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -94,9 +95,9 @@ inline double rw1_cyclic_grad_log_sigma2(const double* phi, int n, double sigma2
         double diff = phi[t] - phi[t_prev];
         quad += diff * diff;
     }
-    // d/d(log_sigma2) = -0.5 * n + 0.5 / sigma2 * quad
-    // Jacobian: multiply by sigma2
-    return (-0.5 * n + 0.5 * quad / sigma2) * sigma2;
+    // d/d(sigma2) = -0.5*n/sigma2 + 0.5*quad/sigma2^2
+    // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
+    return -0.5 * n + 0.5 * quad / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -140,7 +141,9 @@ inline double rw2_grad_log_sigma2(const double* phi, int n, double sigma2) {
         double d = phi[t] - 2.0 * phi[t-1] + phi[t-2];
         quad += d * d;
     }
-    return (-0.5 * (n - 2) + 0.5 * quad / sigma2) * sigma2;
+    // d/d(sigma2) = -0.5*(n-2)/sigma2 + 0.5*quad/sigma2^2
+    // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
+    return -0.5 * (n - 2) + 0.5 * quad / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -176,30 +179,39 @@ inline void ar1_grad_phi(const double* phi, int n, double sigma2, double rho, do
 inline double ar1_grad_log_sigma2(const double* phi, int n, double sigma2, double rho) {
     double one_m_rho2 = 1.0 - rho * rho + 1e-10;
 
-    // Normalization constant gradients
-    double grad = -0.5;  // From stationary variance term
-    grad -= 0.5 * (n - 1);  // From conditional variance terms
+    // AR1 has n terms: 1 marginal + (n-1) conditional
+    // d/d(sigma2) [log_AR1] = -0.5*n/sigma2 + 0.5*quad/sigma2^2
+    double grad = -0.5 * n;
 
-    // Quadratic terms
+    // Quadratic form: (1-rho^2)*phi[0]^2 + sum(resid^2)
     double quad = one_m_rho2 * phi[0] * phi[0];
     for (int t = 1; t < n; t++) {
         double resid = phi[t] - rho * phi[t-1];
         quad += resid * resid;
     }
-    grad += 0.5 * quad / sigma2;
+    grad += 0.5 * quad / (sigma2 + 1e-10);
 
-    // Jacobian for log transform
-    return grad * sigma2;
+    // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
+    // Already applied: -0.5*n + 0.5*quad/sigma2 IS the result after chain rule
+    return grad;
 }
 
 inline double ar1_grad_logit_rho(const double* phi, int n, double sigma2, double rho) {
     double inv_sigma2 = 1.0 / (sigma2 + 1e-10);
     double one_m_rho2 = 1.0 - rho * rho + 1e-10;
 
-    // d log p / d rho from stationary variance
-    double grad_rho = rho / one_m_rho2 * phi[0] * phi[0];
+    // AR1 log-lik = -0.5*log(sigma2/(1-rho^2)) - 0.5*(1-rho^2)/sigma2 * phi[0]^2
+    //             + sum[-0.5*log(sigma2) - 0.5/sigma2 * (phi[t] - rho*phi[t-1])^2]
+    //
+    // d/d(rho) from normalization -0.5*log(sigma2/(1-rho^2)):
+    //   = -rho / (1 - rho^2)
+    double grad_rho = -rho / one_m_rho2;
 
-    // d log p / d rho from AR terms
+    // d/d(rho) from stationary quadratic -0.5*(1-rho^2)/sigma2 * phi[0]^2:
+    //   = rho * phi[0]^2 / sigma2
+    grad_rho += rho * inv_sigma2 * phi[0] * phi[0];
+
+    // d/d(rho) from AR terms: sum 1/sigma2 * (phi[t] - rho*phi[t-1]) * phi[t-1]
     for (int t = 1; t < n; t++) {
         double resid = phi[t] - rho * phi[t-1];
         grad_rho += inv_sigma2 * resid * phi[t-1];
@@ -230,7 +242,9 @@ inline double iid_grad_log_sigma2(const double* phi, int n, double sigma2) {
     for (int t = 0; t < n; t++) {
         quad += phi[t] * phi[t];
     }
-    return (-0.5 * n + 0.5 * quad / sigma2) * sigma2;
+    // d/d(sigma2) = -0.5*n/sigma2 + 0.5*quad/sigma2^2
+    // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
+    return -0.5 * n + 0.5 * quad / (sigma2 + 1e-10);
 }
 
 // =============================================================================

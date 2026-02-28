@@ -105,44 +105,69 @@ Hand-coded analytical gradients for H mode (O(n) complexity):
 ### Issue 2: H Gradient Produces NaN Values
 **Symptom**: All posterior samples are NaN when H dispatch is active
 **Location**: `compute_gradient_multiscale_temporal_handcoded()` in hmc_sampler.cpp
-**Status**: UNRESOLVED
+**Status**: FIXED (2026-02-27)
 
-Likely causes:
-1. Parameter indexing errors (wrong offset calculations)
-2. Missing initialization of gradient vector sections
-3. Incorrect handling of empty components (trend/seasonal/short_term)
+**Root cause**: Four bugs in `src/hmc_multiscale_temporal_grad.h` and `src/hmc_sampler.cpp`:
 
-### Issue 3: A_t Mode Causes Segfaults
+1. **`ar1_grad_logit_rho()` line 200**: Wrong formula for stationary variance contribution.
+   - Before: `rho / one_m_rho2 * phi[0]^2` (missing normalization term, wrong denominator)
+   - After: `-rho / one_m_rho2 + rho * inv_sigma2 * phi[0]^2` (correct: normalization + quadratic)
+   - This was the primary NaN source: when rho → ±1, `1/(1-rho^2)` explodes, and the missing
+     normalization term meant no cancellation occurred.
+
+2. **All `*_grad_log_sigma2()` functions**: Extra `* sigma2` factor (Jacobian applied twice).
+   - The comment correctly derived `d/d(log_sigma2) = -0.5*(n-1) + 0.5*quad/sigma2`
+   - But then the return statement multiplied by sigma2 AGAIN: `return (correct) * sigma2`
+   - Fixed by removing the spurious `* sigma2` from all five functions:
+     `rw1_grad_log_sigma2`, `rw1_cyclic_grad_log_sigma2`, `rw2_grad_log_sigma2`,
+     `ar1_grad_log_sigma2`, `iid_grad_log_sigma2`
+
+3. **Missing Jacobian `+1`** for log_sigma2 parameters in hmc_sampler.cpp.
+   - `compute_log_post` includes `+= log_sigma2` as Jacobian correction (d/d(log_s2) = 1)
+   - The H gradient omitted this +1 for all three sigma2 parameters (trend, seasonal, short)
+   - Confirmed by comparing with the `log_tau_spatial` gradient which correctly has `+ 1.0`
+
+4. **Prior gradient for logit_rho** off by factor of 2.
+   - `compute_log_post` adds Beta(2,2) prior `log(u)+log(1-u)` PLUS Jacobian `log(u)+log(1-u)`
+   - Total: `2*[log(u)+log(1-u)]`, gradient = `2*(1-2u)`
+   - H gradient had `1-2u` (factor of 2 missing)
+
+**Verification**: After fix, H and A modes produce identical draws (max diff = 0.000000)
+for all three component combinations tested (RW1+seasonal+AR1, RW1-only, RW2+IID).
+
+### Issue 3: A_t/A_r/A Mode Segfaults for Multiscale Temporal
 **Symptom**: Segmentation fault when running with A_t mode
-**Location**: `log_post_impl.h` additions for multiscale temporal
-**Status**: UNRESOLVED (changes reverted)
+**Location**: `log_post_impl.h` — missing multiscale temporal support
+**Status**: FIXED (2026-02-27)
 
-Root cause: The `ModelData` struct doesn't have the required prior parameter fields:
-- `ms_sigma2_trend_prior_U`, `ms_sigma2_trend_prior_alpha`
-- `ms_sigma2_seasonal_prior_U`, `ms_sigma2_seasonal_prior_alpha`
-- `ms_sigma2_short_prior_U`, `ms_sigma2_short_prior_alpha`
-- `ms_rho_short_prior_a`, `ms_rho_short_prior_b`
+**Root cause**: `log_post_impl.h` (the templated log-posterior used by all autodiff modes) had NO
+multiscale temporal code at all. It handled regular temporal (`has_temporal`) but had zero handling
+of `has_multiscale_temporal`. This meant:
+1. No extraction of trend/seasonal/short_term parameters from theta vector
+2. No priors added for multiscale temporal effects or hyperparameters
+3. No temporal effects added to eta_num/eta_denom in the likelihood loop
+4. The autodiff modes computed a log-posterior that ignored all multiscale temporal structure
 
-The code in `log_post_impl.h` tried to access these fields which don't exist, causing undefined behavior.
+Note: The prior fields DO exist in `ModelData` (lines 191-199 of `hmc_sampler.h`) — the earlier
+diagnosis that "fields don't exist" was incorrect.
 
-## Required Fixes
+**Fix**: Added complete multiscale temporal support to `log_post_impl.h`:
+1. Added `#include "hmc_temporal_multiscale_autodiff.h"`
+2. Added parameter extraction + PC priors + Beta(2,2) rho prior + GMRF log-likelihood block
+3. Added `compute_temporal_eta()` precomputation and eta contribution in observation loop
+4. Follows exact same structure as reference `compute_log_post()` in `hmc_sampler.cpp`
 
-### For A_t Mode
-1. Add prior parameter fields to `ModelData` struct in `hmc_sampler.h`
-2. Populate these fields in `prepare_hmc_data()` in `backend_hmc.R`
-3. Re-add the templated log-posterior code to `log_post_impl.h`
-
-### For H Mode
-1. Debug parameter indexing in `compute_gradient_multiscale_temporal_handcoded()`
-2. Add gradient verification: compare H output against A output
-3. Add proper bounds checking and defensive initialization
+**Verification**: All 4 gradient modes produce identical results (max diff = 0.000000) across 3
+component combinations (RW1+seasonal+AR1, RW1-only, RW2+IID). Test: `benchmarks/test_ms_temporal_autodiff.R`
 
 ## Current State
 
-- Package compiles and works correctly
-- temporal_multiscale still uses A mode (forward autodiff) at ~700s
-- Header files exist but are not integrated into the dispatch logic
-- Dispatch case in `compute_gradient()` was removed to restore working state
+- All 4 gradient modes (H, A_t, A_r, A) work correctly for multiscale temporal
+- Gradient verification: All modes produce identical draws (max diff = 0.000000)
+- At N=500, iter=500: ~120s for all gradient modes (gradient cost is negligible; bottleneck is
+  NUTS with epsilon=0.0012 requiring ~265k leapfrog steps due to difficult posterior geometry)
+- H mode provides no significant speedup over A at this model size because per-gradient cost
+  is microseconds; improvement would show at N>5000 where O(p×N) becomes material
 
 ## Testing Approach
 
@@ -247,11 +272,16 @@ all.equal(as.matrix(fit_A$draws), as.matrix(fit_H$draws))  # TRUE
 - `hmc_sampler.cpp` line 1707: Added `LOGNORMAL` to `can_use_analytical_gradient()`
 - Now lognormal uses H-mode by default (O(N) complexity, ~same speed as other families)
 
-**Remaining issue: Row 99 (lognormal + RE) mixing**
-The underlying mixing issue for lognormal + RE models remains. This is NOT a gradient bug but a posterior geometry issue:
-- Lognormal + RE has challenging funnel geometry around sigma_re
-- Requires longer chains for adequate ESS
-- Recommendation: Use 4000+ iterations with multiple chains for lognormal + RE models
+**Row 99 (lognormal + RE) mixing: FIXED (2026-02-27)**
+
+Root cause was diagonal mass matrix. The sigma_re ↔ z funnel geometry requires dense mass to
+capture the correlation. Fixed by adding `layout.has_re` to the dense metric trigger in
+`hmc_sampler.cpp` line 8566.
+
+Before (diagonal): ESS 12-41 from 8000 draws, Rhat 1.02-1.04
+After (dense):     ESS 1944-2811 from 4000 draws, Rhat 1.005 — **57-176x improvement**
+
+Negbin+RE unaffected (ESS 2273+, Rhat 1.001). Dense mass is cheap for typical RE models (p < 200).
 
 ### Benchmark Scripts
 
@@ -328,9 +358,9 @@ Audit to find similar issues to the RE parameterization mismatch. The key questi
 
 ## Recommended Actions
 
-1. **Priority 1**: Fix Row 99 (lognormal + RE) - remaining sigma mismatch
+1. ~~**Priority 1**: Fix Row 99 (lognormal + RE) - remaining sigma mismatch~~ DONE (dense mass matrix)
 2. **Priority 2**: Verify GP/HSGP prior consistency (spatial models are working but not validated against Stan)
-3. **Priority 3**: Fix multiscale temporal A_t/H modes
+3. ~~**Priority 3**: Fix multiscale temporal A_t/H modes~~ DONE
 4. **Priority 4**: Audit multi-term RE with slopes
 
 ## Testing Strategy

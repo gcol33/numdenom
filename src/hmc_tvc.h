@@ -18,10 +18,10 @@ using ratiod_temporal::ar1_log_density;
 
 // TVC data structure
 struct TVCData {
-  int n_obs;                          // Number of observations
-  int n_times;                        // Number of unique time points
-  int n_tvc;                          // Number of TVC terms
-  int n_groups;                       // Number of groups (for panel data)
+  int n_obs = 0;                      // Number of observations
+  int n_times = 0;                    // Number of unique time points
+  int n_tvc = 0;                      // Number of TVC terms
+  int n_groups = 1;                   // Number of groups (for panel data)
 
   std::vector<int> time_index;        // Maps obs to time point (1-based)
   std::vector<int> group_index;       // Maps obs to group (1-based)
@@ -30,8 +30,32 @@ struct TVCData {
   std::vector<double> X_tvc;          // Design matrix subset for TVC (n_obs x n_tvc)
 
   TemporalType structure;             // RW1, RW2, AR1, or GP
-  bool shared;                        // Whether TVC is shared between num/denom
-  bool cyclic;                        // Whether temporal structure is cyclic
+  bool shared = false;                // Whether TVC is shared between num/denom
+  bool cyclic = false;                // Whether temporal structure is cyclic
+
+  // Pre-allocated workspace buffers (avoids per-gradient-call heap allocation)
+  mutable std::vector<double> tau_ws;           // size n_tvc
+  mutable std::vector<double> rho_ws;           // size n_tvc
+  mutable std::vector<double> w_flat_ws;        // size n_groups * n_tvc * n_times
+  mutable std::vector<double> eta_ws;           // size n_obs
+  mutable std::vector<double> grad_w_ws;        // size n_groups * n_tvc * n_times
+  mutable std::vector<double> grad_log_tau_ws;  // size n_tvc
+  mutable std::vector<double> grad_logit_rho_ws;// size n_tvc
+  mutable std::vector<double> grad_w_jg_ws;     // size n_times (reused per group-term)
+  mutable std::vector<double> d_ws;             // size n_times (RW2 second differences)
+
+  void init_workspace() {
+    int n_w = n_groups * n_tvc * n_times;
+    tau_ws.resize(n_tvc);
+    rho_ws.resize(n_tvc);
+    w_flat_ws.resize(n_w);
+    eta_ws.resize(n_obs);
+    grad_w_ws.resize(n_w);
+    grad_log_tau_ws.resize(n_tvc);
+    grad_logit_rho_ws.resize(n_tvc);
+    grad_w_jg_ws.resize(n_times);
+    d_ws.resize(n_times);
+  }
 };
 
 // -----------------------------------------------------------------------------

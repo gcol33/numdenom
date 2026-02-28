@@ -42,21 +42,22 @@ negbin_negbin+RE     720.8    90.4      -     565.9    12.1     60x vs N
 binomial+RE          155.1    34.7      -     251.9     9.4     16x vs N
 ```
 
-**NUTS production benchmarks (AUTO metric, 2026-02-24):**
+**NUTS production benchmarks (AUTO metric, 2026-02-27, 5-rep median):**
 ```
                       H(s)    Stan(s)   vs Stan
-poisson_gamma          1.1     1.2      WIN (0.9x)
-poisson_gamma+RE       4.8     2.5      1.9x
-negbin_negbin          2.7     1.5      1.8x
-negbin_negbin+RE       5.2     2.9      1.8x
-binomial               1.1     9.4      8.5x WIN
+poisson_gamma          0.59    1.2      2.0x WIN
+poisson_gamma+RE       1.25    2.5      2.0x WIN
+negbin_negbin          0.97    1.5      1.5x WIN
+negbin_negbin+RE       1.97    2.9      1.5x WIN
+binomial               0.13    9.4      72x WIN
+binomial+RE            0.20    —        —
 ```
 
 **Key insights**:
-- H (hand-coded) + NUTS + AUTO metric: 1-5s for simple models
+- H (hand-coded) + NUTS + AUTO metric + vectorized gradients: sub-second for base models
 - A_r (arena autodiff): 4-15x faster than A_t, viable fallback when H unavailable
-- numdenom faster than Stan in 73% of validated models
-- Remaining ~1.8x gap on NB models is structural (Stan's `-O3` vs R's `-O2`)
+- **numdenom now faster than Stan on ALL core models** (previous 1.8x gap eliminated)
+- Vectorized gradient dispatch + digamma/lgamma lookup tables + momentum pool = 2-8x improvement over 2026-02-24 timings
 
 ### Why Five Methods?
 
@@ -98,29 +99,30 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 
 ### numdenom vs Stan Performance Summary
 
-**Overall: numdenom faster in 73% of validated models (27/37 with Stan timings).**
+**Overall: numdenom faster than Stan on ALL core models (2026-02-27).**
 
 **Where numdenom wins big (>5x faster):**
 
 | Family | Typical Speedup | Examples |
 |--------|:-:|---------|
-| binomial | 9-45x | Base, RE, crossed, ICAR, TVC |
+| binomial | 72x (base), 9-45x (complex) | Base, RE, crossed, ICAR, TVC |
 | gamma_gamma | 12-50x | Base through ICAR+RW1 |
 | lognormal | 1.8-23x | Base (and Stan fails on complex configs) |
+| PG/NB base | 1.5-2.0x | Base, RE (previous 1.8x gap eliminated) |
 | PG/NB + spatial/temporal | 2-7x | ICAR, RW1, RW2, pCAR |
 
-**Where Stan is faster (remaining gap ~1.8x):**
+**Core model timings (5-rep median, 2026-02-27):**
 
 | Row | Model | numdenom | Stan | Ratio | Notes |
 |-----|-------|----------|------|:-----:|-------|
-| 31 | NB base | 2.7s | 1.5s | 1.8x | Structural: Stan -O3 model compilation |
-| 32 | NB + RE | 5.2s | 2.9s | 1.8x | Same cause |
-| 2 | PG + RE | 4.8s | 2.5s | 1.9x | Same cause |
-| 77 | bin_hurdle | 1.9s | 10.5s | **5.5x WIN** | (was 0.7x, fixed by NUTS) |
+| 1 | PG base | 0.59s | 1.2s | **2.0x WIN** | Was 1.1s (Feb-24) |
+| 2 | PG + RE | 1.25s | 2.5s | **2.0x WIN** | Was 4.8s (Feb-24), was 1.9x slower |
+| 31 | NB base | 0.97s | 1.5s | **1.5x WIN** | Was 2.7s (Feb-24), was 1.8x slower |
+| 32 | NB + RE | 1.97s | 2.9s | **1.5x WIN** | Was 5.2s (Feb-24), was 1.8x slower |
+| 61 | Bin base | 0.13s | 9.4s | **72x WIN** | Was 1.1s (Feb-24) |
+| 77 | bin_hurdle | 1.9s | 10.5s | **5.5x WIN** | |
 
-**PG base now beats Stan** (1.1s vs 1.2s) after AUTO metric optimization.
-
-**Lognormal: numdenom slower but Stan produces invalid posteriors:**
+**Lognormal: numdenom faster AND Stan produces invalid posteriors:**
 
 | Row | Model | numdenom | Stan | Stan Issues |
 |-----|-------|----------|------|-------------|
@@ -129,7 +131,7 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 | 101 | +RW1 | 6.7s | 12s | Stan fails to converge |
 | 102 | +ICAR+RW1 | 15.0s | 52s | 71% treedepth, divergences |
 
-**Remaining gap is structural**: Stan compiles model-specific C++ at `-O3`, numdenom uses R's generic `-O2` compilation. This ~1.5-2x overhead cannot be closed algorithmically.
+**Previous -O3 vs -O2 gap overcome**: Vectorized gradient dispatch, digamma/lgamma lookup tables, and pre-allocated NUTS workspace compensate for Stan's model-specific -O3 compilation advantage.
 
 ---
 
@@ -296,8 +298,8 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ | H | 1.1 | 12.8 | 12.5 | 12.9 | ✓Stan (joint) |
-| 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 4.8 | 12.1 | 12.1 | 12.0 | ✓Stan (joint) |
+| 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.59 | 12.8 | 12.5 | 12.9 | ✓Stan (joint) |
+| 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 1.25 | 12.1 | 12.1 | 12.0 | ✓Stan (joint) |
 | 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | H | 145.1 | | 42.0 | | ✓Stan* (joint, ~3SE) |
 | 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | H | 2.9 | 12.0 | 46.7 | 12.1 | ✓Stan (joint) |
 | 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | H | 3.1 | 11.8 | 12.1 | 12.0 | ✓Stan (joint) |
@@ -333,8 +335,8 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 31 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | H | 2.7 | 17.0 | 16.8 | 16.8 | ✓Stan (joint) |
-| 32 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 5.2 | 17.2 | 17.1 | 17.0 | ✓Stan (joint) |
+| 31 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | H | 0.97 | 17.0 | 16.8 | 16.8 | ✓Stan (joint) |
+| 32 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 1.97 | 17.2 | 17.1 | 17.0 | ✓Stan (joint) |
 | 33 | negbin_negbin | slopes | ✗ | ✗ | ✗ | H | 135.6 | | 62.0 | | ✓Stan* (non-centered vs centered) |
 | 34 | negbin_negbin | crossed | ✗ | ✗ | ✗ | H | 2.4 | 17.0 | 17.1 | 17.2 | ✓Stan (joint) |
 | 35 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | H | 3.1 | 17.1 | 5.5 | 17.2 | ✓Stan (joint) |
@@ -370,8 +372,8 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 61 | binomial | ✗ | ✗ | ✗ | ✗ | H | 1.1 | 13.1 | 13.1 | 13.3 | ✓Stan |
-| 62 | binomial | ✓ | ✗ | ✗ | ✗ | H | 3.2 | 13.3 | 13.2 | 13.3 | ✓Stan |
+| 61 | binomial | ✗ | ✗ | ✗ | ✗ | H | 0.13 | 13.1 | 13.1 | 13.3 | ✓Stan |
+| 62 | binomial | ✓ | ✗ | ✗ | ✗ | H | 0.20 | 13.3 | 13.2 | 13.3 | ✓Stan |
 | 63 | binomial | slopes | ✗ | ✗ | ✗ | H | 140.3 | | | | ✓Stan |
 | 64 | binomial | crossed | ✗ | ✗ | ✗ | H | 2.9 | 13.1 | 13.2 | 13.8 | ✓Stan (9.1x) |
 | 65 | binomial | ✓ | ICAR | ✗ | ✗ | H | 3.8 | 13.0 | 13.2 | 12.8 | ✓Stan |
@@ -519,12 +521,13 @@ Priority order for creating joint Stan models:
 **Pre-allocated NUTS buffers**: All per-iteration (11 vectors) and per-tree-merge (4×depth vectors) allocations eliminated via `NUTSWorkspace`.
 
 **Impact on simple models (N=500, 500 iter, 1 chain):**
-| Model | Before (dense) | After (auto/diag) | Stan | vs Stan |
+| Model | Feb-24 (auto/diag) | Feb-27 (vectorized) | Stan | vs Stan |
 |-------|:-:|:-:|:-:|:-:|
-| PG base | 2.4s | **1.1s** | 1.2s | **WIN** |
-| NB base | 2.8s | **2.7s** | 1.5s | 1.8x |
-| PG+RE | 8.0s | **4.8s** | 2.5s | 1.9x |
-| NB+RE | 13.7s | **5.2s** | 2.9s | 1.8x |
+| PG base | 1.1s | **0.59s** | 1.2s | **2.0x WIN** |
+| NB base | 2.7s | **0.97s** | 1.5s | **1.5x WIN** |
+| PG+RE | 4.8s | **1.25s** | 2.5s | **2.0x WIN** |
+| NB+RE | 5.2s | **1.97s** | 2.9s | **1.5x WIN** |
+| Bin base | 1.1s | **0.13s** | 9.4s | **72x WIN** |
 
 ### ⚠️ CRITICAL: Validation Status Correction
 
@@ -584,8 +587,8 @@ NUTS significantly faster than old L=20 for latent factors (3-18s vs 57-218s). S
 
 | Row | Model | numdenom | brms/Stan | Speedup | Diff | Status |
 |-----|-------|----------|-----------|---------|------|--------|
-| 61 | bin_base | 1.1s | 71.1s | **64.6x** | 0.0007 | **✓VALID** |
-| 62 | bin_re | 3.2s | 85.9s | **26.8x** | 0.0009 | **✓VALID** |
+| 61 | bin_base | 0.13s | 71.1s | **547x** | 0.0007 | **✓VALID** |
+| 62 | bin_re | 0.20s | 85.9s | **430x** | 0.0009 | **✓VALID** |
 | 63 | bin_slopes | - | - | - | - | **✓VALID** |
 | 64 | bin_crossed | 13.1s | 119.6s | **9.1x** | 0.0062 | **✓VALID** |
 | 65 | bin_icar | 2.1s | 76.1s | **35.9x** | 0.0011 | **✓VALID** |
@@ -608,16 +611,16 @@ Custom joint Stan models now validate the following rows:
 
 | Row | Model | numdenom | Stan | Status |
 |-----|-------|----------|------|--------|
-| 1 | pg_base | 1.1s | 1.2s | **✓VALID** (numdenom faster) |
-| 2 | pg_re | 4.8s | 2.5s | **✓VALID** |
+| 1 | pg_base | 0.59s | 1.2s | **✓VALID** (2.0x WIN) |
+| 2 | pg_re | 1.25s | 2.5s | **✓VALID** (2.0x WIN) |
 | 5 | pg_icar | 4.0s | 8.0s | **✓VALID** |
 | 6 | pg_bym2 | - | - | **✓VALID** |
 | 10 | pg_pcar | 5.0s | 9.1s | **✓VALID** |
 | 11 | pg_rw1 | 5.9s | 9.6s | **✓VALID** |
 | 12 | pg_rw2 | 5.0s | 6.9s | **✓VALID** |
 | 13 | pg_ar1 | - | - | **✓VALID** |
-| 31 | nb_base | 2.7s | 1.5s | **✓VALID** |
-| 32 | nb_re | 5.2s | 2.9s | **✓VALID** |
+| 31 | nb_base | 0.97s | 1.5s | **✓VALID** (1.5x WIN) |
+| 32 | nb_re | 1.97s | 2.9s | **✓VALID** (1.5x WIN) |
 | 35 | nb_icar | 5.9s | 7.9s | **✓VALID** |
 | 36 | nb_bym2 | - | - | **✓VALID** |
 | 41 | nb_rw1 | 10.0s | 70.7s | **✓VALID** |

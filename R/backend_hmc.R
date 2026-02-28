@@ -2431,7 +2431,7 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
         idx <- idx + 1
       }
 
-      # Temporal effects
+      # Temporal effects (all types: extract directly)
       for (t in seq_len(temporal_info$n_temporal_params)) {
         draws_list[[paste0("temporal[", t, "]")]] <- samples[, idx]
         idx <- idx + 1
@@ -2771,10 +2771,14 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
   # Temporal effects
   temporal_effect <- NULL
   if (temporal_info$type != "none") {
+    tau_temporal_ratio <- exp(samples[, idx])
     idx <- idx + 1  # Skip log_tau_temporal
+    rho_ar1_ratio <- NULL
     if (temporal_info$type == "ar1") {
+      rho_ar1_ratio <- 1 / (1 + exp(-samples[, idx]))
       idx <- idx + 1  # Skip logit_rho_ar1
     }
+
     temporal_effect <- samples[, idx:(idx + temporal_info$n_temporal_params - 1), drop = FALSE]
     idx <- idx + temporal_info$n_temporal_params
   }

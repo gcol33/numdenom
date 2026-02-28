@@ -10,9 +10,11 @@
 
 #include <vector>
 #include "autodiff_utils.h"
+#include "hmc_gp_autodiff.h"  // Templated GP/NNGP functions
 #include "hmc_svc_autodiff.h"  // Templated SVC functions
 #include "hmc_tvc_autodiff.h"  // Templated TVC functions
 #include "hmc_latent_autodiff.h"  // Templated latent factor functions
+#include "hmc_temporal_multiscale_autodiff.h"  // Templated multiscale temporal functions
 
 // Expects these to be defined by including hmc_sampler.h first:
 // - ratiod_hmc::ModelData
@@ -273,6 +275,139 @@ T compute_log_post_impl(
         }
     }
 
+    // GP spatial parameters and priors
+    std::vector<T> gp_w;
+
+    if (layout.is_gp && data.has_gp) {
+        // Extract hyperparameters from log-scale
+        T log_sigma2_gp = params[layout.log_sigma2_gp_idx];
+        T log_phi_gp = params[layout.log_phi_gp_idx];
+        T sigma2_gp = safe_exp(log_sigma2_gp);
+        T phi_gp = safe_exp(log_phi_gp);
+
+        // PC prior on sigma2 + Jacobian for log transform
+        log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+            sigma2_gp, data.gp_sigma2_prior_U, data.gp_sigma2_prior_alpha);
+        log_post = log_post + log_sigma2_gp;  // Jacobian
+
+        // Uniform prior on phi within bounds + Jacobian
+        double phi_val = get_value(phi_gp);
+        if (phi_val < data.gp_phi_prior_lower || phi_val > data.gp_phi_prior_upper) {
+            return T(-INFINITY);
+        }
+        log_post = log_post + ratiod_gp::log_prior_phi_uniform_t(
+            phi_gp, data.gp_phi_prior_lower, data.gp_phi_prior_upper);
+        log_post = log_post + log_phi_gp;  // Jacobian
+
+        // Extract GP spatial effects w[0..n_gp-1]
+        int n_gp = layout.gp_w_end - layout.gp_w_start;
+        gp_w.resize(n_gp);
+        for (int k = 0; k < n_gp; k++) {
+            gp_w[k] = params[layout.gp_w_start + k];
+        }
+
+        // Apply RSR projection if enabled
+        if (data.has_rsr && !data.rsr_projection.empty()) {
+            std::vector<T> w_projected(data.rsr_n, T(0.0));
+            for (int ii = 0; ii < data.rsr_n; ii++) {
+                for (int jj = 0; jj < data.rsr_n; jj++) {
+                    w_projected[ii] = w_projected[ii]
+                        + T(data.rsr_projection[ii * data.rsr_n + jj]) * gp_w[jj];
+                }
+            }
+            gp_w = w_projected;
+        }
+
+        // NNGP log-likelihood on spatial effects
+        log_post = log_post + ratiod_gp::gp_nngp_log_lik_t(
+            gp_w, sigma2_gp, phi_gp, data.gp_data);
+    }
+
+    // Multi-scale GP spatial parameters and priors
+    std::vector<T> ms_gp_w_local;
+    std::vector<T> ms_gp_w_regional;
+    std::vector<T> ms_gp_effect;
+
+    if (layout.is_multiscale_gp && data.has_multiscale_gp) {
+        // Extract 4 hyperparameters from log-scale
+        T log_sigma2_local = params[layout.log_sigma2_gp_local_idx];
+        T log_phi_local = params[layout.log_phi_gp_local_idx];
+        T log_sigma2_regional = params[layout.log_sigma2_gp_regional_idx];
+        T log_phi_regional = params[layout.log_phi_gp_regional_idx];
+
+        T sigma2_local = safe_exp(log_sigma2_local);
+        T phi_local = safe_exp(log_phi_local);
+        T sigma2_regional = safe_exp(log_sigma2_regional);
+        T phi_regional = safe_exp(log_phi_regional);
+
+        // PC priors on sigma2 + Jacobians
+        log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+            sigma2_local, data.ms_sigma2_local_prior_U, data.ms_sigma2_local_prior_alpha);
+        log_post = log_post + log_sigma2_local;  // Jacobian
+
+        log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+            sigma2_regional, data.ms_sigma2_regional_prior_U, data.ms_sigma2_regional_prior_alpha);
+        log_post = log_post + log_sigma2_regional;  // Jacobian
+
+        // Uniform priors on phi (range) within bounds + Jacobians
+        double phi_local_val = get_value(phi_local);
+        if (phi_local_val < data.multiscale_gp_data.range_local_lower ||
+            phi_local_val > data.multiscale_gp_data.range_local_upper) {
+            return T(-INFINITY);
+        }
+        log_post = log_post + log_phi_local;  // Jacobian
+
+        double phi_regional_val = get_value(phi_regional);
+        if (phi_regional_val < data.multiscale_gp_data.range_regional_lower ||
+            phi_regional_val > data.multiscale_gp_data.range_regional_upper) {
+            return T(-INFINITY);
+        }
+        log_post = log_post + log_phi_regional;  // Jacobian
+
+        // Extract local GP effects
+        int n_gp_local = layout.gp_local_end - layout.gp_local_start;
+        ms_gp_w_local.resize(n_gp_local);
+        for (int k = 0; k < n_gp_local; k++) {
+            ms_gp_w_local[k] = params[layout.gp_local_start + k];
+        }
+
+        // Extract regional GP effects
+        int n_gp_regional = layout.gp_regional_end - layout.gp_regional_start;
+        ms_gp_w_regional.resize(n_gp_regional);
+        for (int k = 0; k < n_gp_regional; k++) {
+            ms_gp_w_regional[k] = params[layout.gp_regional_start + k];
+        }
+
+        // Apply RSR projection if enabled
+        if (data.has_rsr && !data.rsr_projection.empty()) {
+            std::vector<T> local_proj(data.rsr_n, T(0.0));
+            std::vector<T> regional_proj(data.rsr_n, T(0.0));
+            for (int ii = 0; ii < data.rsr_n; ii++) {
+                for (int jj = 0; jj < data.rsr_n; jj++) {
+                    local_proj[ii] = local_proj[ii]
+                        + T(data.rsr_projection[ii * data.rsr_n + jj]) * ms_gp_w_local[jj];
+                    regional_proj[ii] = regional_proj[ii]
+                        + T(data.rsr_projection[ii * data.rsr_n + jj]) * ms_gp_w_regional[jj];
+                }
+            }
+            ms_gp_w_local = local_proj;
+            ms_gp_w_regional = regional_proj;
+        }
+
+        // Multiscale NNGP log-likelihood for both scales
+        log_post = log_post + ratiod_gp::multiscale_gp_log_lik_t(
+            ms_gp_w_local, ms_gp_w_regional,
+            sigma2_local, phi_local, sigma2_regional, phi_regional,
+            data.multiscale_gp_data);
+
+        // Precompute combined effect at observation level
+        ms_gp_effect.resize(data.N, T(0.0));
+        for (int ii = 0; ii < data.N; ii++) {
+            int loc = data.multiscale_gp_data.obs_to_loc[ii];
+            ms_gp_effect[ii] = ms_gp_w_local[loc] + ms_gp_w_regional[loc];
+        }
+    }
+
     // Temporal priors
     if (layout.has_temporal) {
         int T_times = data.n_times;
@@ -373,6 +508,93 @@ T compute_log_post_impl(
                 }
             }
         }
+    }
+
+    // Multiscale temporal parameters and priors
+    std::vector<T> ms_trend;
+    std::vector<T> ms_seasonal;
+    std::vector<T> ms_short_term;
+    std::vector<T> ms_temporal_eta;
+    T ms_sigma2_trend = T(1.0);
+    T ms_sigma2_seasonal = T(1.0);
+    T ms_sigma2_short = T(1.0);
+    T ms_rho_short = T(0.5);
+
+    if (layout.has_multiscale_temporal) {
+        const auto& ms_data = data.multiscale_temporal_data;
+
+        // Trend component
+        if (layout.log_sigma2_trend_idx >= 0) {
+            T log_sigma2_trend = params[layout.log_sigma2_trend_idx];
+            ms_sigma2_trend = safe_exp(log_sigma2_trend);
+
+            int n_trend = layout.trend_end - layout.trend_start;
+            ms_trend.resize(n_trend);
+            for (int t = 0; t < n_trend; t++) {
+                ms_trend[t] = params[layout.trend_start + t];
+            }
+
+            // PC prior on sigma2_trend + Jacobian for log transform
+            log_post = log_post + ratiod_multiscale_ad::log_prior_sigma2_temporal_pc(
+                ms_sigma2_trend, data.ms_sigma2_trend_prior_U, data.ms_sigma2_trend_prior_alpha);
+            log_post = log_post + log_sigma2_trend;  // Jacobian
+        }
+
+        // Seasonal component
+        if (layout.log_sigma2_seasonal_idx >= 0) {
+            T log_sigma2_seasonal = params[layout.log_sigma2_seasonal_idx];
+            ms_sigma2_seasonal = safe_exp(log_sigma2_seasonal);
+
+            int n_seasonal = layout.seasonal_end - layout.seasonal_start;
+            ms_seasonal.resize(n_seasonal);
+            for (int t = 0; t < n_seasonal; t++) {
+                ms_seasonal[t] = params[layout.seasonal_start + t];
+            }
+
+            // PC prior on sigma2_seasonal + Jacobian
+            log_post = log_post + ratiod_multiscale_ad::log_prior_sigma2_temporal_pc(
+                ms_sigma2_seasonal, data.ms_sigma2_seasonal_prior_U, data.ms_sigma2_seasonal_prior_alpha);
+            log_post = log_post + log_sigma2_seasonal;  // Jacobian
+        }
+
+        // Short-term component
+        if (layout.log_sigma2_short_idx >= 0) {
+            T log_sigma2_short = params[layout.log_sigma2_short_idx];
+            ms_sigma2_short = safe_exp(log_sigma2_short);
+
+            int n_short = layout.short_term_end - layout.short_term_start;
+            ms_short_term.resize(n_short);
+            for (int t = 0; t < n_short; t++) {
+                ms_short_term[t] = params[layout.short_term_start + t];
+            }
+
+            // PC prior on sigma2_short + Jacobian
+            log_post = log_post + ratiod_multiscale_ad::log_prior_sigma2_temporal_pc(
+                ms_sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha);
+            log_post = log_post + log_sigma2_short;  // Jacobian
+
+            // AR1 rho parameter
+            if (layout.logit_rho_short_idx >= 0) {
+                T logit_rho_short = params[layout.logit_rho_short_idx];
+                // Map logit to (-1, 1): rho = 2*invlogit(logit) - 1
+                T u = inv_logit(logit_rho_short);
+                ms_rho_short = T(2.0) * u - T(1.0);
+
+                // Beta(2,2) prior on u + Jacobian for logit transform
+                log_post = log_post + safe_log(u) + safe_log(T(1.0) - u);  // Beta(2,2)
+                log_post = log_post + safe_log(u) + safe_log(T(1.0) - u);  // Jacobian
+            }
+        }
+
+        // GMRF log-likelihood for all components
+        log_post = log_post + ratiod_multiscale_ad::multiscale_temporal_log_lik(
+            ms_trend, ms_seasonal, ms_short_term,
+            ms_sigma2_trend, ms_sigma2_seasonal, ms_sigma2_short, ms_rho_short,
+            ms_data);
+
+        // Precompute multiscale temporal contribution to linear predictor
+        ratiod_multiscale_ad::compute_temporal_eta(
+            ms_trend, ms_seasonal, ms_short_term, ms_data, ms_temporal_eta);
     }
 
     // SVC (Spatially-Varying Coefficients) parameters and priors
@@ -622,6 +844,29 @@ T compute_log_post_impl(
             eta_denom = eta_denom + spatial_effect;
         }
 
+        // Add GP spatial effect (map observation to unique location)
+        if (layout.is_gp && !gp_w.empty()) {
+            int loc_i = data.gp_data.obs_to_loc[i];
+            T gp_effect = gp_w[loc_i];
+            if (data.gp_data.shared) {
+                eta_num = eta_num + gp_effect;
+                eta_denom = eta_denom + gp_effect;
+            } else {
+                eta_num = eta_num + gp_effect;
+            }
+        }
+
+        // Add multi-scale GP spatial effect
+        if (layout.is_multiscale_gp && !ms_gp_effect.empty()) {
+            T msgp_effect = ms_gp_effect[i];
+            if (data.multiscale_gp_data.shared) {
+                eta_num = eta_num + msgp_effect;
+                eta_denom = eta_denom + msgp_effect;
+            } else {
+                eta_num = eta_num + msgp_effect;
+            }
+        }
+
         // Add temporal effects
         if (layout.has_temporal && !data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
             int t = data.temporal_time_idx[i] - 1;
@@ -633,6 +878,17 @@ T compute_log_post_impl(
                 eta_denom = eta_denom + temporal_effect;
             } else {
                 eta_num = eta_num + temporal_effect;
+            }
+        }
+
+        // Add multiscale temporal effect
+        if (layout.has_multiscale_temporal && !ms_temporal_eta.empty()) {
+            T ms_temp_effect = ms_temporal_eta[i];
+            if (data.multiscale_temporal_data.shared) {
+                eta_num = eta_num + ms_temp_effect;
+                eta_denom = eta_denom + ms_temp_effect;
+            } else {
+                eta_num = eta_num + ms_temp_effect;
             }
         }
 

@@ -81,6 +81,16 @@ inline MassMatrixType parse_metric_type(const std::string& metric_str) {
 // Set global gradient mode (defined in hmc_sampler.cpp)
 void set_gradient_mode(GradientMode mode);
 
+// Function pointer type for gradient computation (eliminates per-call dispatch overhead)
+struct ModelData;
+struct ParamLayout;
+using GradientFn = void(*)(
+    const std::vector<double>&, const ModelData&, const ParamLayout&,
+    std::vector<double>&, double*);
+
+// Resolve the gradient function pointer once based on mode + model config
+GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const ParamLayout& layout);
+
 // Model data container with spatial support
 struct ModelData {
   // Response data
@@ -500,6 +510,9 @@ struct NUTSWorkspace {
   int max_depth;
   int stride;               // 3 * n (q + p + grad per slot)
   int total_slots;
+
+  // Resolved gradient function pointer (set once, avoids per-call dispatch)
+  GradientFn gradient_fn = nullptr;
 
   // Contiguous pool: [slot][q|p|grad], each n doubles wide
   std::vector<double> pool;
