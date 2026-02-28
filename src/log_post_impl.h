@@ -492,8 +492,8 @@ T compute_log_post_impl(
 
             } else if (data.temporal_type == TemporalType::AR1) {
                 // AR1: phi[t] | phi[t-1] ~ N(rho * phi[t-1], 1/tau)
-                // Jacobian for logit -> rho transformation: log(rho+1) + log(1-rho)
-                log_post = log_post + safe_log(rho_ar1 + T(1.0)) + safe_log(T(1.0) - rho_ar1);
+                // Uniform(0,1) prior on rho with logit Jacobian: log(rho) + log(1-rho)
+                log_post = log_post + safe_log(rho_ar1) + safe_log(T(1.0) - rho_ar1);
 
                 for (int g = 0; g < data.n_temporal_groups; g++) {
                     // First time point: phi[0] ~ N(0, 1/(tau*(1-rho^2)))

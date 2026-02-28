@@ -3579,26 +3579,25 @@ void compute_gradient_gp_handcoded(
     // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        double grad_sigma_re = -2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0;
-        grad[layout.log_sigma_re_idx] = grad_sigma_re * sigma_re;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
 
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
         for (int g = 0; g < data.n_re_groups; g++) {
             grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
         }
-        grad[layout.log_sigma_re_idx] -= data.n_re_groups;
     }
 
-    // Overdispersion prior: Gamma
+    // Overdispersion prior: Gamma(shape, rate) via log transform
+    // d/d(log_phi) = shape - rate*phi (no extra phi factor)
     if (layout.has_phi_num) {
-        grad[layout.log_phi_num_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_num_idx] = data.phi_prior_shape
                                        - data.phi_prior_rate * phi_num;
-        grad[layout.log_phi_num_idx] *= phi_num;
     }
     if (layout.has_phi_denom) {
-        grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_denom_idx] = data.phi_prior_shape
                                          - data.phi_prior_rate * phi_denom;
-        grad[layout.log_phi_denom_idx] *= phi_denom;
     }
 
     // PC prior on GP variance: P(sigma > U) = alpha
@@ -3782,13 +3781,17 @@ void compute_gradient_gp_temporal_handcoded(
 
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
+        }
     }
 
-    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
-    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
 
     double rate_sigma = -std::log(data.gp_sigma2_prior_alpha) / data.gp_sigma2_prior_U;
     grad[layout.log_sigma2_gp_idx] = -0.5 * rate_sigma * std::sqrt(sigma2_gp) + 0.5;
@@ -3941,14 +3944,18 @@ void compute_gradient_temporal_gp_handcoded(
     // RE priors: Half-Cauchy on sigma_re + N(0, sigma_re^2) on each RE
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
+        }
     }
 
-    // Dispersion priors: Gamma on phi_num/phi_denom
-    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
-    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+    // Dispersion priors: Gamma on phi via log transform, d/d(log_phi) = shape - rate*phi
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
 
     // Temporal GP hyperparameter priors
     // sigma2: PC prior => d/d(log_sigma2) [ log(rate) - rate*sqrt(sigma2) - log(2*sqrt(sigma2)) + log_sigma2 ]
@@ -4233,13 +4240,17 @@ void compute_gradient_msgp_temporal_handcoded(
 
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
+        }
     }
 
-    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
-    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
 
     // PC priors on MSGP variances
     double rate_sigma_local = -std::log(data.ms_sigma2_local_prior_alpha) / data.ms_sigma2_local_prior_U;
@@ -4472,37 +4483,34 @@ void compute_gradient_svc_handcoded(
     // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        double grad_sigma_re = -2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0;
-        grad[layout.log_sigma_re_idx] = grad_sigma_re * sigma_re;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
 
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
         for (int g = 0; g < data.n_re_groups; g++) {
             grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
         }
-        grad[layout.log_sigma_re_idx] -= data.n_re_groups;
     }
 
-    // Overdispersion prior: Gamma
+    // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
     if (layout.has_phi_num) {
-        grad[layout.log_phi_num_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_num_idx] = data.phi_prior_shape
                                        - data.phi_prior_rate * phi_num;
-        grad[layout.log_phi_num_idx] *= phi_num;
     }
     if (layout.has_phi_denom) {
-        grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_denom_idx] = data.phi_prior_shape
                                          - data.phi_prior_rate * phi_denom;
-        grad[layout.log_phi_denom_idx] *= phi_denom;
     }
 
     // SVC hyperparameter priors
     for (int j = 0; j < n_svc; j++) {
-        // Half-Cauchy on sigma
+        // Half-Cauchy on sigma, d/d(log_sigma2) = -ratio^2/(1+ratio^2) + 1
         double sigma = std::sqrt(svc_sigma2[j]);
         double scale = data.svc_sigma2_prior_scale;
         double ratio = sigma / scale;
-        // d/d(log_sigma2) of Half-Cauchy: (-ratio/(scale*(1+ratio^2)) + 0.5/sigma) * sigma2
-        double grad_hc = -ratio / (scale * (1.0 + ratio * ratio)) + 0.5 / sigma;
-        grad[layout.log_sigma2_svc_start + j] = grad_hc * svc_sigma2[j];
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma2_svc_start + j] = -ratio_sq / (1.0 + ratio_sq) + 1.0;
 
         // Uniform prior on phi - just Jacobian
         grad[layout.log_phi_svc_start + j] = 1.0;
@@ -4750,26 +4758,24 @@ void compute_gradient_tvc_handcoded(
     // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        double grad_sigma_re = -2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0;
-        grad[layout.log_sigma_re_idx] = grad_sigma_re * sigma_re;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
 
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
         for (int g = 0; g < data.n_re_groups; g++) {
             grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
         }
-        grad[layout.log_sigma_re_idx] -= data.n_re_groups;
     }
 
-    // Overdispersion prior: Gamma
+    // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
     if (layout.has_phi_num) {
-        grad[layout.log_phi_num_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_num_idx] = data.phi_prior_shape
                                        - data.phi_prior_rate * phi_num;
-        grad[layout.log_phi_num_idx] *= phi_num;
     }
     if (layout.has_phi_denom) {
-        grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_denom_idx] = data.phi_prior_shape
                                          - data.phi_prior_rate * phi_denom;
-        grad[layout.log_phi_denom_idx] *= phi_denom;
     }
 
     // TVC hyperparameter priors: PC prior on tau (must match compute_log_post)
@@ -5064,14 +5070,14 @@ void compute_gradient_latent_handcoded(
     // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        double grad_sigma_re = -2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0;
-        grad[layout.log_sigma_re_idx] = grad_sigma_re * sigma_re;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
 
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
         for (int g = 0; g < data.n_re_groups; g++) {
             grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
         }
-        grad[layout.log_sigma_re_idx] -= data.n_re_groups;
     }
 
     // Overdispersion prior: Gamma(shape, rate) on phi, with log transform
@@ -5555,26 +5561,24 @@ void compute_gradient_msgp_handcoded(
     // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        double grad_sigma_re = -2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0;
-        grad[layout.log_sigma_re_idx] = grad_sigma_re * sigma_re;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
 
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
         for (int g = 0; g < data.n_re_groups; g++) {
             grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
         }
-        grad[layout.log_sigma_re_idx] -= data.n_re_groups;
     }
 
-    // Overdispersion prior: Gamma
+    // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
     if (layout.has_phi_num) {
-        grad[layout.log_phi_num_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_num_idx] = data.phi_prior_shape
                                        - data.phi_prior_rate * phi_num;
-        grad[layout.log_phi_num_idx] *= phi_num;
     }
     if (layout.has_phi_denom) {
-        grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+        grad[layout.log_phi_denom_idx] = data.phi_prior_shape
                                          - data.phi_prior_rate * phi_denom;
-        grad[layout.log_phi_denom_idx] *= phi_denom;
     }
 
     // PC priors on GP variances
@@ -6055,8 +6059,8 @@ void compute_gradient_gp_temporal_autodiff(
             Var logit_rho = params_ad[layout.logit_rho_ar1_idx];
             rho_ar1 = 1.0 / (1.0 + safe_exp(-logit_rho));
 
-            // rho ~ Uniform(-1, 1) Jacobian
-            log_post = log_post + safe_log(rho_ar1 + 1.0) + safe_log(1.0 - rho_ar1);
+            // rho ~ Uniform(0,1) prior with logit Jacobian
+            log_post = log_post + safe_log(rho_ar1) + safe_log(1.0 - rho_ar1);
         }
 
         // Extract temporal effects for each group
@@ -6294,27 +6298,24 @@ void compute_gradient_hsgp(
   // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
   if (layout.has_re && data.n_re_groups > 0) {
     double ratio = sigma_re / data.sigma_re_scale;
-    double grad_sigma_re = -2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0;
-    grad[layout.log_sigma_re_idx] = grad_sigma_re * sigma_re;
+    double ratio_sq = ratio * ratio;
+    grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
 
     double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
     for (int g = 0; g < data.n_re_groups; g++) {
       grad[layout.re_start + g] = -tau_re * re[g];
+      grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
     }
-    // Gradient of RE normalizing constant w.r.t. log_sigma_re
-    grad[layout.log_sigma_re_idx] -= data.n_re_groups;
   }
 
-  // Overdispersion prior: Gamma
+  // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
   if (layout.has_phi_num) {
-    grad[layout.log_phi_num_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+    grad[layout.log_phi_num_idx] = data.phi_prior_shape
                                   - data.phi_prior_rate * phi_num;
-    grad[layout.log_phi_num_idx] *= phi_num;
   }
   if (layout.has_phi_denom) {
-    grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - 1.0 + 1.0)
+    grad[layout.log_phi_denom_idx] = data.phi_prior_shape
                                     - data.phi_prior_rate * phi_denom;
-    grad[layout.log_phi_denom_idx] *= phi_denom;
   }
 
   // HSGP prior gradients (will be added to by hsgp_compute_gradients)
@@ -6606,13 +6607,17 @@ void compute_gradient_ms_temporal_handcoded(
 
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
+        }
     }
 
-    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
-    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
 
     // Spatial prior gradients (ICAR/BYM2)
     if (layout.has_spatial && !layout.is_bym2) {
@@ -6624,7 +6629,7 @@ void compute_gradient_ms_temporal_handcoded(
         double sigma_total = sigma_s_bym2 / std::sqrt(rho_bym2);
         double ratio = sigma_total / data.sigma_re_scale;
         grad[layout.log_sigma_bym2_idx] = -2.0 * ratio * ratio / (1.0 + ratio * ratio) + 1.0;
-        grad[layout.logit_rho_bym2_idx] = 0.5 * (1.0 - 2.0 * rho_bym2);
+        grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
     }
 
     // PC priors on multiscale temporal variances + Jacobian (+1 for log_sigma2 = log(exp(·)))
@@ -6881,13 +6886,17 @@ void compute_gradient_spatiotemporal_handcoded(
 
     if (layout.has_re && data.n_re_groups > 0) {
         double ratio = sigma_re / data.sigma_re_scale;
-        grad[layout.log_sigma_re_idx] = (-2.0 * ratio / (data.sigma_re_scale * (1.0 + ratio * ratio)) + 1.0) * sigma_re - data.n_re_groups;
+        double ratio_sq = ratio * ratio;
+        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
         double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) grad[layout.re_start + g] = -tau_re * re[g];
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
+        }
     }
 
-    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_num) * phi_num;
-    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = (data.phi_prior_shape - data.phi_prior_rate * phi_denom) * phi_denom;
+    if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
+    if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
 
     // Spatial prior (ICAR: Gamma on tau)
     if (layout.has_spatial && !layout.is_bym2) {
@@ -6898,7 +6907,7 @@ void compute_gradient_spatiotemporal_handcoded(
         double sigma_total = sigma_s_bym2 / std::sqrt(rho_bym2);
         double ratio = sigma_total / data.sigma_re_scale;
         grad[layout.log_sigma_bym2_idx] = -2.0 * ratio * ratio / (1.0 + ratio * ratio) + 1.0;
-        grad[layout.logit_rho_bym2_idx] = 0.5 * (1.0 - 2.0 * rho_bym2);
+        grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
     }
 
     // Temporal prior (Gamma on tau, Beta on rho)
