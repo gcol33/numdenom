@@ -324,7 +324,7 @@ Priority order for creating joint Stan models:
 | 24 | poisson_gamma | ✓ | ICAR | ✗ | ZI | H | 4.5 | | | | ✓Stan* (soft constraint) |
 | 25 | poisson_gamma | slopes | ICAR | ✗ | ✗ | H | 158.4 | | 45.3 | | ✓Stan* (soft constraint) |
 | 26 | poisson_gamma | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim* (eta cor=0.73, NUTS timeout) |
-| 27 | poisson_gamma | ✓ | ✗ | TVC | ✗ | H | 68.0 | | 47.3 | | ✓Stan (joint, 12.4s) |
+| 27 | poisson_gamma | ✓ | ✗ | TVC | ✗ | H | 1.1 | | 47.3 | | ✓Stan (joint, 12.4s) |
 | 28 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 90.3 | | | | ✓Sim ST-I (0.11 SD) |
 | 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 140.9 | | | | ✓Sim ST-IV (0.24 SD) |
 | 30 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 10.4 | | | | ✓Sim latent (1.66 SD) |
@@ -361,7 +361,7 @@ Priority order for creating joint Stan models:
 | 54 | negbin_negbin | ✓ | ICAR | ✗ | ZI | H | 2.9 | | | | ✓Stan* (soft constraint) |
 | 55 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H | 160.2 | | | | ✓Stan* (soft constraint) |
 | 56 | negbin_negbin | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim* (eta cor=0.70, NUTS timeout) |
-| 57 | negbin_negbin | ✓ | ✗ | TVC | ✗ | H | 183.2 | | | | ✓Stan (joint) |
+| 57 | negbin_negbin | ✓ | ✗ | TVC | ✗ | H | 3.1 | | | | ✓Stan (joint) |
 | 58 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 132.7 | | | | ✓Sim ST-I (0.50 SD) |
 | 59 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 184.4 | | | | ✓Sim ST-IV (1.91 SD) |
 | 60 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 18.4 | | | | ✓Sim latent (0.04 SD) |
@@ -400,7 +400,7 @@ Priority order for creating joint Stan models:
 | 86 | binomial | ✓ | ICAR | ✗ | ZI | H | 3.0 | | | | ✓Stan (13.2x) |
 | 87 | binomial | slopes | ICAR | ✗ | ✗ | H | 136.5 | | | | ✓Stan |
 | 88 | binomial | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim (eta cor=0.83, NUTS timeout) |
-| 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 24.4 | | | | ✓Stan (17.1x) |
+| 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 2.7 | | | | ✓Stan (17.1x) |
 | 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 44.1 | | | | ✓Sim ST-I (0.59 SD) |
 | 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 93.9 | | | | ✓Sim ST-IV (1.67 SD) |
 | 92 | binomial | ✓ | ✗ | ✗ | ✗ | H | 3.0 | | | | ✓Sim latent (1.97 SD) |
@@ -507,16 +507,16 @@ Priority order for creating joint Stan models:
 | **Total** | **107** | **100%** |
 
 **NUTS performance summary:**
-- **Fast (<10s)**: 52 rows — base families, RE, ICAR, pCAR, RW, ZI/ZOIB, latent (bin)
-- **Medium (10-100s)**: 15 rows — temporal GP, MS_t, TVC, HSGP (bin), latent (pg/nb)
+- **Fast (<10s)**: 55 rows — base families, RE, ICAR, pCAR, RW, ZI/ZOIB, latent (bin), TVC
+- **Medium (10-100s)**: 12 rows — temporal GP, MS_t, HSGP (bin), latent (pg/nb)
 - **Slow (100-600s)**: 23 rows — slopes, BYM2, HSGP (pg/nb), hurdle, AR1+spatial, spatiotemporal
 - **Timeout (>600s)**: 12 rows — GP, SVC, MSGP (some), GP+RW1
 
 ### Mass Matrix & Metric Selection (2026-02-24)
 
 **AUTO metric** (`metric="auto"`, default) selects mass matrix type based on model complexity:
-- **DIAG** for: base, +RE, +ICAR, +pCAR, +RW1/RW2/AR1, +ZI/Hurdle, +crossed
-- **DENSE** (with OAS shrinkage) for: BYM2, correlated slopes, GP, HSGP, MSGP, temporal GP, multiscale temporal, SVC, TVC, spatiotemporal, latent factors
+- **DIAG** for: base, +RE, +ICAR, +pCAR, +RW1/RW2/AR1, +ZI/Hurdle, +crossed, +TVC
+- **DENSE** (with OAS shrinkage) for: BYM2, correlated slopes, GP, HSGP, MSGP, temporal GP, multiscale temporal, SVC, spatiotemporal, latent factors
 
 **Pre-allocated NUTS buffers**: All per-iteration (11 vectors) and per-tree-merge (4×depth vectors) allocations eliminated via `NUTSWorkspace`.
 
@@ -552,7 +552,7 @@ Priority order for creating joint Stan models:
 
 **All features now have H gradients, benchmarks, and validation:**
 - SVC (rows 26, 56, 88) - NNGP-based, ~700-765s (SLOW, O(N²) NNGP), validated via prediction recovery
-- TVC (rows 27, 57, 89) - RW prior, 3-14s (fast)
+- TVC (rows 27, 57, 89) - RW prior, 1-3s (fast, gradient fix 2026-02-28: was 24-183s)
 - Latent factors (rows 30, 60, 92) - benchmarked with N=50 (see note below)
 
 **Latent factor benchmark (N=50, K=2, NUTS):**
@@ -566,7 +566,7 @@ NUTS significantly faster than old L=20 for latent factors (3-18s vs 57-218s). S
 
 **Newly benchmarked (44 models):**
 - **SVC models: rows 26, 56, 88 (708-765s, SLOW - O(N²) NNGP)**
-- **TVC models: rows 27, 57, 89 (3-14s, fast)**
+- **TVC models: rows 27, 57, 89 (1.1-3.1s, fast after gradient fix 2026-02-28)**
 - negbin GP spatial: rows 37-40 (92.2s, 0.3s, 14.0s, 9.5s)
 - negbin temporal GP/MS: rows 44-45 (8.1s, 8.2s)
 - negbin GP+temporal: rows 51-53 (101.2s, 0.4s, 14.2s)
@@ -891,7 +891,7 @@ Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/bench_validate_svc_fixed.R`
 - **Temporal GP**: 10-12s (efficient temporal structure)
 - **Temporal Multiscale**: ~700s (SLOW - needs optimization)
 - **SVC**: 708-765s (SLOW - O(N²) NNGP distance computations)
-- **TVC**: 3-14s (fast - simple RW prior structure)
+- **TVC**: 1-3s (fast - gradient fix 2026-02-28: was 24-183s)
 - **gamma_gamma family**: 31-570s (SLOW - needs optimization)
 - **lognormal family**: 10-213s (moderate)
 - **beta_binomial family**: 48-1048s (SLOW - needs optimization)
@@ -900,8 +900,8 @@ Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/bench_validate_svc_fixed.R`
 **Performance tiers (NUTS, H mode):**
 | Tier | Time | Model types |
 |:----:|:----:|-------------|
-| Fast | <10s | Core families, RE, ICAR, pCAR, RW1/RW2, ZI/ZOIB, MSGP (pg) |
-| Medium | 10-100s | GP_t, MS_t, TVC, HSGP (bin), latent, AR1 |
+| Fast | <10s | Core families, RE, ICAR, pCAR, RW1/RW2, ZI/ZOIB, MSGP (pg), TVC |
+| Medium | 10-100s | GP_t, MS_t, HSGP (bin), latent, AR1 |
 | Slow | 100-600s | Slopes, BYM2, HSGP (pg/nb), hurdle, ICAR+AR1, MSGP (bin/nb) |
 | Timeout | >600s | GP (NNGP), SVC, GP+RW1 — need dense mass matrix |
 | OI/ZOIB | <10s | OI binomial, ZOIB (rows 78-79) |
@@ -921,7 +921,7 @@ Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/bench_validate_svc_fixed.R`
 - HSGP + temporal: ✓ (rows 22, 52, 84)
 - MSGP + temporal: ✓ (rows 23, 53, 85)
 - **SVC: ✓Sim (rows 26, 56, 88) - 708-765s, SLOW O(N²) NNGP, prediction recovery validated**
-- **TVC: ✓ (rows 27, 57, 89) - 3-14s, fast**
+- **TVC: ✓ (rows 27, 57, 89) - 1.1-3.1s, fast (gradient fix 2026-02-28)**
 - gamma_gamma: ✓ (rows 93-97)
 - lognormal: ✓ (rows 98-102)
 - beta_binomial: ✓ (rows 103-107)
