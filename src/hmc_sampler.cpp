@@ -4772,25 +4772,23 @@ void compute_gradient_tvc_handcoded(
         grad[layout.log_phi_denom_idx] *= phi_denom;
     }
 
-    // TVC hyperparameter priors (Gamma on tau)
-    double tau_prior_shape = 2.0;
-    double tau_prior_rate = 0.5;
+    // TVC hyperparameter priors: PC prior on tau (must match compute_log_post)
+    // log_post = log(rate) - rate/sqrt(tau) - log(2*sigma) + log(tau)
+    //          = const - rate * tau^{-1/2} + 1.5 * log(tau)
+    // d/d(log_tau) = 0.5 * rate / sqrt(tau) + 1.5
+    double tvc_pc_rate = -std::log(0.01) / 1.0;  // P(sigma > 1) = 0.01
     for (int j = 0; j < n_tvc; j++) {
-        // Gamma prior on tau: (shape-1)*log(tau) - rate*tau + log(tau) [Jacobian]
-        grad[layout.log_tau_tvc_start + j] = (tau_prior_shape - 1.0 + 1.0) - tau_prior_rate * tvc_tau[j];
-        grad[layout.log_tau_tvc_start + j] *= tvc_tau[j];
+        double sigma_j = 1.0 / std::sqrt(tvc_tau[j]);
+        grad[layout.log_tau_tvc_start + j] = 0.5 * tvc_pc_rate * sigma_j + 1.5;
     }
 
-    // AR1: Beta(2,2) prior on rho (centered at 0)
+    // AR1: Uniform(-1,1) prior on rho (must match compute_log_post)
+    // log_post Jacobian: log(u) + log(1-u) where u = (rho+1)/2
+    // d/d(logit_u) [log(u) + log(1-u)] = (1-u) + (-u) = 1 - 2u
     if (data.tvc_data.structure == ratiod_temporal::TemporalType::AR1) {
         for (int j = 0; j < n_tvc; j++) {
             double u = (tvc_rho[j] + 1.0) / 2.0;  // u in (0,1)
-            // Beta(2,2) log density: log(u) + log(1-u) + Jacobian
-            // d/d(logit_u) = (2-1)/u - (2-1)/(1-u) + u*(1-u) [Jacobian]
-            //             = 1/u - 1/(1-u) + u*(1-u)
-            // Simplified: grad = (1-2*u) + u*(1-u)
-            double grad_logit = (1.0 - 2.0 * u) + u * (1.0 - u);
-            grad[layout.logit_rho_tvc_start + j] = grad_logit;
+            grad[layout.logit_rho_tvc_start + j] = 1.0 - 2.0 * u;
         }
     }
 
@@ -8562,14 +8560,18 @@ HMCResultCpp run_hmc_chain_cpp(
   // Resolve AUTO metric: select dense vs diagonal based on model complexity.
   // Dense mass helps when posterior has strong parameter correlations that
   // reparameterization alone cannot decorrelate (correlated slopes, BYM2, HSGP, GP, SVC).
-  // Models with effective reparameterizations (TVC) work equally well or better
-  // with diagonal mass.
   //
   // BENCHMARKED 2026-02-27: Attempted removing has_re, has_temporal, is_hsgp,
   // is_temporal_gp, has_tvc from needs_dense. Result: ALL models got WORSE
   // (row 2 pg+RE: 1.25s→4.2s, row 27 pg+TVC: 68→87s, row 38 nb+HSGP: 210→266s).
   // Dense metric is essential even for non-centered RE — NUTS compensates for
   // missing correlation info with longer trajectories, net negative.
+  //
+  // REBENCHMARKED 2026-02-28: After fixing TVC tau prior gradient mismatch
+  // (PC prior in log_post vs Gamma(2,0.5) in gradient), TVC no longer needs
+  // dense mass. DIAG: NB+TVC=1.1s/0div, PG+TVC=0.9s/0div. DENSE: NB+TVC
+  // fails (OAS shrinkage=0.000 → near-singular matrix → 250/250 divergences).
+  // TVC removed from needs_dense.
   constexpr int DENSE_MAX_PARAMS = 200;
   MassMatrixType effective_metric = metric_type;
   if (effective_metric == MassMatrixType::AUTO) {
@@ -8577,6 +8579,8 @@ HMCResultCpp run_hmc_chain_cpp(
     // - Any RE model has residual sigma_re ↔ likelihood correlation that
     //   non-centered parameterization doesn't fully remove.
     // - Temporal, spatial, and other structured effects also benefit from dense.
+    // - TVC uses diagonal: gradient fix (2026-02-28) eliminated the tau prior
+    //   inconsistency that was causing poor step sizes requiring dense compensation.
     bool needs_dense = layout.has_re ||
                        layout.has_re_correlated_slopes ||
                        layout.has_temporal ||
@@ -8588,8 +8592,7 @@ HMCResultCpp run_hmc_chain_cpp(
                        layout.has_multiscale_temporal ||
                        layout.has_svc ||
                        layout.has_spatiotemporal ||
-                       layout.has_latent ||
-                       layout.has_tvc;
+                       layout.has_latent;
     effective_metric = needs_dense ? MassMatrixType::DENSE : MassMatrixType::DIAG;
     if (verbose) {
       REprintf("  [METRIC] auto -> %s (p=%d",

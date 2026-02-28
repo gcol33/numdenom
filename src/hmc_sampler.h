@@ -863,6 +863,14 @@ public:
       double rho_floor = 1.0 - nf / p;
       rho = std::max(rho, rho_floor);
     }
+
+    // Even when n > p, moderate n/p ratios (2-5) can produce poorly
+    // conditioned matrices. Apply a floor that decays as n/p grows.
+    // At n/p=2: floor=0.08, n/p=5: floor=0.05, n/p=10+: floor=0.0
+    if (nf < 10.0 * p) {
+      double rho_cond_floor = 0.1 * (1.0 - nf / (10.0 * p));
+      rho = std::max(rho, rho_cond_floor);
+    }
     shrinkage_intensity = rho;
 
     // Step 3: Apply shrinkage: Σ = (1 - ρ) * S + ρ * (tr(S)/p) * I

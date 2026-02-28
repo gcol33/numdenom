@@ -179,8 +179,10 @@ inline double ar1_grad_log_tau(const double* w, int n_times, double tau, double 
 inline double ar1_grad_logit_rho(const double* w, int n_times, double tau, double rho) {
     double one_m_rho2 = 1.0 - rho * rho;
 
-    // d log p / d rho from stationary variance
-    double grad_rho = rho / one_m_rho2 * w[0] * w[0];
+    // d log p / d rho from stationary distribution:
+    // log p(w[0]) = 0.5*log(tau*(1-rho^2)) - 0.5*tau*(1-rho^2)*w[0]^2 + const
+    // d/d(rho) = -rho/(1-rho^2) + tau*rho*w[0]^2
+    double grad_rho = tau * rho * w[0] * w[0] - rho / one_m_rho2;
 
     // d log p / d rho from AR terms
     for (int t = 1; t < n_times; t++) {
