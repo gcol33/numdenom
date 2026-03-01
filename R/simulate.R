@@ -191,6 +191,16 @@ sim_ratiod <- function(n = 100,
     y_denom <- rgamma(n, shape = phi_denom, rate = phi_denom / mu_denom)
     y_denom[y_denom < 0.01] <- 0.01  # Avoid division by zero
 
+  } else if (family_name == "negbin_gamma") {
+    mu_num <- exp(eta_num)
+    mu_denom <- exp(eta_denom)
+
+    y_num <- rnbinom(n, size = phi_num, mu = mu_num)
+
+    # Gamma: shape = phi, rate = phi / mu
+    y_denom <- rgamma(n, shape = phi_denom, rate = phi_denom / mu_denom)
+    y_denom[y_denom < 0.01] <- 0.01  # Avoid division by zero
+
   } else if (family_name == "gamma_gamma") {
     mu_num <- exp(eta_num)
     mu_denom <- exp(eta_denom)
@@ -233,7 +243,7 @@ sim_ratiod <- function(n = 100,
     re = re
   )
 
-  if (family_name %in% c("negbin_negbin", "poisson_gamma", "gamma_gamma")) {
+  if (family_name %in% c("negbin_negbin", "negbin_gamma", "poisson_gamma", "gamma_gamma")) {
     true_params$phi_num <- phi_num
     true_params$phi_denom <- phi_denom
   }
@@ -354,7 +364,7 @@ sim_ratiod_sbc <- function(n_sims = 100,
     sigma_re <- rexp(1, rate = priors$sigma$rate)
 
     # Overdispersion
-    if (family_name %in% c("negbin_negbin", "poisson_gamma", "gamma_gamma")) {
+    if (family_name %in% c("negbin_negbin", "negbin_gamma", "poisson_gamma", "gamma_gamma")) {
       phi_num <- rexp(1, rate = priors$phi$rate) + 1  # Ensure > 1
       phi_denom <- rexp(1, rate = priors$phi$rate) + 1
     } else {

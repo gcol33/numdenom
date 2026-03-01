@@ -19,12 +19,14 @@ fit_hmc(
   chains = 4,
   cores = NULL,
   L = 0,
+  adapt_delta = NULL,
   max_treedepth = 10,
   seed = NULL,
   verbose = TRUE,
   gradient_mode = "auto",
   re_param = "noncentered",
-  metric = "diag"
+  metric = "auto",
+  riemannian = NULL
 )
 }
 \arguments{

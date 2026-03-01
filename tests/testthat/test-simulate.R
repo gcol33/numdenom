@@ -75,6 +75,34 @@ test_that("sim_ratiod generates valid data for poisson_gamma family", {
   expect_true(all(sim$data$y_denom > 0))
 })
 
+test_that("sim_ratiod generates valid data for negbin_gamma family", {
+  sim <- sim_ratiod(
+    n = 60,
+    family = ratiod_negbin_gamma(),
+    beta_num = c(2, 0.3),
+    beta_denom = c(1, 0.2),
+    sigma_re = 0.5,
+    phi_num = 5,
+    phi_denom = 3,
+    n_groups = 6,
+    seed = 321
+  )
+
+  expect_s3_class(sim, "ratiod_simdata")
+  expect_equal(nrow(sim$data), 60)
+
+  # Numerator: integer counts (NegBin)
+  expect_true(all(sim$data$y_num >= 0))
+  expect_true(all(sim$data$y_num == floor(sim$data$y_num)))
+
+  # Denominator: positive continuous (Gamma)
+  expect_true(all(sim$data$y_denom > 0))
+
+  # True params stored
+  expect_equal(sim$true_params$phi_num, 5)
+  expect_equal(sim$true_params$phi_denom, 3)
+})
+
 test_that("sim_ratiod uses default coefficients when not specified", {
   sim <- sim_ratiod(
     n = 30,

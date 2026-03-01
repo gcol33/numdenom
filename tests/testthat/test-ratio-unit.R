@@ -294,8 +294,8 @@ test_that("as_draws.ratiod_fit works", {
 })
 
 test_that("as_draws errors without posterior package", {
-  # Can't easily test package absence, so just verify method exists
-  expect_true(exists("as_draws.ratiod_fit"))
+  # Can't easily test package absence, so just verify method is registered
+  expect_true("as_draws.ratiod_fit" %in% methods("as_draws"))
 })
 
 # Test spread_draws

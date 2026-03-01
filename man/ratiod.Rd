@@ -30,8 +30,10 @@ ratiod(
   verbose = TRUE,
   gradient_mode = c("auto", "N", "A", "A_r", "A_t", "H"),
   re_param = c("noncentered", "centered"),
+  adapt_delta = NULL,
   max_treedepth = 10,
-  metric = c("diag", "dense"),
+  metric = c("auto", "dense", "diag"),
+  riemannian = NULL,
   ...
 )
 }
@@ -138,11 +140,24 @@ Better for weakly-informed random effects or small group sizes.
 \code{"centered"} stores re directly with re ~ N(0,σ²) prior.
 Better for strongly-informed random effects or large group sizes.}
 
+\item{adapt_delta}{Target average acceptance probability for NUTS step size
+adaptation. Higher values produce smaller step sizes, reducing divergences
+but slowing sampling. \code{NULL} (default) selects automatically based on model
+complexity: 0.80 for simple models, 0.85 for ICAR, 0.90 for BYM2 and
+correlated random slopes. Manual range: 0.80--0.99.}
+
 \item{metric}{Mass matrix type for NUTS:
-\code{"diag"} (default) diagonal mass matrix;
-\code{"dense"} full dense mass matrix (better for correlated posteriors
-like random slopes, BYM2, HSGP models). Auto-falls back to diagonal
-when p > 500.}
+\code{"dense"} (default) full dense mass matrix with Ledoit-Wolf shrinkage
+(handles correlated posteriors: random slopes, BYM2, HSGP, TVC models);
+\code{"diag"} diagonal mass matrix (faster per step but may require deeper trees).
+Auto-falls back to diagonal when p > 2000.}
+
+\item{riemannian}{Logical or NULL. Enable per-trajectory SoftAbs metric
+retry for divergent transitions. When a NUTS trajectory diverges,
+computes a local Hessian-based metric and retries the trajectory.
+\code{NULL} (default) enables automatically for BYM2 and ICAR spatial models
+with dense mass matrix. \code{TRUE} forces on, \code{FALSE} forces off.
+Cost: ~(p+1) gradient evaluations per divergent trajectory only.}
 
 \item{...}{Additional arguments passed to the sampler.}
 }

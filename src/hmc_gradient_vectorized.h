@@ -47,7 +47,7 @@ struct VecGradWorkspace {
   std::vector<double> log_dd;    // log(mu_denom + phi_denom) for NB
 
   // Precomputed data-dependent constants (computed once per dataset)
-  const void* data_key = nullptr;
+  uint64_t cached_data_id = 0;
   std::vector<double> lgamma_y_num_p1;    // lgamma(y_num[i] + 1)
   std::vector<double> lgamma_y_denom_p1;  // lgamma(y_denom[i] + 1)
   std::vector<double> lchoose_cache;      // lchoose(n_trials[i], y[i]) for binomial
@@ -81,13 +81,13 @@ struct VecGradWorkspace {
     lchoose_cache.resize(n);
     log_y_num_cont.resize(n);
     log_y_denom_cont.resize(n);
-    data_key = nullptr;  // Force recompute on next use
+    cached_data_id = 0;  // Force recompute on next use
   }
 
   // Precompute data-only constants (lgamma(y+1), lchoose, log(y)) — called once per dataset
   void precompute(const ModelData& data) {
-    if (&data == data_key) return;  // Already computed for this data
-    data_key = &data;
+    if (data.unique_id == cached_data_id) return;  // Already computed for this data
+    cached_data_id = data.unique_id;
     max_y_num_val = 0;
     max_y_denom_val = 0;
     for (int i = 0; i < N; i++) {
@@ -146,12 +146,21 @@ inline void expand_re_single(
     const ParamLayout& layout,
     const double* params,
     double* dense,
-    int N
+    int N,
+    double sigma_re = 0.0  // >0 means non-centered: multiply z by sigma
 ) {
   const double* re = &params[layout.re_start];
   const auto& group = data.re_group;
-  for (int i = 0; i < N; i++) {
-    dense[i] = (group[i] > 0) ? re[group[i] - 1] : 0.0;
+  if (sigma_re > 0.0) {
+    // Non-centered: dense[i] = sigma * z[g]
+    for (int i = 0; i < N; i++) {
+      dense[i] = (group[i] > 0) ? sigma_re * re[group[i] - 1] : 0.0;
+    }
+  } else {
+    // Centered: dense[i] = re[g]
+    for (int i = 0; i < N; i++) {
+      dense[i] = (group[i] > 0) ? re[group[i] - 1] : 0.0;
+    }
   }
 }
 
@@ -160,15 +169,17 @@ inline void expand_re_crossed(
     const ParamLayout& layout,
     const double* params,
     double* dense,
-    int N
+    int N,
+    const double* sigma_re_terms = nullptr  // non-null means non-centered: multiply z by sigma per term
 ) {
   std::memset(dense, 0, N * sizeof(double));
   for (int t = 0; t < data.n_re_terms; t++) {
     int re_start_t = layout.re_start_multi[t];
+    double scale = (sigma_re_terms != nullptr) ? sigma_re_terms[t] : 1.0;
     for (int i = 0; i < N; i++) {
       int gidx = data.re_group_multi_flat[t * N + i];
       if (gidx > 0) {
-        dense[i] += params[re_start_t + gidx - 1];
+        dense[i] += scale * params[re_start_t + gidx - 1];
       }
     }
   }
@@ -213,8 +224,16 @@ inline void expand_temporal(
     int N
 ) {
   const auto& tidx = data.temporal_time_idx;
+  const auto& gidx = data.temporal_group_idx;
+  int T = data.n_times;
   for (int i = 0; i < N; i++) {
-    dense[i] = (tidx[i] > 0) ? phi_temporal[tidx[i] - 1] : 0.0;
+    if (tidx[i] > 0) {
+      int t = tidx[i] - 1;
+      int g = gidx[i] - 1;
+      dense[i] = phi_temporal[g * T + t];  // Panel temporal: flat index
+    } else {
+      dense[i] = 0.0;
+    }
   }
 }
 
@@ -339,20 +358,20 @@ inline void compute_residuals_impl(
     int N,
     const double* eta_num, const double* eta_denom,
     const ModelData& data,
-    double phi_num, double /*phi_denom*/,
+    double /*phi_num*/, double phi_denom,
     double* resid_num, double* resid_denom,
     double& grad_phi_num_lik, double& grad_phi_denom_lik,
     double& obs_ll, bool compute_lp,
     const VecGradWorkspace& ws
 ) {
   // Hoist phi-dependent constants
-  const double digamma_phi = ratiod::math::portable_digamma(phi_num);
-  const double log_phi = std::log(phi_num);
-  const double lgamma_phi = compute_lp ? std::lgamma(phi_num) : 0.0;
+  const double digamma_phi = ratiod::math::portable_digamma(phi_denom);
+  const double log_phi = std::log(phi_denom);
+  const double lgamma_phi = compute_lp ? std::lgamma(phi_denom) : 0.0;
 
-  double gpn = 0.0;
+  double gpd = 0.0;
   double ll = 0.0;
-  grad_phi_denom_lik = 0.0;
+  grad_phi_num_lik = 0.0;
 
   for (int i = 0; i < N; i++) {
     const double mu_num = std::exp(eta_num[i]);
@@ -363,22 +382,87 @@ inline void compute_residuals_impl(
     const double inv_mu_d = 1.0 / mu_denom;
     const double yd_over_mud = y_d * inv_mu_d;
     resid_num[i] = y_n - mu_num;
-    resid_denom[i] = phi_num * (yd_over_mud - 1.0);
+    resid_denom[i] = phi_denom * (yd_over_mud - 1.0);
 
     // Gradient: log(rate) = log(phi) - log(mu_denom) = log_phi - eta_denom[i]
     const double log_rate = log_phi - eta_denom[i];
-    gpn += log_rate + 1.0 + ws.log_y_denom_cont[i] - digamma_phi
+    gpd += log_rate + 1.0 + ws.log_y_denom_cont[i] - digamma_phi
          - yd_over_mud;
 
     if (compute_lp) {
       // Poisson: y*eta - exp(eta) - lgamma(y+1)
       ll += y_n * eta_num[i] - mu_num - ws.lgamma_y_num_p1[i];
       // Gamma: (shape-1)*log(y) + shape*log(rate) - rate*y - lgamma(shape)
-      ll += (phi_num - 1.0) * ws.log_y_denom_cont[i] + phi_num * log_rate
-          - phi_num * yd_over_mud - lgamma_phi;
+      ll += (phi_denom - 1.0) * ws.log_y_denom_cont[i] + phi_denom * log_rate
+          - phi_denom * yd_over_mud - lgamma_phi;
+    }
+  }
+  grad_phi_denom_lik += gpd;
+  obs_ll += ll;
+}
+
+// --- NEGBIN_GAMMA ---
+// NB numerator (integer y, digamma/lgamma tables) + Gamma denominator (continuous y).
+inline void compute_residuals_impl(
+    ModelTag<ModelType::NEGBIN_GAMMA>,
+    int N,
+    const double* eta_num, const double* eta_denom,
+    const ModelData& data,
+    double phi_num, double phi_denom,
+    double* resid_num, double* resid_denom,
+    double& grad_phi_num_lik, double& grad_phi_denom_lik,
+    double& obs_ll, bool compute_lp,
+    const VecGradWorkspace& ws
+) {
+  // Hoist phi-dependent constants
+  const double digamma_phi_n = ratiod::math::portable_digamma(phi_num);
+  const double digamma_phi_d = ratiod::math::portable_digamma(phi_denom);
+  const double log_phi_n = std::log(phi_num);
+  const double log_phi_d = std::log(phi_denom);
+  const double lgamma_phi_n = compute_lp ? std::lgamma(phi_num) : 0.0;
+  const double lgamma_phi_d = compute_lp ? std::lgamma(phi_denom) : 0.0;
+
+  double gpn = 0.0, gpd = 0.0;
+  double ll = 0.0;
+
+  for (int i = 0; i < N; i++) {
+    const double mu_num = std::exp(eta_num[i]);
+    const double mu_denom = std::exp(eta_denom[i]);
+    const int y_n = data.y_num[i];
+    const double y_d = data.y_denom_cont[i];
+
+    // NB numerator
+    const double dn = mu_num + phi_num;
+    const double inv_dn = 1.0 / dn;
+    resid_num[i] = y_n - mu_num * (y_n + phi_num) * inv_dn;
+
+    // Gamma denominator
+    const double inv_mu_d = 1.0 / mu_denom;
+    const double yd_over_mud = y_d * inv_mu_d;
+    resid_denom[i] = phi_denom * (yd_over_mud - 1.0);
+
+    // NB phi_num gradient (using digamma table)
+    const double digamma_yn_phi = ws.dig_table_num[y_n];
+    const double lgamma_yn_phi = ws.lg_table_num[y_n];
+    const double log_dn = std::log(dn);
+    const double log_phi_dn = log_phi_n - log_dn;
+    gpn += digamma_yn_phi - digamma_phi_n + log_phi_dn + (mu_num - y_n) * inv_dn;
+
+    // Gamma phi_denom gradient
+    const double log_rate = log_phi_d - eta_denom[i];
+    gpd += log_rate + 1.0 + ws.log_y_denom_cont[i] - digamma_phi_d - yd_over_mud;
+
+    if (compute_lp) {
+      // NB numerator log-lik
+      ll += lgamma_yn_phi - ws.lgamma_y_num_p1[i] - lgamma_phi_n
+          + phi_num * log_phi_dn + y_n * (eta_num[i] - log_dn);
+      // Gamma denominator log-lik
+      ll += (phi_denom - 1.0) * ws.log_y_denom_cont[i] + phi_denom * log_rate
+          - phi_denom * yd_over_mud - lgamma_phi_d;
     }
   }
   grad_phi_num_lik += gpn;
+  grad_phi_denom_lik += gpd;
   obs_ll += ll;
 }
 
@@ -608,11 +692,15 @@ inline void accumulate_temporal_gradient(
     int N
 ) {
   const auto& tidx = data.temporal_time_idx;
+  const auto& gidx = data.temporal_group_idx;
+  int T = data.n_times;
   for (int i = 0; i < N; i++) {
     if (tidx[i] > 0) {
       double temp_grad_i = resid_num[i];
       if (!is_binomial) temp_grad_i += resid_denom[i];
-      grad_temporal_lik[tidx[i] - 1] += temp_grad_i;
+      int t = tidx[i] - 1;
+      int g = gidx[i] - 1;
+      grad_temporal_lik[g * T + t] += temp_grad_i;  // Panel temporal: flat index
     }
   }
 }
@@ -697,6 +785,8 @@ void compute_gradient_fused(
   // Build digamma/lgamma lookup tables for NB (indexed by integer y, rebuilt each call since phi changes)
   if constexpr (MT == ModelType::NEGBIN_NEGBIN) {
     ws.build_digamma_tables(phi_num, phi_denom, true);
+  } else if constexpr (MT == ModelType::NEGBIN_GAMMA) {
+    ws.build_digamma_tables(phi_num, phi_denom, false);  // numerator only (denom is Gamma, not NB)
   } else if constexpr (MT == ModelType::BETA_BINOMIAL) {
     // Beta-binomial needs digamma(y+alpha), digamma(n-y+beta) — not integer-indexed by y alone
     // (alpha = p*phi, beta = (1-p)*phi depend on eta which varies per obs). Skip table.
@@ -723,9 +813,17 @@ void compute_gradient_fused(
     h_lgamma_phi_d = compute_lp ? std::lgamma(phi_denom) : 0.0;
   }
   if constexpr (MT == ModelType::POISSON_GAMMA) {
+    h_digamma_phi_d = ratiod::math::portable_digamma(phi_denom);
+    h_log_phi_d = std::log(phi_denom);
+    h_lgamma_phi_d = compute_lp ? std::lgamma(phi_denom) : 0.0;
+  }
+  if constexpr (MT == ModelType::NEGBIN_GAMMA) {
     h_digamma_phi_n = ratiod::math::portable_digamma(phi_num);
+    h_digamma_phi_d = ratiod::math::portable_digamma(phi_denom);
     h_log_phi_n = std::log(phi_num);
+    h_log_phi_d = std::log(phi_denom);
     h_lgamma_phi_n = compute_lp ? std::lgamma(phi_num) : 0.0;
+    h_lgamma_phi_d = compute_lp ? std::lgamma(phi_denom) : 0.0;
   }
   if constexpr (MT == ModelType::GAMMA_GAMMA) {
     h_digamma_phi_n = ratiod::math::portable_digamma(phi_num);
@@ -776,8 +874,23 @@ void compute_gradient_fused(
   // PG: SIMD exp + eliminates redundant scalar exp(log_rate) per obs.
   // Binomial/LN/BB stay single-pass (simpler kernels, overhead not worthwhile).
   constexpr bool use_multipass = (MT == ModelType::NEGBIN_NEGBIN) ||
+                                 (MT == ModelType::NEGBIN_GAMMA) ||
                                  (MT == ModelType::GAMMA_GAMMA) ||
                                  (MT == ModelType::POISSON_GAMMA);
+
+  // Non-centered RE: extract sigma for computing re = sigma * z
+  double fused_sigma_re = 0.0;  // >0 when non-centered single term
+  std::vector<double> fused_sigma_re_terms;  // per-term for crossed NC
+  if (layout.has_re && data.re_parameterization == 1 && !layout.has_re_slopes) {
+    if (data.n_re_terms > 1) {
+      fused_sigma_re_terms.resize(data.n_re_terms);
+      for (int t = 0; t < data.n_re_terms; t++) {
+        fused_sigma_re_terms[t] = std::exp(params[layout.log_sigma_re_multi[t]]);
+      }
+    } else {
+      fused_sigma_re = std::exp(params[layout.log_sigma_re_idx]);
+    }
+  }
 
   // --- Shared lambda: compute eta for observation i ---
   // (avoids code duplication between needs_exp and !needs_exp paths)
@@ -794,14 +907,22 @@ void compute_gradient_fused(
     }
     if (layout.has_re) {
       double re_val;
-      if (data.n_re_terms == 1) {
-        int g = data.re_group[i];
-        re_val = (g > 0) ? params[layout.re_start + g - 1] : 0.0;
-      } else {
+      if (data.n_re_terms > 1) {
         re_val = 0.0;
         for (int t = 0; t < data.n_re_terms; t++) {
           int g = data.re_group_multi_flat[t * N + i];
-          if (g > 0) re_val += params[layout.re_start_multi[t] + g - 1];
+          if (g > 0) {
+            double z_or_re = params[layout.re_start_multi[t] + g - 1];
+            re_val += fused_sigma_re_terms.empty() ? z_or_re : fused_sigma_re_terms[t] * z_or_re;
+          }
+        }
+      } else {
+        int g = data.re_group[i];
+        if (g > 0) {
+          double z_or_re = params[layout.re_start + g - 1];
+          re_val = (fused_sigma_re > 0.0) ? fused_sigma_re * z_or_re : z_or_re;
+        } else {
+          re_val = 0.0;
         }
       }
       eta_n += re_val;
@@ -824,8 +945,10 @@ void compute_gradient_fused(
     if (layout.has_temporal && !data.temporal_time_idx.empty()) {
       int t = data.temporal_time_idx[i];
       if (t > 0) {
-        eta_n += phi_temporal[t - 1];
-        if constexpr (!is_binomial) eta_d += phi_temporal[t - 1];
+        int g = data.temporal_group_idx[i] - 1;
+        int flat = g * data.n_times + (t - 1);  // Panel temporal: flat index
+        eta_n += phi_temporal[flat];
+        if constexpr (!is_binomial) eta_d += phi_temporal[flat];
       }
     }
   };
@@ -843,14 +966,14 @@ void compute_gradient_fused(
     double total_lik_grad = resid_n;
     if constexpr (!is_binomial) total_lik_grad += resid_d;
     if (layout.has_re) {
-      if (data.n_re_terms == 1) {
-        int g = data.re_group[i];
-        if (g > 0) grad[layout.re_start + g - 1] += total_lik_grad;
-      } else {
+      if (data.n_re_terms > 1) {
         for (int t = 0; t < data.n_re_terms; t++) {
           int g = data.re_group_multi_flat[t * N + i];
           if (g > 0) grad[layout.re_start_multi[t] + g - 1] += total_lik_grad;
         }
+      } else {
+        int g = data.re_group[i];
+        if (g > 0) grad[layout.re_start + g - 1] += total_lik_grad;
       }
     }
     if (layout.has_spatial) {
@@ -868,7 +991,9 @@ void compute_gradient_fused(
     if (layout.has_temporal && !data.temporal_time_idx.empty()) {
       int t = data.temporal_time_idx[i];
       if (t > 0) {
-        grad_temporal_lik_out[t - 1] += total_lik_grad;
+        int g = data.temporal_group_idx[i] - 1;
+        int flat = g * data.n_times + (t - 1);  // Panel temporal: flat index
+        grad_temporal_lik_out[flat] += total_lik_grad;
       }
     }
   };
@@ -896,6 +1021,10 @@ void compute_gradient_fused(
           (Eigen::Map<const ArrayXd>(ws.mu_num.data(), N) + phi_num).log();
       Eigen::Map<ArrayXd>(ws.log_dd.data(), N) =
           (Eigen::Map<const ArrayXd>(ws.mu_denom.data(), N) + phi_denom).log();
+    }
+    if constexpr (MT == ModelType::NEGBIN_GAMMA) {
+      Eigen::Map<ArrayXd>(ws.log_dn.data(), N) =
+          (Eigen::Map<const ArrayXd>(ws.mu_num.data(), N) + phi_num).log();
     }
 
     // Pass 2: scalar residual kernel using precomputed mu + scatter
@@ -937,14 +1066,41 @@ void compute_gradient_fused(
         const double inv_mu_d = 1.0 / mu_d;  // reciprocal: 1 div replaces 3
         const double yd_over_mud = y_d * inv_mu_d;
         resid_n = y_n - mu_n;
-        resid_d = phi_num * (yd_over_mud - 1.0);
-        const double log_rate = h_log_phi_n - eta_d;
-        grad_phi_num_lik += log_rate + 1.0 + ws.log_y_denom_cont[i] - h_digamma_phi_n
+        resid_d = phi_denom * (yd_over_mud - 1.0);
+        const double log_rate = h_log_phi_d - eta_d;
+        grad_phi_denom_lik += log_rate + 1.0 + ws.log_y_denom_cont[i] - h_digamma_phi_d
                           - yd_over_mud;
         if (compute_lp) {
           ll += y_n * eta_n - mu_n - ws.lgamma_y_num_p1[i];
-          ll += (phi_num - 1.0) * ws.log_y_denom_cont[i] + phi_num * log_rate
-              - phi_num * yd_over_mud - h_lgamma_phi_n;
+          ll += (phi_denom - 1.0) * ws.log_y_denom_cont[i] + phi_denom * log_rate
+              - phi_denom * yd_over_mud - h_lgamma_phi_d;
+        }
+      }
+      else if constexpr (MT == ModelType::NEGBIN_GAMMA) {
+        const int y_n = data.y_num[i];
+        const double y_d = data.y_denom_cont[i];
+        // NB numerator (same as NEGBIN_NEGBIN num)
+        const double inv_dn = 1.0 / (mu_n + phi_num);
+        resid_n = y_n - mu_n * (y_n + phi_num) * inv_dn;
+        const double digamma_yn_phi = ws.dig_table_num[y_n];
+        const double lgamma_yn_phi = ws.lg_table_num[y_n];
+        const double log_dn = ws.log_dn[i];
+        const double log_phi_dn = h_log_phi_n - log_dn;
+        grad_phi_num_lik += digamma_yn_phi - h_digamma_phi_n + log_phi_dn + (mu_n - y_n) * inv_dn;
+        // Gamma denominator (same as PG denom)
+        const double inv_mu_d = 1.0 / mu_d;
+        const double yd_over_mud = y_d * inv_mu_d;
+        resid_d = phi_denom * (yd_over_mud - 1.0);
+        const double log_rate = h_log_phi_d - eta_d;
+        grad_phi_denom_lik += log_rate + 1.0 + ws.log_y_denom_cont[i] - h_digamma_phi_d
+                          - yd_over_mud;
+        if (compute_lp) {
+          // NB numerator log-lik
+          ll += lgamma_yn_phi - ws.lgamma_y_num_p1[i] - h_lgamma_phi_n
+              + phi_num * log_phi_dn + y_n * (eta_n - log_dn);
+          // Gamma denominator log-lik
+          ll += (phi_denom - 1.0) * ws.log_y_denom_cont[i] + phi_denom * log_rate
+              - phi_denom * yd_over_mud - h_lgamma_phi_d;
         }
       }
       else if constexpr (MT == ModelType::GAMMA_GAMMA) {
@@ -986,14 +1142,14 @@ void compute_gradient_fused(
         const double mu_n = std::exp(eta_n);
         const double mu_d = std::exp(eta_d);
         resid_n = y_n - mu_n;
-        resid_d = phi_num * (y_d / mu_d - 1.0);
-        const double log_rate = h_log_phi_n - eta_d;
-        grad_phi_num_lik += log_rate + 1.0 + ws.log_y_denom_cont[i] - h_digamma_phi_n
+        resid_d = phi_denom * (y_d / mu_d - 1.0);
+        const double log_rate = h_log_phi_d - eta_d;
+        grad_phi_denom_lik += log_rate + 1.0 + ws.log_y_denom_cont[i] - h_digamma_phi_d
                           - y_d / mu_d;
         if (compute_lp) {
           ll += y_n * eta_n - mu_n - ws.lgamma_y_num_p1[i];
-          ll += (phi_num - 1.0) * ws.log_y_denom_cont[i] + phi_num * log_rate
-              - (phi_num / mu_d) * y_d - h_lgamma_phi_n;
+          ll += (phi_denom - 1.0) * ws.log_y_denom_cont[i] + phi_denom * log_rate
+              - (phi_denom / mu_d) * y_d - h_lgamma_phi_d;
         }
       }
       else if constexpr (MT == ModelType::BINOMIAL) {
@@ -1096,6 +1252,11 @@ inline bool dispatch_fused_gradient(
         params, data, layout, grad, obs_ll, compute_lp,
         grad_temporal_lik_out, grad_spatial_lik_out, ws);
       return true;
+    case ModelType::NEGBIN_GAMMA:
+      compute_gradient_fused<ModelType::NEGBIN_GAMMA>(
+        params, data, layout, grad, obs_ll, compute_lp,
+        grad_temporal_lik_out, grad_spatial_lik_out, ws);
+      return true;
     case ModelType::GAMMA_GAMMA:
       compute_gradient_fused<ModelType::GAMMA_GAMMA>(
         params, data, layout, grad, obs_ll, compute_lp,
@@ -1184,11 +1345,25 @@ void compute_obs_gradients_vectorized(
   }
 
   // Add RE (expand to dense, then vectorized add)
+  // Non-centered: multiply z by sigma to get actual RE values
+  double sigma_re_nc = 0.0;  // >0 when non-centered
+  std::vector<double> sigma_re_terms_nc;  // per-term sigmas for crossed NC
+  if (layout.has_re && data.re_parameterization == 1 && !layout.has_re_slopes) {
+    if (data.n_re_terms > 1) {
+      sigma_re_terms_nc.resize(data.n_re_terms);
+      for (int t = 0; t < data.n_re_terms; t++) {
+        sigma_re_terms_nc[t] = std::exp(params[layout.log_sigma_re_multi[t]]);
+      }
+    } else {
+      sigma_re_nc = std::exp(params[layout.log_sigma_re_idx]);
+    }
+  }
   if (layout.has_re) {
     if (data.n_re_terms > 1) {
-      expand_re_crossed(data, layout, params.data(), ws.effect_dense.data(), N);
+      expand_re_crossed(data, layout, params.data(), ws.effect_dense.data(), N,
+                        sigma_re_terms_nc.empty() ? nullptr : sigma_re_terms_nc.data());
     } else {
-      expand_re_single(data, layout, params.data(), ws.effect_dense.data(), N);
+      expand_re_single(data, layout, params.data(), ws.effect_dense.data(), N, sigma_re_nc);
     }
     Eigen::Map<VectorXd>(ws.eta_num.data(), N) +=
         Eigen::Map<const VectorXd>(ws.effect_dense.data(), N);
@@ -1238,6 +1413,8 @@ void compute_obs_gradients_vectorized(
   // Build digamma/lgamma lookup tables for NB (same optimization as fused path)
   if constexpr (MT == ModelType::NEGBIN_NEGBIN) {
     ws.build_digamma_tables(phi_num, phi_denom, true);
+  } else if constexpr (MT == ModelType::NEGBIN_GAMMA) {
+    ws.build_digamma_tables(phi_num, phi_denom, false);
   }
 
   // === Pass 2: Model-specific residuals (scalar, template-specialized) ===
@@ -1277,6 +1454,8 @@ void compute_obs_gradients_vectorized(
   }
 
   // RE gradients (scatter from dense residuals to grouped params)
+  // accumulate_re_* writes centered likelihood gradient to grad[re+g]
+  // Non-centered post-processing (chain rule) happens in compute_gradient_analytical
   if (layout.has_re) {
     if (data.n_re_terms > 1) {
       accumulate_re_gradient_crossed(data, layout,
@@ -1352,6 +1531,11 @@ inline bool dispatch_vectorized_gradient(
       return true;
     case ModelType::POISSON_GAMMA:
       compute_obs_gradients_vectorized<ModelType::POISSON_GAMMA>(
+        params, data, layout, grad, obs_ll, compute_lp,
+        grad_temporal_lik_out, grad_spatial_lik_out, ws);
+      return true;
+    case ModelType::NEGBIN_GAMMA:
+      compute_obs_gradients_vectorized<ModelType::NEGBIN_GAMMA>(
         params, data, layout, grad, obs_ll, compute_lp,
         grad_temporal_lik_out, grad_spatial_lik_out, ws);
       return true;

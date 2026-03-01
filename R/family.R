@@ -208,6 +208,72 @@ ratiod_poisson_gamma <- function(link_num = "log", link_denom = "log") {
   )
 }
 
+#' Negative binomial - Gamma family for overdispersed count/effort ratios
+#'
+#' @description
+#' Two-process model where the numerator follows a negative binomial distribution
+#' and the denominator (effort/exposure) follows a Gamma distribution. This fills
+#' the gap between Poisson-Gamma (equidispersed counts) and NegBin-NegBin
+#' (integer denominator): use it when counts are overdispersed and effort is
+#' continuous.
+#'
+#' Use cases:
+#' - Overdispersed catch per unit effort (CPUE)
+#' - Overdispersed observations per continuous exposure
+#' - Any ratio of overdispersed counts over continuous positive effort
+#'
+#' @param link_num Link function for count rate (default: "log")
+#' @param link_denom Link function for effort mean (default: "log")
+#'
+#' @return A `ratiod_family` object
+#'
+#' @examples
+#' # Create family object
+#' fam <- ratiod_negbin_gamma()
+#' print(fam)
+#'
+#' # Simulate overdispersed CPUE data
+#' set.seed(123)
+#' n <- 60
+#' df <- data.frame(
+#'   catch = rnbinom(n, size = 5, mu = 8),
+#'   effort_hours = rgamma(n, shape = 4, rate = 1),
+#'   depth = rnorm(n),
+#'   vessel = factor(rep(1:6, each = n/6))
+#' )
+#'
+#' \dontrun{
+#' # Fit model (slow, not run on CRAN)
+#' fit <- ratiod(
+#'   catch | effort_hours ~ depth + (1 | vessel),
+#'   data = df,
+#'   family = ratiod_negbin_gamma(),
+#'   iter = 200, warmup = 100, chains = 1
+#' )
+#' }
+#'
+#' @export
+ratiod_negbin_gamma <- function(link_num = "log", link_denom = "log") {
+  validate_link(link_num, c("log"))
+  validate_link(link_denom, c("log"))
+
+  structure(
+    list(
+      name = "negbin_gamma",
+      numerator = list(
+        distribution = "neg_binomial_2",
+        link = link_num
+      ),
+      denominator = list(
+        distribution = "gamma",
+        link = link_denom
+      ),
+      description = "Negative binomial numerator, Gamma denominator (overdispersed CPUE-type)"
+    ),
+    class = c("ratiod_family", "list")
+  )
+}
+
 #' Validate link function
 #'
 #' @param link Link function name

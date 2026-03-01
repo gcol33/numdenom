@@ -197,16 +197,18 @@ ParamLayout compute_param_layout(const ModelData& data) {
 
   // Overdispersion / shape / sigma parameters
   // NEGBIN_NEGBIN: phi_num (overdispersion for num), phi_denom (overdispersion for denom)
-  // POISSON_GAMMA: phi_num (shape for gamma denom)
+  // POISSON_GAMMA: phi_denom (shape for gamma denom)
   // GAMMA_GAMMA: phi_num (shape for num), phi_denom (shape for denom)
   // LOGNORMAL: phi_num (sigma for num), phi_denom (sigma for denom)
   // BETA_BINOMIAL: phi_num (precision parameter)
   layout.has_phi_num = (data.model_type == ModelType::NEGBIN_NEGBIN ||
-                        data.model_type == ModelType::POISSON_GAMMA ||
+                        data.model_type == ModelType::NEGBIN_GAMMA ||
                         data.model_type == ModelType::GAMMA_GAMMA ||
                         data.model_type == ModelType::LOGNORMAL ||
                         data.model_type == ModelType::BETA_BINOMIAL);
   layout.has_phi_denom = (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                          data.model_type == ModelType::POISSON_GAMMA ||
+                          data.model_type == ModelType::NEGBIN_GAMMA ||
                           data.model_type == ModelType::GAMMA_GAMMA ||
                           data.model_type == ModelType::LOGNORMAL);
 
@@ -607,7 +609,12 @@ inline double compute_obs_ll(
     double mu_num = std::exp(eta_num);
     double mu_denom = std::exp(eta_denom);
     return log_lik_poisson(data.y_num[i], mu_num)
-         + log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+         + log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
+  } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+    double mu_num = std::exp(eta_num);
+    double mu_denom = std::exp(eta_denom);
+    return log_lik_negbin(data.y_num[i], mu_num, phi_num)
+         + log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
   } else if (data.model_type == ModelType::GAMMA_GAMMA) {
     double mu_num = std::exp(eta_num);
     double mu_denom = std::exp(eta_denom);
@@ -857,9 +864,26 @@ double compute_log_post(
         // the |det(diag(sigma)*L)| from the change of variables cancels exactly
         // with the |Sigma|^{-1/2} normalization of the MVN density.
 
+      } else if (data.re_parameterization == 1) {
+        // Uncorrelated non-centered: params store z ~ N(0,1), re = sigma * z
+        // Pre-compute re = sigma * z for observation loop
+        if (!skip_obs_loop) {
+          for (int g = 0; g < n_groups; g++) {
+            for (int c = 0; c < n_coefs; c++) {
+              double z_gc = params[re_start + g * n_coefs + c];
+              re_nc_flat[re_start + g * n_coefs + c] = sigmas[c] * z_gc;
+            }
+          }
+        }
+        // N(0, I) prior on z
+        for (int g = 0; g < n_groups; g++) {
+          for (int c = 0; c < n_coefs; c++) {
+            double z_gc = params[re_start + g * n_coefs + c];
+            log_post -= 0.5 * z_gc * z_gc;
+          }
+        }
       } else {
-        // Uncorrelated case: centered parameterization (unchanged)
-        // params store actual re values, prior is N(0, sigma_c^2)
+        // Uncorrelated centered: params store actual re values, prior is N(0, sigma_c^2)
         for (int g = 0; g < n_groups; g++) {
           for (int c = 0; c < n_coefs; c++) {
             double re_val = params[re_start + g * n_coefs + c];
@@ -1522,15 +1546,16 @@ double compute_log_post(
             int re_base = layout.re_start_multi[t] + g * n_coefs;
             bool is_corr_t = layout.re_correlated_multi[t] && n_coefs > 1;
 
-            // For correlated slopes: use pre-computed non-centered re
-            // For uncorrelated slopes: params store re directly (centered)
-            double re_contrib = is_corr_t ? re_nc_flat[re_base] : params[re_base];
+            // For correlated or non-centered: use pre-computed re_nc_flat
+            // For centered uncorrelated: use params directly
+            bool use_nc = is_corr_t || (data.re_parameterization == 1);
+            double re_contrib = use_nc ? re_nc_flat[re_base] : params[re_base];
 
             int n_slopes = n_coefs - 1;
             if (n_slopes > 0 && !data.re_slope_matrices[t].empty()) {
               for (int s = 0; s < n_slopes; s++) {
                 double x_slope = data.re_slope_matrices[t][i * n_slopes + s];
-                double re_slope = is_corr_t ? re_nc_flat[re_base + 1 + s] : params[re_base + 1 + s];
+                double re_slope = use_nc ? re_nc_flat[re_base + 1 + s] : params[re_base + 1 + s];
                 re_contrib += re_slope * x_slope;
               }
             }
@@ -1540,22 +1565,26 @@ double compute_log_post(
           }
         }
       } else if (n_terms > 1) {
-        // Multiple RE terms (intercept only): params store re directly (centered)
+        // Multiple RE terms (intercept only)
+        // Non-centered: use pre-computed re_nc_flat; centered: use params directly
         for (int t = 0; t < n_terms; t++) {
           int group_idx = data.re_group_multi_flat[t * data.N + i];
           if (group_idx > 0) {
             int g = group_idx - 1;
-            double re_val = params[layout.re_start_multi[t] + g];
+            int re_idx = layout.re_start_multi[t] + g;
+            double re_val = (data.re_parameterization == 1) ? re_nc_flat[re_idx] : params[re_idx];
             eta_num += re_val;
             eta_denom += re_val;
           }
         }
       } else {
         // Single RE term (legacy path)
+        // Non-centered: use pre-computed re_nc_flat; centered: use params directly
         if (data.re_group[i] > 0) {
           int g = data.re_group[i] - 1;
-          eta_num += re[g];
-          eta_denom += re[g];
+          double re_val = (data.re_parameterization == 1) ? re_nc_flat[layout.re_start + g] : re[g];
+          eta_num += re_val;
+          eta_denom += re_val;
         }
       }
     }
@@ -1778,7 +1807,21 @@ double compute_log_post(
         ll_i = log_lik_poisson(data.y_num[i], mu_num);
       }
       // Denominator is gamma (continuous)
-      ll_i += log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+      ll_i += log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
+
+    } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+      double mu_num = std::exp(eta_num);
+      double mu_denom = std::exp(eta_denom);
+
+      // Check for zero-inflation on numerator
+      if (layout.has_zi) {
+        ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
+                                           logit_zi, data.zi_type);
+      } else {
+        ll_i = log_lik_negbin(data.y_num[i], mu_num, phi_num);
+      }
+      // Denominator is gamma (continuous)
+      ll_i += log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
 
     } else if (data.model_type == ModelType::GAMMA_GAMMA) {
       // Gamma-Gamma: both numerator and denominator are Gamma distributed
@@ -1831,6 +1874,7 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
   // Hand-coded gradients for basic models without complex structure
   bool is_basic_family = (data.model_type == ModelType::POISSON_GAMMA ||
                           data.model_type == ModelType::NEGBIN_NEGBIN ||
+                          data.model_type == ModelType::NEGBIN_GAMMA ||
                           data.model_type == ModelType::BINOMIAL ||
                           data.model_type == ModelType::GAMMA_GAMMA ||
                           data.model_type == ModelType::BETA_BINOMIAL ||
@@ -2144,21 +2188,30 @@ void compute_gradient_analytical(
 
       double log_sigma_t = params[log_sigma_idx];
       double sigma_t = std::exp(log_sigma_t);
-      double tau_t = 1.0 / (sigma_t * sigma_t + 1e-10);
 
-      // Half-Cauchy prior on sigma_t
+      // Half-Cauchy prior on sigma_t (same for both parameterizations)
       double ratio_t = sigma_t / data.sigma_re_scale;
       double ratio_t_sq = ratio_t * ratio_t;
       grad[log_sigma_idx] = -2.0 * ratio_t_sq / (1.0 + ratio_t_sq) + 1.0;
 
-      // N(0, sigma_t^2) prior on each RE for this term
-      double sigma_grad_t = 0.0;
-      for (int g = 0; g < n_groups_t; g++) {
-        double re_g = params[re_start_t + g];
-        grad[re_start_t + g] = -tau_t * re_g;
-        sigma_grad_t += tau_t * re_g * re_g - 1.0;
+      if (data.re_parameterization == 1) {
+        // Non-centered: z ~ N(0, 1), prior grad = -z
+        // No sigma contribution from z prior (sigma gradient comes from likelihood chain rule)
+        for (int g = 0; g < n_groups_t; g++) {
+          double z_g = params[re_start_t + g];
+          grad[re_start_t + g] = -z_g;
+        }
+      } else {
+        // Centered: re ~ N(0, sigma_t^2)
+        double tau_t = 1.0 / (sigma_t * sigma_t + 1e-10);
+        double sigma_grad_t = 0.0;
+        for (int g = 0; g < n_groups_t; g++) {
+          double re_g = params[re_start_t + g];
+          grad[re_start_t + g] = -tau_t * re_g;
+          sigma_grad_t += tau_t * re_g * re_g - 1.0;
+        }
+        grad[log_sigma_idx] += sigma_grad_t;
       }
-      grad[log_sigma_idx] += sigma_grad_t;
     }
   }
 
@@ -2370,13 +2423,19 @@ void compute_gradient_analytical(
           }
         } else if (data.n_re_terms > 1) {
           // Crossed RE (multiple intercept-only terms)
+          // Non-centered: re_val = sigma * z; centered: re_val = params directly
           n_crossed_terms = data.n_re_terms;
           for (int t = 0; t < n_crossed_terms; t++) {
             int group_idx = data.re_group_multi_flat[t * data.N + i];
             if (group_idx > 0) {
               int g = group_idx - 1;
               re_idx_multi_buf[t] = g;
-              double re_val = params[layout.re_start_multi[t] + g];
+              double z_or_re = params[layout.re_start_multi[t] + g];
+              double re_val = z_or_re;
+              if (data.re_parameterization == 1) {
+                double sigma_t = std::exp(params[layout.log_sigma_re_multi[t]]);
+                re_val = sigma_t * z_or_re;
+              }
               eta_num += re_val;
               if (data.model_type != ModelType::BINOMIAL) {
                 eta_denom += re_val;
@@ -2387,17 +2446,24 @@ void compute_gradient_analytical(
           }
         } else if (data.re_group[i] > 0) {
           // Simple intercept-only RE (single term)
+          // Non-centered: re = sigma * z; centered: re = params directly
           re_idx = data.re_group[i] - 1;
-          eta_num += re[re_idx];
+          double re_val = re[re_idx];
+          if (data.re_parameterization == 1) {
+            re_val = sigma_re * re_val;  // re_val was z, now sigma*z
+          }
+          eta_num += re_val;
           if (data.model_type != ModelType::BINOMIAL) {
-            eta_denom += re[re_idx];
+            eta_denom += re_val;
           }
         }
       }
       // Add temporal effect if present
       int t_idx = -1;
       if (layout.has_temporal && !data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
-        t_idx = data.temporal_time_idx[i] - 1;
+        int t = data.temporal_time_idx[i] - 1;
+        int g = data.temporal_group_idx[i] - 1;
+        t_idx = g * data.n_times + t;  // Panel temporal: flat index
         double temporal_effect = phi_temporal[t_idx];
         eta_num += temporal_effect;
         if (data.model_type != ModelType::BINOMIAL) {
@@ -2653,10 +2719,10 @@ void compute_gradient_analytical(
 
         // Denominator: Gamma (always standard)
         double y_denom_i = data.y_denom_cont[i];
-        resid_denom = phi_num * (y_denom_i / mu_denom - 1.0);
-        double rate = phi_num / mu_denom;
+        resid_denom = phi_denom * (y_denom_i / mu_denom - 1.0);
+        double rate = phi_denom / mu_denom;
         double grad_phi_gamma = std::log(rate) + 1.0 + std::log(y_denom_i)
-                                - ratiod::math::portable_digamma(phi_num) - rate * y_denom_i / phi_num;
+                                - ratiod::math::portable_digamma(phi_denom) - rate * y_denom_i / phi_denom;
 
         // Numerator with ZI handling
         if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::ZI_POISSON) {
@@ -2669,30 +2735,74 @@ void compute_gradient_analytical(
             // d(LL)/d(eta) = d(LL)/d(mu) * mu = -(1-zi)*exp(-mu)*mu / p0
             resid_num = -(1.0 - zi_prob) * exp_neg_mu * mu_num / p0;
             grad_logit_zi_i = zi_prob * (1.0 - zi_prob) * (1.0 - exp_neg_mu) / p0;
-            grad_phi_num_i = grad_phi_gamma;  // Only gamma part
+            grad_phi_denom_i = grad_phi_gamma;  // Only gamma part
           } else {
             // P(Y=y) = (1-zi) * Poisson(y|mu)
             resid_num = y_num_i - mu_num;
             grad_logit_zi_i = -zi_prob;
-            grad_phi_num_i = grad_phi_gamma;
+            grad_phi_denom_i = grad_phi_gamma;
           }
         } else if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::HURDLE_POISSON) {
           // Hurdle-Poisson numerator
           if (y_num_i == 0) {
             resid_num = 0.0;
             grad_logit_zi_i = -zi_prob;  // zi_prob is theta here
-            grad_phi_num_i = grad_phi_gamma;
+            grad_phi_denom_i = grad_phi_gamma;
           } else {
             // Truncated Poisson: d(LL)/d(eta) = y - mu + mu*exp(-mu)/(1-exp(-mu))
             double exp_neg_mu = std::exp(-mu_num);
             resid_num = y_num_i - mu_num + mu_num * exp_neg_mu / (1.0 - exp_neg_mu);
             grad_logit_zi_i = 1.0 - zi_prob;
-            grad_phi_num_i = grad_phi_gamma;
+            grad_phi_denom_i = grad_phi_gamma;
           }
         } else {
           // Standard Poisson (no ZI)
           resid_num = y_num_i - mu_num;
-          grad_phi_num_i = grad_phi_gamma;
+          grad_phi_denom_i = grad_phi_gamma;
+        }
+
+      } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+        // ---- NEGBIN_GAMMA ----
+        // NegBin numerator + Gamma denominator
+        double mu_num = std::exp(eta_num);
+        double mu_denom = std::exp(eta_denom);
+        int y_num_i = data.y_num[i];
+
+        // Denominator: Gamma (always standard)
+        double y_denom_i = data.y_denom_cont[i];
+        resid_denom = phi_denom * (y_denom_i / mu_denom - 1.0);
+        double rate = phi_denom / mu_denom;
+        double grad_phi_gamma = std::log(rate) + 1.0 + std::log(y_denom_i)
+                                - ratiod::math::portable_digamma(phi_denom) - rate * y_denom_i / phi_denom;
+
+        // Numerator with ZI handling (same as NEGBIN_NEGBIN)
+        if (layout.has_zi && data.zi_type == ratiod_zi::ZIType::ZI_NEGBIN) {
+          double denom_num = mu_num + phi_num;
+          double nb_p0 = std::pow(phi_num / denom_num, phi_num);
+
+          if (y_num_i == 0) {
+            double p0 = zi_prob + (1.0 - zi_prob) * nb_p0;
+            resid_num = -(1.0 - zi_prob) * nb_p0 * phi_num * mu_num / (denom_num * p0);
+            grad_logit_zi_i = zi_prob * (1.0 - zi_prob) * (1.0 - nb_p0) / p0;
+            grad_phi_num_i = -(1.0 - zi_prob) * nb_p0 * phi_num
+                             * (std::log(phi_num / denom_num) + mu_num / denom_num) / p0;
+          } else {
+            double denom_num2 = mu_num + phi_num;
+            resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num2;
+            grad_logit_zi_i = -zi_prob;
+            grad_phi_num_i = ratiod::math::portable_digamma(y_num_i + phi_num) - ratiod::math::portable_digamma(phi_num)
+                             + std::log(phi_num / denom_num2)
+                             + (mu_num - y_num_i) / denom_num2;
+          }
+          grad_phi_denom_i = grad_phi_gamma;
+        } else {
+          // Standard NegBin numerator (no ZI)
+          double denom_num = mu_num + phi_num;
+          resid_num = y_num_i - mu_num * (y_num_i + phi_num) / denom_num;
+          grad_phi_num_i = ratiod::math::portable_digamma(y_num_i + phi_num) - ratiod::math::portable_digamma(phi_num)
+                           + std::log(phi_num / denom_num)
+                           + (mu_num - y_num_i) / denom_num;
+          grad_phi_denom_i = grad_phi_gamma;
         }
 
       } else if (data.model_type == ModelType::GAMMA_GAMMA) {
@@ -2976,7 +3086,7 @@ void compute_gradient_analytical(
           } else {
             ll_i = log_lik_poisson(data.y_num[i], mu_num_i);
           }
-          ll_i += log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom_i);
+          ll_i += log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom_i);
         } else if (data.model_type == ModelType::GAMMA_GAMMA) {
           double mu_num_i = std::exp(eta_num);
           double mu_denom_i = std::exp(eta_denom);
@@ -3147,6 +3257,34 @@ void compute_gradient_analytical(
 
   } // end if (!used_vectorized)
 
+  // ============ Non-centered RE post-processing ============
+  // At this point, grad[re+g] = prior_grad + centered_lik_grad
+  // For non-centered: prior_grad = -z_g, so centered_lik = grad[re+g] + z_g
+  // Transform: grad[z_g] = -z_g + sigma * centered_lik (chain rule through re = sigma*z)
+  //            grad[log_sigma] += sigma * sum(z_g * centered_lik)
+  if (layout.has_re && !layout.has_re_slopes && data.re_parameterization == 1) {
+    int n_terms = (data.n_re_terms > 1) ? data.n_re_terms : 1;
+    for (int t = 0; t < n_terms; t++) {
+      int re_start_t = (n_terms > 1) ? layout.re_start_multi[t] : layout.re_start;
+      int n_groups_t = (n_terms > 1) ? data.re_n_groups_multi[t] : data.n_re_groups;
+      int log_sigma_idx = (n_terms > 1) ? layout.log_sigma_re_multi[t] : layout.log_sigma_re_idx;
+      double sigma_t = std::exp(params[log_sigma_idx]);
+
+      double sigma_lik_grad = 0.0;
+      for (int g = 0; g < n_groups_t; g++) {
+        double z_g = params[re_start_t + g];
+        // Extract centered lik grad: total - prior = (grad[re+g]) - (-z_g) = grad[re+g] + z_g
+        double centered_lik = grad[re_start_t + g] + z_g;
+        // z gradient = prior + chain rule through sigma*z
+        grad[re_start_t + g] = -z_g + sigma_t * centered_lik;
+        // sigma gradient from likelihood: z_g * d_ll/d_re_g
+        sigma_lik_grad += z_g * centered_lik;
+      }
+      // d_ll/d_log_sigma = sigma * sum(z_g * d_ll/d_re_g)
+      grad[log_sigma_idx] += sigma_t * sigma_lik_grad;
+    }
+  }
+
   // ============ Temporal GMRF prior gradients ============
   if (layout.has_temporal && T_len > 0) {
     // Initialize temporal gradients with likelihood contribution
@@ -3154,95 +3292,132 @@ void compute_gradient_analytical(
       grad[layout.temporal_start + t] = grad_temporal_lik[t];
     }
 
+    // Panel temporal: apply prior independently to each group
+    int T = data.n_times;  // Time points per group
+    int n_groups = data.n_temporal_groups;
+
     if (data.temporal_type == TemporalType::RW1) {
-      // RW1: -0.5 * tau * sum((phi[t] - phi[t-1])^2)
-      // d/d(phi[t]) = tau * (phi[t-1] - phi[t]) + tau * (phi[t+1] - phi[t]) (interior)
-      double quad_form = 0.0;
-      for (int t = 0; t < T_len; t++) {
-        double grad_t = 0.0;
-        if (t > 0) {
-          grad_t += tau_temporal * (phi_temporal[t - 1] - phi_temporal[t]);
-          quad_form += (phi_temporal[t] - phi_temporal[t - 1]) * (phi_temporal[t] - phi_temporal[t - 1]);
+      double total_quad_form = 0.0;
+      int total_rank = 0;
+      for (int g = 0; g < n_groups; g++) {
+        const double* phi_g = phi_temporal + g * T;
+        int base = layout.temporal_start + g * T;
+        double quad_form = 0.0;
+        for (int t = 0; t < T; t++) {
+          double grad_t = 0.0;
+          if (t > 0) {
+            grad_t += tau_temporal * (phi_g[t - 1] - phi_g[t]);
+            quad_form += (phi_g[t] - phi_g[t - 1]) * (phi_g[t] - phi_g[t - 1]);
+          }
+          if (t < T - 1) {
+            grad_t += tau_temporal * (phi_g[t + 1] - phi_g[t]);
+          }
+          grad[base + t] += grad_t;
         }
-        if (t < T_len - 1) {
-          grad_t += tau_temporal * (phi_temporal[t + 1] - phi_temporal[t]);
+        if (data.temporal_cyclic) {
+          double diff_cyclic = phi_g[0] - phi_g[T - 1];
+          quad_form += diff_cyclic * diff_cyclic;
+          grad[base + 0] -= tau_temporal * diff_cyclic;
+          grad[base + T - 1] += tau_temporal * diff_cyclic;
         }
-        grad[layout.temporal_start + t] += grad_t;
+        total_quad_form += quad_form;
+        total_rank += data.temporal_cyclic ? T : T - 1;
+        // Sum-to-zero penalty per group
+        double sum_phi = 0.0;
+        for (int t = 0; t < T; t++) sum_phi += phi_g[t];
+        for (int t = 0; t < T; t++) grad[base + t] -= 0.001 * sum_phi;
       }
-      // tau gradient: 0.5*(T-1)*log(tau) - 0.5*tau*quad => d/d(log_tau) = 0.5*(T-1) - 0.5*tau*quad
-      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * quad_form;
-      // Sum-to-zero penalty gradient: d/d(phi[t]) of [-0.5*lambda*sum(phi)^2] = -lambda*sum(phi)
-      { double sum_phi = 0.0;
-        for (int t = 0; t < T_len; t++) sum_phi += phi_temporal[t];
-        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sum_phi;
-      }
+      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_quad_form;
 
     } else if (data.temporal_type == TemporalType::RW2) {
-      // RW2: second-order differences
-      double quad_form = 0.0;
-      for (int t = 0; t < T_len; t++) {
-        double grad_t = 0.0;
-        if (t >= 2) {
-          double d2 = phi_temporal[t - 2] - 2.0 * phi_temporal[t - 1] + phi_temporal[t];
-          grad_t -= tau_temporal * d2;  // coefficient of phi[t] in (phi[t-2] - 2*phi[t-1] + phi[t])^2 is +1
+      double total_quad_form = 0.0;
+      int total_rank = 0;
+      for (int g = 0; g < n_groups; g++) {
+        const double* phi_g = phi_temporal + g * T;
+        int base = layout.temporal_start + g * T;
+        double quad_form = 0.0;
+        for (int t = 0; t < T; t++) {
+          double grad_t = 0.0;
+          if (t >= 2) {
+            double d2 = phi_g[t - 2] - 2.0 * phi_g[t - 1] + phi_g[t];
+            grad_t -= tau_temporal * d2;
+          }
+          if (t >= 1 && t < T - 1) {
+            double d2 = phi_g[t - 1] - 2.0 * phi_g[t] + phi_g[t + 1];
+            grad_t += 2.0 * tau_temporal * d2;
+          }
+          if (t < T - 2) {
+            double d2 = phi_g[t] - 2.0 * phi_g[t + 1] + phi_g[t + 2];
+            grad_t -= tau_temporal * d2;
+          }
+          grad[base + t] += grad_t;
         }
-        if (t >= 1 && t < T_len - 1) {
-          double d2 = phi_temporal[t - 1] - 2.0 * phi_temporal[t] + phi_temporal[t + 1];
-          grad_t += 2.0 * tau_temporal * d2;  // coefficient of phi[t] is -2
+        for (int t = 2; t < T; t++) {
+          double d2 = phi_g[t - 2] - 2.0 * phi_g[t - 1] + phi_g[t];
+          quad_form += d2 * d2;
         }
-        if (t < T_len - 2) {
-          double d2 = phi_temporal[t] - 2.0 * phi_temporal[t + 1] + phi_temporal[t + 2];
-          grad_t -= tau_temporal * d2;  // coefficient of phi[t] is +1
+        if (data.temporal_cyclic) {
+          double d2_a = phi_g[T - 2] - 2.0 * phi_g[T - 1] + phi_g[0];
+          double d2_b = phi_g[T - 1] - 2.0 * phi_g[0] + phi_g[1];
+          quad_form += d2_a * d2_a + d2_b * d2_b;
+          grad[base + T - 2] -= tau_temporal * d2_a;
+          grad[base + T - 1] += 2.0 * tau_temporal * d2_a;
+          grad[base + 0] -= tau_temporal * d2_a;
+          grad[base + T - 1] -= tau_temporal * d2_b;
+          grad[base + 0] += 2.0 * tau_temporal * d2_b;
+          grad[base + 1] -= tau_temporal * d2_b;
         }
-        grad[layout.temporal_start + t] += grad_t;
+        total_quad_form += quad_form;
+        total_rank += data.temporal_cyclic ? T : T - 2;
+        // Sum-to-zero penalty per group
+        double sum_phi = 0.0;
+        for (int t = 0; t < T; t++) sum_phi += phi_g[t];
+        for (int t = 0; t < T; t++) grad[base + t] -= 0.001 * sum_phi;
       }
-      // Compute quadratic form for tau gradient
-      for (int t = 2; t < T_len; t++) {
-        double d2 = phi_temporal[t - 2] - 2.0 * phi_temporal[t - 1] + phi_temporal[t];
-        quad_form += d2 * d2;
-      }
-      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * quad_form;
-      // Sum-to-zero penalty gradient
-      { double sum_phi = 0.0;
-        for (int t = 0; t < T_len; t++) sum_phi += phi_temporal[t];
-        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sum_phi;
-      }
+      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_quad_form;
 
     } else if (data.temporal_type == TemporalType::AR1) {
-      // Centered AR1: phi[0] ~ N(0, 1/(tau*(1-rho^2))), phi[t] | phi[t-1] ~ N(rho*phi[t-1], 1/tau)
       double one_minus_rho2 = 1.0 - rho_ar1 * rho_ar1;
+      double total_quad_form = 0.0;
+      double total_grad_rho = 0.0;
+      for (int g = 0; g < n_groups; g++) {
+        const double* phi_g = phi_temporal + g * T;
+        int base = layout.temporal_start + g * T;
 
-      // Gradient for phi[0]: d/d(phi[0]) = -tau*(1-rho^2)*phi[0] + tau*rho*(phi[1] - rho*phi[0])
-      grad[layout.temporal_start] += -tau_temporal * one_minus_rho2 * phi_temporal[0];
-      if (T_len > 1) {
-        grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
-      }
-
-      // Gradient for phi[t], t > 0
-      double quad_form = one_minus_rho2 * phi_temporal[0] * phi_temporal[0];
-      for (int t = 1; t < T_len; t++) {
-        double resid = phi_temporal[t] - rho_ar1 * phi_temporal[t - 1];
-        quad_form += resid * resid;
-        double grad_t = -tau_temporal * resid;
-        if (t < T_len - 1) {
-          double resid_next = phi_temporal[t + 1] - rho_ar1 * phi_temporal[t];
-          grad_t += tau_temporal * rho_ar1 * resid_next;
+        // Gradient for phi_g[0]
+        grad[base] += -tau_temporal * one_minus_rho2 * phi_g[0];
+        if (T > 1) {
+          grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
         }
-        grad[layout.temporal_start + t] += grad_t;
+
+        double quad_form = one_minus_rho2 * phi_g[0] * phi_g[0];
+        for (int t = 1; t < T; t++) {
+          double resid = phi_g[t] - rho_ar1 * phi_g[t - 1];
+          quad_form += resid * resid;
+          double grad_t = -tau_temporal * resid;
+          if (t < T - 1) {
+            double resid_next = phi_g[t + 1] - rho_ar1 * phi_g[t];
+            grad_t += tau_temporal * rho_ar1 * resid_next;
+          }
+          grad[base + t] += grad_t;
+        }
+        total_quad_form += quad_form;
+
+        // rho gradient contributions from this group
+        total_grad_rho += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
+        for (int t = 1; t < T; t++) {
+          double resid = phi_g[t] - rho_ar1 * phi_g[t - 1];
+          total_grad_rho += tau_temporal * resid * phi_g[t - 1];
+        }
       }
 
-      // tau gradient: 0.5*T*log(tau) + 0.5*log(1-rho^2) - 0.5*tau*quad
-      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * quad_form;
+      // tau gradient: sum over groups of [0.5*T*log(tau) + 0.5*log(1-rho^2) - 0.5*tau*quad]
+      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_quad_form;
 
       // rho gradient
       if (layout.logit_rho_ar1_idx >= 0) {
-        double grad_rho = -rho_ar1 / one_minus_rho2;  // From 0.5*log(1-rho^2)
-        grad_rho += tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];  // From first term
-        for (int t = 1; t < T_len; t++) {
-          double resid = phi_temporal[t] - rho_ar1 * phi_temporal[t - 1];
-          grad_rho += tau_temporal * resid * phi_temporal[t - 1];
-        }
-        // Chain rule: d/d(logit_rho) = d/d(rho) * d(rho)/d(logit_rho) = grad_rho * rho * (1 - rho)
+        double grad_rho = -n_groups * rho_ar1 / one_minus_rho2;  // n_groups copies of 0.5*log(1-rho^2)
+        grad_rho += total_grad_rho;
         grad[layout.logit_rho_ar1_idx] += grad_rho * rho_ar1 * (1.0 - rho_ar1);
       }
     }
@@ -3318,6 +3493,11 @@ void compute_gradient_analytical(
 
 }
 
+// Gradient mode: controls which gradient function is used.
+// Moved here (before verify_gradient_runtime) so mode-aware functions
+// can reference it. Previously defined later in the file.
+static GradientMode g_gradient_mode = GradientMode::AUTO;
+
 // =====================================================================
 // Numerical gradient (fallback for complex models)
 // =====================================================================
@@ -3348,6 +3528,44 @@ void compute_gradient_numerical(
 
     double f_plus = compute_log_post(params_plus, data, layout);
     double f_minus = compute_log_post(params_minus, data, layout);
+
+    grad[i] = (f_plus - f_minus) / (2.0 * h);
+  }
+}
+
+// =====================================================================
+// Numerical gradient using compute_log_post_impl<double>
+// Used for verifying A_r/A modes which use compute_log_post_impl<T>.
+// This ensures the numerical reference matches the same function that
+// the autodiff mode differentiates (important when parameterization
+// differs from H-mode, e.g. non-centered RE).
+// =====================================================================
+
+void compute_gradient_numerical_impl(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
+) {
+  int n = params.size();
+  grad.resize(n);
+
+  if (log_post_out) {
+    *log_post_out = ratiod::compute_log_post_impl(params, data, layout);
+  }
+
+  double h = 1e-5;
+
+  for (int i = 0; i < n; i++) {
+    std::vector<double> params_plus = params;
+    std::vector<double> params_minus = params;
+
+    params_plus[i] = params[i] + h;
+    params_minus[i] = params[i] - h;
+
+    double f_plus = ratiod::compute_log_post_impl(params_plus, data, layout);
+    double f_minus = ratiod::compute_log_post_impl(params_minus, data, layout);
 
     grad[i] = (f_plus - f_minus) / (2.0 * h);
   }
@@ -3385,6 +3603,62 @@ bool verify_gradient(
                 << " at param " << worst_idx
                 << " (analytical: " << grad_analytical[worst_idx]
                 << ", numerical: " << grad_numerical[worst_idx] << ")\n";
+    return false;
+  }
+  return true;
+}
+
+// Runtime gradient check: compare compute_gradient() dispatcher output
+// against numerical gradients at the first warmup iteration.
+// Catches log-post/gradient mismatches in ALL specialized gradient functions
+// (GP, HSGP, SVC, TVC, MSGP, spatiotemporal, etc.), not just the main
+// compute_gradient_analytical().
+bool verify_gradient_runtime(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    double tol = 1e-4
+) {
+  // compute_gradient() uses the current g_gradient_mode dispatcher,
+  // which routes to the actual specialized function being used
+  std::vector<double> grad_active, grad_numerical;
+  compute_gradient(params, data, layout, grad_active, nullptr);
+
+  // For A_r/A modes: use compute_log_post_impl<double> as numerical reference,
+  // since those modes differentiate compute_log_post_impl<T> (which may use
+  // different parameterization than H-mode's compute_log_post, e.g. non-centered RE).
+  // For H mode: use compute_log_post (H-mode function) as reference.
+  if (g_gradient_mode == GradientMode::AUTODIFF_ARENA ||
+      g_gradient_mode == GradientMode::AUTODIFF_FORWARD ||
+      g_gradient_mode == GradientMode::AUTODIFF_TAPE) {
+    compute_gradient_numerical_impl(params, data, layout, grad_numerical);
+  } else {
+    compute_gradient_numerical(params, data, layout, grad_numerical);
+  }
+
+  double max_diff = 0.0;
+  int worst_idx = -1;
+  for (size_t i = 0; i < grad_active.size(); i++) {
+    double diff = std::abs(grad_active[i] - grad_numerical[i]);
+    double scale = std::max(1.0, std::max(std::abs(grad_active[i]),
+                                           std::abs(grad_numerical[i])));
+    double rel_diff = diff / scale;
+    if (rel_diff > max_diff) {
+      max_diff = rel_diff;
+      worst_idx = i;
+    }
+  }
+
+  if (max_diff > tol) {
+    // Use REprintf for immediate output, then Rcpp::warning for R-level notice
+    REprintf("[numdenom] WARNING: gradient mismatch detected at param %d!\n"
+             "  max |active - numerical| / scale = %.6e (tol = %.1e)\n"
+             "  active[%d] = %.8e, numerical[%d] = %.8e\n"
+             "  This indicates a bug in the specialized gradient function.\n"
+             "  Falling back to numerical gradients for safety.\n",
+             worst_idx, max_diff, tol,
+             worst_idx, grad_active[worst_idx],
+             worst_idx, grad_numerical[worst_idx]);
     return false;
   }
   return true;
@@ -3440,26 +3714,32 @@ void compute_gradient_arena(
 ) {
     using namespace ratiod::arena;
 
-    // Thread-safe: each call gets its own arena via RAII
-    ArenaScope scope;
-    Arena* arena = scope.arena();
+    int n_nodes_used = 0;
+    {
+        // Thread-safe: each call gets its own arena via RAII
+        ArenaScope scope;
+        Arena* arena = scope.arena();
 
-    // Create autodiff variables from parameters
-    std::vector<Var> params_ar = make_vars(arena, params);
+        // Create autodiff variables from parameters
+        std::vector<Var> params_ar = make_vars(arena, params);
 
-    // Compute log posterior using templated implementation
-    Var log_post = ratiod::compute_log_post_impl(params_ar, data, layout);
+        // Compute log posterior using templated implementation
+        Var log_post = ratiod::compute_log_post_impl(params_ar, data, layout);
 
-    // Extract log_post value before backward pass
-    if (log_post_out) *log_post_out = log_post.val();
+        // Extract log_post value before backward pass
+        if (log_post_out) *log_post_out = log_post.val();
 
-    // Backward pass to compute gradients
-    log_post.backward();
+        // Backward pass to compute gradients
+        log_post.backward();
 
-    // Extract gradients
-    grad = get_adjoints(params_ar);
+        // Extract gradients
+        grad = get_adjoints(params_ar);
 
-    // ArenaScope destructor handles cleanup
+        n_nodes_used = arena->size();
+        // ArenaScope destructor handles cleanup
+    }
+
+    (void)n_nodes_used;  // suppress unused warning
 }
 
 // =====================================================================
@@ -3672,12 +3952,21 @@ void compute_gradient_gp_handcoded(
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_deta_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {  // POISSON_GAMMA
-            // Poisson: d(log_lik)/d(eta) = y - mu
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num);
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num;
-            // Gamma: d(log_lik)/d(eta) = phi * (y/mu - 1)
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            dLL_deta_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -3700,15 +3989,17 @@ void compute_gradient_gp_handcoded(
                               (dLL_deta_num + dLL_deta_denom) : dLL_deta_num;
         grad[layout.gp_w_start + loc_i] += dLL_dspatial;
 
-        // Gradient w.r.t. phi_num (for NegBin)
-        if (layout.has_phi_num && data.model_type == ModelType::NEGBIN_NEGBIN) {
-            double mu_num = std::exp(eta_num);
-            double y = data.y_num[i];
-            // d(log_lik)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + 1 - (y+phi)/(mu+phi)
-            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
-                             + std::log(phi_num / (mu_num + phi_num)) + 1.0
-                             - (y + phi_num) / (mu_num + phi_num);
-            grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
         }
 
         // Gradient w.r.t. phi_denom
@@ -3720,13 +4011,13 @@ void compute_gradient_gp_handcoded(
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
-            } else if (data.model_type == ModelType::POISSON_GAMMA) {
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
-                double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
-                                 + std::log(y) - std::log(mu_denom)
-                                 - y / mu_denom;
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             }
         }
@@ -3819,7 +4110,9 @@ void compute_gradient_gp_temporal_handcoded(
 
         int t_idx = -1;
         if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
-            t_idx = data.temporal_time_idx[i] - 1;
+            int t = data.temporal_time_idx[i] - 1;
+            int g = data.temporal_group_idx[i] - 1;
+            t_idx = g * data.n_times + t;  // Panel temporal: flat index
             if (t_idx >= 0 && t_idx < T_len) {
                 if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
                 else { eta_num += phi_temporal[t_idx]; }
@@ -3836,9 +4129,18 @@ void compute_gradient_gp_temporal_handcoded(
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -3847,49 +4149,119 @@ void compute_gradient_gp_temporal_handcoded(
         if (layout.has_re && data.re_group[i] > 0) grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
         grad[layout.gp_w_start + loc_i] += data.gp_data.shared ? (dLL_num + dLL_denom) : dLL_num;
         if (t_idx >= 0 && t_idx < T_len) grad_temporal_lik[t_idx] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
+
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
+        }
+
+        // Gradient w.r.t. phi_denom
+        if (layout.has_phi_denom) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
+                                 + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
+                                 - (y + phi_denom) / (mu_denom + phi_denom);
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom_cont[i];
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            }
+        }
     }
 
-    // Temporal GMRF
+    // Temporal GMRF (per-group for panel temporal)
+    int T = data.n_times;
+    int n_groups = data.n_temporal_groups;
     for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
     if (data.temporal_type == TemporalType::RW1) {
-        double qf = 0.0;
-        for (int t = 0; t < T_len; t++) {
-            double g = 0.0;
-            if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
-            if (t < T_len - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
-            grad[layout.temporal_start + t] += g;
+        double total_qf = 0.0; int total_rank = 0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const double* phi_g = phi_temporal + gg * T;
+            int base = layout.temporal_start + gg * T;
+            double qf = 0.0;
+            for (int t = 0; t < T; t++) {
+                double g = 0.0;
+                if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
+                if (t < T - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
+                grad[base + t] += g;
+            }
+            if (data.temporal_cyclic) {
+                double dc = phi_g[0] - phi_g[T - 1]; qf += dc * dc;
+                grad[base + 0] -= tau_temporal * dc;
+                grad[base + T - 1] += tau_temporal * dc;
+            }
+            total_qf += qf; total_rank += data.temporal_cyclic ? T : T - 1;
+            { double sp = 0.0; for (int t = 0; t < T; t++) sp += phi_g[t];
+              for (int t = 0; t < T; t++) grad[base + t] -= 0.001 * sp; }
         }
-        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
-        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
-          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
     } else if (data.temporal_type == TemporalType::RW2) {
-        double qf = 0.0;
-        for (int t = 0; t < T_len; t++) {
-            double g = 0.0;
-            if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
-            if (t >= 1 && t < T_len - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
-            if (t < T_len - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
-            grad[layout.temporal_start + t] += g;
+        double total_qf = 0.0; int total_rank = 0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const double* phi_g = phi_temporal + gg * T;
+            int base = layout.temporal_start + gg * T;
+            double qf = 0.0;
+            for (int t = 0; t < T; t++) {
+                double g = 0.0;
+                if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+                if (t >= 1 && t < T - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
+                if (t < T - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
+                grad[base + t] += g;
+            }
+            for (int t = 2; t < T; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+            if (data.temporal_cyclic && T >= 3) {
+                double d2_a = phi_g[T - 2] - 2.0 * phi_g[T - 1] + phi_g[0];
+                double d2_b = phi_g[T - 1] - 2.0 * phi_g[0] + phi_g[1];
+                qf += d2_a * d2_a + d2_b * d2_b;
+                grad[base + T - 2] -= tau_temporal * d2_a;
+                grad[base + T - 1] += 2.0 * tau_temporal * d2_a;
+                grad[base + 0] -= tau_temporal * d2_a;
+                grad[base + T - 1] -= tau_temporal * d2_b;
+                grad[base + 0] += 2.0 * tau_temporal * d2_b;
+                grad[base + 1] -= tau_temporal * d2_b;
+            }
+            total_qf += qf; total_rank += data.temporal_cyclic ? T : T - 2;
+            { double sp = 0.0; for (int t = 0; t < T; t++) sp += phi_g[t];
+              for (int t = 0; t < T; t++) grad[base + t] -= 0.001 * sp; }
         }
-        for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
-        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
-        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
-          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
     } else if (data.temporal_type == TemporalType::AR1) {
         double omr2 = 1.0 - rho_ar1 * rho_ar1;
-        grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
-        if (T_len > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
-        double qf = omr2 * phi_temporal[0] * phi_temporal[0];
-        for (int t = 1; t < T_len; t++) {
-            double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
-            double g = -tau_temporal * r;
-            if (t < T_len - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
-            grad[layout.temporal_start + t] += g;
+        double total_qf = 0.0, total_gr = 0.0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const double* phi_g = phi_temporal + gg * T;
+            int base = layout.temporal_start + gg * T;
+            grad[base] += -tau_temporal * omr2 * phi_g[0];
+            if (T > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
+            double qf = omr2 * phi_g[0] * phi_g[0];
+            for (int t = 1; t < T; t++) {
+                double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
+                double g = -tau_temporal * r;
+                if (t < T - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
+                grad[base + t] += g;
+            }
+            total_qf += qf;
+            total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
+            for (int t = 1; t < T; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
         }
-        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * qf;
+        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
         if (layout.logit_rho_ar1_idx >= 0) {
-            double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
-            for (int t = 1; t < T_len; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+            double gr = -n_groups * rho_ar1 / omr2 + total_gr;
             grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
         }
     }
@@ -4097,10 +4469,23 @@ void compute_gradient_temporal_gp_handcoded(
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             resid_num = data.y_num[i] - mu_num;
             double y_denom_i = data.y_denom_cont[i];
-            resid_denom = phi_num * (y_denom_i / mu_denom - 1.0);
-            double rate = phi_num / mu_denom;
-            grad_phi_num_i = std::log(rate) + 1.0 + std::log(y_denom_i)
-                             - ratiod::math::portable_digamma(phi_num) - rate * y_denom_i / phi_num;
+            resid_denom = phi_denom * (y_denom_i / mu_denom - 1.0);
+            double rate = phi_denom / mu_denom;
+            grad_phi_denom_i = std::log(rate) + 1.0 + std::log(y_denom_i)
+                             - ratiod::math::portable_digamma(phi_denom) - rate * y_denom_i / phi_denom;
+
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            resid_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            double y_denom_i = data.y_denom_cont[i];
+            resid_denom = phi_denom * (y_denom_i / mu_denom - 1.0);
+            grad_phi_num_i = ratiod::math::portable_digamma(data.y_num[i] + phi_num) - ratiod::math::portable_digamma(phi_num)
+                             + std::log(phi_num / denom_nb)
+                             + (mu_num - data.y_num[i]) / denom_nb;
+            double rate = phi_denom / mu_denom;
+            grad_phi_denom_i = std::log(rate) + 1.0 + std::log(y_denom_i)
+                             - ratiod::math::portable_digamma(phi_denom) - rate * y_denom_i / phi_denom;
 
         } else if (data.model_type == ModelType::GAMMA_GAMMA) {
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
@@ -4319,7 +4704,9 @@ void compute_gradient_msgp_temporal_handcoded(
 
         int t_idx = -1;
         if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
-            t_idx = data.temporal_time_idx[i] - 1;
+            int t = data.temporal_time_idx[i] - 1;
+            int g = data.temporal_group_idx[i] - 1;
+            t_idx = g * data.n_times + t;  // Panel temporal: flat index
             if (t_idx >= 0 && t_idx < T_len) {
                 if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
                 else { eta_num += phi_temporal[t_idx]; }
@@ -4336,9 +4723,18 @@ void compute_gradient_msgp_temporal_handcoded(
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -4351,51 +4747,119 @@ void compute_gradient_msgp_temporal_handcoded(
         grad[layout.gp_regional_start + loc_i] += dLL_dspatial;
 
         if (t_idx >= 0 && t_idx < T_len) grad_temporal_lik[t_idx] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
+
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
+        }
+
+        // Gradient w.r.t. phi_denom
+        if (layout.has_phi_denom) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
+                                 + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
+                                 - (y + phi_denom) / (mu_denom + phi_denom);
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom_cont[i];
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            }
+        }
     }
 
-    // =========================================================================
-    // Temporal GMRF gradients
-    // =========================================================================
+    // Temporal GMRF gradients (per-group for panel temporal)
+    int T_msgp = data.n_times;
+    int n_groups_msgp = data.n_temporal_groups;
     for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
     if (data.temporal_type == TemporalType::RW1) {
-        double qf = 0.0;
-        for (int t = 0; t < T_len; t++) {
-            double g = 0.0;
-            if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
-            if (t < T_len - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
-            grad[layout.temporal_start + t] += g;
+        double total_qf = 0.0; int total_rank = 0;
+        for (int gg = 0; gg < n_groups_msgp; gg++) {
+            const double* phi_g = phi_temporal + gg * T_msgp;
+            int base = layout.temporal_start + gg * T_msgp;
+            double qf = 0.0;
+            for (int t = 0; t < T_msgp; t++) {
+                double g = 0.0;
+                if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
+                if (t < T_msgp - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
+                grad[base + t] += g;
+            }
+            if (data.temporal_cyclic) {
+                double dc = phi_g[0] - phi_g[T_msgp - 1]; qf += dc * dc;
+                grad[base + 0] -= tau_temporal * dc;
+                grad[base + T_msgp - 1] += tau_temporal * dc;
+            }
+            total_qf += qf; total_rank += data.temporal_cyclic ? T_msgp : T_msgp - 1;
+            { double sp = 0.0; for (int t = 0; t < T_msgp; t++) sp += phi_g[t];
+              for (int t = 0; t < T_msgp; t++) grad[base + t] -= 0.001 * sp; }
         }
-        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
-        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
-          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
     } else if (data.temporal_type == TemporalType::RW2) {
-        double qf = 0.0;
-        for (int t = 0; t < T_len; t++) {
-            double g = 0.0;
-            if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
-            if (t >= 1 && t < T_len - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
-            if (t < T_len - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
-            grad[layout.temporal_start + t] += g;
+        double total_qf = 0.0; int total_rank = 0;
+        for (int gg = 0; gg < n_groups_msgp; gg++) {
+            const double* phi_g = phi_temporal + gg * T_msgp;
+            int base = layout.temporal_start + gg * T_msgp;
+            double qf = 0.0;
+            for (int t = 0; t < T_msgp; t++) {
+                double g = 0.0;
+                if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+                if (t >= 1 && t < T_msgp - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
+                if (t < T_msgp - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
+                grad[base + t] += g;
+            }
+            for (int t = 2; t < T_msgp; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+            if (data.temporal_cyclic && T_msgp >= 3) {
+                double d2_a = phi_g[T_msgp - 2] - 2.0 * phi_g[T_msgp - 1] + phi_g[0];
+                double d2_b = phi_g[T_msgp - 1] - 2.0 * phi_g[0] + phi_g[1];
+                qf += d2_a * d2_a + d2_b * d2_b;
+                grad[base + T_msgp - 2] -= tau_temporal * d2_a;
+                grad[base + T_msgp - 1] += 2.0 * tau_temporal * d2_a;
+                grad[base + 0] -= tau_temporal * d2_a;
+                grad[base + T_msgp - 1] -= tau_temporal * d2_b;
+                grad[base + 0] += 2.0 * tau_temporal * d2_b;
+                grad[base + 1] -= tau_temporal * d2_b;
+            }
+            total_qf += qf; total_rank += data.temporal_cyclic ? T_msgp : T_msgp - 2;
+            { double sp = 0.0; for (int t = 0; t < T_msgp; t++) sp += phi_g[t];
+              for (int t = 0; t < T_msgp; t++) grad[base + t] -= 0.001 * sp; }
         }
-        for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
-        grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
-        { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
-          for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
     } else if (data.temporal_type == TemporalType::AR1) {
         double omr2 = 1.0 - rho_ar1 * rho_ar1;
-        grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
-        if (T_len > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
-        double qf = omr2 * phi_temporal[0] * phi_temporal[0];
-        for (int t = 1; t < T_len; t++) {
-            double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
-            double g = -tau_temporal * r;
-            if (t < T_len - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
-            grad[layout.temporal_start + t] += g;
+        double total_qf = 0.0, total_gr = 0.0;
+        for (int gg = 0; gg < n_groups_msgp; gg++) {
+            const double* phi_g = phi_temporal + gg * T_msgp;
+            int base = layout.temporal_start + gg * T_msgp;
+            grad[base] += -tau_temporal * omr2 * phi_g[0];
+            if (T_msgp > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
+            double qf = omr2 * phi_g[0] * phi_g[0];
+            for (int t = 1; t < T_msgp; t++) {
+                double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
+                double g = -tau_temporal * r;
+                if (t < T_msgp - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
+                grad[base + t] += g;
+            }
+            total_qf += qf;
+            total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
+            for (int t = 1; t < T_msgp; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
         }
-        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * qf;
+        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
         if (layout.logit_rho_ar1_idx >= 0) {
-            double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
-            for (int t = 1; t < T_len; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+            double gr = -n_groups_msgp * rho_ar1 / omr2 + total_gr;
             grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
         }
     }
@@ -4598,10 +5062,21 @@ void compute_gradient_svc_handcoded(
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_deta_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {  // POISSON_GAMMA
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num);
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            dLL_deta_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -4627,14 +5102,17 @@ void compute_gradient_svc_handcoded(
             grad[layout.svc_w_start + j * N_obs + i] += dLL_dsvc * x_ij;
         }
 
-        // Gradient w.r.t. phi_num (for NegBin)
-        if (layout.has_phi_num && data.model_type == ModelType::NEGBIN_NEGBIN) {
-            double mu_num = std::exp(eta_num);
-            double y = data.y_num[i];
-            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
-                             + std::log(phi_num / (mu_num + phi_num)) + 1.0
-                             - (y + phi_num) / (mu_num + phi_num);
-            grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
         }
 
         // Gradient w.r.t. phi_denom
@@ -4646,13 +5124,13 @@ void compute_gradient_svc_handcoded(
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
-            } else if (data.model_type == ModelType::POISSON_GAMMA) {
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
-                double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
-                                 + std::log(y) - std::log(mu_denom)
-                                 - y / mu_denom;
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             }
         }
@@ -4883,10 +5361,21 @@ void compute_gradient_tvc_handcoded(
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_deta_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {  // POISSON_GAMMA
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num);
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            dLL_deta_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -4915,14 +5404,17 @@ void compute_gradient_tvc_handcoded(
             grad[layout.tvc_w_start + w_idx] += dLL_dtvc * x_ij;
         }
 
-        // Gradient w.r.t. phi_num (for NegBin)
-        if (layout.has_phi_num && data.model_type == ModelType::NEGBIN_NEGBIN) {
-            double mu_num = std::exp(eta_num);
-            double y = data.y_num[i];
-            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
-                             + std::log(phi_num / (mu_num + phi_num)) + 1.0
-                             - (y + phi_num) / (mu_num + phi_num);
-            grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
         }
 
         // Gradient w.r.t. phi_denom
@@ -4934,13 +5426,13 @@ void compute_gradient_tvc_handcoded(
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
-            } else if (data.model_type == ModelType::POISSON_GAMMA) {
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
-                double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
-                                 + std::log(y) - std::log(mu_denom)
-                                 - y / mu_denom;
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             }
         }
@@ -5160,12 +5652,23 @@ void compute_gradient_latent_handcoded(
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_deta_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {  // POISSON_GAMMA
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num);
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num;
-            // For POISSON_GAMMA, phi_num is the shape parameter for gamma denom
-            dLL_deta_denom = phi_num * (data.y_denom_cont[i] / mu_denom - 1.0);
+            // For POISSON_GAMMA, phi_denom is the shape parameter for gamma denom
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {  // GAMMA_GAMMA fallback
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            dLL_deta_num = data.y_num[i] - mu_num;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
         // Total gradient through latent effect
@@ -5197,33 +5700,37 @@ void compute_gradient_latent_handcoded(
 
         // Gradient w.r.t. phi_num
         if (layout.has_phi_num) {
-            if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
                 double mu_num = std::exp(eta_num);
                 double y = data.y_num[i];
                 double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
                                  + std::log(phi_num / (mu_num + phi_num)) + 1.0
                                  - (y + phi_num) / (mu_num + phi_num);
                 grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
-            } else if (data.model_type == ModelType::POISSON_GAMMA) {
-                // For POISSON_GAMMA, phi_num is the gamma shape parameter for denominator
-                double mu_denom = std::exp(eta_denom);
-                double y = data.y_denom_cont[i];
-                double digamma_phi = ratiod::math::portable_digamma(phi_num);
-                double dLL_dphi = std::log(phi_num) + 1.0 - digamma_phi
-                                 + std::log(y) - std::log(mu_denom)
-                                 - y / mu_denom;
-                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
             }
         }
 
-        // Gradient w.r.t. phi_denom (NEGBIN_NEGBIN only)
-        if (layout.has_phi_denom && data.model_type == ModelType::NEGBIN_NEGBIN) {
-            double mu_denom = std::exp(eta_denom);
-            double y = data.y_denom[i];
-            double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
-                             + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
-                             - (y + phi_denom) / (mu_denom + phi_denom);
-            grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+        // Gradient w.r.t. phi_denom
+        if (layout.has_phi_denom) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
+                                 + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
+                                 - (y + phi_denom) / (mu_denom + phi_denom);
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
+                // For POISSON_GAMMA/NEGBIN_GAMMA, phi_denom is the gamma shape parameter for denominator
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom_cont[i];
+                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
+                double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
+                                 + std::log(y) - std::log(mu_denom)
+                                 - y / mu_denom;
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            }
         }
     }
 
@@ -5457,7 +5964,7 @@ void compute_gradient_gp_autodiff(
             Var mu_num = safe_exp(eta_num);
             Var mu_denom = safe_exp(eta_denom);
             ll_i = ratiod::math::log_lik_poisson(data.y_num[i], mu_num) +
-                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
         }
 
         log_post = log_post + ll_i;
@@ -5684,12 +6191,21 @@ void compute_gradient_msgp_handcoded(
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_deta_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {  // POISSON_GAMMA
-            // Poisson: d(log_lik)/d(eta) = y - mu
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num);
             double mu_denom = std::exp(eta_denom);
             dLL_deta_num = data.y_num[i] - mu_num;
-            // Gamma: d(log_lik)/d(eta) = phi * (y/mu - 1)
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num);
+            double mu_denom = std::exp(eta_denom);
+            dLL_deta_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -5713,15 +6229,17 @@ void compute_gradient_msgp_handcoded(
         grad[layout.gp_local_start + loc_i] += dLL_dspatial;
         grad[layout.gp_regional_start + loc_i] += dLL_dspatial;
 
-        // Gradient w.r.t. phi_num (for NegBin)
-        if (layout.has_phi_num && data.model_type == ModelType::NEGBIN_NEGBIN) {
-            double mu_num = std::exp(eta_num);
-            double y = data.y_num[i];
-            // d(log_lik)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + 1 - (y+phi)/(mu+phi)
-            double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
-                             + std::log(phi_num / (mu_num + phi_num)) + 1.0
-                             - (y + phi_num) / (mu_num + phi_num);
-            grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
         }
 
         // Gradient w.r.t. phi_denom
@@ -5733,13 +6251,13 @@ void compute_gradient_msgp_handcoded(
                                  + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                                  - (y + phi_denom) / (mu_denom + phi_denom);
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
-            } else if (data.model_type == ModelType::POISSON_GAMMA) {
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
                 double mu_denom = std::exp(eta_denom);
                 double y = data.y_denom_cont[i];
-                double digamma_phi = ratiod::math::portable_digamma(phi_denom);
-                double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
-                                 + std::log(y) - std::log(mu_denom)
-                                 - y / mu_denom;
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
                 grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
             }
         }
@@ -5942,7 +6460,7 @@ void compute_gradient_msgp_autodiff(
             Var mu_num = safe_exp(eta_num);
             Var mu_denom = safe_exp(eta_denom);
             ll_i = ratiod::math::log_lik_poisson(data.y_num[i], mu_num) +
-                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
         }
 
         log_post = log_post + ll_i;
@@ -6192,7 +6710,7 @@ void compute_gradient_gp_temporal_autodiff(
             Var mu_num = safe_exp(eta_num);
             Var mu_denom = safe_exp(eta_denom);
             ll_i = ratiod::math::log_lik_poisson(data.y_num[i], mu_num) +
-                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+                   ratiod::math::log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
         }
 
         log_post = log_post + ll_i;
@@ -6378,7 +6896,9 @@ void compute_gradient_hsgp(
     int t_idx = -1;
     if (layout.has_temporal && !data.temporal_time_idx.empty() &&
         i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
-      t_idx = data.temporal_time_idx[i] - 1;
+      int t = data.temporal_time_idx[i] - 1;
+      int g = data.temporal_group_idx[i] - 1;
+      t_idx = g * data.n_times + t;  // Panel temporal: flat index
       if (t_idx >= 0 && t_idx < T_len) {
         if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
         else { eta_num += phi_temporal[t_idx]; }
@@ -6402,12 +6922,21 @@ void compute_gradient_hsgp(
       double mu_denom = std::exp(eta_denom);
       dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
       dLL_deta_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-    } else {  // POISSON_GAMMA
-      // Poisson: d(log_lik)/d(eta) = y - mu
+    } else if (data.model_type == ModelType::POISSON_GAMMA) {
       double mu_num = std::exp(eta_num);
       double mu_denom = std::exp(eta_denom);
       dLL_deta_num = data.y_num[i] - mu_num;
-      // Gamma: d(log_lik)/d(eta) = phi * (y/mu - 1)
+      dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+    } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+      double mu_num = std::exp(eta_num);
+      double mu_denom = std::exp(eta_denom);
+      double denom_nb = mu_num + phi_num;
+      dLL_deta_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+      dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+    } else {
+      double mu_num = std::exp(eta_num);
+      double mu_denom = std::exp(eta_denom);
+      dLL_deta_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
       dLL_deta_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
     }
 
@@ -6425,15 +6954,17 @@ void compute_gradient_hsgp(
       grad[layout.re_start + g] += dLL_deta_num + dLL_deta_denom;
     }
 
-    // Gradient w.r.t. phi_num (for NegBin)
-    if (layout.has_phi_num && data.model_type == ModelType::NEGBIN_NEGBIN) {
-      double mu_num = std::exp(eta_num);
-      double y = data.y_num[i];
-      // d(log_lik)/d(phi) = digamma(y+phi) - digamma(phi) + log(phi/(mu+phi)) + 1 - (y+phi)/(mu+phi)
-      double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
-                       + std::log(phi_num / (mu_num + phi_num)) + 1.0
-                       - (y + phi_num) / (mu_num + phi_num);
-      grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+    // Gradient w.r.t. phi_num
+    if (layout.has_phi_num) {
+      if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+          data.model_type == ModelType::NEGBIN_GAMMA) {
+        double mu_num = std::exp(eta_num);
+        double y = data.y_num[i];
+        double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                         + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                         - (y + phi_num) / (mu_num + phi_num);
+        grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+      }
     }
 
     // Gradient w.r.t. phi_denom
@@ -6445,13 +6976,13 @@ void compute_gradient_hsgp(
                          + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
                          - (y + phi_denom) / (mu_denom + phi_denom);
         grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
-      } else if (data.model_type == ModelType::POISSON_GAMMA) {
+      } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                 data.model_type == ModelType::NEGBIN_GAMMA) {
         double mu_denom = std::exp(eta_denom);
         double y = data.y_denom_cont[i];
-        double digamma_phi = ratiod::math::portable_digamma(phi_denom);
-        double dLL_dphi = std::log(phi_denom) + 1.0 - digamma_phi
-                         + std::log(y) - std::log(mu_denom)
-                         - y / mu_denom;
+        double rate = phi_denom / mu_denom;
+        double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                         - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
         grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
       }
     }
@@ -6481,50 +7012,85 @@ void compute_gradient_hsgp(
   grad[layout.log_sigma2_hsgp_idx] += hsgp_grads.grad_log_sigma2;
   grad[layout.log_lengthscale_hsgp_idx] += hsgp_grads.grad_log_lengthscale;
 
-  // =========================================================================
-  // Temporal GMRF gradients (same pattern as compute_gradient_analytical)
-  // =========================================================================
+  // Temporal GMRF gradients (per-group for panel temporal)
   if (layout.has_temporal && T_len > 0) {
+    int T_hsgp = data.n_times;
+    int n_groups_hsgp = data.n_temporal_groups;
     for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
     if (data.temporal_type == TemporalType::RW1) {
-      double qf = 0.0;
-      for (int t = 0; t < T_len; t++) {
-        double g = 0.0;
-        if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
-        if (t < T_len - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
-        grad[layout.temporal_start + t] += g;
+      double total_qf = 0.0; int total_rank = 0;
+      for (int gg = 0; gg < n_groups_hsgp; gg++) {
+        const double* phi_g = phi_temporal + gg * T_hsgp;
+        int base = layout.temporal_start + gg * T_hsgp;
+        double qf = 0.0;
+        for (int t = 0; t < T_hsgp; t++) {
+          double g = 0.0;
+          if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
+          if (t < T_hsgp - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
+          grad[base + t] += g;
+        }
+        if (data.temporal_cyclic) {
+          double dc = phi_g[0] - phi_g[T_hsgp - 1]; qf += dc * dc;
+          grad[base + 0] -= tau_temporal * dc;
+          grad[base + T_hsgp - 1] += tau_temporal * dc;
+        }
+        total_qf += qf; total_rank += data.temporal_cyclic ? T_hsgp : T_hsgp - 1;
+        { double sp = 0.0; for (int t = 0; t < T_hsgp; t++) sp += phi_g[t];
+          for (int t = 0; t < T_hsgp; t++) grad[base + t] -= 0.001 * sp; }
       }
-      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 1) - 0.5 * tau_temporal * qf;
-      { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
-        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
     } else if (data.temporal_type == TemporalType::RW2) {
-      double qf = 0.0;
-      for (int t = 0; t < T_len; t++) {
-        double g = 0.0;
-        if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
-        if (t >= 1 && t < T_len - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
-        if (t < T_len - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
-        grad[layout.temporal_start + t] += g;
+      double total_qf = 0.0; int total_rank = 0;
+      for (int gg = 0; gg < n_groups_hsgp; gg++) {
+        const double* phi_g = phi_temporal + gg * T_hsgp;
+        int base = layout.temporal_start + gg * T_hsgp;
+        double qf = 0.0;
+        for (int t = 0; t < T_hsgp; t++) {
+          double g = 0.0;
+          if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+          if (t >= 1 && t < T_hsgp - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
+          if (t < T_hsgp - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
+          grad[base + t] += g;
+        }
+        for (int t = 2; t < T_hsgp; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+        if (data.temporal_cyclic && T_hsgp >= 3) {
+          double d2_a = phi_g[T_hsgp - 2] - 2.0 * phi_g[T_hsgp - 1] + phi_g[0];
+          double d2_b = phi_g[T_hsgp - 1] - 2.0 * phi_g[0] + phi_g[1];
+          qf += d2_a * d2_a + d2_b * d2_b;
+          grad[base + T_hsgp - 2] -= tau_temporal * d2_a;
+          grad[base + T_hsgp - 1] += 2.0 * tau_temporal * d2_a;
+          grad[base + 0] -= tau_temporal * d2_a;
+          grad[base + T_hsgp - 1] -= tau_temporal * d2_b;
+          grad[base + 0] += 2.0 * tau_temporal * d2_b;
+          grad[base + 1] -= tau_temporal * d2_b;
+        }
+        total_qf += qf; total_rank += data.temporal_cyclic ? T_hsgp : T_hsgp - 2;
+        { double sp = 0.0; for (int t = 0; t < T_hsgp; t++) sp += phi_g[t];
+          for (int t = 0; t < T_hsgp; t++) grad[base + t] -= 0.001 * sp; }
       }
-      for (int t = 2; t < T_len; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
-      grad[layout.log_tau_temporal_idx] += 0.5 * (T_len - 2) - 0.5 * tau_temporal * qf;
-      { double sp = 0.0; for (int t = 0; t < T_len; t++) sp += phi_temporal[t];
-        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
     } else if (data.temporal_type == TemporalType::AR1) {
       double omr2 = 1.0 - rho_ar1 * rho_ar1;
-      grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
-      if (T_len > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
-      double qf = omr2 * phi_temporal[0] * phi_temporal[0];
-      for (int t = 1; t < T_len; t++) {
-        double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
-        double g = -tau_temporal * r;
-        if (t < T_len - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
-        grad[layout.temporal_start + t] += g;
+      double total_qf = 0.0, total_gr = 0.0;
+      for (int gg = 0; gg < n_groups_hsgp; gg++) {
+        const double* phi_g = phi_temporal + gg * T_hsgp;
+        int base = layout.temporal_start + gg * T_hsgp;
+        grad[base] += -tau_temporal * omr2 * phi_g[0];
+        if (T_hsgp > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
+        double qf = omr2 * phi_g[0] * phi_g[0];
+        for (int t = 1; t < T_hsgp; t++) {
+          double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
+          double g = -tau_temporal * r;
+          if (t < T_hsgp - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
+          grad[base + t] += g;
+        }
+        total_qf += qf;
+        total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
+        for (int t = 1; t < T_hsgp; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
       }
-      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * qf;
+      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
       if (layout.logit_rho_ar1_idx >= 0) {
-        double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
-        for (int t = 1; t < T_len; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+        double gr = -n_groups_hsgp * rho_ar1 / omr2 + total_gr;
         grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
       }
     }
@@ -6707,9 +7273,18 @@ void compute_gradient_ms_temporal_handcoded(
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -6738,6 +7313,39 @@ void compute_gradient_ms_temporal_handcoded(
                 if (s_idx < n_seasonal) grad_seasonal_lik[s_idx] += dLL_temporal;
             }
             if (short_term != nullptr && t_idx < n_short) grad_short_lik[t_idx] += dLL_temporal;
+        }
+
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
+        }
+
+        // Gradient w.r.t. phi_denom
+        if (layout.has_phi_denom) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
+                                 + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
+                                 - (y + phi_denom) / (mu_denom + phi_denom);
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom_cont[i];
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            }
         }
     }
 
@@ -6976,7 +7584,9 @@ void compute_gradient_spatiotemporal_handcoded(
         int t_base = -1;
         if (layout.has_temporal && !data.temporal_time_idx.empty() &&
             i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
-            t_base = data.temporal_time_idx[i] - 1;
+            int t = data.temporal_time_idx[i] - 1;
+            int g = data.temporal_group_idx[i] - 1;
+            t_base = g * data.n_times + t;  // Panel temporal: flat index
             if (t_base >= 0 && t_base < T_temporal) {
                 if (data.temporal_shared) { eta_num += phi_temporal[t_base]; eta_denom += phi_temporal[t_base]; }
                 else { eta_num += phi_temporal[t_base]; }
@@ -7002,9 +7612,18 @@ void compute_gradient_spatiotemporal_handcoded(
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / (mu_num + phi_num);
             dLL_denom = data.y_denom[i] - mu_denom * (data.y_denom[i] + phi_denom) / (mu_denom + phi_denom);
-        } else {
+        } else if (data.model_type == ModelType::POISSON_GAMMA) {
             double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
             dLL_num = data.y_num[i] - mu_num;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            double denom_nb = mu_num + phi_num;
+            dLL_num = data.y_num[i] - mu_num * (data.y_num[i] + phi_num) / denom_nb;
+            dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
+        } else {
+            double mu_num = std::exp(eta_num), mu_denom = std::exp(eta_denom);
+            dLL_num = phi_num * (data.y_num_cont[i] / mu_num - 1.0);
             dLL_denom = phi_denom * (data.y_denom_cont[i] / mu_denom - 1.0);
         }
 
@@ -7023,6 +7642,39 @@ void compute_gradient_spatiotemporal_handcoded(
         }
         if (st_idx >= 0) {
             grad_delta_lik[st_idx] += st.shared ? dLL_shared : dLL_num;
+        }
+
+        // Gradient w.r.t. phi_num
+        if (layout.has_phi_num) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_num = std::exp(eta_num);
+                double y = data.y_num[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_num) - ratiod::math::portable_digamma(phi_num)
+                                 + std::log(phi_num / (mu_num + phi_num)) + 1.0
+                                 - (y + phi_num) / (mu_num + phi_num);
+                grad[layout.log_phi_num_idx] += dLL_dphi * phi_num;
+            }
+        }
+
+        // Gradient w.r.t. phi_denom
+        if (layout.has_phi_denom) {
+            if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom[i];
+                double dLL_dphi = ratiod::math::portable_digamma(y + phi_denom) - ratiod::math::portable_digamma(phi_denom)
+                                 + std::log(phi_denom / (mu_denom + phi_denom)) + 1.0
+                                 - (y + phi_denom) / (mu_denom + phi_denom);
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            } else if (data.model_type == ModelType::POISSON_GAMMA ||
+                       data.model_type == ModelType::NEGBIN_GAMMA) {
+                double mu_denom = std::exp(eta_denom);
+                double y = data.y_denom_cont[i];
+                double rate = phi_denom / mu_denom;
+                double dLL_dphi = std::log(rate) + 1.0 + std::log(y)
+                                 - ratiod::math::portable_digamma(phi_denom) - y / mu_denom;
+                grad[layout.log_phi_denom_idx] += dLL_dphi * phi_denom;
+            }
         }
     }
 
@@ -7065,50 +7717,85 @@ void compute_gradient_spatiotemporal_handcoded(
         }
     }
 
-    // =========================================================================
-    // Temporal GMRF prior gradients
-    // =========================================================================
+    // Temporal GMRF prior gradients (per-group for panel temporal)
     if (layout.has_temporal && T_temporal > 0) {
+        int T_st = data.n_times;
+        int n_groups_st = data.n_temporal_groups;
         for (int t = 0; t < T_temporal; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
         if (data.temporal_type == TemporalType::RW1) {
-            double qf = 0.0;
-            for (int t = 0; t < T_temporal; t++) {
-                double g = 0.0;
-                if (t > 0) { g += tau_temporal * (phi_temporal[t-1] - phi_temporal[t]); qf += std::pow(phi_temporal[t] - phi_temporal[t-1], 2); }
-                if (t < T_temporal - 1) g += tau_temporal * (phi_temporal[t+1] - phi_temporal[t]);
-                grad[layout.temporal_start + t] += g;
+            double total_qf = 0.0; int total_rank = 0;
+            for (int gg = 0; gg < n_groups_st; gg++) {
+                const double* phi_g = phi_temporal + gg * T_st;
+                int base = layout.temporal_start + gg * T_st;
+                double qf = 0.0;
+                for (int t = 0; t < T_st; t++) {
+                    double g = 0.0;
+                    if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
+                    if (t < T_st - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
+                    grad[base + t] += g;
+                }
+                if (data.temporal_cyclic) {
+                    double dc = phi_g[0] - phi_g[T_st - 1]; qf += dc * dc;
+                    grad[base + 0] -= tau_temporal * dc;
+                    grad[base + T_st - 1] += tau_temporal * dc;
+                }
+                total_qf += qf; total_rank += data.temporal_cyclic ? T_st : T_st - 1;
+                { double sp = 0.0; for (int t = 0; t < T_st; t++) sp += phi_g[t];
+                  for (int t = 0; t < T_st; t++) grad[base + t] -= 0.001 * sp; }
             }
-            grad[layout.log_tau_temporal_idx] += 0.5 * (T_temporal - 1) - 0.5 * tau_temporal * qf;
-            { double sp = 0.0; for (int t = 0; t < T_temporal; t++) sp += phi_temporal[t];
-              for (int t = 0; t < T_temporal; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+            grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
         } else if (data.temporal_type == TemporalType::RW2) {
-            double qf = 0.0;
-            for (int t = 0; t < T_temporal; t++) {
-                double g = 0.0;
-                if (t >= 2) g -= tau_temporal * (phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t]);
-                if (t >= 1 && t < T_temporal - 1) g += 2.0 * tau_temporal * (phi_temporal[t-1] - 2.0*phi_temporal[t] + phi_temporal[t+1]);
-                if (t < T_temporal - 2) g -= tau_temporal * (phi_temporal[t] - 2.0*phi_temporal[t+1] + phi_temporal[t+2]);
-                grad[layout.temporal_start + t] += g;
+            double total_qf = 0.0; int total_rank = 0;
+            for (int gg = 0; gg < n_groups_st; gg++) {
+                const double* phi_g = phi_temporal + gg * T_st;
+                int base = layout.temporal_start + gg * T_st;
+                double qf = 0.0;
+                for (int t = 0; t < T_st; t++) {
+                    double g = 0.0;
+                    if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+                    if (t >= 1 && t < T_st - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
+                    if (t < T_st - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
+                    grad[base + t] += g;
+                }
+                for (int t = 2; t < T_st; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
+                if (data.temporal_cyclic && T_st >= 3) {
+                    double d2_a = phi_g[T_st - 2] - 2.0 * phi_g[T_st - 1] + phi_g[0];
+                    double d2_b = phi_g[T_st - 1] - 2.0 * phi_g[0] + phi_g[1];
+                    qf += d2_a * d2_a + d2_b * d2_b;
+                    grad[base + T_st - 2] -= tau_temporal * d2_a;
+                    grad[base + T_st - 1] += 2.0 * tau_temporal * d2_a;
+                    grad[base + 0] -= tau_temporal * d2_a;
+                    grad[base + T_st - 1] -= tau_temporal * d2_b;
+                    grad[base + 0] += 2.0 * tau_temporal * d2_b;
+                    grad[base + 1] -= tau_temporal * d2_b;
+                }
+                total_qf += qf; total_rank += data.temporal_cyclic ? T_st : T_st - 2;
+                { double sp = 0.0; for (int t = 0; t < T_st; t++) sp += phi_g[t];
+                  for (int t = 0; t < T_st; t++) grad[base + t] -= 0.001 * sp; }
             }
-            for (int t = 2; t < T_temporal; t++) qf += std::pow(phi_temporal[t-2] - 2.0*phi_temporal[t-1] + phi_temporal[t], 2);
-            grad[layout.log_tau_temporal_idx] += 0.5 * (T_temporal - 2) - 0.5 * tau_temporal * qf;
-            { double sp = 0.0; for (int t = 0; t < T_temporal; t++) sp += phi_temporal[t];
-              for (int t = 0; t < T_temporal; t++) grad[layout.temporal_start + t] -= 0.001 * sp; }
+            grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
         } else if (data.temporal_type == TemporalType::AR1) {
             double omr2 = 1.0 - rho_ar1 * rho_ar1;
-            grad[layout.temporal_start] += -tau_temporal * omr2 * phi_temporal[0];
-            if (T_temporal > 1) grad[layout.temporal_start] += tau_temporal * rho_ar1 * (phi_temporal[1] - rho_ar1 * phi_temporal[0]);
-            double qf = omr2 * phi_temporal[0] * phi_temporal[0];
-            for (int t = 1; t < T_temporal; t++) {
-                double r = phi_temporal[t] - rho_ar1 * phi_temporal[t-1]; qf += r * r;
-                double g = -tau_temporal * r;
-                if (t < T_temporal - 1) g += tau_temporal * rho_ar1 * (phi_temporal[t+1] - rho_ar1 * phi_temporal[t]);
-                grad[layout.temporal_start + t] += g;
+            double total_qf = 0.0, total_gr = 0.0;
+            for (int gg = 0; gg < n_groups_st; gg++) {
+                const double* phi_g = phi_temporal + gg * T_st;
+                int base = layout.temporal_start + gg * T_st;
+                grad[base] += -tau_temporal * omr2 * phi_g[0];
+                if (T_st > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
+                double qf = omr2 * phi_g[0] * phi_g[0];
+                for (int t = 1; t < T_st; t++) {
+                    double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
+                    double g = -tau_temporal * r;
+                    if (t < T_st - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
+                    grad[base + t] += g;
+                }
+                total_qf += qf;
+                total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
+                for (int t = 1; t < T_st; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
             }
-            grad[layout.log_tau_temporal_idx] += 0.5 * T_temporal - 0.5 * tau_temporal * qf;
+            grad[layout.log_tau_temporal_idx] += 0.5 * T_temporal - 0.5 * tau_temporal * total_qf;
             if (layout.logit_rho_ar1_idx >= 0) {
-                double gr = -rho_ar1 / omr2 + tau_temporal * rho_ar1 * phi_temporal[0] * phi_temporal[0];
-                for (int t = 1; t < T_temporal; t++) gr += tau_temporal * (phi_temporal[t] - rho_ar1 * phi_temporal[t-1]) * phi_temporal[t-1];
+                double gr = -n_groups_st * rho_ar1 / omr2 + total_gr;
                 grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
             }
         }
@@ -7277,9 +7964,7 @@ void compute_gradient_spatiotemporal_handcoded(
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
-// Global gradient mode (set by cpp_hmc_fit, used by compute_gradient)
-// Thread-safe since each chain runs in its own process or the mode is set once before sampling
-static GradientMode g_gradient_mode = GradientMode::AUTO;
+// g_gradient_mode defined earlier in file (before verify_gradient_runtime)
 
 // Set global gradient mode (called at start of sampling)
 void set_gradient_mode(GradientMode mode) {
@@ -8511,7 +9196,14 @@ HMCResultCpp run_hmc_chain_cpp(
   if (use_nuts) {
     compute_gradient(q, data, layout, current_grad, &log_prob_current);
   } else {
-    log_prob_current = compute_log_post(q, data, layout);
+    // Use same log-post function as the active gradient mode
+    if (g_gradient_mode == GradientMode::AUTODIFF_ARENA ||
+        g_gradient_mode == GradientMode::AUTODIFF_FORWARD ||
+        g_gradient_mode == GradientMode::AUTODIFF_TAPE) {
+      log_prob_current = ratiod::compute_log_post_impl(q, data, layout);
+    } else {
+      log_prob_current = compute_log_post(q, data, layout);
+    }
   }
 
   double epsilon = find_reasonable_epsilon(q, data, layout, rng);
@@ -9261,6 +9953,25 @@ HMCResultCpp run_hmc_chain_cpp(
       // Adaptation during warmup
       if (is_warmup) {
         epsilon = da.update(alpha);
+
+        // Early detection of catastrophic dense mass during terminal buffer.
+        // Normal epsilon with dense mass is 0.1-0.5. If it exceeds 2.0, the mass
+        // matrix eigenvalues are pathological. Fall back to DIAG immediately so
+        // the remaining terminal buffer iterations (~48) properly adapt epsilon.
+        // inv_mass_diag is always kept in sync with the dense diagonal (line 62).
+        if (iter >= n_warmup - term_buffer && iter < n_warmup - 1 &&
+            mass.type == MassMatrixType::DENSE && mass.adapted && epsilon > 2.0) {
+          if (verbose) {
+            REprintf("  [DENSE] WARNING at iter %d: epsilon=%.4f (catastrophic). "
+                     "Falling back to DIAG mass.\n", iter, epsilon);
+          }
+          mass.type = MassMatrixType::DIAG;
+          // inv_mass_diag already populated from dense diagonal (update_from_covariance)
+          epsilon = find_reasonable_epsilon(q, data, layout, rng, mass.inv_mass_diag);
+          da = DualAveraging(epsilon, n_params, target_boost);
+          if (use_nuts) da.target_accept = nuts_target_accept;
+        }
+
         if (iter >= init_buffer && iter < n_warmup - term_buffer) {
           mass_stats.update(q);
           if (mass.type == MassMatrixType::DENSE) {
@@ -9269,6 +9980,22 @@ HMCResultCpp run_hmc_chain_cpp(
         }
         if (iter == n_warmup - 1) {
           epsilon = da.final_epsilon();
+
+          // Final safety net: if epsilon is still > 1.0 with dense mass after
+          // the full terminal buffer, fall back to DIAG. This catches cases
+          // where the catastrophe develops slowly.
+          if (epsilon > 1.0 && mass.type == MassMatrixType::DENSE && mass.adapted) {
+            if (verbose) {
+              REprintf("  [DENSE] WARNING: epsilon=%.4f after warmup (catastrophic). "
+                       "Falling back to DIAG mass.\n", epsilon);
+            }
+            mass.type = MassMatrixType::DIAG;
+            epsilon = find_reasonable_epsilon(q, data, layout, rng, mass.inv_mass_diag);
+            da = DualAveraging(epsilon, n_params, target_boost);
+            if (use_nuts) da.target_accept = nuts_target_accept;
+            epsilon = da.final_epsilon();
+          }
+
           if (verbose) {
             REprintf("  [DENSE] Warmup done: epsilon=%.6f, mass.type=%s, mass.adapted=%d\n",
                      epsilon, (mass.type == MassMatrixType::DENSE ? "DENSE" : "DIAG"),
@@ -9412,8 +10139,15 @@ HMCResultCpp run_hmc_chain_cpp(
         }
       }
 
-      // Compute proposed Hamiltonian
-      double log_prob_prop = compute_log_post(q_prop, data, layout);
+      // Compute proposed Hamiltonian (use same log-post as gradient mode)
+      double log_prob_prop;
+      if (g_gradient_mode == GradientMode::AUTODIFF_ARENA ||
+          g_gradient_mode == GradientMode::AUTODIFF_FORWARD ||
+          g_gradient_mode == GradientMode::AUTODIFF_TAPE) {
+        log_prob_prop = ratiod::compute_log_post_impl(q_prop, data, layout);
+      } else {
+        log_prob_prop = compute_log_post(q_prop, data, layout);
+      }
       double kinetic_prop = 0.0;
 
       if (use_lbfgs && lbfgs_initialized && !lbfgs_warmup_done && lbfgs_state.d == n_params) {
@@ -9536,6 +10270,23 @@ HMCResult run_hmc_chain(
     double adapt_delta,
     int riemannian
 ) {
+  // Runtime gradient check: compare active gradient function against numerical
+  // at the initial parameter values. Catches log-post/gradient mismatches in
+  // specialized gradient functions before sampling begins.
+  // Safe to call here (single-threaded, R API available).
+  if (g_gradient_mode != GradientMode::NUMERICAL) {
+    bool grad_ok = verify_gradient_runtime(q_init, data, layout, 1e-4);
+    if (!grad_ok) {
+      g_gradient_mode = GradientMode::NUMERICAL;
+      Rcpp::warning(
+        "Gradient mismatch detected: active gradient function disagrees with "
+        "numerical gradients (max rel diff > 1e-4). Falling back to numerical "
+        "gradients (mode='N'). This is slower but correct. Please report this "
+        "as a bug at https://github.com/gcol33/numdenom/issues"
+      );
+    }
+  }
+
   // Run C++ version - pass verbose through for debugging
   HMCResultCpp cpp_result = run_hmc_chain_cpp(
     q_init, data, layout, n_iter, n_warmup, L, chain_id, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
@@ -9577,6 +10328,17 @@ std::vector<HMCResult> run_hmc_parallel_chains(
 ) {
   ParamLayout layout = compute_param_layout(data);
   int n_params = layout.total_params;
+
+  // Runtime gradient check: compare active gradient function against numerical
+  // BEFORE spawning parallel chains. This is single-threaded, so R API and
+  // g_gradient_mode modification are safe.
+  if (g_gradient_mode != GradientMode::NUMERICAL) {
+    bool grad_ok = verify_gradient_runtime(q_init, data, layout, 1e-4);
+    if (!grad_ok) {
+      g_gradient_mode = GradientMode::NUMERICAL;
+      REprintf("[numdenom] Falling back to numerical gradients for all chains.\n");
+    }
+  }
 
   // Use pure C++ containers in parallel region
   std::vector<HMCResultCpp> cpp_results(n_chains);
@@ -9924,6 +10686,8 @@ Rcpp::List cpp_hmc_fit(
     data.model_type = ModelType::NEGBIN_NEGBIN;
   } else if (model_type_str == "poisson_gamma") {
     data.model_type = ModelType::POISSON_GAMMA;
+  } else if (model_type_str == "negbin_gamma") {
+    data.model_type = ModelType::NEGBIN_GAMMA;
   } else if (model_type_str == "gamma_gamma") {
     data.model_type = ModelType::GAMMA_GAMMA;
   } else if (model_type_str == "lognormal") {
@@ -10486,6 +11250,8 @@ Rcpp::List cpp_hmc_fit_gp(
     data.model_type = ModelType::NEGBIN_NEGBIN;
   } else if (model_type_str == "poisson_gamma") {
     data.model_type = ModelType::POISSON_GAMMA;
+  } else if (model_type_str == "negbin_gamma") {
+    data.model_type = ModelType::NEGBIN_GAMMA;
   } else if (model_type_str == "gamma_gamma") {
     data.model_type = ModelType::GAMMA_GAMMA;
   } else if (model_type_str == "lognormal") {

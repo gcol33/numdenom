@@ -30,6 +30,17 @@ test_that("ratiod_poisson_gamma creates valid family", {
   expect_equal(fam$denominator$distribution, "gamma")
 })
 
+test_that("ratiod_negbin_gamma creates valid family", {
+  fam <- ratiod_negbin_gamma()
+
+  expect_s3_class(fam, "ratiod_family")
+  expect_equal(fam$name, "negbin_gamma")
+  expect_equal(fam$numerator$distribution, "neg_binomial_2")
+  expect_equal(fam$denominator$distribution, "gamma")
+  expect_equal(fam$numerator$link, "log")
+  expect_equal(fam$denominator$link, "log")
+})
+
 test_that("invalid link functions are rejected", {
   expect_error(
     ratiod_negbin_negbin(link_num = "identity"),

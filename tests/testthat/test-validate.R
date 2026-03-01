@@ -3,8 +3,7 @@
 test_that("pp_check generic dispatches correctly", {
   # pp_check is a generic
   expect_true(is.function(pp_check))
-  expect_true("ratiod_fit" %in% methods("pp_check") ||
-              exists("pp_check.ratiod_fit", mode = "function"))
+  expect_true("pp_check.ratiod_fit" %in% methods("pp_check"))
 })
 
 test_that("prior_predict is not yet implemented", {

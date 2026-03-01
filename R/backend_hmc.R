@@ -670,6 +670,9 @@ fit_hmc <- function(formula,
 #' Get HMC model type string
 #' @keywords internal
 get_hmc_model_type <- function(family) {
+  # Check family name first for families that share numerator distribution
+  if (identical(family$name, "negbin_gamma")) return("negbin_gamma")
+
   dist <- family$numerator$distribution
   if (dist == "binomial") return("binomial")
   if (dist %in% c("negbin", "negative_binomial", "neg_binomial_2")) return("negbin_negbin")
@@ -724,6 +727,11 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
     y_denom <- as.integer(y_denom)
     y_denom_cont <- rep(0.0, length(y_num))
   } else if (model_type == "poisson_gamma") {
+    y_num <- as.integer(y_num)
+    y_denom_int <- rep(1L, length(y_num))
+    y_denom_cont <- as.numeric(y_denom)
+    y_denom <- y_denom_int
+  } else if (model_type == "negbin_gamma") {
     y_num <- as.integer(y_num)
     y_denom_int <- rep(1L, length(y_num))
     y_denom_cont <- as.numeric(y_denom)
@@ -1041,6 +1049,8 @@ initialize_hmc_params_spatial <- function(hmc_data, model_type, spatial_info) {
     n_params <- n_params + 2
   } else if (model_type == "poisson_gamma") {
     n_params <- n_params + 1
+  } else if (model_type == "negbin_gamma") {
+    n_params <- n_params + 2
   }
 
   # Spatial
@@ -1178,7 +1188,7 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
   }
 
   # Overdispersion
-  if (model_type == "negbin_negbin") {
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
     draws_list[["phi_num"]] <- exp(samples[, idx])
     idx <- idx + 1
     draws_list[["phi_denom"]] <- exp(samples[, idx])
@@ -1292,7 +1302,7 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
   }
 
   # Overdispersion indices (skip for ratio computation)
-  if (model_type == "negbin_negbin") {
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
     idx <- idx + 2
   } else if (model_type == "poisson_gamma") {
     idx <- idx + 1
@@ -1628,6 +1638,8 @@ initialize_hmc_params_spatial_temporal <- function(hmc_data, model_type,
     n_params <- n_params + 2
   } else if (model_type == "poisson_gamma") {
     n_params <- n_params + 1
+  } else if (model_type == "negbin_gamma") {
+    n_params <- n_params + 2
   }
 
   # Spatial
@@ -1728,7 +1740,7 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
   if (p_num > 0) {
     beta_num_init <- rep(0.0, p_num)
     # Data-driven intercept for continuous families (log link)
-    if (model_type %in% c("gamma_gamma", "lognormal", "poisson_gamma", "negbin_negbin")) {
+    if (model_type %in% c("gamma_gamma", "lognormal", "poisson_gamma", "negbin_negbin", "negbin_gamma")) {
       if (!is.null(hmc_data$y_num_cont) && any(hmc_data$y_num_cont > 0)) {
         # Use y_num_cont for continuous families
         y_mean <- mean(hmc_data$y_num_cont[hmc_data$y_num_cont > 0])
@@ -1764,7 +1776,7 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
   p_denom <- hmc_data$p_denom
   if (p_denom > 0) {
     beta_denom_init <- rep(0.0, p_denom)
-    if (model_type %in% c("gamma_gamma", "lognormal", "poisson_gamma", "negbin_negbin")) {
+    if (model_type %in% c("gamma_gamma", "lognormal", "poisson_gamma", "negbin_negbin", "negbin_gamma")) {
       if (!is.null(hmc_data$y_denom_cont) && any(hmc_data$y_denom_cont > 0)) {
         y_mean <- mean(hmc_data$y_denom_cont[hmc_data$y_denom_cont > 0])
         if (is.finite(y_mean) && y_mean > 0) {
@@ -1807,6 +1819,8 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
     q_init <- c(q_init, log(2), log(2))  # log_phi_num, log_phi_denom
   } else if (model_type == "poisson_gamma") {
     q_init <- c(q_init, log(2))  # log_shape
+  } else if (model_type == "negbin_gamma") {
+    q_init <- c(q_init, log(2), log(2))  # log_phi_num (NB), log_phi_denom (Gamma shape)
   } else if (model_type == "gamma_gamma") {
     q_init <- c(q_init, log(2), log(2))  # log_shape_num, log_shape_denom
   } else if (model_type == "lognormal") {
@@ -2265,7 +2279,7 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
   }
 
   # Overdispersion
-  if (model_type == "negbin_negbin") {
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
     draws_list[["phi_num"]] <- exp(samples[, idx])
     idx <- idx + 1
     draws_list[["phi_denom"]] <- exp(samples[, idx])
@@ -2688,7 +2702,7 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
   }
 
   # Overdispersion indices (skip for ratio computation)
-  if (model_type == "negbin_negbin") {
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
     idx <- idx + 2
   } else if (model_type == "poisson_gamma") {
     idx <- idx + 1

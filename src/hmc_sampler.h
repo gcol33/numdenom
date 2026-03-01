@@ -45,7 +45,7 @@ using ratiod_spatiotemporal::NonsepType;
 // Model configuration
 // =====================================================================
 
-enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA, GAMMA_GAMMA, LOGNORMAL, BETA_BINOMIAL };
+enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA, NEGBIN_GAMMA, GAMMA_GAMMA, LOGNORMAL, BETA_BINOMIAL };
 enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP, HSGP };
 
 // Gradient computation methods
@@ -93,6 +93,16 @@ GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const P
 
 // Model data container with spatial support
 struct ModelData {
+  // Unique ID for cache invalidation (incremented per construction)
+  // Prevents stale VecGradWorkspace cache when consecutive model fits
+  // allocate ModelData at the same stack address.
+  uint64_t unique_id;
+  static inline uint64_t next_id() {
+    static uint64_t counter = 0;
+    return ++counter;
+  }
+  ModelData() : unique_id(next_id()) {}
+
   // Response data
   std::vector<int> y_num;
   std::vector<int> y_denom;

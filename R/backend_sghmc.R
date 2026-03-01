@@ -176,7 +176,7 @@ fit_sghmc <- function(formula,
   # Initialize from zeros
   n_params <- ncol(hmc_data$X_num) + ncol(hmc_data$X_denom)
   if (hmc_data$n_re_groups > 0) n_params <- n_params + 1 + hmc_data$n_re_groups
-  if (model_type == "negbin_negbin") n_params <- n_params + 2
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") n_params <- n_params + 2
   if (model_type == "poisson_gamma") n_params <- n_params + 1
 
   q_init <- rep(0.0, n_params)
@@ -389,7 +389,7 @@ fit_sgld <- function(formula,
   # Initialize
   n_params <- ncol(hmc_data$X_num) + ncol(hmc_data$X_denom)
   if (hmc_data$n_re_groups > 0) n_params <- n_params + 1 + hmc_data$n_re_groups
-  if (model_type == "negbin_negbin") n_params <- n_params + 2
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") n_params <- n_params + 2
   if (model_type == "poisson_gamma") n_params <- n_params + 1
 
   q_init <- rep(0.0, n_params)

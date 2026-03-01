@@ -191,18 +191,16 @@ T compute_log_post_impl(
         int n_re = layout.re_end - layout.re_start;
         if (data.re_parameterization == 1) {
             // Non-centered: z ~ N(0, 1), so tau = 1
-            // Prior on z values (the stored params)
             for (int g = 0; g < n_re; g++) {
                 T z_g = params[layout.re_start + g];
                 log_post = log_post + log_prior_normal(z_g, 1.0);
-                // Normalization constant for tau=1: 0.5 * log(1) = 0
             }
         } else {
             // Centered: re ~ N(0, sigma_re^2)
+            // Keep tau_re as autodiff variable so gradient flows to sigma_re
             T tau_re = T(1.0) / (sigma_re * sigma_re + T(1e-10));
             for (int g = 0; g < n_re; g++) {
-                log_post = log_post + log_prior_normal(re[g], get_value(tau_re));
-                // Add normalization constant
+                log_post = log_post + T(-0.5) * tau_re * re[g] * re[g];
                 log_post = log_post + T(0.5) * safe_log(tau_re);
             }
         }
@@ -472,8 +470,15 @@ T compute_log_post_impl(
                         T diff = phi_temporal[g * T_times + t] - phi_temporal[g * T_times + t - 1];
                         quad_form = quad_form + diff * diff;
                     }
+                    // Cyclic: add wrap-around edge (phi[0] - phi[T-1])
+                    if (data.temporal_cyclic) {
+                        T diff_cyclic = phi_temporal[g * T_times] - phi_temporal[g * T_times + T_times - 1];
+                        quad_form = quad_form + diff_cyclic * diff_cyclic;
+                    }
                 }
-                log_post = log_post + T(0.5 * (T_times - 1) * data.n_temporal_groups) * log_tau;
+                // Rank: T for cyclic, T-1 for non-cyclic
+                int rank_rw1 = data.temporal_cyclic ? T_times : T_times - 1;
+                log_post = log_post + T(0.5 * rank_rw1 * data.n_temporal_groups) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
 
             } else if (data.temporal_type == TemporalType::RW2) {
@@ -486,8 +491,20 @@ T compute_log_post_impl(
                                + phi_temporal[g * T_times + t - 2];
                         quad_form = quad_form + diff * diff;
                     }
+                    // Cyclic: add wrap-around second-order differences
+                    if (data.temporal_cyclic && T_times >= 3) {
+                        T d2_a = phi_temporal[g * T_times + T_times - 2]
+                               - T(2.0) * phi_temporal[g * T_times + T_times - 1]
+                               + phi_temporal[g * T_times];
+                        T d2_b = phi_temporal[g * T_times + T_times - 1]
+                               - T(2.0) * phi_temporal[g * T_times]
+                               + phi_temporal[g * T_times + 1];
+                        quad_form = quad_form + d2_a * d2_a + d2_b * d2_b;
+                    }
                 }
-                log_post = log_post + T(0.5 * (T_times - 2) * data.n_temporal_groups) * log_tau;
+                // Rank: T for cyclic, T-2 for non-cyclic
+                int rank_rw2 = data.temporal_cyclic ? T_times : T_times - 2;
+                log_post = log_post + T(0.5 * rank_rw2 * data.n_temporal_groups) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
 
             } else if (data.temporal_type == TemporalType::AR1) {
@@ -972,7 +989,13 @@ T compute_log_post_impl(
             T mu_num = safe_exp(eta_num);
             T mu_denom = safe_exp(eta_denom);
             ll_i = log_lik_poisson(data.y_num[i], mu_num);
-            ll_i = ll_i + log_lik_gamma(data.y_denom_cont[i], phi_num, mu_denom);
+            ll_i = ll_i + log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
+
+        } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
+            T mu_num = safe_exp(eta_num);
+            T mu_denom = safe_exp(eta_denom);
+            ll_i = log_lik_negbin(data.y_num[i], mu_num, phi_num);
+            ll_i = ll_i + log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
 
         } else if (data.model_type == ModelType::GAMMA_GAMMA) {
             // Gamma-Gamma: both responses are continuous Gamma

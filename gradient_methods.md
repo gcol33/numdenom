@@ -25,6 +25,24 @@ H    - Hand-coded                  IMPLEMENTED (production default)
 gradient_mode = "auto" → H > A_r > A > N
 ```
 
+### Runtime Gradient Check (since 2026-02-28)
+
+At the start of every HMC sampling run, numdenom automatically compares the active gradient function (H, A_r, etc.) against numerical finite differences. This catches log-post/gradient mismatches in specialized gradient functions **before** sampling begins.
+
+**Behavior:**
+- Runs once per model fit (before any chain starts)
+- Tolerance: `max |active - numerical| / scale < 1e-4`
+- On mismatch: prints warning via `REprintf()`, falls back to `gradient_mode="N"` (numerical)
+- Thread-safe: check runs in single-threaded context, before OpenMP parallel chains
+- Cost: one extra O(p×N) numerical gradient evaluation at initialization
+
+**Why this matters:**
+- Specialized gradient functions (GP, HSGP, SVC, TVC, MSGP, spatiotemporal) are copy-adapted from `compute_gradient_analytical()`. Copy-paste errors in prior gradients (e.g., wrong Jacobian, missing terms) broke Hamiltonian conservation without any visible error — only manifesting as poor sampling efficiency (2-180x slowdown) or silent posterior bias.
+- The runtime check catches these mismatches immediately and falls back to a correct (if slower) gradient.
+- Users see a warning message directing them to report the bug.
+
+**Implementation:** `verify_gradient_runtime()` in `src/hmc_sampler.cpp`, called from `run_hmc_chain()` and `run_hmc_parallel_chains()`.
+
 ### Benchmark Results (n=500, 500 iter)
 
 **Legacy fixed-L HMC benchmarks (pre-NUTS, for gradient mode comparison):**
@@ -440,6 +458,43 @@ Priority order for creating joint Stan models:
 | 105 | beta_binomial | ✓ | ICAR | ✗ | ✗ | H | 6.6 | | | | ✓Sim (0.48 SD) |
 | 106 | beta_binomial | ✓ | ✗ | RW1 | ✗ | H | 10.5 | | | | ✓Stan (4.2x) |
 | 107 | beta_binomial | ✓ | ICAR | RW1 | ✗ | H | 9.1 | | | | ✓Sim (0.88 SD) |
+
+### Section 7: negbin_gamma Family (Rows 108-137)
+
+**⚠️ brms validation INVALID for this family** - numdenom models num as NegBin and denom as Gamma with shared RE, brms cannot express joint num/denom models.
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
+| 108 | negbin_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.1 | | | | ✓Stan (joint, 29.5x) |
+| 109 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.9 | | | | ✓Stan (joint, 7.5x) |
+| 110 | negbin_gamma | slopes | ✗ | ✗ | ✗ | H | | | | | |
+| 111 | negbin_gamma | crossed | ✗ | ✗ | ✗ | H | | | | | |
+| 112 | negbin_gamma | ✓ | ICAR | ✗ | ✗ | H | | | | | |
+| 113 | negbin_gamma | ✓ | BYM2 | ✗ | ✗ | H | | | | | |
+| 114 | negbin_gamma | ✓ | GP | ✗ | ✗ | H | | | | | |
+| 115 | negbin_gamma | ✓ | HSGP | ✗ | ✗ | H | | | | | |
+| 116 | negbin_gamma | ✓ | MSGP | ✗ | ✗ | H | | | | | |
+| 117 | negbin_gamma | ✓ | pCAR | ✗ | ✗ | H | | | | | |
+| 118 | negbin_gamma | ✓ | ✗ | RW1 | ✗ | H | | | | | |
+| 119 | negbin_gamma | ✓ | ✗ | RW2 | ✗ | H | | | | | |
+| 120 | negbin_gamma | ✓ | ✗ | AR1 | ✗ | H | | | | | |
+| 121 | negbin_gamma | ✓ | ✗ | GP_t | ✗ | H | | | | | |
+| 122 | negbin_gamma | ✓ | ✗ | MS_t | ✗ | H | | | | | |
+| 123 | negbin_gamma | ✓ | ✗ | ✗ | ZI | H | | | | | |
+| 124 | negbin_gamma | ✓ | ✗ | ✗ | Hurdle | H | | | | | |
+| 125 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | | | | | |
+| 126 | negbin_gamma | ✓ | BYM2 | RW1 | ✗ | H | | | | | |
+| 127 | negbin_gamma | ✓ | ICAR | AR1 | ✗ | H | | | | | |
+| 128 | negbin_gamma | ✓ | GP | RW1 | ✗ | H | | | | | |
+| 129 | negbin_gamma | ✓ | HSGP | RW1 | ✗ | H | | | | | |
+| 130 | negbin_gamma | ✓ | MSGP | RW1 | ✗ | H | | | | | |
+| 131 | negbin_gamma | ✓ | ICAR | ✗ | ZI | H | | | | | |
+| 132 | negbin_gamma | slopes | ICAR | ✗ | ✗ | H | | | | | |
+| 133 | negbin_gamma | ✓ | SVC | ✗ | ✗ | H | | | | | |
+| 134 | negbin_gamma | ✓ | ✗ | TVC | ✗ | H | | | | | |
+| 135 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | | | | | ST-I |
+| 136 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | | | | | ST-IV |
+| 137 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | | | | | latent |
 
 ---
 

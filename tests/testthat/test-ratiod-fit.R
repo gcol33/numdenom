@@ -55,6 +55,35 @@ test_that("ratiod fits negbin_negbin model", {
   expect_true(!is.null(fit$draws))
 })
 
+test_that("ratiod fits negbin_gamma model", {
+  skip_on_cran()
+
+  set.seed(789)
+  n <- 40
+  df <- data.frame(
+    catch = rnbinom(n, size = 5, mu = 12),
+    effort = rgamma(n, shape = 4, rate = 1),
+    x = rnorm(n),
+    site = factor(rep(1:4, each = 10))
+  )
+
+  fit <- ratiod(
+    catch | effort ~ x + (1 | site),
+    data = df,
+    family = ratiod_negbin_gamma(),
+    mode = "hmc",
+    iter = 100,
+    warmup = 50,
+    chains = 1
+  )
+
+  expect_s3_class(fit, "ratiod_fit")
+  expect_equal(fit$family$name, "negbin_gamma")
+  expect_equal(fit$backend, "hmc")
+  expect_true(!is.null(fit$draws))
+  expect_true(nrow(fit$draws) > 0)
+})
+
 test_that("ratiod fits binomial model", {
   skip_on_cran()
 

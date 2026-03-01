@@ -310,7 +310,7 @@ get_param_names_vi <- function(hmc_data, spatial_info, temporal_info, zi_info, m
   }
 
   # Overdispersion
-  if (model_type == "negbin_negbin") {
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
     names <- c(names, "log_phi_num", "log_phi_denom")
   } else if (model_type == "poisson_gamma") {
     names <- c(names, "log_shape")

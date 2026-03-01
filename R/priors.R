@@ -554,10 +554,10 @@ priors_default <- function(family = NULL, spatial = FALSE, temporal = FALSE) {
     cat("  Used for: Standard deviation of group-level effects\n\n")
 
     # Family-specific parameters
-    if (family_name %in% c("negbin_negbin", "poisson_gamma", "gamma_gamma")) {
+    if (family_name %in% c("negbin_negbin", "negbin_gamma", "poisson_gamma", "gamma_gamma")) {
       cat("Overdispersion (phi):\n")
       print_prior(defaults$phi, indent = "  ")
-      if (family_name == "negbin_negbin") {
+      if (family_name %in% c("negbin_negbin", "negbin_gamma")) {
         cat("  Used for: NB2 size parameter (larger = less overdispersion)\n\n")
       } else if (family_name == "poisson_gamma") {
         cat("  Used for: Gamma shape parameter for effort/exposure\n\n")

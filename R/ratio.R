@@ -523,7 +523,7 @@ compute_fitted_hmc <- function(object) {
   }
 
   # Skip overdispersion params
-  if (model_type == "negbin_negbin") {
+  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
     idx <- idx + 2
   } else if (model_type == "poisson_gamma") {
     idx <- idx + 1
