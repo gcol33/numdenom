@@ -3781,6 +3781,78 @@ void compute_gradient_forward(
 }
 
 // =====================================================================
+// RE gradient helpers for specialized gradient functions
+// Handles both centered and non-centered parameterizations correctly
+// =====================================================================
+
+// Initialize RE gradient with prior contribution
+static inline void re_gradient_prior(
+    const ModelData& data,
+    const ParamLayout& layout,
+    const double* re,   // re[g] = params[re_start + g]
+    double* grad,
+    double sigma_re
+) {
+    if (!layout.has_re || data.n_re_groups <= 0) return;
+
+    // Half-Cauchy prior on sigma_re (log-scale)
+    double ratio = sigma_re / data.sigma_re_scale;
+    double ratio_sq = ratio * ratio;
+    grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
+
+    if (data.re_parameterization == 1) {
+        // Non-centered: z ~ N(0,1), prior grad = -z
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -re[g];
+        }
+    } else {
+        // Centered: re ~ N(0, sigma^2)
+        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+        for (int g = 0; g < data.n_re_groups; g++) {
+            grad[layout.re_start + g] = -tau_re * re[g];
+            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
+        }
+    }
+}
+
+// Get RE value for observation (handles NC -> sigma*z transformation)
+static inline double re_value_for_eta(
+    const double* re,
+    int g,
+    double sigma_re,
+    int re_parameterization
+) {
+    double val = re[g];
+    if (re_parameterization == 1) val *= sigma_re;
+    return val;
+}
+
+// Apply NC chain rule transformation after observation loop
+// Must be called AFTER observation loop has accumulated likelihood gradients in grad[re+g]
+static inline void re_gradient_nc_transform(
+    const ModelData& data,
+    const ParamLayout& layout,
+    const double* params,
+    double* grad,
+    double sigma_re
+) {
+    if (!layout.has_re || data.n_re_groups <= 0 || data.re_parameterization != 1) return;
+
+    double sigma_lik_grad = 0.0;
+    for (int g = 0; g < data.n_re_groups; g++) {
+        double z_g = params[layout.re_start + g];
+        // Extract centered lik grad: total - prior = grad[re+g] - (-z_g) = grad[re+g] + z_g
+        double centered_lik = grad[layout.re_start + g] + z_g;
+        // z gradient = prior + chain rule through sigma*z
+        grad[layout.re_start + g] = -z_g + sigma_re * centered_lik;
+        // sigma gradient from likelihood: z_g * d_ll/d_re_g
+        sigma_lik_grad += z_g * centered_lik;
+    }
+    // d_ll/d_log_sigma = sigma * sum(z_g * d_ll/d_re_g)
+    grad[layout.log_sigma_re_idx] += sigma_re * sigma_lik_grad;
+}
+
+// =====================================================================
 // GP gradient (hand-coded, ~3x faster than autodiff)
 // Uses analytical gradients from gp_nngp_gradients for NNGP prior
 // =====================================================================
@@ -3856,18 +3928,8 @@ void compute_gradient_gp_handcoded(
         grad[layout.beta_denom_start + j] -= tau_beta * beta_denom[j];
     }
 
-    // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     // Overdispersion prior: Gamma(shape, rate) via log transform
     // d/d(log_phi) = shape - rate*phi (no extra phi factor)
@@ -3917,11 +3979,12 @@ void compute_gradient_gp_handcoded(
             eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
         }
 
-        // Random effects
+        // Random effects (handles NC parameterization)
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
-            eta_num += re[g];
-            eta_denom += re[g];
+            double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
+            eta_num += re_eff;
+            eta_denom += re_eff;
         }
 
         // GP spatial effect (map observation to unique location)
@@ -4023,6 +4086,9 @@ void compute_gradient_gp_handcoded(
         }
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -4070,16 +4136,8 @@ void compute_gradient_gp_temporal_handcoded(
     for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
     for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
 
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
     if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
@@ -4104,7 +4162,7 @@ void compute_gradient_gp_temporal_handcoded(
         double eta_num = 0.0, eta_denom = 0.0;
         for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
         for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+        if (layout.has_re && data.re_group[i] > 0) { double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization); eta_num += re_eff; eta_denom += re_eff; }
         int loc_i = data.gp_data.obs_to_loc[i];
         if (data.gp_data.shared) { eta_num += gp_w[loc_i]; eta_denom += gp_w[loc_i]; } else { eta_num += gp_w[loc_i]; }
 
@@ -4266,6 +4324,9 @@ void compute_gradient_gp_temporal_handcoded(
         }
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -4313,17 +4374,8 @@ void compute_gradient_temporal_gp_handcoded(
     for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
     for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
 
-    // RE priors: Half-Cauchy on sigma_re + N(0, sigma_re^2) on each RE
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     // Dispersion priors: Gamma on phi via log transform, d/d(log_phi) = shape - rate*phi
     if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
@@ -4425,8 +4477,10 @@ void compute_gradient_temporal_gp_handcoded(
         for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
 
         if (layout.has_re && data.re_group[i] > 0) {
-            eta_num += re[data.re_group[i] - 1];
-            eta_denom += re[data.re_group[i] - 1];
+            int g = data.re_group[i] - 1;
+            double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
+            eta_num += re_eff;
+            eta_denom += re_eff;
         }
 
         // Temporal effect
@@ -4557,6 +4611,9 @@ void compute_gradient_temporal_gp_handcoded(
     if (layout.has_phi_num) grad[layout.log_phi_num_idx] += grad_phi_num_lik * phi_num;
     if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] += grad_phi_denom_lik * phi_denom;
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -4623,16 +4680,8 @@ void compute_gradient_msgp_temporal_handcoded(
     for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
     for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
 
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
     if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
@@ -4694,7 +4743,7 @@ void compute_gradient_msgp_temporal_handcoded(
         double eta_num = 0.0, eta_denom = 0.0;
         for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
         for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+        if (layout.has_re && data.re_group[i] > 0) { double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization); eta_num += re_eff; eta_denom += re_eff; }
 
         // Multi-scale GP spatial effect (map observation to unique location)
         int loc_i = data.multiscale_gp_data.obs_to_loc[i];
@@ -4864,6 +4913,9 @@ void compute_gradient_msgp_temporal_handcoded(
         }
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -4944,18 +4996,8 @@ void compute_gradient_svc_handcoded(
         grad[layout.beta_denom_start + j] -= tau_beta * beta_denom[j];
     }
 
-    // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
     if (layout.has_phi_num) {
@@ -5027,11 +5069,12 @@ void compute_gradient_svc_handcoded(
             eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
         }
 
-        // Random effects
+        // Random effects (handles NC parameterization)
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
-            eta_num += re[g];
-            eta_denom += re[g];
+            double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
+            eta_num += re_eff;
+            eta_denom += re_eff;
         }
 
         // SVC effect: sum_j X_svc[i,j] * w_j[i]
@@ -5149,6 +5192,9 @@ void compute_gradient_svc_handcoded(
         svc_grad_debug_counter++;
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -5233,18 +5279,8 @@ void compute_gradient_tvc_handcoded(
         grad[layout.beta_denom_start + j] -= tau_beta * beta_denom[j];
     }
 
-    // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
     if (layout.has_phi_num) {
@@ -5331,11 +5367,12 @@ void compute_gradient_tvc_handcoded(
             eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
         }
 
-        // Random effects
+        // Random effects (handles NC parameterization)
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
-            eta_num += re[g];
-            eta_denom += re[g];
+            double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
+            eta_num += re_eff;
+            eta_denom += re_eff;
         }
 
         // TVC effect
@@ -5451,6 +5488,9 @@ void compute_gradient_tvc_handcoded(
         tvc_grad_debug_counter++;
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -5559,18 +5599,8 @@ void compute_gradient_latent_handcoded(
         grad[layout.beta_denom_start + j] -= tau_beta * beta_denom[j];
     }
 
-    // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     // Overdispersion prior: Gamma(shape, rate) on phi, with log transform
     // log p(log_phi) = (shape-1)*log_phi - rate*phi + log_phi  [includes Jacobian]
@@ -5622,11 +5652,12 @@ void compute_gradient_latent_handcoded(
             eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
         }
 
-        // Random effects
+        // Random effects (handles NC parameterization)
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
-            eta_num += re[g];
-            eta_denom += re[g];
+            double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
+            eta_num += re_eff;
+            eta_denom += re_eff;
         }
 
         // Latent effect
@@ -5784,6 +5815,9 @@ void compute_gradient_latent_handcoded(
         }
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -5839,12 +5873,21 @@ void compute_gradient_gp_autodiff(
         log_post = log_post - safe_log(1.0 + ratio * ratio);
         log_post = log_post + log_sigma_re;  // Jacobian
 
-        // N(0, sigma_re^2) prior on RE
-        Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            Var re_g = params_ad[layout.re_start + g];
-            log_post = log_post - 0.5 * tau_re * re_g * re_g;
-            log_post = log_post + 0.5 * safe_log(tau_re);
+        // RE prior (handles NC parameterization)
+        if (data.re_parameterization == 1) {
+            // Non-centered: z ~ N(0,1)
+            for (int g = 0; g < data.n_re_groups; g++) {
+                Var re_g = params_ad[layout.re_start + g];
+                log_post = log_post - 0.5 * re_g * re_g;
+            }
+        } else {
+            // Centered: re ~ N(0, sigma_re^2)
+            Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+            for (int g = 0; g < data.n_re_groups; g++) {
+                Var re_g = params_ad[layout.re_start + g];
+                log_post = log_post - 0.5 * tau_re * re_g * re_g;
+                log_post = log_post + 0.5 * safe_log(tau_re);
+            }
         }
     }
 
@@ -5933,8 +5976,9 @@ void compute_gradient_gp_autodiff(
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
             Var re_g = params_ad[layout.re_start + g];
-            eta_num = eta_num + re_g;
-            eta_denom = eta_denom + re_g;
+            Var re_eff = (data.re_parameterization == 1) ? sigma_re * re_g : re_g;
+            eta_num = eta_num + re_eff;
+            eta_denom = eta_denom + re_eff;
         }
 
         // Add GP spatial effect (map observation to unique location)
@@ -6065,18 +6109,8 @@ void compute_gradient_msgp_handcoded(
         grad[layout.beta_denom_start + j] -= tau_beta * beta_denom[j];
     }
 
-    // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
     if (layout.has_phi_num) {
@@ -6157,11 +6191,12 @@ void compute_gradient_msgp_handcoded(
             eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
         }
 
-        // Random effects
+        // Random effects (handles NC parameterization)
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
-            eta_num += re[g];
-            eta_denom += re[g];
+            double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
+            eta_num += re_eff;
+            eta_denom += re_eff;
         }
 
         // Multi-scale GP spatial effect (map observation to unique location)
@@ -6263,6 +6298,9 @@ void compute_gradient_msgp_handcoded(
         }
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -6317,12 +6355,21 @@ void compute_gradient_msgp_autodiff(
         log_post = log_post - safe_log(1.0 + ratio * ratio);
         log_post = log_post + log_sigma_re;  // Jacobian
 
-        // N(0, sigma_re^2) prior on RE
-        Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            Var re_g = params_ad[layout.re_start + g];
-            log_post = log_post - 0.5 * tau_re * re_g * re_g;
-            log_post = log_post + 0.5 * safe_log(tau_re);
+        // RE prior (handles NC parameterization)
+        if (data.re_parameterization == 1) {
+            // Non-centered: z ~ N(0,1)
+            for (int g = 0; g < data.n_re_groups; g++) {
+                Var re_g = params_ad[layout.re_start + g];
+                log_post = log_post - 0.5 * re_g * re_g;
+            }
+        } else {
+            // Centered: re ~ N(0, sigma_re^2)
+            Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+            for (int g = 0; g < data.n_re_groups; g++) {
+                Var re_g = params_ad[layout.re_start + g];
+                log_post = log_post - 0.5 * tau_re * re_g * re_g;
+                log_post = log_post + 0.5 * safe_log(tau_re);
+            }
         }
     }
 
@@ -6431,8 +6478,9 @@ void compute_gradient_msgp_autodiff(
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
             Var re_g = params_ad[layout.re_start + g];
-            eta_num = eta_num + re_g;
-            eta_denom = eta_denom + re_g;
+            Var re_eff = (data.re_parameterization == 1) ? sigma_re * re_g : re_g;
+            eta_num = eta_num + re_eff;
+            eta_denom = eta_denom + re_eff;
         }
 
         // Add multi-scale GP spatial effect (map observation to unique location)
@@ -6526,12 +6574,21 @@ void compute_gradient_gp_temporal_autodiff(
         log_post = log_post - safe_log(1.0 + ratio * ratio);
         log_post = log_post + log_sigma_re;  // Jacobian
 
-        // N(0, sigma_re^2) prior on RE
-        Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            Var re_g = params_ad[layout.re_start + g];
-            log_post = log_post - 0.5 * tau_re * re_g * re_g;
-            log_post = log_post + 0.5 * safe_log(tau_re);
+        // RE prior (handles NC parameterization)
+        if (data.re_parameterization == 1) {
+            // Non-centered: z ~ N(0,1)
+            for (int g = 0; g < data.n_re_groups; g++) {
+                Var re_g = params_ad[layout.re_start + g];
+                log_post = log_post - 0.5 * re_g * re_g;
+            }
+        } else {
+            // Centered: re ~ N(0, sigma_re^2)
+            Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+            for (int g = 0; g < data.n_re_groups; g++) {
+                Var re_g = params_ad[layout.re_start + g];
+                log_post = log_post - 0.5 * tau_re * re_g * re_g;
+                log_post = log_post + 0.5 * safe_log(tau_re);
+            }
         }
     }
 
@@ -6662,8 +6719,9 @@ void compute_gradient_gp_temporal_autodiff(
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
             Var re_g = params_ad[layout.re_start + g];
-            eta_num = eta_num + re_g;
-            eta_denom = eta_denom + re_g;
+            Var re_eff = (data.re_parameterization == 1) ? sigma_re * re_g : re_g;
+            eta_num = eta_num + re_eff;
+            eta_denom = eta_denom + re_eff;
         }
 
         // Add temporal effect
@@ -6813,18 +6871,8 @@ void compute_gradient_hsgp(
     grad[layout.beta_denom_start + j] -= tau_beta * beta_denom[j];
   }
 
-  // RE prior: Half-Cauchy on sigma, N(0, sigma_re^2) on effects
-  if (layout.has_re && data.n_re_groups > 0) {
-    double ratio = sigma_re / data.sigma_re_scale;
-    double ratio_sq = ratio * ratio;
-    grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-
-    double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-    for (int g = 0; g < data.n_re_groups; g++) {
-      grad[layout.re_start + g] = -tau_re * re[g];
-      grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-    }
-  }
+  // RE prior (handles both centered and non-centered parameterizations)
+  re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
   // Overdispersion prior: Gamma via log transform, d/d(log_phi) = shape - rate*phi
   if (layout.has_phi_num) {
@@ -6877,11 +6925,12 @@ void compute_gradient_hsgp(
       eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
     }
 
-    // Random effects
+    // Random effects (handles NC parameterization)
     if (layout.has_re && data.re_group[i] > 0) {
       int g = data.re_group[i] - 1;
-      eta_num += re[g];
-      eta_denom += re[g];
+      double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
+      eta_num += re_eff;
+      eta_denom += re_eff;
     }
 
     // HSGP spatial effect
@@ -7096,6 +7145,9 @@ void compute_gradient_hsgp(
     }
   }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -7171,16 +7223,8 @@ void compute_gradient_ms_temporal_handcoded(
     for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
     for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
 
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
     if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
@@ -7234,7 +7278,7 @@ void compute_gradient_ms_temporal_handcoded(
         double eta_num = 0.0, eta_denom = 0.0;
         for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
         for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+        if (layout.has_re && data.re_group[i] > 0) { double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization); eta_num += re_eff; eta_denom += re_eff; }
 
         // Spatial effect
         int s_unit = -1;
@@ -7413,6 +7457,9 @@ void compute_gradient_ms_temporal_handcoded(
         grad[layout.logit_rho_short_idx] += ms_grads.grad_logit_rho_short;
     }
 
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
@@ -7492,16 +7539,8 @@ void compute_gradient_spatiotemporal_handcoded(
     for (int j = 0; j < data.p_num; j++) grad[layout.beta_num_start + j] = -tau_beta * beta_num[j];
     for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] = -tau_beta * beta_denom[j];
 
-    if (layout.has_re && data.n_re_groups > 0) {
-        double ratio = sigma_re / data.sigma_re_scale;
-        double ratio_sq = ratio * ratio;
-        grad[layout.log_sigma_re_idx] = -2.0 * ratio_sq / (1.0 + ratio_sq) + 1.0;
-        double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-        for (int g = 0; g < data.n_re_groups; g++) {
-            grad[layout.re_start + g] = -tau_re * re[g];
-            grad[layout.log_sigma_re_idx] += tau_re * re[g] * re[g] - 1.0;
-        }
-    }
+    // RE prior (handles both centered and non-centered parameterizations)
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
 
     if (layout.has_phi_num) grad[layout.log_phi_num_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_num;
     if (layout.has_phi_denom) grad[layout.log_phi_denom_idx] = data.phi_prior_shape - data.phi_prior_rate * phi_denom;
@@ -7566,7 +7605,7 @@ void compute_gradient_spatiotemporal_handcoded(
         double eta_num = 0.0, eta_denom = 0.0;
         for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
         for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        if (layout.has_re && data.re_group[i] > 0) { eta_num += re[data.re_group[i] - 1]; eta_denom += re[data.re_group[i] - 1]; }
+        if (layout.has_re && data.re_group[i] > 0) { double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization); eta_num += re_eff; eta_denom += re_eff; }
 
         // Spatial effect
         int s_unit = -1;
@@ -7960,6 +7999,9 @@ void compute_gradient_spatiotemporal_handcoded(
             }
         }
     }
+
+    // Non-centered RE chain rule transformation
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
 
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }

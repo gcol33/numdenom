@@ -1,12 +1,13 @@
 # =============================================================================
 # Single-row benchmark runner (called as subprocess)
-# Usage: Rscript benchmarks/bench_single_row.R <row_number>
-# Output: RESULT:<row>:<time_or_error>
+# Usage: Rscript benchmarks/bench_single_row.R <row_number> [gradient_mode] [timeout]
+# Output: RESULT:<row>:<mode>:<time_or_error>
 # =============================================================================
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 1) stop("Usage: Rscript bench_single_row.R <row_number>")
+if (length(args) < 1) stop("Usage: Rscript bench_single_row.R <row_number> [gradient_mode] [timeout]")
 ROW_NUM <- as.integer(args[1])
+GRAD_MODE <- if (length(args) >= 2) args[2] else "H"
 
 suppressPackageStartupMessages(library(numdenom))
 
@@ -24,7 +25,7 @@ N_TIMES_GP  <- 10L
 N_SITES_LATENT <- 10L
 N_TIMES_LAT <- 10L
 SEED        <- 123L
-TIMEOUT_SEC <- 600
+TIMEOUT_SEC <- if (length(args) >= 3) as.integer(args[3]) else 600L
 
 set.seed(SEED)
 
@@ -107,8 +108,17 @@ generate_datasets <- function(n, n_sites, n_times, seed = 123) {
                       lon = lon_site, lat = lat_site,
                       spatial_site = site)
 
+  # NegBin-Gamma data (NegBin numerator + Gamma denominator)
+  y_nbg_num   <- rnbinom(n, mu = exp(2 + 0.3 * x), size = 5)
+  y_nbg_denom <- rgamma(n, 10, 1)
+  df_nbg <- data.frame(y = y_nbg_num, denom = y_nbg_denom, x = x, z = z,
+                        site = site, time = time_factor, time_num = time,
+                        lon = lon_site, lat = lat_site,
+                        lon_obs = lon_obs, lat_obs = lat_obs,
+                        spatial_site = site)
+
   list(pg = df_pg, nb = df_nb, bin = df_bin,
-       gg = df_gg, ln = df_ln, bb = df_bb,
+       gg = df_gg, ln = df_ln, bb = df_bb, nbg = df_nbg,
        adj_mat = adj_mat, grid = grid)
 }
 
@@ -219,7 +229,32 @@ ROW_CONFIGS <- list(
   make_row(102, "ln", sp="icar", temp="rw1"),
   make_row(103, "bb", re="none"), make_row(104, "bb", re="int"),
   make_row(105, "bb", sp="icar"), make_row(106, "bb", temp="rw1"),
-  make_row(107, "bb", sp="icar", temp="rw1")
+  make_row(107, "bb", sp="icar", temp="rw1"),
+  # Section 7: negbin_gamma (rows 108-137)
+  make_row(108, "nbg", re="none"), make_row(109, "nbg", re="int"),
+  make_row(110, "nbg", re="slopes"), make_row(111, "nbg", re="crossed"),
+  make_row(112, "nbg", sp="icar"), make_row(113, "nbg", sp="bym2"),
+  make_row(114, "nbg", sp="gp", use_gp_data=TRUE),
+  make_row(115, "nbg", sp="hsgp"),
+  make_row(116, "nbg", sp="msgp", use_gp_data=TRUE),
+  make_row(117, "nbg", sp="pcar"),
+  make_row(118, "nbg", temp="rw1"), make_row(119, "nbg", temp="rw2"),
+  make_row(120, "nbg", temp="ar1"), make_row(121, "nbg", temp="gp_t"),
+  make_row(122, "nbg", temp="ms_t"),
+  make_row(123, "nbg", zi="zi"), make_row(124, "nbg", zi="hurdle"),
+  make_row(125, "nbg", sp="icar", temp="rw1"),
+  make_row(126, "nbg", sp="bym2", temp="rw1"),
+  make_row(127, "nbg", sp="icar", temp="ar1"),
+  make_row(128, "nbg", sp="gp", temp="rw1", use_gp_data=TRUE),
+  make_row(129, "nbg", sp="hsgp", temp="rw1"),
+  make_row(130, "nbg", sp="msgp", temp="rw1", use_gp_data=TRUE),
+  make_row(131, "nbg", sp="icar", zi="zi"),
+  make_row(132, "nbg", re="slopes", sp="icar"),
+  make_row(133, "nbg", sp="svc"),
+  make_row(134, "nbg", temp="tvc"),
+  make_row(135, "nbg", sp="icar", temp="rw1", st="I"),
+  make_row(136, "nbg", sp="icar", temp="rw1", st="IV"),
+  make_row(137, "nbg", latent=TRUE)
 )
 
 config_by_row <- list()
@@ -247,9 +282,9 @@ temp <- cfg$temp; zi <- cfg$zi; st <- cfg$st
 df <- ds[[fam]]
 adj_mat <- ds$adj_mat
 
-if (zi == "zi" && fam %in% c("pg", "nb", "bin")) {
+if (zi == "zi" && fam %in% c("pg", "nb", "nbg", "bin")) {
   df <- inject_zeros(df, "y", 0.3)
-} else if (zi == "hurdle" && fam %in% c("pg", "nb", "bin")) {
+} else if (zi == "hurdle" && fam %in% c("pg", "nb", "nbg", "bin")) {
   df <- inject_zeros(df, "y", 0.3)
 } else if (zi == "oi") {
   df <- inject_ones_binomial(df, 0.15)
@@ -276,7 +311,8 @@ nd_family <- switch(fam,
   "bin" = ratiod_binomial(),
   "gg"  = ratiod_gamma_gamma(),
   "ln"  = ratiod_lognormal(),
-  "bb"  = ratiod_beta_binomial()
+  "bb"  = ratiod_beta_binomial(),
+  "nbg" = ratiod_negbin_gamma()
 )
 
 nd_spatial <- NULL
@@ -312,11 +348,11 @@ if (temp == "rw1") {
 }
 
 nd_zi <- NULL
-if (zi == "zi" && fam %in% c("pg", "nb")) {
+if (zi == "zi" && fam %in% c("pg", "nb", "nbg")) {
   nd_zi <- if (fam == "pg") zi_poisson() else zi_negbin()
 } else if (zi == "zi" && fam == "bin") {
   nd_family <- ratiod_zibinomial()
-} else if (zi == "hurdle" && fam %in% c("pg", "nb")) {
+} else if (zi == "hurdle" && fam %in% c("pg", "nb", "nbg")) {
   nd_zi <- if (fam == "pg") hurdle_poisson() else hurdle_negbin()
 } else if (zi == "hurdle" && fam == "bin") {
   nd_family <- ratiod_hurdle_binomial()
@@ -353,19 +389,19 @@ ratiod_args <- list(
   warmup           = N_WARMUP,
   chains           = N_CHAINS,
   verbose          = FALSE,
-  gradient_mode    = "H"
+  gradient_mode    = GRAD_MODE
 )
 
 tryCatch({
   setTimeLimit(cpu = TIMEOUT_SEC, elapsed = TIMEOUT_SEC, transient = TRUE)
   on.exit(setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE))
   elapsed <- system.time(do.call(ratiod, ratiod_args))["elapsed"]
-  cat(sprintf("RESULT:%d:%.1f\n", ROW_NUM, elapsed))
+  cat(sprintf("RESULT:%d:%s:%.1f\n", ROW_NUM, GRAD_MODE, elapsed))
 }, error = function(e) {
   msg <- conditionMessage(e)
   if (grepl("timeout|elapsed", msg, ignore.case = TRUE)) {
-    cat(sprintf("RESULT:%d:TIMEOUT\n", ROW_NUM))
+    cat(sprintf("RESULT:%d:%s:TIMEOUT\n", ROW_NUM, GRAD_MODE))
   } else {
-    cat(sprintf("RESULT:%d:ERROR:%s\n", ROW_NUM, gsub("\n", " ", msg)))
+    cat(sprintf("RESULT:%d:%s:ERROR:%s\n", ROW_NUM, GRAD_MODE, gsub("\n", " ", msg)))
   }
 })
