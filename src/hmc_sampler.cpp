@@ -1948,6 +1948,22 @@ static inline void tau_temporal_prior_grad(
     double tau_temporal, double* grad);
 static inline void temporal_sum_to_zero_grad(
     const double* phi, int T, int base_idx, double lambda, double* grad);
+static inline void temporal_gmrf_prior_grad(
+    const ModelData& data, const ParamLayout& layout,
+    double tau_temporal, double rho_ar1,
+    const double* phi_temporal, int T_len,
+    const double* grad_temporal_lik, double* grad);
+static inline double gp_pc_prior_grad_log_sigma2(
+    double sigma2, double U, double alpha);
+static inline std::pair<GPData, GPData> make_msgp_gp_views(
+    const MultiscaleGPData& msgp);
+static inline void spatial_gmrf_prior_grad(
+    const ModelData& data, const ParamLayout& layout,
+    const double* spatial_phi, double tau_spatial,
+    double sigma_s_bym2, double sigma_u_bym2, double rho_bym2,
+    const double* theta_bym2,
+    const double* grad_spatial_lik, const double* grad_theta_lik,
+    double* grad);
 
 void compute_gradient_analytical(
     const std::vector<double>& params,
@@ -3301,134 +3317,8 @@ void compute_gradient_analytical(
 
   // ============ Temporal GMRF prior gradients ============
   if (layout.has_temporal && T_len > 0) {
-    // Initialize temporal gradients with likelihood contribution
-    for (int t = 0; t < T_len; t++) {
-      grad[layout.temporal_start + t] = grad_temporal_lik[t];
-    }
-
-    // Panel temporal: apply prior independently to each group
-    int T = data.n_times;  // Time points per group
-    int n_groups = data.n_temporal_groups;
-
-    if (data.temporal_type == TemporalType::RW1) {
-      double total_quad_form = 0.0;
-      int total_rank = 0;
-      for (int g = 0; g < n_groups; g++) {
-        const double* phi_g = phi_temporal + g * T;
-        int base = layout.temporal_start + g * T;
-        double quad_form = 0.0;
-        for (int t = 0; t < T; t++) {
-          double grad_t = 0.0;
-          if (t > 0) {
-            grad_t += tau_temporal * (phi_g[t - 1] - phi_g[t]);
-            quad_form += (phi_g[t] - phi_g[t - 1]) * (phi_g[t] - phi_g[t - 1]);
-          }
-          if (t < T - 1) {
-            grad_t += tau_temporal * (phi_g[t + 1] - phi_g[t]);
-          }
-          grad[base + t] += grad_t;
-        }
-        if (data.temporal_cyclic) {
-          double diff_cyclic = phi_g[0] - phi_g[T - 1];
-          quad_form += diff_cyclic * diff_cyclic;
-          grad[base + 0] -= tau_temporal * diff_cyclic;
-          grad[base + T - 1] += tau_temporal * diff_cyclic;
-        }
-        total_quad_form += quad_form;
-        total_rank += data.temporal_cyclic ? T : T - 1;
-        temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad.data());
-      }
-      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_quad_form;
-
-    } else if (data.temporal_type == TemporalType::RW2) {
-      double total_quad_form = 0.0;
-      int total_rank = 0;
-      for (int g = 0; g < n_groups; g++) {
-        const double* phi_g = phi_temporal + g * T;
-        int base = layout.temporal_start + g * T;
-        double quad_form = 0.0;
-        for (int t = 0; t < T; t++) {
-          double grad_t = 0.0;
-          if (t >= 2) {
-            double d2 = phi_g[t - 2] - 2.0 * phi_g[t - 1] + phi_g[t];
-            grad_t -= tau_temporal * d2;
-          }
-          if (t >= 1 && t < T - 1) {
-            double d2 = phi_g[t - 1] - 2.0 * phi_g[t] + phi_g[t + 1];
-            grad_t += 2.0 * tau_temporal * d2;
-          }
-          if (t < T - 2) {
-            double d2 = phi_g[t] - 2.0 * phi_g[t + 1] + phi_g[t + 2];
-            grad_t -= tau_temporal * d2;
-          }
-          grad[base + t] += grad_t;
-        }
-        for (int t = 2; t < T; t++) {
-          double d2 = phi_g[t - 2] - 2.0 * phi_g[t - 1] + phi_g[t];
-          quad_form += d2 * d2;
-        }
-        if (data.temporal_cyclic) {
-          double d2_a = phi_g[T - 2] - 2.0 * phi_g[T - 1] + phi_g[0];
-          double d2_b = phi_g[T - 1] - 2.0 * phi_g[0] + phi_g[1];
-          quad_form += d2_a * d2_a + d2_b * d2_b;
-          grad[base + T - 2] -= tau_temporal * d2_a;
-          grad[base + T - 1] += 2.0 * tau_temporal * d2_a;
-          grad[base + 0] -= tau_temporal * d2_a;
-          grad[base + T - 1] -= tau_temporal * d2_b;
-          grad[base + 0] += 2.0 * tau_temporal * d2_b;
-          grad[base + 1] -= tau_temporal * d2_b;
-        }
-        total_quad_form += quad_form;
-        total_rank += data.temporal_cyclic ? T : T - 2;
-        temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad.data());
-      }
-      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_quad_form;
-
-    } else if (data.temporal_type == TemporalType::AR1) {
-      double one_minus_rho2 = 1.0 - rho_ar1 * rho_ar1;
-      double total_quad_form = 0.0;
-      double total_grad_rho = 0.0;
-      for (int g = 0; g < n_groups; g++) {
-        const double* phi_g = phi_temporal + g * T;
-        int base = layout.temporal_start + g * T;
-
-        // Gradient for phi_g[0]
-        grad[base] += -tau_temporal * one_minus_rho2 * phi_g[0];
-        if (T > 1) {
-          grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
-        }
-
-        double quad_form = one_minus_rho2 * phi_g[0] * phi_g[0];
-        for (int t = 1; t < T; t++) {
-          double resid = phi_g[t] - rho_ar1 * phi_g[t - 1];
-          quad_form += resid * resid;
-          double grad_t = -tau_temporal * resid;
-          if (t < T - 1) {
-            double resid_next = phi_g[t + 1] - rho_ar1 * phi_g[t];
-            grad_t += tau_temporal * rho_ar1 * resid_next;
-          }
-          grad[base + t] += grad_t;
-        }
-        total_quad_form += quad_form;
-
-        // rho gradient contributions from this group
-        total_grad_rho += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
-        for (int t = 1; t < T; t++) {
-          double resid = phi_g[t] - rho_ar1 * phi_g[t - 1];
-          total_grad_rho += tau_temporal * resid * phi_g[t - 1];
-        }
-      }
-
-      // tau gradient: sum over groups of [0.5*T*log(tau) + 0.5*log(1-rho^2) - 0.5*tau*quad]
-      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_quad_form;
-
-      // rho gradient
-      if (layout.logit_rho_ar1_idx >= 0) {
-        double grad_rho = -n_groups * rho_ar1 / one_minus_rho2;  // n_groups copies of 0.5*log(1-rho^2)
-        grad_rho += total_grad_rho;
-        grad[layout.logit_rho_ar1_idx] += grad_rho * rho_ar1 * (1.0 - rho_ar1);
-      }
-    }
+    temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
+                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
   }
 
   // ============ Spatial GMRF prior gradients (ICAR and BYM2) ============
@@ -4057,6 +3947,212 @@ static inline void temporal_sum_to_zero_grad(
 }
 
 // =====================================================================
+// Temporal GMRF prior gradient helper (RW1/RW2/AR1)
+// Shared by all gradient functions that include temporal effects.
+// Writes phi gradients, tau gradient, and rho gradient (for AR1).
+// Expects grad_temporal_lik[0..T_len-1] to hold likelihood contributions.
+// =====================================================================
+static inline void temporal_gmrf_prior_grad(
+    const ModelData& data, const ParamLayout& layout,
+    double tau_temporal, double rho_ar1,
+    const double* phi_temporal, int T_len,
+    const double* grad_temporal_lik,
+    double* grad
+) {
+    int T = data.n_times;
+    int n_groups = data.n_temporal_groups;
+
+    // Initialize temporal gradients with likelihood contribution
+    for (int t = 0; t < T_len; t++) {
+        grad[layout.temporal_start + t] = grad_temporal_lik[t];
+    }
+
+    if (data.temporal_type == TemporalType::RW1) {
+        double total_qf = 0.0;
+        int total_rank = 0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const double* phi_g = phi_temporal + gg * T;
+            int base = layout.temporal_start + gg * T;
+            double qf = 0.0;
+            for (int t = 0; t < T; t++) {
+                double g = 0.0;
+                if (t > 0) {
+                    g += tau_temporal * (phi_g[t - 1] - phi_g[t]);
+                    qf += (phi_g[t] - phi_g[t - 1]) * (phi_g[t] - phi_g[t - 1]);
+                }
+                if (t < T - 1) g += tau_temporal * (phi_g[t + 1] - phi_g[t]);
+                grad[base + t] += g;
+            }
+            if (data.temporal_cyclic) {
+                double dc = phi_g[0] - phi_g[T - 1];
+                qf += dc * dc;
+                grad[base + 0] -= tau_temporal * dc;
+                grad[base + T - 1] += tau_temporal * dc;
+            }
+            total_qf += qf;
+            total_rank += data.temporal_cyclic ? T : T - 1;
+            temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad);
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
+
+    } else if (data.temporal_type == TemporalType::RW2) {
+        double total_qf = 0.0;
+        int total_rank = 0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const double* phi_g = phi_temporal + gg * T;
+            int base = layout.temporal_start + gg * T;
+            double qf = 0.0;
+            for (int t = 0; t < T; t++) {
+                double g = 0.0;
+                if (t >= 2) g -= tau_temporal * (phi_g[t - 2] - 2.0 * phi_g[t - 1] + phi_g[t]);
+                if (t >= 1 && t < T - 1) g += 2.0 * tau_temporal * (phi_g[t - 1] - 2.0 * phi_g[t] + phi_g[t + 1]);
+                if (t < T - 2) g -= tau_temporal * (phi_g[t] - 2.0 * phi_g[t + 1] + phi_g[t + 2]);
+                grad[base + t] += g;
+            }
+            for (int t = 2; t < T; t++) {
+                double d2 = phi_g[t - 2] - 2.0 * phi_g[t - 1] + phi_g[t];
+                qf += d2 * d2;
+            }
+            if (data.temporal_cyclic && T >= 3) {
+                double d2_a = phi_g[T - 2] - 2.0 * phi_g[T - 1] + phi_g[0];
+                double d2_b = phi_g[T - 1] - 2.0 * phi_g[0] + phi_g[1];
+                qf += d2_a * d2_a + d2_b * d2_b;
+                grad[base + T - 2] -= tau_temporal * d2_a;
+                grad[base + T - 1] += 2.0 * tau_temporal * d2_a;
+                grad[base + 0] -= tau_temporal * d2_a;
+                grad[base + T - 1] -= tau_temporal * d2_b;
+                grad[base + 0] += 2.0 * tau_temporal * d2_b;
+                grad[base + 1] -= tau_temporal * d2_b;
+            }
+            total_qf += qf;
+            total_rank += data.temporal_cyclic ? T : T - 2;
+            temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad);
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
+
+    } else if (data.temporal_type == TemporalType::AR1) {
+        double omr2 = 1.0 - rho_ar1 * rho_ar1;
+        double total_qf = 0.0, total_gr = 0.0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const double* phi_g = phi_temporal + gg * T;
+            int base = layout.temporal_start + gg * T;
+            grad[base] += -tau_temporal * omr2 * phi_g[0];
+            if (T > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
+            double qf = omr2 * phi_g[0] * phi_g[0];
+            for (int t = 1; t < T; t++) {
+                double r = phi_g[t] - rho_ar1 * phi_g[t - 1];
+                qf += r * r;
+                double g = -tau_temporal * r;
+                if (t < T - 1) g += tau_temporal * rho_ar1 * (phi_g[t + 1] - rho_ar1 * phi_g[t]);
+                grad[base + t] += g;
+            }
+            total_qf += qf;
+            total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
+            for (int t = 1; t < T; t++) {
+                total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t - 1]) * phi_g[t - 1];
+            }
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
+        if (layout.logit_rho_ar1_idx >= 0) {
+            double gr = -n_groups * rho_ar1 / omr2 + total_gr;
+            grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
+        }
+    }
+}
+
+// =====================================================================
+// PC prior gradient on log(sigma2) for GP variances
+// Returns d log_prior / d log_sigma2 INCLUDING Jacobian for exp transform.
+// Formula: -0.5 * rate * sigma + 0.5  where rate = -log(alpha) / U
+// =====================================================================
+static inline double gp_pc_prior_grad_log_sigma2(
+    double sigma2, double U, double alpha
+) {
+    double sigma = std::sqrt(sigma2 + 1e-10);
+    double rate = -std::log(alpha + 1e-10) / (U + 1e-10);
+    return -0.5 * rate * sigma + 0.5;
+}
+
+// =====================================================================
+// Build GPData views from MultiscaleGPData for local and regional scales
+// =====================================================================
+static inline std::pair<GPData, GPData> make_msgp_gp_views(
+    const MultiscaleGPData& msgp
+) {
+    GPData gp_local;
+    gp_local.n_obs = msgp.n_obs;
+    gp_local.nn = msgp.nn_local;
+    gp_local.coords = msgp.coords;
+    gp_local.nn_idx = msgp.nn_idx_local;
+    gp_local.nn_dist = msgp.nn_dist_local;
+    gp_local.nn_order = msgp.nn_order_local;
+    gp_local.nn_order_inv = msgp.nn_order_inv_local;
+    gp_local.cov_type = msgp.cov_type;
+
+    GPData gp_regional;
+    gp_regional.n_obs = msgp.n_obs;
+    gp_regional.nn = msgp.nn_regional;
+    gp_regional.coords = msgp.coords;
+    gp_regional.nn_idx = msgp.nn_idx_regional;
+    gp_regional.nn_dist = msgp.nn_dist_regional;
+    gp_regional.nn_order = msgp.nn_order_regional;
+    gp_regional.nn_order_inv = msgp.nn_order_inv_regional;
+    gp_regional.cov_type = msgp.cov_type;
+
+    return {gp_local, gp_regional};
+}
+
+// =====================================================================
+// Spatial ICAR/BYM2 GMRF prior gradient helper
+// Used by ms_temporal and spatiotemporal gradient functions.
+// Writes phi_spatial gradients, theta_bym2 gradients (BYM2), tau gradient (ICAR).
+// grad_spatial_lik and grad_theta_lik must hold accumulated likelihood contributions.
+// =====================================================================
+static inline void spatial_gmrf_prior_grad(
+    const ModelData& data, const ParamLayout& layout,
+    const double* spatial_phi,
+    double tau_spatial,
+    double sigma_s_bym2, double sigma_u_bym2,
+    double rho_bym2,
+    const double* theta_bym2,
+    const double* grad_spatial_lik,
+    const double* grad_theta_lik,
+    double* grad
+) {
+    int S = data.n_spatial_units;
+    if (layout.is_bym2) {
+        for (int s = 0; s < S; s++) {
+            double icar_grad = 0.0;
+            for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
+                int j = data.adj_col_idx[idx];
+                icar_grad += (spatial_phi[j] - spatial_phi[s]);
+            }
+            grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad;
+            grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
+        }
+        double grad_sigma_s_lik = 0.0, grad_sigma_u_lik = 0.0;
+        for (int s = 0; s < S; s++) {
+            grad_sigma_s_lik += grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s];
+            grad_sigma_u_lik += grad_theta_lik[s] * sigma_u_bym2 * theta_bym2[s];
+        }
+        grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
+        grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
+                                                    - rho_bym2 * grad_sigma_u_lik);
+    } else {
+        for (int s = 0; s < S; s++) {
+            double icar_grad = 0.0;
+            for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
+                int j = data.adj_col_idx[idx];
+                icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
+            }
+            grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad;
+        }
+        double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S), data);
+        grad[layout.log_tau_spatial_idx] += 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
+    }
+}
+
+// =====================================================================
 // GP gradient (hand-coded, ~3x faster than autodiff)
 // Uses analytical gradients from gp_nngp_gradients for NNGP prior
 // =====================================================================
@@ -4102,11 +4198,9 @@ void compute_gradient_gp_handcoded(
     re_gradient_prior(data, layout, re, grad.data(), sigma_re);
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
-    // PC prior on GP variance: P(sigma > U) = alpha
-    // sigma2 ~ transformed Exp, so d/d(log_sigma2) = (-rate*sigma/2 + 0.5)
-    double rate_sigma = -std::log(data.gp_sigma2_prior_alpha) / data.gp_sigma2_prior_U;
-    double sigma_gp = std::sqrt(sigma2_gp);
-    grad[layout.log_sigma2_gp_idx] = -0.5 * rate_sigma * sigma_gp + 0.5;
+    // PC prior on GP variance
+    grad[layout.log_sigma2_gp_idx] = gp_pc_prior_grad_log_sigma2(
+        sigma2_gp, data.gp_sigma2_prior_U, data.gp_sigma2_prior_alpha);
 
     // Uniform prior on phi - just Jacobian
     grad[layout.log_phi_gp_idx] = 1.0;
@@ -4220,8 +4314,8 @@ void compute_gradient_gp_temporal_handcoded(
     re_gradient_prior(data, layout, re, grad.data(), sigma_re);
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
-    double rate_sigma = -std::log(data.gp_sigma2_prior_alpha) / data.gp_sigma2_prior_U;
-    grad[layout.log_sigma2_gp_idx] = -0.5 * rate_sigma * std::sqrt(sigma2_gp) + 0.5;
+    grad[layout.log_sigma2_gp_idx] = gp_pc_prior_grad_log_sigma2(
+        sigma2_gp, data.gp_sigma2_prior_U, data.gp_sigma2_prior_alpha);
     grad[layout.log_phi_gp_idx] = 1.0;
     tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
     if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
@@ -4268,85 +4362,9 @@ void compute_gradient_gp_temporal_handcoded(
         accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
-    // Temporal GMRF (per-group for panel temporal)
-    int T = data.n_times;
-    int n_groups = data.n_temporal_groups;
-    for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
-    if (data.temporal_type == TemporalType::RW1) {
-        double total_qf = 0.0; int total_rank = 0;
-        for (int gg = 0; gg < n_groups; gg++) {
-            const double* phi_g = phi_temporal + gg * T;
-            int base = layout.temporal_start + gg * T;
-            double qf = 0.0;
-            for (int t = 0; t < T; t++) {
-                double g = 0.0;
-                if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
-                if (t < T - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
-                grad[base + t] += g;
-            }
-            if (data.temporal_cyclic) {
-                double dc = phi_g[0] - phi_g[T - 1]; qf += dc * dc;
-                grad[base + 0] -= tau_temporal * dc;
-                grad[base + T - 1] += tau_temporal * dc;
-            }
-            total_qf += qf; total_rank += data.temporal_cyclic ? T : T - 1;
-            temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad.data());
-        }
-        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-    } else if (data.temporal_type == TemporalType::RW2) {
-        double total_qf = 0.0; int total_rank = 0;
-        for (int gg = 0; gg < n_groups; gg++) {
-            const double* phi_g = phi_temporal + gg * T;
-            int base = layout.temporal_start + gg * T;
-            double qf = 0.0;
-            for (int t = 0; t < T; t++) {
-                double g = 0.0;
-                if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-                if (t >= 1 && t < T - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
-                if (t < T - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
-                grad[base + t] += g;
-            }
-            for (int t = 2; t < T; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-            if (data.temporal_cyclic && T >= 3) {
-                double d2_a = phi_g[T - 2] - 2.0 * phi_g[T - 1] + phi_g[0];
-                double d2_b = phi_g[T - 1] - 2.0 * phi_g[0] + phi_g[1];
-                qf += d2_a * d2_a + d2_b * d2_b;
-                grad[base + T - 2] -= tau_temporal * d2_a;
-                grad[base + T - 1] += 2.0 * tau_temporal * d2_a;
-                grad[base + 0] -= tau_temporal * d2_a;
-                grad[base + T - 1] -= tau_temporal * d2_b;
-                grad[base + 0] += 2.0 * tau_temporal * d2_b;
-                grad[base + 1] -= tau_temporal * d2_b;
-            }
-            total_qf += qf; total_rank += data.temporal_cyclic ? T : T - 2;
-            temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad.data());
-        }
-        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-    } else if (data.temporal_type == TemporalType::AR1) {
-        double omr2 = 1.0 - rho_ar1 * rho_ar1;
-        double total_qf = 0.0, total_gr = 0.0;
-        for (int gg = 0; gg < n_groups; gg++) {
-            const double* phi_g = phi_temporal + gg * T;
-            int base = layout.temporal_start + gg * T;
-            grad[base] += -tau_temporal * omr2 * phi_g[0];
-            if (T > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
-            double qf = omr2 * phi_g[0] * phi_g[0];
-            for (int t = 1; t < T; t++) {
-                double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
-                double g = -tau_temporal * r;
-                if (t < T - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
-                grad[base + t] += g;
-            }
-            total_qf += qf;
-            total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
-            for (int t = 1; t < T; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
-        }
-        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
-        if (layout.logit_rho_ar1_idx >= 0) {
-            double gr = -n_groups * rho_ar1 / omr2 + total_gr;
-            grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
-        }
-    }
+    // Temporal GMRF gradients
+    temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
+                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -4698,10 +4716,10 @@ void compute_gradient_msgp_temporal_handcoded(
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
     // PC priors on MSGP variances
-    double rate_sigma_local = -std::log(data.ms_sigma2_local_prior_alpha) / data.ms_sigma2_local_prior_U;
-    grad[layout.log_sigma2_gp_local_idx] = -0.5 * rate_sigma_local * std::sqrt(sigma2_local) + 0.5;
-    double rate_sigma_regional = -std::log(data.ms_sigma2_regional_prior_alpha) / data.ms_sigma2_regional_prior_U;
-    grad[layout.log_sigma2_gp_regional_idx] = -0.5 * rate_sigma_regional * std::sqrt(sigma2_regional) + 0.5;
+    grad[layout.log_sigma2_gp_local_idx] = gp_pc_prior_grad_log_sigma2(
+        sigma2_local, data.ms_sigma2_local_prior_U, data.ms_sigma2_local_prior_alpha);
+    grad[layout.log_sigma2_gp_regional_idx] = gp_pc_prior_grad_log_sigma2(
+        sigma2_regional, data.ms_sigma2_regional_prior_U, data.ms_sigma2_regional_prior_alpha);
     grad[layout.log_phi_gp_local_idx] = 1.0;
     grad[layout.log_phi_gp_regional_idx] = 1.0;
 
@@ -4713,25 +4731,7 @@ void compute_gradient_msgp_temporal_handcoded(
     // =========================================================================
     // NNGP prior gradients for multi-scale GP
     // =========================================================================
-    GPData gp_local;
-    gp_local.n_obs = data.multiscale_gp_data.n_obs;
-    gp_local.nn = data.multiscale_gp_data.nn_local;
-    gp_local.coords = data.multiscale_gp_data.coords;
-    gp_local.nn_idx = data.multiscale_gp_data.nn_idx_local;
-    gp_local.nn_dist = data.multiscale_gp_data.nn_dist_local;
-    gp_local.nn_order = data.multiscale_gp_data.nn_order_local;
-    gp_local.nn_order_inv = data.multiscale_gp_data.nn_order_inv_local;
-    gp_local.cov_type = data.multiscale_gp_data.cov_type;
-
-    GPData gp_regional;
-    gp_regional.n_obs = data.multiscale_gp_data.n_obs;
-    gp_regional.nn = data.multiscale_gp_data.nn_regional;
-    gp_regional.coords = data.multiscale_gp_data.coords;
-    gp_regional.nn_idx = data.multiscale_gp_data.nn_idx_regional;
-    gp_regional.nn_dist = data.multiscale_gp_data.nn_dist_regional;
-    gp_regional.nn_order = data.multiscale_gp_data.nn_order_regional;
-    gp_regional.nn_order_inv = data.multiscale_gp_data.nn_order_inv_regional;
-    gp_regional.cov_type = data.multiscale_gp_data.cov_type;
+    auto [gp_local, gp_regional] = make_msgp_gp_views(data.multiscale_gp_data);
 
     ratiod_gp::NNGPGradients nngp_grads_local, nngp_grads_regional;
     ratiod_gp::gp_nngp_gradients(w_local, sigma2_local, phi_local, gp_local, nngp_grads_local);
@@ -4790,85 +4790,9 @@ void compute_gradient_msgp_temporal_handcoded(
         accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
-    // Temporal GMRF gradients (per-group for panel temporal)
-    int T_msgp = data.n_times;
-    int n_groups_msgp = data.n_temporal_groups;
-    for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
-    if (data.temporal_type == TemporalType::RW1) {
-        double total_qf = 0.0; int total_rank = 0;
-        for (int gg = 0; gg < n_groups_msgp; gg++) {
-            const double* phi_g = phi_temporal + gg * T_msgp;
-            int base = layout.temporal_start + gg * T_msgp;
-            double qf = 0.0;
-            for (int t = 0; t < T_msgp; t++) {
-                double g = 0.0;
-                if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
-                if (t < T_msgp - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
-                grad[base + t] += g;
-            }
-            if (data.temporal_cyclic) {
-                double dc = phi_g[0] - phi_g[T_msgp - 1]; qf += dc * dc;
-                grad[base + 0] -= tau_temporal * dc;
-                grad[base + T_msgp - 1] += tau_temporal * dc;
-            }
-            total_qf += qf; total_rank += data.temporal_cyclic ? T_msgp : T_msgp - 1;
-            temporal_sum_to_zero_grad(phi_g, T_msgp, base, 0.001, grad.data());
-        }
-        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-    } else if (data.temporal_type == TemporalType::RW2) {
-        double total_qf = 0.0; int total_rank = 0;
-        for (int gg = 0; gg < n_groups_msgp; gg++) {
-            const double* phi_g = phi_temporal + gg * T_msgp;
-            int base = layout.temporal_start + gg * T_msgp;
-            double qf = 0.0;
-            for (int t = 0; t < T_msgp; t++) {
-                double g = 0.0;
-                if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-                if (t >= 1 && t < T_msgp - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
-                if (t < T_msgp - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
-                grad[base + t] += g;
-            }
-            for (int t = 2; t < T_msgp; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-            if (data.temporal_cyclic && T_msgp >= 3) {
-                double d2_a = phi_g[T_msgp - 2] - 2.0 * phi_g[T_msgp - 1] + phi_g[0];
-                double d2_b = phi_g[T_msgp - 1] - 2.0 * phi_g[0] + phi_g[1];
-                qf += d2_a * d2_a + d2_b * d2_b;
-                grad[base + T_msgp - 2] -= tau_temporal * d2_a;
-                grad[base + T_msgp - 1] += 2.0 * tau_temporal * d2_a;
-                grad[base + 0] -= tau_temporal * d2_a;
-                grad[base + T_msgp - 1] -= tau_temporal * d2_b;
-                grad[base + 0] += 2.0 * tau_temporal * d2_b;
-                grad[base + 1] -= tau_temporal * d2_b;
-            }
-            total_qf += qf; total_rank += data.temporal_cyclic ? T_msgp : T_msgp - 2;
-            temporal_sum_to_zero_grad(phi_g, T_msgp, base, 0.001, grad.data());
-        }
-        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-    } else if (data.temporal_type == TemporalType::AR1) {
-        double omr2 = 1.0 - rho_ar1 * rho_ar1;
-        double total_qf = 0.0, total_gr = 0.0;
-        for (int gg = 0; gg < n_groups_msgp; gg++) {
-            const double* phi_g = phi_temporal + gg * T_msgp;
-            int base = layout.temporal_start + gg * T_msgp;
-            grad[base] += -tau_temporal * omr2 * phi_g[0];
-            if (T_msgp > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
-            double qf = omr2 * phi_g[0] * phi_g[0];
-            for (int t = 1; t < T_msgp; t++) {
-                double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
-                double g = -tau_temporal * r;
-                if (t < T_msgp - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
-                grad[base + t] += g;
-            }
-            total_qf += qf;
-            total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
-            for (int t = 1; t < T_msgp; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
-        }
-        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
-        if (layout.logit_rho_ar1_idx >= 0) {
-            double gr = -n_groups_msgp * rho_ar1 / omr2 + total_gr;
-            grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
-        }
-    }
+    // Temporal GMRF gradients
+    temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
+                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -5033,19 +4957,6 @@ void compute_gradient_svc_handcoded(
         }
 
         accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
-    }
-
-    // Debug output (first call only)
-    static int svc_grad_debug_counter = 0;
-    if (svc_grad_debug_counter == 0) {
-        double sum_abs_grad_svc = 0.0;
-        int n_svc_params = n_svc * N_obs;
-        for (int k = 0; k < n_svc_params; k++) {
-            sum_abs_grad_svc += std::abs(grad[layout.svc_w_start + k]);
-        }
-        Rcpp::Rcout << "[SVC TOTAL] sum|grad_svc_w|=" << sum_abs_grad_svc
-                    << " (n_svc=" << n_svc << ", N_obs=" << N_obs << ")\n";
-        svc_grad_debug_counter++;
     }
 
     // Non-centered RE chain rule transformation
@@ -5228,19 +5139,6 @@ void compute_gradient_tvc_handcoded(
         }
 
         accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
-    }
-
-    // Debug output (first call only)
-    static int tvc_grad_debug_counter = 0;
-    if (tvc_grad_debug_counter == 0) {
-        double sum_abs_grad_tvc = 0.0;
-        for (int k = 0; k < n_w; k++) {
-            sum_abs_grad_tvc += std::abs(grad[layout.tvc_w_start + k]);
-        }
-        Rcpp::Rcout << "[TVC TOTAL] sum|grad_tvc_w|=" << sum_abs_grad_tvc
-                    << " (n_tvc=" << n_tvc << ", n_times=" << n_times
-                    << ", n_groups=" << n_groups << ")\n";
-        tvc_grad_debug_counter++;
     }
 
     // Non-centered RE chain rule transformation
@@ -5476,30 +5374,30 @@ void compute_gradient_latent_handcoded(
 // Uses templated NNGP likelihood from hmc_gp_autodiff.h
 // =====================================================================
 
-void compute_gradient_gp_autodiff(
-    const std::vector<double>& params,
+// =====================================================================
+// Common autodiff prior setup (beta, RE, phi priors)
+// Shared by gp_autodiff, msgp_autodiff, gp_temporal_autodiff.
+// Returns log_post, sigma_re, phi_num, phi_denom via output parameters.
+// =====================================================================
+struct AutodiffCommonResult {
+    ratiod::ad::Var log_post;
+    ratiod::ad::Var sigma_re;
+    ratiod::ad::Var phi_num;
+    ratiod::ad::Var phi_denom;
+};
+
+static inline AutodiffCommonResult add_common_priors_ad(
+    ratiod::ad::Tape* tape,
+    const std::vector<ratiod::ad::Var>& params_ad,
     const ModelData& data,
-    const ParamLayout& layout,
-    std::vector<double>& grad
+    const ParamLayout& layout
 ) {
     using namespace ratiod::ad;
     using namespace ratiod::math;
 
-    // Thread-safe: each call gets its own tape via RAII
-    TapeScope tape_scope;
-    Tape* tape = tape_scope.tape;
-
-    int n_params = params.size();
-    grad.assign(n_params, 0.0);
-
-    // Create autodiff variables from all parameters
-    std::vector<Var> params_ad = make_vars(tape, params);
-
     Var log_post(tape, 0.0);
 
-    // =========================================================================
     // Fixed effects priors: N(0, sigma_beta^2)
-    // =========================================================================
     double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
     for (int j = 0; j < data.p_num; j++) {
         Var beta = params_ad[layout.beta_num_start + j];
@@ -5510,28 +5408,22 @@ void compute_gradient_gp_autodiff(
         log_post = log_post - (0.5 * tau_beta) * beta * beta;
     }
 
-    // =========================================================================
     // Random effects priors (if present)
-    // =========================================================================
     Var sigma_re(tape, 1.0);
     if (layout.has_re && data.n_re_groups > 0) {
         Var log_sigma_re = params_ad[layout.log_sigma_re_idx];
         sigma_re = safe_exp(log_sigma_re);
 
-        // Half-Cauchy prior on sigma_re
         Var ratio = sigma_re / data.sigma_re_scale;
         log_post = log_post - safe_log(1.0 + ratio * ratio);
         log_post = log_post + log_sigma_re;  // Jacobian
 
-        // RE prior (handles NC parameterization)
         if (data.re_parameterization == 1) {
-            // Non-centered: z ~ N(0,1)
             for (int g = 0; g < data.n_re_groups; g++) {
                 Var re_g = params_ad[layout.re_start + g];
                 log_post = log_post - 0.5 * re_g * re_g;
             }
         } else {
-            // Centered: re ~ N(0, sigma_re^2)
             Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
             for (int g = 0; g < data.n_re_groups; g++) {
                 Var re_g = params_ad[layout.re_start + g];
@@ -5541,27 +5433,43 @@ void compute_gradient_gp_autodiff(
         }
     }
 
-    // =========================================================================
     // Overdispersion priors (Gamma)
-    // =========================================================================
     Var phi_num(tape, 1.0);
     Var phi_denom(tape, 1.0);
-
     if (layout.has_phi_num) {
         Var log_phi = params_ad[layout.log_phi_num_idx];
         phi_num = safe_exp(log_phi);
-        // Gamma(shape, rate) prior on phi
         log_post = log_post + (data.phi_prior_shape - 1.0) * log_phi
-                            - data.phi_prior_rate * phi_num
-                            + log_phi;  // Jacobian
+                            - data.phi_prior_rate * phi_num + log_phi;
     }
     if (layout.has_phi_denom) {
         Var log_phi = params_ad[layout.log_phi_denom_idx];
         phi_denom = safe_exp(log_phi);
         log_post = log_post + (data.phi_prior_shape - 1.0) * log_phi
-                            - data.phi_prior_rate * phi_denom
-                            + log_phi;
+                            - data.phi_prior_rate * phi_denom + log_phi;
     }
+
+    return {log_post, sigma_re, phi_num, phi_denom};
+}
+
+void compute_gradient_gp_autodiff(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad
+) {
+    using namespace ratiod::ad;
+    using namespace ratiod::math;
+
+    TapeScope tape_scope;
+    Tape* tape = tape_scope.tape;
+
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    std::vector<Var> params_ad = make_vars(tape, params);
+
+    auto [log_post, sigma_re, phi_num, phi_denom] = add_common_priors_ad(tape, params_ad, data, layout);
 
     // =========================================================================
     // GP priors and NNGP likelihood
@@ -5739,16 +5647,10 @@ void compute_gradient_msgp_handcoded(
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
     // PC priors on GP variances
-    // sigma2 ~ Exp(rate) where rate = -log(alpha)/U (via sigma = sqrt(sigma2))
-    // log p(sigma2) = -rate * sqrt(sigma2) + const - log(sigma2)/2
-    // d/d(log_sigma2) = d/d(sigma2) * sigma2 = -rate * sqrt(sigma2)/2 + 0.5
-    double rate_sigma_local = -std::log(data.ms_sigma2_local_prior_alpha) / data.ms_sigma2_local_prior_U;
-    double sigma_local = std::sqrt(sigma2_local);
-    grad[layout.log_sigma2_gp_local_idx] = -0.5 * rate_sigma_local * sigma_local + 0.5;
-
-    double rate_sigma_regional = -std::log(data.ms_sigma2_regional_prior_alpha) / data.ms_sigma2_regional_prior_U;
-    double sigma_regional = std::sqrt(sigma2_regional);
-    grad[layout.log_sigma2_gp_regional_idx] = -0.5 * rate_sigma_regional * sigma_regional + 0.5;
+    grad[layout.log_sigma2_gp_local_idx] = gp_pc_prior_grad_log_sigma2(
+        sigma2_local, data.ms_sigma2_local_prior_U, data.ms_sigma2_local_prior_alpha);
+    grad[layout.log_sigma2_gp_regional_idx] = gp_pc_prior_grad_log_sigma2(
+        sigma2_regional, data.ms_sigma2_regional_prior_U, data.ms_sigma2_regional_prior_alpha);
 
     // Jacobians for log-transforms
     grad[layout.log_phi_gp_local_idx] = 1.0;    // Uniform prior, just Jacobian
@@ -5757,27 +5659,8 @@ void compute_gradient_msgp_handcoded(
     // =========================================================================
     // Compute NNGP gradients w.r.t. spatial effects (analytical)
     // =========================================================================
-    GPData gp_local;
-    gp_local.n_obs = data.multiscale_gp_data.n_obs;
-    gp_local.nn = data.multiscale_gp_data.nn_local;
-    gp_local.coords = data.multiscale_gp_data.coords;
-    gp_local.nn_idx = data.multiscale_gp_data.nn_idx_local;
-    gp_local.nn_dist = data.multiscale_gp_data.nn_dist_local;
-    gp_local.nn_order = data.multiscale_gp_data.nn_order_local;
-    gp_local.nn_order_inv = data.multiscale_gp_data.nn_order_inv_local;
-    gp_local.cov_type = data.multiscale_gp_data.cov_type;
+    auto [gp_local, gp_regional] = make_msgp_gp_views(data.multiscale_gp_data);
 
-    GPData gp_regional;
-    gp_regional.n_obs = data.multiscale_gp_data.n_obs;
-    gp_regional.nn = data.multiscale_gp_data.nn_regional;
-    gp_regional.coords = data.multiscale_gp_data.coords;
-    gp_regional.nn_idx = data.multiscale_gp_data.nn_idx_regional;
-    gp_regional.nn_dist = data.multiscale_gp_data.nn_dist_regional;
-    gp_regional.nn_order = data.multiscale_gp_data.nn_order_regional;
-    gp_regional.nn_order_inv = data.multiscale_gp_data.nn_order_inv_regional;
-    gp_regional.cov_type = data.multiscale_gp_data.cov_type;
-
-    // Get NNGP gradients (analytical for w, numerical for sigma2/phi)
     ratiod_gp::NNGPGradients nngp_grads_local, nngp_grads_regional;
     ratiod_gp::gp_nngp_gradients(w_local, sigma2_local, phi_local, gp_local, nngp_grads_local);
     ratiod_gp::gp_nngp_gradients(w_regional, sigma2_regional, phi_regional, gp_regional, nngp_grads_regional);
@@ -5861,82 +5744,15 @@ void compute_gradient_msgp_autodiff(
     using namespace ratiod::ad;
     using namespace ratiod::math;
 
-    // Thread-safe: each call gets its own tape via RAII
     TapeScope tape_scope;
     Tape* tape = tape_scope.tape;
 
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
-    // Create autodiff variables from all parameters
     std::vector<Var> params_ad = make_vars(tape, params);
 
-    Var log_post(tape, 0.0);
-
-    // =========================================================================
-    // Fixed effects priors: N(0, sigma_beta^2)
-    // =========================================================================
-    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
-    for (int j = 0; j < data.p_num; j++) {
-        Var beta = params_ad[layout.beta_num_start + j];
-        log_post = log_post - (0.5 * tau_beta) * beta * beta;
-    }
-    for (int j = 0; j < data.p_denom; j++) {
-        Var beta = params_ad[layout.beta_denom_start + j];
-        log_post = log_post - (0.5 * tau_beta) * beta * beta;
-    }
-
-    // =========================================================================
-    // Random effects priors (if present)
-    // =========================================================================
-    Var sigma_re(tape, 1.0);
-    if (layout.has_re && data.n_re_groups > 0) {
-        Var log_sigma_re = params_ad[layout.log_sigma_re_idx];
-        sigma_re = safe_exp(log_sigma_re);
-
-        // Half-Cauchy prior on sigma_re
-        Var ratio = sigma_re / data.sigma_re_scale;
-        log_post = log_post - safe_log(1.0 + ratio * ratio);
-        log_post = log_post + log_sigma_re;  // Jacobian
-
-        // RE prior (handles NC parameterization)
-        if (data.re_parameterization == 1) {
-            // Non-centered: z ~ N(0,1)
-            for (int g = 0; g < data.n_re_groups; g++) {
-                Var re_g = params_ad[layout.re_start + g];
-                log_post = log_post - 0.5 * re_g * re_g;
-            }
-        } else {
-            // Centered: re ~ N(0, sigma_re^2)
-            Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-            for (int g = 0; g < data.n_re_groups; g++) {
-                Var re_g = params_ad[layout.re_start + g];
-                log_post = log_post - 0.5 * tau_re * re_g * re_g;
-                log_post = log_post + 0.5 * safe_log(tau_re);
-            }
-        }
-    }
-
-    // =========================================================================
-    // Overdispersion priors (Gamma)
-    // =========================================================================
-    Var phi_num(tape, 1.0);
-    Var phi_denom(tape, 1.0);
-
-    if (layout.has_phi_num) {
-        Var log_phi = params_ad[layout.log_phi_num_idx];
-        phi_num = safe_exp(log_phi);
-        log_post = log_post + (data.phi_prior_shape - 1.0) * log_phi
-                            - data.phi_prior_rate * phi_num
-                            + log_phi;  // Jacobian
-    }
-    if (layout.has_phi_denom) {
-        Var log_phi = params_ad[layout.log_phi_denom_idx];
-        phi_denom = safe_exp(log_phi);
-        log_post = log_post + (data.phi_prior_shape - 1.0) * log_phi
-                            - data.phi_prior_rate * phi_denom
-                            + log_phi;
-    }
+    auto [log_post, sigma_re, phi_num, phi_denom] = add_common_priors_ad(tape, params_ad, data, layout);
 
     // =========================================================================
     // Multi-scale GP priors and NNGP likelihoods
@@ -6080,82 +5896,15 @@ void compute_gradient_gp_temporal_autodiff(
     using namespace ratiod::ad;
     using namespace ratiod::math;
 
-    // Thread-safe: each call gets its own tape via RAII
     TapeScope tape_scope;
     Tape* tape = tape_scope.tape;
 
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
-    // Create autodiff variables from all parameters
     std::vector<Var> params_ad = make_vars(tape, params);
 
-    Var log_post(tape, 0.0);
-
-    // =========================================================================
-    // Fixed effects priors: N(0, sigma_beta^2)
-    // =========================================================================
-    double tau_beta = 1.0 / (data.sigma_beta * data.sigma_beta);
-    for (int j = 0; j < data.p_num; j++) {
-        Var beta = params_ad[layout.beta_num_start + j];
-        log_post = log_post - (0.5 * tau_beta) * beta * beta;
-    }
-    for (int j = 0; j < data.p_denom; j++) {
-        Var beta = params_ad[layout.beta_denom_start + j];
-        log_post = log_post - (0.5 * tau_beta) * beta * beta;
-    }
-
-    // =========================================================================
-    // Random effects priors (if present)
-    // =========================================================================
-    Var sigma_re(tape, 1.0);
-    if (layout.has_re && data.n_re_groups > 0) {
-        Var log_sigma_re = params_ad[layout.log_sigma_re_idx];
-        sigma_re = safe_exp(log_sigma_re);
-
-        // Half-Cauchy prior on sigma_re
-        Var ratio = sigma_re / data.sigma_re_scale;
-        log_post = log_post - safe_log(1.0 + ratio * ratio);
-        log_post = log_post + log_sigma_re;  // Jacobian
-
-        // RE prior (handles NC parameterization)
-        if (data.re_parameterization == 1) {
-            // Non-centered: z ~ N(0,1)
-            for (int g = 0; g < data.n_re_groups; g++) {
-                Var re_g = params_ad[layout.re_start + g];
-                log_post = log_post - 0.5 * re_g * re_g;
-            }
-        } else {
-            // Centered: re ~ N(0, sigma_re^2)
-            Var tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-            for (int g = 0; g < data.n_re_groups; g++) {
-                Var re_g = params_ad[layout.re_start + g];
-                log_post = log_post - 0.5 * tau_re * re_g * re_g;
-                log_post = log_post + 0.5 * safe_log(tau_re);
-            }
-        }
-    }
-
-    // =========================================================================
-    // Overdispersion priors (Gamma)
-    // =========================================================================
-    Var phi_num(tape, 1.0);
-    Var phi_denom(tape, 1.0);
-
-    if (layout.has_phi_num) {
-        Var log_phi = params_ad[layout.log_phi_num_idx];
-        phi_num = safe_exp(log_phi);
-        log_post = log_post + (data.phi_prior_shape - 1.0) * log_phi
-                            - data.phi_prior_rate * phi_num
-                            + log_phi;  // Jacobian
-    }
-    if (layout.has_phi_denom) {
-        Var log_phi = params_ad[layout.log_phi_denom_idx];
-        phi_denom = safe_exp(log_phi);
-        log_post = log_post + (data.phi_prior_shape - 1.0) * log_phi
-                            - data.phi_prior_rate * phi_denom
-                            + log_phi;
-    }
+    auto [log_post, sigma_re, phi_num, phi_denom] = add_common_priors_ad(tape, params_ad, data, layout);
 
     // =========================================================================
     // Temporal priors
@@ -6500,86 +6249,10 @@ void compute_gradient_hsgp(
   grad[layout.log_sigma2_hsgp_idx] += hsgp_grads.grad_log_sigma2;
   grad[layout.log_lengthscale_hsgp_idx] += hsgp_grads.grad_log_lengthscale;
 
-  // Temporal GMRF gradients (per-group for panel temporal)
+  // Temporal GMRF gradients
   if (layout.has_temporal && T_len > 0) {
-    int T_hsgp = data.n_times;
-    int n_groups_hsgp = data.n_temporal_groups;
-    for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
-    if (data.temporal_type == TemporalType::RW1) {
-      double total_qf = 0.0; int total_rank = 0;
-      for (int gg = 0; gg < n_groups_hsgp; gg++) {
-        const double* phi_g = phi_temporal + gg * T_hsgp;
-        int base = layout.temporal_start + gg * T_hsgp;
-        double qf = 0.0;
-        for (int t = 0; t < T_hsgp; t++) {
-          double g = 0.0;
-          if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
-          if (t < T_hsgp - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
-          grad[base + t] += g;
-        }
-        if (data.temporal_cyclic) {
-          double dc = phi_g[0] - phi_g[T_hsgp - 1]; qf += dc * dc;
-          grad[base + 0] -= tau_temporal * dc;
-          grad[base + T_hsgp - 1] += tau_temporal * dc;
-        }
-        total_qf += qf; total_rank += data.temporal_cyclic ? T_hsgp : T_hsgp - 1;
-        temporal_sum_to_zero_grad(phi_g, T_hsgp, base, 0.001, grad.data());
-      }
-      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-    } else if (data.temporal_type == TemporalType::RW2) {
-      double total_qf = 0.0; int total_rank = 0;
-      for (int gg = 0; gg < n_groups_hsgp; gg++) {
-        const double* phi_g = phi_temporal + gg * T_hsgp;
-        int base = layout.temporal_start + gg * T_hsgp;
-        double qf = 0.0;
-        for (int t = 0; t < T_hsgp; t++) {
-          double g = 0.0;
-          if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-          if (t >= 1 && t < T_hsgp - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
-          if (t < T_hsgp - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
-          grad[base + t] += g;
-        }
-        for (int t = 2; t < T_hsgp; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-        if (data.temporal_cyclic && T_hsgp >= 3) {
-          double d2_a = phi_g[T_hsgp - 2] - 2.0 * phi_g[T_hsgp - 1] + phi_g[0];
-          double d2_b = phi_g[T_hsgp - 1] - 2.0 * phi_g[0] + phi_g[1];
-          qf += d2_a * d2_a + d2_b * d2_b;
-          grad[base + T_hsgp - 2] -= tau_temporal * d2_a;
-          grad[base + T_hsgp - 1] += 2.0 * tau_temporal * d2_a;
-          grad[base + 0] -= tau_temporal * d2_a;
-          grad[base + T_hsgp - 1] -= tau_temporal * d2_b;
-          grad[base + 0] += 2.0 * tau_temporal * d2_b;
-          grad[base + 1] -= tau_temporal * d2_b;
-        }
-        total_qf += qf; total_rank += data.temporal_cyclic ? T_hsgp : T_hsgp - 2;
-        temporal_sum_to_zero_grad(phi_g, T_hsgp, base, 0.001, grad.data());
-      }
-      grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-    } else if (data.temporal_type == TemporalType::AR1) {
-      double omr2 = 1.0 - rho_ar1 * rho_ar1;
-      double total_qf = 0.0, total_gr = 0.0;
-      for (int gg = 0; gg < n_groups_hsgp; gg++) {
-        const double* phi_g = phi_temporal + gg * T_hsgp;
-        int base = layout.temporal_start + gg * T_hsgp;
-        grad[base] += -tau_temporal * omr2 * phi_g[0];
-        if (T_hsgp > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
-        double qf = omr2 * phi_g[0] * phi_g[0];
-        for (int t = 1; t < T_hsgp; t++) {
-          double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
-          double g = -tau_temporal * r;
-          if (t < T_hsgp - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
-          grad[base + t] += g;
-        }
-        total_qf += qf;
-        total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
-        for (int t = 1; t < T_hsgp; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
-      }
-      grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
-      if (layout.logit_rho_ar1_idx >= 0) {
-        double gr = -n_groups_hsgp * rho_ar1 / omr2 + total_gr;
-        grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
-      }
-    }
+    temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
+                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
   }
 
     // Non-centered RE chain rule transformation
@@ -6773,47 +6446,11 @@ void compute_gradient_ms_temporal_handcoded(
         accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
-    // =========================================================================
     // Spatial GMRF prior gradients (ICAR/BYM2)
-    // =========================================================================
     if (layout.has_spatial) {
-        int S = data.n_spatial_units;
-        if (layout.is_bym2) {
-            // BYM2 (separate variance): phi and theta gradients
-            // ICAR prior on spatial_phi (no tau_spatial for BYM2 — using unit precision)
-            for (int s = 0; s < S; s++) {
-                double icar_grad = 0.0;
-                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
-                    int j = data.adj_col_idx[idx];  // already 0-based from R
-                    icar_grad += (spatial_phi[j] - spatial_phi[s]);
-                }
-                // d(LL)/d(phi[s]) = d(LL)/d(spatial) * d(spatial)/d(phi) = dLL_shared * sigma_s * scale
-                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad;
-                // d(LL)/d(theta[s]) = d(LL)/d(spatial) * d(spatial)/d(theta) = dLL_shared * sigma_u
-                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
-            }
-            // Riebler: transform (grad_sigma_s, grad_sigma_u) -> (grad_log_sigma, grad_logit_rho)
-            double grad_sigma_s_lik = 0.0, grad_sigma_u_lik = 0.0;
-            for (int s = 0; s < S; s++) {
-                grad_sigma_s_lik += grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s];
-                grad_sigma_u_lik += grad_theta_lik[s] * sigma_u_bym2 * theta_bym2[s];
-            }
-            grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
-            grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
-                                                        - rho_bym2 * grad_sigma_u_lik);
-        } else {
-            // ICAR
-            for (int s = 0; s < S; s++) {
-                double icar_grad = 0.0;
-                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
-                    int j = data.adj_col_idx[idx];  // already 0-based from R
-                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
-                }
-                grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad;
-            }
-            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S), data);
-            grad[layout.log_tau_spatial_idx] += 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
-        }
+        spatial_gmrf_prior_grad(data, layout, spatial_phi, tau_spatial,
+                                sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
+                                grad_spatial_lik.data(), grad_theta_lik.data(), grad.data());
     }
 
     // =========================================================================
@@ -7039,125 +6676,17 @@ void compute_gradient_spatiotemporal_handcoded(
         accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
-    // =========================================================================
     // Spatial GMRF prior gradients (ICAR/BYM2)
-    // =========================================================================
     if (layout.has_spatial) {
-        int S_sp = data.n_spatial_units;
-        if (layout.is_bym2) {
-            // BYM2 (separate variance): phi and theta gradients
-            for (int s = 0; s < S_sp; s++) {
-                double icar_grad = 0.0;
-                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
-                    int j = data.adj_col_idx[idx];  // already 0-based from R
-                    icar_grad += (spatial_phi[j] - spatial_phi[s]);
-                }
-                grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad;
-                grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
-            }
-            // Riebler: transform (grad_sigma_s, grad_sigma_u) -> (grad_log_sigma, grad_logit_rho)
-            double grad_sigma_s_lik = 0.0, grad_sigma_u_lik = 0.0;
-            for (int s = 0; s < S_sp; s++) {
-                grad_sigma_s_lik += grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s];
-                grad_sigma_u_lik += grad_theta_lik[s] * sigma_u_bym2 * theta_bym2[s];
-            }
-            grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
-            grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
-                                                        - rho_bym2 * grad_sigma_u_lik);
-        } else {
-            for (int s = 0; s < S_sp; s++) {
-                double icar_grad = 0.0;
-                for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
-                    int j = data.adj_col_idx[idx];  // already 0-based from R
-                    icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
-                }
-                grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad;
-            }
-            double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S_sp), data);
-            grad[layout.log_tau_spatial_idx] += 0.5 * (S_sp - 1) - 0.5 * tau_spatial * icar_qf;
-        }
+        spatial_gmrf_prior_grad(data, layout, spatial_phi, tau_spatial,
+                                sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
+                                grad_spatial_lik.data(), grad_theta_lik.data(), grad.data());
     }
 
-    // Temporal GMRF prior gradients (per-group for panel temporal)
+    // Temporal GMRF prior gradients
     if (layout.has_temporal && T_temporal > 0) {
-        int T_st = data.n_times;
-        int n_groups_st = data.n_temporal_groups;
-        for (int t = 0; t < T_temporal; t++) grad[layout.temporal_start + t] = grad_temporal_lik[t];
-        if (data.temporal_type == TemporalType::RW1) {
-            double total_qf = 0.0; int total_rank = 0;
-            for (int gg = 0; gg < n_groups_st; gg++) {
-                const double* phi_g = phi_temporal + gg * T_st;
-                int base = layout.temporal_start + gg * T_st;
-                double qf = 0.0;
-                for (int t = 0; t < T_st; t++) {
-                    double g = 0.0;
-                    if (t > 0) { g += tau_temporal * (phi_g[t-1] - phi_g[t]); qf += (phi_g[t] - phi_g[t-1]) * (phi_g[t] - phi_g[t-1]); }
-                    if (t < T_st - 1) g += tau_temporal * (phi_g[t+1] - phi_g[t]);
-                    grad[base + t] += g;
-                }
-                if (data.temporal_cyclic) {
-                    double dc = phi_g[0] - phi_g[T_st - 1]; qf += dc * dc;
-                    grad[base + 0] -= tau_temporal * dc;
-                    grad[base + T_st - 1] += tau_temporal * dc;
-                }
-                total_qf += qf; total_rank += data.temporal_cyclic ? T_st : T_st - 1;
-                temporal_sum_to_zero_grad(phi_g, T_st, base, 0.001, grad.data());
-            }
-            grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-        } else if (data.temporal_type == TemporalType::RW2) {
-            double total_qf = 0.0; int total_rank = 0;
-            for (int gg = 0; gg < n_groups_st; gg++) {
-                const double* phi_g = phi_temporal + gg * T_st;
-                int base = layout.temporal_start + gg * T_st;
-                double qf = 0.0;
-                for (int t = 0; t < T_st; t++) {
-                    double g = 0.0;
-                    if (t >= 2) g -= tau_temporal * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-                    if (t >= 1 && t < T_st - 1) g += 2.0 * tau_temporal * (phi_g[t-1] - 2.0*phi_g[t] + phi_g[t+1]);
-                    if (t < T_st - 2) g -= tau_temporal * (phi_g[t] - 2.0*phi_g[t+1] + phi_g[t+2]);
-                    grad[base + t] += g;
-                }
-                for (int t = 2; t < T_st; t++) qf += (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]) * (phi_g[t-2] - 2.0*phi_g[t-1] + phi_g[t]);
-                if (data.temporal_cyclic && T_st >= 3) {
-                    double d2_a = phi_g[T_st - 2] - 2.0 * phi_g[T_st - 1] + phi_g[0];
-                    double d2_b = phi_g[T_st - 1] - 2.0 * phi_g[0] + phi_g[1];
-                    qf += d2_a * d2_a + d2_b * d2_b;
-                    grad[base + T_st - 2] -= tau_temporal * d2_a;
-                    grad[base + T_st - 1] += 2.0 * tau_temporal * d2_a;
-                    grad[base + 0] -= tau_temporal * d2_a;
-                    grad[base + T_st - 1] -= tau_temporal * d2_b;
-                    grad[base + 0] += 2.0 * tau_temporal * d2_b;
-                    grad[base + 1] -= tau_temporal * d2_b;
-                }
-                total_qf += qf; total_rank += data.temporal_cyclic ? T_st : T_st - 2;
-                temporal_sum_to_zero_grad(phi_g, T_st, base, 0.001, grad.data());
-            }
-            grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
-        } else if (data.temporal_type == TemporalType::AR1) {
-            double omr2 = 1.0 - rho_ar1 * rho_ar1;
-            double total_qf = 0.0, total_gr = 0.0;
-            for (int gg = 0; gg < n_groups_st; gg++) {
-                const double* phi_g = phi_temporal + gg * T_st;
-                int base = layout.temporal_start + gg * T_st;
-                grad[base] += -tau_temporal * omr2 * phi_g[0];
-                if (T_st > 1) grad[base] += tau_temporal * rho_ar1 * (phi_g[1] - rho_ar1 * phi_g[0]);
-                double qf = omr2 * phi_g[0] * phi_g[0];
-                for (int t = 1; t < T_st; t++) {
-                    double r = phi_g[t] - rho_ar1 * phi_g[t-1]; qf += r * r;
-                    double g = -tau_temporal * r;
-                    if (t < T_st - 1) g += tau_temporal * rho_ar1 * (phi_g[t+1] - rho_ar1 * phi_g[t]);
-                    grad[base + t] += g;
-                }
-                total_qf += qf;
-                total_gr += tau_temporal * rho_ar1 * phi_g[0] * phi_g[0];
-                for (int t = 1; t < T_st; t++) total_gr += tau_temporal * (phi_g[t] - rho_ar1 * phi_g[t-1]) * phi_g[t-1];
-            }
-            grad[layout.log_tau_temporal_idx] += 0.5 * T_temporal - 0.5 * tau_temporal * total_qf;
-            if (layout.logit_rho_ar1_idx >= 0) {
-                double gr = -n_groups_st * rho_ar1 / omr2 + total_gr;
-                grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
-            }
-        }
+        temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
+                                 phi_temporal, T_temporal, grad_temporal_lik.data(), grad.data());
     }
 
     // =========================================================================
