@@ -245,6 +245,13 @@ T compute_log_post_impl(
             }
             log_post = log_post - T(0.5) * quad_form;
 
+            // Soft sum-to-zero constraint on ICAR phi
+            {
+                T phi_sum = T(0.0);
+                for (int s = 0; s < data.n_spatial_units; s++) phi_sum = phi_sum + phi_spatial[s];
+                log_post = log_post - T(0.5) * T(0.01) * phi_sum * phi_sum;
+            }
+
             // N(0, I) prior on theta
             for (int s = 0; s < data.n_spatial_units; s++) {
                 log_post = log_post - T(0.5) * theta_bym2[s] * theta_bym2[s];
@@ -416,13 +423,12 @@ T compute_log_post_impl(
             T log_phi = params[layout.log_phi_temporal_gp_idx];
 
             // PC prior on sigma2 (favor smaller variance)
-            // log p(sigma2) = log(rate) - rate * sqrt(sigma2) - log(2 * sqrt(sigma2))
             double rate = -std::log(data.temporal_gp_sigma2_prior_alpha) / data.temporal_gp_sigma2_prior_U;
             T sigma_gp = safe_sqrt(sigma2_temporal_gp);
             log_post = log_post + T(std::log(rate)) - T(rate) * sigma_gp - safe_log(T(2.0) * sigma_gp);
             log_post = log_post + log_sigma2;  // Jacobian for log transform
 
-            // Uniform prior on phi within bounds - just check bounds
+            // Uniform prior on phi within bounds
             double phi_val = get_value(phi_temporal_gp);
             if (phi_val < data.temporal_gp_phi_prior_lower || phi_val > data.temporal_gp_phi_prior_upper) {
                 return T(-INFINITY);
@@ -430,31 +436,69 @@ T compute_log_post_impl(
             log_post = log_post - T(std::log(data.temporal_gp_phi_prior_upper - data.temporal_gp_phi_prior_lower));
             log_post = log_post + log_phi;  // Jacobian
 
-            // GP log-likelihood for temporal effects using exponential covariance
-            // For efficiency, use state-space representation (AR1 approximation)
-            for (int g = 0; g < data.n_temporal_groups; g++) {
-                // First time point: marginal N(0, sigma2)
-                T f0 = phi_temporal[g * T_times];
-                log_post = log_post - T(0.5) * safe_log(T(2.0 * M_PI) * sigma2_temporal_gp);
-                log_post = log_post - T(0.5) * f0 * f0 / sigma2_temporal_gp;
+            const bool use_nc = (data.temporal_gp_parameterization == 1);
 
-                // Subsequent time points: conditional on previous
-                for (int t = 1; t < T_times; t++) {
-                    T f_prev = phi_temporal[g * T_times + t - 1];
-                    T f_curr = phi_temporal[g * T_times + t];
+            if (use_nc) {
+                // Non-centered: params store z ~ N(0,1)
+                // Prior: z ~ N(0, I) for each temporal effect
+                int n_temporal = layout.temporal_end - layout.temporal_start;
+                for (int t = 0; t < n_temporal; t++) {
+                    log_post = log_post - T(0.5) * phi_temporal[t] * phi_temporal[t];
+                }
 
-                    // Time difference (assumes consecutive integer times scaled)
-                    double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
-                    T rho = safe_exp(T(-dt) / phi_temporal_gp);
-                    T cond_var = sigma2_temporal_gp * (T(1.0) - rho * rho);
+                // Jacobian of transform f = g(z, sigma2, phi):
+                // log|det(df/dz)| = T*log(sigma) + 0.5*sum_{t>=1} log(1 - rho_t^2) per group
+                T sigma_t = safe_sqrt(sigma2_temporal_gp);
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    log_post = log_post + T(T_times) * safe_log(sigma_t);
+                    for (int t = 1; t < T_times; t++) {
+                        double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
+                        T rho = safe_exp(T(-dt) / phi_temporal_gp);
+                        T one_minus_rho2 = T(1.0) - rho * rho;
+                        T one_minus_rho2_safe = safe_max(one_minus_rho2, T(1e-10));
+                        log_post = log_post + T(0.5) * safe_log(one_minus_rho2_safe);
+                    }
+                }
 
-                    // Ensure positive variance
-                    T cond_var_safe = safe_max(cond_var, T(1e-10));
-                    T cond_mean = rho * f_prev;
-                    T resid = f_curr - cond_mean;
+                // Forward transform z -> f: overwrite phi_temporal for use in obs loop
+                // f[0] = sigma * z[0]
+                // f[t] = rho_t * f[t-1] + sigma * sqrt(1 - rho_t^2) * z[t]
+                std::vector<T> f_reconstructed(n_temporal);
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    int off = g * T_times;
+                    f_reconstructed[off] = sigma_t * phi_temporal[off];
+                    for (int t = 1; t < T_times; t++) {
+                        double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
+                        T rho = safe_exp(T(-dt) / phi_temporal_gp);
+                        T one_minus_rho2 = T(1.0) - rho * rho;
+                        T one_minus_rho2_safe = safe_max(one_minus_rho2, T(1e-10));
+                        T a_t = sigma_t * safe_sqrt(one_minus_rho2_safe);
+                        f_reconstructed[off + t] = rho * f_reconstructed[off + t - 1] + a_t * phi_temporal[off + t];
+                    }
+                }
+                // Replace phi_temporal with reconstructed f for observation loop
+                phi_temporal = std::move(f_reconstructed);
+            } else {
+                // Centered: GP log-likelihood using state-space representation
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    T f0 = phi_temporal[g * T_times];
+                    log_post = log_post - T(0.5) * safe_log(T(2.0 * M_PI) * sigma2_temporal_gp);
+                    log_post = log_post - T(0.5) * f0 * f0 / sigma2_temporal_gp;
 
-                    log_post = log_post - T(0.5) * safe_log(T(2.0 * M_PI) * cond_var_safe);
-                    log_post = log_post - T(0.5) * resid * resid / cond_var_safe;
+                    for (int t = 1; t < T_times; t++) {
+                        T f_prev = phi_temporal[g * T_times + t - 1];
+                        T f_curr = phi_temporal[g * T_times + t];
+
+                        double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
+                        T rho = safe_exp(T(-dt) / phi_temporal_gp);
+                        T cond_var = sigma2_temporal_gp * (T(1.0) - rho * rho);
+                        T cond_var_safe = safe_max(cond_var, T(1e-10));
+                        T cond_mean = rho * f_prev;
+                        T resid = f_curr - cond_mean;
+
+                        log_post = log_post - T(0.5) * safe_log(T(2.0 * M_PI) * cond_var_safe);
+                        log_post = log_post - T(0.5) * resid * resid / cond_var_safe;
+                    }
                 }
             }
         } else {

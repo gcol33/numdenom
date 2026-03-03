@@ -1,197 +1,107 @@
-# Stan comparison benchmark
-# Compares numdenom with brms (Stan) for validation
-# Validation: posterior means within 2 SE
+# Quick benchmark: key rows affected by DIAG->DENSE recovery change
+suppressPackageStartupMessages(library(numdenom))
 
-library(numdenom)
-library(brms)
+N_OBS <- 500L; N_ITER <- 500L; N_WARMUP <- 250L; N_CHAINS <- 1L
+N_SITES <- 50L; N_TIMES <- 20L; SEED <- 123L
 
-set.seed(123)
+set.seed(SEED)
+site <- factor(rep(1:N_SITES, length.out = N_OBS))
+time <- rep(1:N_TIMES, length.out = N_OBS)
+time_factor <- factor(time)
+x <- rnorm(N_OBS)
 
-# Standard parameters
-N <- 500
-N_SITES <- 50
-x <- rnorm(N)
-site <- factor(rep(1:N_SITES, length.out = N))
+n_side <- ceiling(sqrt(N_SITES))
+grid <- expand.grid(lon = 1:n_side, lat = 1:n_side)[1:N_SITES, ]
+site_int <- as.integer(site)
+lon_site <- grid$lon[site_int]
+lat_site <- grid$lat[site_int]
 
-# Generate data - poisson-gamma style
-y_count <- rpois(N, exp(2 + 0.3*x))
-denom <- rgamma(N, shape=10, rate=0.1)  # mean ~100
-denom[denom < 1] <- 1
-df <- data.frame(y=y_count, denom=denom, x=x, site=site)
+adj_mat <- matrix(0L, N_SITES, N_SITES)
+for (i in 1:N_SITES) for (j in 1:N_SITES) {
+  if (i != j) {
+    d <- sqrt((grid$lon[i] - grid$lon[j])^2 + (grid$lat[i] - grid$lat[j])^2)
+    if (d <= 1.5) adj_mat[i, j] <- 1L
+  }
+}
 
-# Also generate negbin data
-y_nb <- rnbinom(N, mu=exp(2 + 0.3*x), size=5)
-denom_nb <- rnbinom(N, mu=100, size=10)
-denom_nb[denom_nb == 0] <- 1
-df_nb <- data.frame(y=y_nb, denom=denom_nb, x=x, site=site)
+y_pg_num <- rpois(N_OBS, exp(2 + 0.5 * x))
+y_pg_denom <- rgamma(N_OBS, 10, 1)
+df_pg <- data.frame(y = y_pg_num, denom = y_pg_denom, x = x,
+                    site = site, time = time_factor,
+                    lon = lon_site, lat = lat_site, spatial_site = site)
 
-# Binomial data
-trials <- rpois(N, 50) + 10
-prob <- plogis(-0.5 + 0.3*x)
-y_bin <- rbinom(N, trials, prob)
-df_bin <- data.frame(y=y_bin, trials=trials, x=x, site=site)
+y_nb_num <- rnbinom(N_OBS, mu = exp(2 + 0.3 * x), size = 5)
+y_nb_denom <- rnbinom(N_OBS, mu = 100, size = 10)
+y_nb_denom[y_nb_denom == 0] <- 1L
+df_nb <- data.frame(y = y_nb_num, denom = y_nb_denom, x = x,
+                    site = site, time = time_factor,
+                    lon = lon_site, lat = lat_site, spatial_site = site)
+
+trials <- sample(10:50, N_OBS, replace = TRUE)
+y_bin <- rbinom(N_OBS, trials, plogis(0.5 + 0.3 * x))
+df_bin <- data.frame(y = y_bin, trials = trials, x = x,
+                     site = site, time = time_factor,
+                     lon = lon_site, lat = lat_site, spatial_site = site)
+
+run_bench <- function(label, ...) {
+  args <- list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
+               verbose = FALSE, gradient_mode = "H")
+  args <- c(args, list(...))
+  elapsed <- tryCatch({
+    system.time(do.call(ratiod, args))["elapsed"]
+  }, error = function(e) NA_real_)
+  cat(sprintf("ROW|%-25s|%6.1f\n", label, elapsed))
+  elapsed
+}
 
 results <- list()
 
-# ============ Test 1: Simple poisson-gamma (no RE) ============
-cat("\n=== Test 1: Poisson-gamma (no RE) ===\n")
-
-# numdenom
-time_nd <- system.time({
-  fit_nd <- ratiod(y | denom ~ x, data=df, family=ratiod_poisson_gamma(),
-                   iter=1000, warmup=500, chains=2, gradient_mode="H")
-})["elapsed"]
-
-# brms: model y ~ Poisson with log(denom) offset
-time_brms <- system.time({
-  fit_brms <- brm(y ~ x + offset(log(denom)),
-                  data=df, family=poisson(),
-                  iter=1000, warmup=500, chains=2,
-                  backend="cmdstanr", silent=2, refresh=0)
-})["elapsed"]
-
-# Compare posteriors
-nd_summary <- summary(fit_nd)
-brms_summary <- summary(fit_brms)$fixed
-
-cat(sprintf("  numdenom: x effect = %.3f (SE=%.3f), time=%.1fs\n",
-            nd_summary$fixed["x", "mean"],
-            nd_summary$fixed["x", "se_mean"],
-            time_nd))
-cat(sprintf("  brms:     x effect = %.3f (SE=%.3f), time=%.1fs\n",
-            brms_summary["x", "Estimate"],
-            brms_summary["x", "Est.Error"]/sqrt(brms_summary["x", "Bulk_ESS"]),
-            time_brms))
-
-diff <- abs(nd_summary$fixed["x", "mean"] - brms_summary["x", "Estimate"])
-se_combined <- sqrt(nd_summary$fixed["x", "se_mean"]^2 +
-                    (brms_summary["x", "Est.Error"]/sqrt(brms_summary["x", "Bulk_ESS"]))^2)
-within_2se <- diff < 2 * se_combined
-
-results$test1 <- list(
-  numdenom_time = time_nd,
-  brms_time = time_brms,
-  numdenom_x = nd_summary$fixed["x", "mean"],
-  brms_x = brms_summary["x", "Estimate"],
-  diff = diff,
-  within_2se = within_2se,
-  speedup = time_brms / time_nd
-)
-
-cat(sprintf("  Difference: %.4f (%.1f combined SE) - %s\n",
-            diff, diff/se_combined, if(within_2se) "PASS" else "FAIL"))
-cat(sprintf("  Speedup: %.1fx\n", time_brms/time_nd))
-
-
-# ============ Test 2: Negbin with RE ============
-cat("\n=== Test 2: Negbin with RE ===\n")
-
-# numdenom
-time_nd <- system.time({
-  fit_nd <- ratiod(y | denom ~ x + (1|site), data=df_nb, family=ratiod_negbin_negbin(),
-                   iter=1000, warmup=500, chains=2, gradient_mode="H")
-})["elapsed"]
-
-# brms: negbinomial with offset
-time_brms <- system.time({
-  fit_brms <- brm(y ~ x + (1|site) + offset(log(denom)),
-                  data=df_nb, family=negbinomial(),
-                  iter=1000, warmup=500, chains=2,
-                  backend="cmdstanr", silent=2, refresh=0)
-})["elapsed"]
-
-nd_summary <- summary(fit_nd)
-brms_summary <- summary(fit_brms)$fixed
-
-cat(sprintf("  numdenom: x effect = %.3f (SE=%.3f), time=%.1fs\n",
-            nd_summary$fixed["x", "mean"],
-            nd_summary$fixed["x", "se_mean"],
-            time_nd))
-cat(sprintf("  brms:     x effect = %.3f (SE=%.3f), time=%.1fs\n",
-            brms_summary["x", "Estimate"],
-            brms_summary["x", "Est.Error"]/sqrt(brms_summary["x", "Bulk_ESS"]),
-            time_brms))
-
-diff <- abs(nd_summary$fixed["x", "mean"] - brms_summary["x", "Estimate"])
-se_combined <- sqrt(nd_summary$fixed["x", "se_mean"]^2 +
-                    (brms_summary["x", "Est.Error"]/sqrt(brms_summary["x", "Bulk_ESS"]))^2)
-within_2se <- diff < 2 * se_combined
-
-results$test2 <- list(
-  numdenom_time = time_nd,
-  brms_time = time_brms,
-  numdenom_x = nd_summary$fixed["x", "mean"],
-  brms_x = brms_summary["x", "Estimate"],
-  diff = diff,
-  within_2se = within_2se,
-  speedup = time_brms / time_nd
-)
-
-cat(sprintf("  Difference: %.4f (%.1f combined SE) - %s\n",
-            diff, diff/se_combined, if(within_2se) "PASS" else "FAIL"))
-cat(sprintf("  Speedup: %.1fx\n", time_brms/time_nd))
-
-
-# ============ Test 3: Binomial ============
-cat("\n=== Test 3: Binomial with RE ===\n")
-
-# numdenom
-time_nd <- system.time({
-  fit_nd <- ratiod(y | trials ~ x + (1|site), data=df_bin, family=ratiod_binomial(),
-                   iter=1000, warmup=500, chains=2, gradient_mode="H")
-})["elapsed"]
-
-# brms
-time_brms <- system.time({
-  fit_brms <- brm(y | trials(trials) ~ x + (1|site),
-                  data=df_bin, family=binomial(),
-                  iter=1000, warmup=500, chains=2,
-                  backend="cmdstanr", silent=2, refresh=0)
-})["elapsed"]
-
-nd_summary <- summary(fit_nd)
-brms_summary <- summary(fit_brms)$fixed
-
-cat(sprintf("  numdenom: x effect = %.3f (SE=%.3f), time=%.1fs\n",
-            nd_summary$fixed["x", "mean"],
-            nd_summary$fixed["x", "se_mean"],
-            time_nd))
-cat(sprintf("  brms:     x effect = %.3f (SE=%.3f), time=%.1fs\n",
-            brms_summary["x", "Estimate"],
-            brms_summary["x", "Est.Error"]/sqrt(brms_summary["x", "Bulk_ESS"]),
-            time_brms))
-
-diff <- abs(nd_summary$fixed["x", "mean"] - brms_summary["x", "Estimate"])
-se_combined <- sqrt(nd_summary$fixed["x", "se_mean"]^2 +
-                    (brms_summary["x", "Est.Error"]/sqrt(brms_summary["x", "Bulk_ESS"]))^2)
-within_2se <- diff < 2 * se_combined
-
-results$test3 <- list(
-  numdenom_time = time_nd,
-  brms_time = time_brms,
-  numdenom_x = nd_summary$fixed["x", "mean"],
-  brms_x = brms_summary["x", "Estimate"],
-  diff = diff,
-  within_2se = within_2se,
-  speedup = time_brms / time_nd
-)
-
-cat(sprintf("  Difference: %.4f (%.1f combined SE) - %s\n",
-            diff, diff/se_combined, if(within_2se) "PASS" else "FAIL"))
-cat(sprintf("  Speedup: %.1fx\n", time_brms/time_nd))
-
-
-# ============ Summary ============
-cat("\n=== SUMMARY ===\n")
-cat(sprintf("Test 1 (PG no RE):    %s  Speedup: %.1fx\n",
-            if(results$test1$within_2se) "PASS" else "FAIL",
-            results$test1$speedup))
-cat(sprintf("Test 2 (NB with RE):  %s  Speedup: %.1fx\n",
-            if(results$test2$within_2se) "PASS" else "FAIL",
-            results$test2$speedup))
-cat(sprintf("Test 3 (Bin with RE): %s  Speedup: %.1fx\n",
-            if(results$test3$within_2se) "PASS" else "FAIL",
-            results$test3$speedup))
-
-saveRDS(results, "benchmarks/stan_compare_results.rds")
-cat("\nResults saved to benchmarks/stan_compare_results.rds\n")
+# Core models with Stan comparison numbers
+results[["R1"]]  <- run_bench("R1  PG base",
+  formula = y | denom ~ x, data = df_pg, family = ratiod_poisson_gamma())
+results[["R2"]]  <- run_bench("R2  PG+RE",
+  formula = y | denom ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma())
+results[["R5"]]  <- run_bench("R5  PG+ICAR",
+  formula = y | denom ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"))
+results[["R13"]] <- run_bench("R13 PG+AR1",
+  formula = y | denom ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  temporal = temporal_ar1("time"))
+results[["R20"]] <- run_bench("R20 PG+ICAR+AR1",
+  formula = y | denom ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
+  temporal = temporal_ar1("time"))
+results[["R31"]] <- run_bench("R31 NB base",
+  formula = y | denom ~ x, data = df_nb, family = ratiod_negbin_negbin())
+results[["R32"]] <- run_bench("R32 NB+RE",
+  formula = y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin())
+results[["R35"]] <- run_bench("R35 NB+ICAR",
+  formula = y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"))
+results[["R43"]] <- run_bench("R43 NB+AR1",
+  formula = y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  temporal = temporal_ar1("time"))
+results[["R50"]] <- run_bench("R50 NB+ICAR+AR1",
+  formula = y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
+  temporal = temporal_ar1("time"))
+results[["R61"]] <- run_bench("R61 Bin base",
+  formula = y | trials ~ x, data = df_bin, family = ratiod_binomial())
+results[["R62"]] <- run_bench("R62 Bin+RE",
+  formula = y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial())
+results[["R65"]] <- run_bench("R65 Bin+ICAR",
+  formula = y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"))
+results[["R73"]] <- run_bench("R73 Bin+AR1",
+  formula = y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  temporal = temporal_ar1("time"))
+results[["R82"]] <- run_bench("R82 Bin+ICAR+AR1",
+  formula = y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
+  temporal = temporal_ar1("time"))
+results[["R11"]] <- run_bench("R11 PG+RW1",
+  formula = y | denom ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  temporal = temporal_rw1("time"))
+results[["R41"]] <- run_bench("R41 NB+RW1",
+  formula = y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  temporal = temporal_rw1("time"))

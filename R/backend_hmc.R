@@ -497,7 +497,8 @@ fit_hmc <- function(formula,
       gp_sigma2_prior_U = priors$temporal_gp_sigma2_prior_U %||% 1.0,
       gp_sigma2_prior_alpha = priors$temporal_gp_sigma2_prior_alpha %||% 0.01,
       gp_phi_prior_lower = priors$temporal_gp_phi_prior_lower %||% 0.01,
-      gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0
+      gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0,
+      gp_parameterization = temporal_info$parameterization %||% "noncentered"
     )
 
     prior_params <- list(
@@ -730,22 +731,53 @@ prepare_hmc_data <- function(formula, data, family, model_type) {
     y_num <- as.integer(y_num)
     y_denom_int <- rep(1L, length(y_num))
     y_denom_cont <- as.numeric(y_denom)
+    # Gamma distribution requires y > 0; clamp zeros with warning
+    n_zero <- sum(y_denom_cont <= 0)
+    if (n_zero > 0) {
+      warning(sprintf(
+        "%d denominator value(s) <= 0 (Gamma requires y > 0). Clamping to 1e-6.",
+        n_zero), call. = FALSE)
+      y_denom_cont[y_denom_cont <= 0] <- 1e-6
+    }
     y_denom <- y_denom_int
   } else if (model_type == "negbin_gamma") {
     y_num <- as.integer(y_num)
     y_denom_int <- rep(1L, length(y_num))
     y_denom_cont <- as.numeric(y_denom)
+    n_zero <- sum(y_denom_cont <= 0)
+    if (n_zero > 0) {
+      warning(sprintf(
+        "%d denominator value(s) <= 0 (Gamma requires y > 0). Clamping to 1e-6.",
+        n_zero), call. = FALSE)
+      y_denom_cont[y_denom_cont <= 0] <- 1e-6
+    }
     y_denom <- y_denom_int
   } else if (model_type == "gamma_gamma") {
     # Gamma-Gamma: both continuous
     y_num_cont <- as.numeric(y_num)
     y_denom_cont <- as.numeric(y_denom)
+    n_zero <- sum(y_num_cont <= 0) + sum(y_denom_cont <= 0)
+    if (n_zero > 0) {
+      warning(sprintf(
+        "%d value(s) <= 0 (Gamma requires y > 0). Clamping to 1e-6.",
+        n_zero), call. = FALSE)
+      y_num_cont[y_num_cont <= 0] <- 1e-6
+      y_denom_cont[y_denom_cont <= 0] <- 1e-6
+    }
     y_num <- rep(0L, length(y_num))    # Dummy integer for C++ struct
     y_denom <- rep(0L, length(y_num_cont))
   } else if (model_type == "lognormal") {
     # Lognormal: both continuous
     y_num_cont <- as.numeric(y_num)
     y_denom_cont <- as.numeric(y_denom)
+    n_zero <- sum(y_num_cont <= 0) + sum(y_denom_cont <= 0)
+    if (n_zero > 0) {
+      warning(sprintf(
+        "%d value(s) <= 0 (Lognormal requires y > 0). Clamping to 1e-6.",
+        n_zero), call. = FALSE)
+      y_num_cont[y_num_cont <= 0] <- 1e-6
+      y_denom_cont[y_denom_cont <= 0] <- 1e-6
+    }
     y_num <- rep(0L, length(y_num))    # Dummy integer for C++ struct
     y_denom <- rep(0L, length(y_num_cont))
   } else if (model_type == "beta_binomial") {
@@ -1447,6 +1479,7 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
       cov_type = temporal$cov,
       nu = temporal$nu %||% 1.5,
       period = temporal$period %||% 1.0,
+      parameterization = temporal$parameterization %||% "noncentered",
       # TVC fields (not used)
       n_tvc = 0L,
       structure = "gp"
@@ -2428,10 +2461,52 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
       draws_list[["phi_temporal_gp"]] <- exp(samples[, idx])
       idx <- idx + 1
 
-      # Temporal GP effects (one per observation)
+      # Temporal GP effects — extract z params, transform to f if NC
+      z_start_idx <- idx
+      z_samples <- matrix(NA_real_, nrow = nrow(samples),
+                          ncol = temporal_info$n_temporal_params)
       for (i in seq_len(temporal_info$n_temporal_params)) {
-        draws_list[[paste0("temporal_gp[", i, "]")]] <- samples[, idx]
+        z_samples[, i] <- samples[, idx]
         idx <- idx + 1
+      }
+
+      gp_param <- temporal_info$parameterization %||% "noncentered"
+      if (gp_param == "noncentered") {
+        # Transform z -> f using state-space forward pass (vectorized over MCMC samples)
+        sigma2_draws <- draws_list[["sigma2_temporal_gp"]]
+        phi_draws <- draws_list[["phi_temporal_gp"]]
+        T_times <- temporal_info$n_times
+        n_groups <- temporal_info$n_groups
+        time_vals <- temporal_info$time_values
+
+        f_samples <- z_samples  # Same dimensions, will overwrite
+        for (s in seq_len(nrow(samples))) {
+          sigma_s <- sqrt(sigma2_draws[s])
+          phi_s <- phi_draws[s]
+
+          for (g in seq_len(n_groups)) {
+            off <- (g - 1L) * T_times
+            # f[0] = sigma * z[0]
+            f_samples[s, off + 1L] <- sigma_s * z_samples[s, off + 1L]
+            for (tt in seq(2L, T_times)) {
+              dt <- time_vals[tt] - time_vals[tt - 1L]
+              rho_t <- exp(-dt / phi_s)
+              one_minus_rho2 <- max(1.0 - rho_t^2, 1e-10)
+              a_t <- sigma_s * sqrt(one_minus_rho2)
+              f_samples[s, off + tt] <- rho_t * f_samples[s, off + tt - 1L] +
+                                        a_t * z_samples[s, off + tt]
+            }
+          }
+        }
+        # Store f (actual temporal effects) in draws
+        for (i in seq_len(temporal_info$n_temporal_params)) {
+          draws_list[[paste0("temporal_gp[", i, "]")]] <- f_samples[, i]
+        }
+      } else {
+        # Centered: z == f, store directly
+        for (i in seq_len(temporal_info$n_temporal_params)) {
+          draws_list[[paste0("temporal_gp[", i, "]")]] <- z_samples[, i]
+        }
       }
     } else {
       # Regular temporal (RW1, RW2, AR1)

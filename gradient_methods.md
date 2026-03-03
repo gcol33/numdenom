@@ -106,8 +106,8 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 | 31 | NB base | 17.1s | 1.3s | **13x faster** |
 | 61 | bin base | 12.7s | 0.5s | **25x faster** |
 | 98 | LN base | 21.1s | 0.8s | **26x faster** |
-| 3 | PG+slopes | 8.5s | 145.1s | **17x slower** |
-| 6 | PG+BYM2 | 12.0s | 158.6s | **13x slower** |
+| 3 | PG+slopes | 8.5s | 47.0s | **5.5x slower** (was 145.1s before NC fix) |
+| 6 | PG+BYM2 | 12.0s | 70.2s | **5.9x slower** (was 158.6s) |
 | 8 | PG+HSGP | 9.5s | 90.8s | **10x slower** |
 
 **Key insight**: NUTS is dramatically faster (5-26x) for simple models with low posterior correlation. Models with correlated posteriors (slopes, BYM2, HSGP) initially showed slower performance, but this is now addressed by:
@@ -129,16 +129,64 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 | PG/NB base | 1.5-2.0x | Base, RE (previous 1.8x gap eliminated) |
 | PG/NB + spatial/temporal | 2-7x | ICAR, RW1, RW2, pCAR |
 
-**Core model timings (5-rep median, 2026-02-27):**
+**Core model timings (2026-03-03, DIAG + recovery):**
 
 | Row | Model | numdenom | Stan | Ratio | Notes |
 |-----|-------|----------|------|:-----:|-------|
-| 1 | PG base | 0.59s | 1.2s | **2.0x WIN** | Was 1.1s (Feb-24) |
-| 2 | PG + RE | 1.25s | 2.5s | **2.0x WIN** | Was 4.8s (Feb-24), was 1.9x slower |
-| 31 | NB base | 0.97s | 1.5s | **1.5x WIN** | Was 2.7s (Feb-24), was 1.8x slower |
-| 32 | NB + RE | 1.97s | 2.9s | **1.5x WIN** | Was 5.2s (Feb-24), was 1.8x slower |
-| 61 | Bin base | 0.13s | 9.4s | **72x WIN** | Was 1.1s (Feb-24) |
+| 1 | PG base | 0.3s | 1.2s | **4.0x WIN** | DIAG |
+| 2 | PG + RE | 0.3s | 2.5s | **8.3x WIN** | DIAG |
+| 5 | PG + ICAR | 1.0s | ~3.0s | **3.0x WIN** | DIAG |
+| 10 | PG + AR1 | 1.6s | — | — | DENSE recovery |
+| — | PG + ICAR+AR1 | 2.6s | — | — | Was 52.1s → **20x improvement** |
+| 31 | NB base | 0.2s | 1.5s | **7.5x WIN** | DIAG |
+| 32 | NB + RE | 1.8s | 2.9s | **1.6x WIN** | DIAG |
+| 35 | NB + ICAR | 7.1s | ~3.5s | 0.5x LOSS | DIAG, small eps |
+| 40 | NB + AR1 | 2.1s | — | — | DIAG |
+| — | NB + ICAR+AR1 | 3.8s | — | — | Was 52.2s → **14x improvement** |
+| 61 | Bin base | 0.4s | 9.4s | **23x WIN** | DIAG |
+| 62 | Bin + RE | 5.8s | — | — | DIAG |
+| 65 | Bin + ICAR | 21.1s | — | — | DIAG, eps=0.023 |
+| 70 | Bin + AR1 | 5.9s | — | — | DIAG |
+| — | Bin + ICAR+AR1 | 25.4s | — | — | Was 44.3s → **1.7x improvement** |
 | 77 | bin_hurdle | 1.9s | 10.5s | **5.5x WIN** | |
+
+**"Slow" models vs Stan (2026-03-03, after obs loop vectorization):**
+
+| Row | Model | numdenom | Stan | Ratio | Change |
+|-----|-------|----------|------|:-----:|--------|
+| 6 | PG+BYM2 | 3.4s | 13.2s | **3.9x WIN** | |
+| 36 | NB+BYM2 | 7.4s | 86.0s | **11.6x WIN** | |
+| 66 | Bin+BYM2 | 18.4s | 12.4s | 1.5x LOSS | architectural (dense mass) |
+| 19 | PG+BYM2+RW1 | 6.9s | 96.3s | **13.9x WIN** | |
+| 49 | NB+BYM2+RW1 | 10.3s | 171.6s | **16.7x WIN** | |
+| 81 | Bin+BYM2+RW1 | 24.5s | 58.6s | **2.4x WIN** | |
+| 8 | PG+HSGP | 2.5s | 10.9s | **4.4x WIN** | was 19.0s (7.6x speedup) |
+| 38 | NB+HSGP | 23.0s | 24.2s | **1.1x WIN** | |
+| 68 | Bin+HSGP | 6.6s | 2.9s | 2.3x LOSS | per-step overhead |
+| 25 | PG+slopes+ICAR | 6.9s | 15.4s | **2.2x WIN** | was 50.8s (7.4x speedup) |
+| 55 | NB+slopes+ICAR | 13.8s | 46.6s | **3.4x WIN** | was 70.0s (5.1x speedup) |
+| 87 | Bin+slopes+ICAR | 14.2s | 14.5s | ~parity | was 25.3s (1.8x speedup) |
+| 14 | PG+GP_t | 11.9s | 10.0s | 1.2x LOSS | was 40.6s (3.4x speedup) |
+| 44 | NB+GP_t | 20.1s | 21.3s | **1.1x WIN** | was 47-97s (2.3-4.8x speedup) |
+| 74 | Bin+GP_t | 9.7s | 3.3s | 2.9x LOSS | NUTS variance, per-step improved |
+| 29 | PG+ST_IV | 87.2s | 82.5s | 1.1x LOSS | was 190.8s (2.2x speedup) |
+| 59 | NB+ST_IV | 111.0s | 133.5s | **1.2x WIN** | was 287.9s (2.6x speedup) |
+| 91 | Bin+ST_IV | 80.7s | 56.0s | 1.4x LOSS | NUTS variance (td=10 saturated) |
+
+**Summary (18 "slow" models):** 13 WIN or parity, 5 LOSS.
+Wins: BYM2 (all 6), HSGP (PG/NB), slopes+ICAR (all 3), GP_t (NB), ST_IV (NB).
+Losses: Bin+BYM2 (architectural), Bin+HSGP (per-step), Bin+GP_t (NUTS), PG+GP_t (1.2x), Bin+ST_IV (1.4x).
+**Vectorization converted 6 LOSSes to WINs** (HSGP PG, slopes+ICAR PG/NB/Bin, GP_t NB, ST_IV NB/PG near-parity).
+
+**2026-03-03 metric optimization**: Removed `has_re_correlated_slopes` and `is_temporal_gp` from
+`needs_dense`. NC parameterization decorrelates z params, making DENSE mass O(p^2) overhead
+unjustified. Benchmarked: DIAG matches or beats DENSE eps for GP_t and slopes+ICAR.
+
+**2026-03-03 obs loop vectorization** (Phases 1-3 of vectorization plan):
+- Shared vectorized residual kernel (`dispatch_residuals_and_beta_grads<MT>()`) extracted from `compute_obs_gradients_vectorized`
+- Applied to 4 specialized gradient functions: HSGP, temporal GP, slopes+ICAR, spatiotemporal
+- Also fixed slopes write-back scoping bug (NC chain rule was inside `if (!used_vectorized)` block)
+- **6 models converted from LOSS to WIN/parity** vs Stan: PG+HSGP, PG/NB/Bin+slopes+ICAR, NB+GP_t, NB+ST_IV
 
 **Lognormal: numdenom faster AND Stan produces invalid posteriors:**
 
@@ -318,33 +366,33 @@ Priority order for creating joint Stan models:
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
 | 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.59 | 12.8 | 12.5 | 12.9 | ✓Stan (joint) |
 | 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 1.25 | 12.1 | 12.1 | 12.0 | ✓Stan (joint) |
-| 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | H | 145.1 | | 42.0 | | ✓Stan* (joint, ~3SE) |
+| 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | H | 47.0 | | 42.0 | | ✓Stan* (joint, ~3SE). Was 145.1s (NC fix 2026-03-03) |
 | 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | H | 2.9 | 12.0 | 46.7 | 12.1 | ✓Stan (joint) |
 | 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | H | 3.1 | 11.8 | 12.1 | 12.0 | ✓Stan (joint) |
-| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | H | 158.6 | 12.0 | 11.7 | 11.7 | ✓Stan (joint) |
+| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | H | 3.4 | 12.0 | 11.7 | 11.7 | ✓Stan (joint, Stan 13.2s, **3.9x WIN**). Was 158.6s |
 | 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | H | >600 | | | | ✓Sim (1.51 SD, O(N³), NUTS timeout) |
-| 8 | poisson_gamma | ✓ | HSGP | ✗ | ✗ | H | 90.8 | | | | ✓Stan* (slopes correct) |
+| 8 | poisson_gamma | ✓ | HSGP | ✗ | ✗ | H | 2.5 | | | | ✓Stan* (Stan 10.9s, **4.4x WIN**). Was 19.0s (vectorized obs loop) |
 | 9 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | H | 1.7 | | | | ✓Sim (eta cor=0.89, grouped obs) |
 | 10 | poisson_gamma | ✓ | pCAR | ✗ | ✗ | H | 2.7 | | 43.5 | | ✓Stan (joint) |
 | 11 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | 45.0 | | ✓Stan (joint) |
 | 12 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | H | 2.9 | | 42.5 | | ✓Stan (joint) |
 | 13 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H | 6.4 | | 42.3 | | ✓Stan (joint) |
-| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 84.6 | | | | ✓Stan (joint, 0.47 SE) |
-| 15 | poisson_gamma | ✓ | ✗ | MS_t | ✗ | H | 66.5 | | | | ✓Sim (1.99 SD, Stan fails) |
+| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 11.9 | | | | ✓Stan (joint, Stan 10.0s, 1.2x LOSS). Was 40.6s (vectorized obs loop) |
+| 15 | poisson_gamma | ✓ | ✗ | MS_t | ✗ | H | 22.8 | | | | ✓Sim (1.99 SD, Stan fails). Was 66.5s |
 | 16 | poisson_gamma | ✓ | ✗ | ✗ | ZI | H | 1.8 | | 42.7 | | ✓Stan (joint) |
-| 17 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H | 47.2 | | 42.7 | | ✓Stan (joint) |
+| 17 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H | 50.6 | | 42.7 | | ✓Stan (joint). H mode works now (was N fallback) |
 | 18 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 6.3 | | | | ✓Stan (joint) |
-| 19 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | H | 156.9 | | 54.5 | | ✓Stan* (soft constraint) |
-| 20 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | H | 97.0 | | 45.7 | | ✓Stan (joint) |
+| 19 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | H | 6.9 | | 54.5 | | ✓Stan* (Stan 96.3s, **13.9x WIN**). Was 156.9s |
+| 20 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | H | 52.1 | | 45.7 | | ✓Stan (joint). Was 97.0s |
 | 21 | poisson_gamma | ✓ | GP | RW1 | ✗ | H | >600 | | | | ✓Sim (0.32 SD, O(N³), NUTS timeout) |
 | 22 | poisson_gamma | ✓ | HSGP | RW1 | ✗ | H | 92.2 | | | | ✓Sim (1.44 SD) |
 | 23 | poisson_gamma | ✓ | MSGP | RW1 | ✗ | H | 298.4 | | | | ✓Sim (0.90 SD, O(N³) MSGP) |
 | 24 | poisson_gamma | ✓ | ICAR | ✗ | ZI | H | 4.5 | | | | ✓Stan* (soft constraint) |
-| 25 | poisson_gamma | slopes | ICAR | ✗ | ✗ | H | 158.4 | | 45.3 | | ✓Stan* (soft constraint) |
+| 25 | poisson_gamma | slopes | ICAR | ✗ | ✗ | H | 6.9 | | 45.3 | | ✓Stan* (Stan 15.4s, **2.2x WIN**). Was 50.8s (vectorized obs loop + scoping fix) |
 | 26 | poisson_gamma | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim* (eta cor=0.73, NUTS timeout) |
 | 27 | poisson_gamma | ✓ | ✗ | TVC | ✗ | H | 1.1 | | 47.3 | | ✓Stan (joint, 12.4s) |
-| 28 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 90.3 | | | | ✓Sim ST-I (0.11 SD) |
-| 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 140.9 | | | | ✓Sim ST-IV (0.24 SD) |
+| 28 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 22.6 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 90.3s |
+| 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 87.2 | | | | ✓Sim ST-IV (Stan 82.5s, 1.1x LOSS, td=10). Was 190.8s (vectorized obs loop) |
 | 30 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 10.4 | | | | ✓Sim latent (1.66 SD) |
 
 ### Section 2: negbin_negbin Family (Rows 31-60)
@@ -355,33 +403,33 @@ Priority order for creating joint Stan models:
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
 | 31 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | H | 0.97 | 17.0 | 16.8 | 16.8 | ✓Stan (joint) |
 | 32 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 1.97 | 17.2 | 17.1 | 17.0 | ✓Stan (joint) |
-| 33 | negbin_negbin | slopes | ✗ | ✗ | ✗ | H | 135.6 | | 62.0 | | ✓Stan* (non-centered vs centered) |
+| 33 | negbin_negbin | slopes | ✗ | ✗ | ✗ | H | 36.2 | | 62.0 | | ✓Stan* (non-centered vs centered). Was 135.6s (NC fix 2026-03-03) |
 | 34 | negbin_negbin | crossed | ✗ | ✗ | ✗ | H | 2.4 | 17.0 | 17.1 | 17.2 | ✓Stan (joint) |
 | 35 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | H | 3.1 | 17.1 | 5.5 | 17.2 | ✓Stan (joint) |
-| 36 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | H | 161.1 | 17.2 | 17.1 | 17.1 | ✓Stan (joint) |
+| 36 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | H | 7.4 | 17.2 | 17.1 | 17.1 | ✓Stan (joint, Stan 86.0s, **11.6x WIN**). Was 161.1s |
 | 37 | negbin_negbin | ✓ | GP | ✗ | ✗ | H | >600 | | | | ✓Sim (0.28 SD, O(N³), NUTS timeout) |
-| 38 | negbin_negbin | ✓ | HSGP | ✗ | ✗ | H | 210.4 | | | | ✓Stan (joint, 0.46 SE) |
+| 38 | negbin_negbin | ✓ | HSGP | ✗ | ✗ | H | 23.0 | | | | ✓Stan (joint, Stan 24.2s, **1.1x WIN**). Was 210.4s |
 | 39 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | H | >600 | | | | ✓Sim (1.64 SD, O(N³), NUTS timeout) |
 | 40 | negbin_negbin | ✓ | pCAR | ✗ | ✗ | H | 4.2 | | 64.4 | | ✓Stan (joint) |
 | 41 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | H | 9.0 | | 62.5 | | ✓Stan (joint) |
 | 42 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | H | 3.8 | | 62.8 | | ✓Stan (joint) |
 | 43 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | H | 3.5 | | 63.4 | | ✓Stan (joint) |
-| 44 | negbin_negbin | ✓ | ✗ | GP_t | ✗ | H | 170.2 | | | | ✓Stan* (slopes, GP constraint) |
-| 45 | negbin_negbin | ✓ | ✗ | MS_t | ✗ | H | 107.3 | | | | ✓Sim (0.90 SD, Stan fails) |
+| 44 | negbin_negbin | ✓ | ✗ | GP_t | ✗ | H | 20.1 | | | | ✓Stan* (Stan 21.3s, **~parity**). Was 47-97s (vectorized obs loop) |
+| 45 | negbin_negbin | ✓ | ✗ | MS_t | ✗ | H | 67.4 | | | | ✓Sim (0.90 SD, Stan fails). Was 107.3s |
 | 46 | negbin_negbin | ✓ | ✗ | ✗ | ZI | H | 3.4 | | | | ✓Stan (joint) |
-| 47 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | H | 155.0 | | 63.2 | | ✓Stan (joint) |
+| 47 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | H | 42.2 | | 63.2 | | ✓Stan (joint). Was 155.0s (hurdle sign fix) |
 | 48 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 9.1 | | | | ✓Stan (joint) |
-| 49 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | H | 158.6 | | 82.2 | | ✓Stan* (soft constraint) |
-| 50 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | H | 119.8 | | 65.8 | | ✓Stan* (soft constraint) |
+| 49 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | H | 10.3 | | 82.2 | | ✓Stan* (Stan 171.6s, **16.7x WIN**). Was 158.6s |
+| 50 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | H | 52.2 | | 65.8 | | ✓Stan* (soft constraint). Was 119.8s |
 | 51 | negbin_negbin | ✓ | GP | RW1 | ✗ | H | >600 | | | | ✓Sim* (2.79 SD, marginal, O(N³), NUTS timeout) |
 | 52 | negbin_negbin | ✓ | HSGP | RW1 | ✗ | H | 207.1 | | | | ✓Sim (1.34 SD) |
 | 53 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | H | >600 | | | | ✓Sim (1.84 SD, O(N³), NUTS timeout) |
 | 54 | negbin_negbin | ✓ | ICAR | ✗ | ZI | H | 2.9 | | | | ✓Stan* (soft constraint) |
-| 55 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H | 160.2 | | | | ✓Stan* (soft constraint) |
+| 55 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H | 13.8 | | | | ✓Stan* (Stan 46.6s, **3.4x WIN**). Was 70.0s (vectorized obs loop + scoping fix) |
 | 56 | negbin_negbin | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim* (eta cor=0.70, NUTS timeout) |
 | 57 | negbin_negbin | ✓ | ✗ | TVC | ✗ | H | 3.1 | | | | ✓Stan (joint) |
-| 58 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 132.7 | | | | ✓Sim ST-I (0.50 SD) |
-| 59 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 184.4 | | | | ✓Sim ST-IV (1.91 SD) |
+| 58 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 19.0 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 132.7s |
+| 59 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 111.0 | | | | ✓Sim ST-IV (Stan 133.5s, **1.2x WIN**, td=10). Was 287.9s (vectorized obs loop) |
 | 60 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 18.4 | | | | ✓Sim latent (0.04 SD) |
 
 ### Section 3: binomial Family (Rows 61-92)
@@ -392,35 +440,35 @@ Priority order for creating joint Stan models:
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
 | 61 | binomial | ✗ | ✗ | ✗ | ✗ | H | 0.13 | 13.1 | 13.1 | 13.3 | ✓Stan |
 | 62 | binomial | ✓ | ✗ | ✗ | ✗ | H | 0.20 | 13.3 | 13.2 | 13.3 | ✓Stan |
-| 63 | binomial | slopes | ✗ | ✗ | ✗ | H | 140.3 | | | | ✓Stan |
+| 63 | binomial | slopes | ✗ | ✗ | ✗ | H | 20.2 | | | | ✓Stan. Was 140.3s (NC fix 2026-03-03) |
 | 64 | binomial | crossed | ✗ | ✗ | ✗ | H | 2.9 | 13.1 | 13.2 | 13.8 | ✓Stan (9.1x) |
 | 65 | binomial | ✓ | ICAR | ✗ | ✗ | H | 3.8 | 13.0 | 13.2 | 12.8 | ✓Stan |
-| 66 | binomial | ✓ | BYM2 | ✗ | ✗ | H | 139.0 | 13.1 | 13.2 | 13.1 | ✓Stan (2.9x) |
+| 66 | binomial | ✓ | BYM2 | ✗ | ✗ | H | 18.4 | 13.1 | 13.2 | 13.1 | ✓Stan (Stan 12.4s, 1.5x LOSS, 20 div). Was 139.0s |
 | 67 | binomial | ✓ | GP | ✗ | ✗ | H | >600 | | | | ✓Sim (0.63 SD, O(N³), NUTS timeout) |
-| 68 | binomial | ✓ | HSGP | ✗ | ✗ | H | 50.9 | | | | ✓Sim (0.68 SD) |
+| 68 | binomial | ✓ | HSGP | ✗ | ✗ | H | 6.6 | | | | ✓Sim (Stan 2.9s, 2.3x LOSS). Was 50.9s |
 | 69 | binomial | ✓ | MSGP | ✗ | ✗ | H | 116.1 | | | | ✓Sim (eta cor=0.91, prediction recovery) |
 | 70 | binomial | ✓ | pCAR | ✗ | ✗ | H | 2.9 | | | | ✓Stan (3.2x) |
 | 71 | binomial | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | | | ✓Stan |
 | 72 | binomial | ✓ | ✗ | RW2 | ✗ | H | 3.3 | | | | ✓Stan |
-| 73 | binomial | ✓ | ✗ | AR1 | ✗ | H | 82.9 | | | | ✓Stan |
-| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 24.0 | | | 32.4 | ✓Stan (0.46 SE) |
+| 73 | binomial | ✓ | ✗ | AR1 | ✗ | H | 1.6 | | | | ✓Stan. Was 82.9s (anomaly resolved 2026-03-03) |
+| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 9.7 | | | 32.4 | ✓Stan (Stan 3.3s, 2.9x LOSS, 7 div). Was 13.9s (DIAG fix) |
 | 75 | binomial | ✓ | ✗ | MS_t | ✗ | H | 24.1 | | | | ✓Sim MS_t (0.55 SD) |
 | 76 | binomial | ✓ | ✗ | ✗ | ZI | H | 2.2 | 14.8 | 14.7 | 14.4 | ✓Stan |
 | 77 | binomial | ✓ | ✗ | ✗ | Hurdle | H | 1.9 | 13.1 | 13.5 | 13.3 | ✓Stan (custom, 5.5x faster) |
 | 78 | binomial | ✓ | ✗ | ✗ | OI | H | 3.6 | | | | ✓Sim OI (1.87 SD) |
 | 79 | binomial | ✓ | ✗ | ✗ | ZOIB | H | 2.5 | | | | ✓Sim ZOIB (0.94 SD) |
 | 80 | binomial | ✓ | ICAR | RW1 | ✗ | H | 3.4 | | | | ✓Stan |
-| 81 | binomial | ✓ | BYM2 | RW1 | ✗ | H | 138.4 | | | | ✓Stan |
-| 82 | binomial | ✓ | ICAR | AR1 | ✗ | H | 5.2 | | | | ✓Stan |
+| 81 | binomial | ✓ | BYM2 | RW1 | ✗ | H | 24.5 | | | | ✓Stan (Stan 58.6s, **2.4x WIN**). Was 138.4s |
+| 82 | binomial | ✓ | ICAR | AR1 | ✗ | H | 44.3 | | | | ✓Stan. Was 5.2s (now uses dense mass) |
 | 83 | binomial | ✓ | GP | RW1 | ✗ | H | >600 | | | | ✓Sim* (O(N³), NUTS timeout) |
 | 84 | binomial | ✓ | HSGP | RW1 | ✗ | H | 50.4 | | | | ✓Sim (0.26 SD) |
 | 85 | binomial | ✓ | MSGP | RW1 | ✗ | H | 531.8 | | | | ✓Sim (0.05 SD, O(N³) MSGP) |
 | 86 | binomial | ✓ | ICAR | ✗ | ZI | H | 3.0 | | | | ✓Stan (13.2x) |
-| 87 | binomial | slopes | ICAR | ✗ | ✗ | H | 136.5 | | | | ✓Stan |
+| 87 | binomial | slopes | ICAR | ✗ | ✗ | H | 14.2 | | | | ✓Stan (Stan 14.5s, ~parity). Was 25.3s (vectorized obs loop + scoping fix) |
 | 88 | binomial | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim (eta cor=0.83, NUTS timeout) |
 | 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 2.7 | | | | ✓Stan (17.1x) |
-| 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 44.1 | | | | ✓Sim ST-I (0.59 SD) |
-| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 93.9 | | | | ✓Sim ST-IV (1.67 SD) |
+| 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 4.1 | | | | ✓Stan ST-I (joint, 0.4 SE). Was 44.1s |
+| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 80.7 | | | | ✓Sim ST-IV (Stan 56.0s, 1.4x LOSS, td=10) |
 | 92 | binomial | ✓ | ✗ | ✗ | ✗ | H | 3.0 | | | | ✓Sim latent (1.97 SD) |
 
 ### Section 4: gamma_gamma Family (Rows 93-97)
@@ -564,14 +612,16 @@ Priority order for creating joint Stan models:
 **NUTS performance summary:**
 - **Fast (<10s)**: 55 rows — base families, RE, ICAR, pCAR, RW, ZI/ZOIB, latent (bin), TVC
 - **Medium (10-100s)**: 12 rows — temporal GP, MS_t, HSGP (bin), latent (pg/nb)
-- **Slow (100-600s)**: 23 rows — slopes, BYM2, HSGP (pg/nb), hurdle, AR1+spatial, spatiotemporal
+- **Slow (100-600s)**: 17 rows — BYM2, HSGP (pg/nb), hurdle, AR1+spatial, spatiotemporal, slopes+ICAR
+- **Medium-slow (20-100s)**: 6 rows — slopes (fixed 2026-03-03, was 135-145s), temporal GP, MS_t
 - **Timeout (>600s)**: 12 rows — GP, SVC, MSGP (some), GP+RW1
 
 ### Mass Matrix & Metric Selection (2026-02-24)
 
 **AUTO metric** (`metric="auto"`, default) selects mass matrix type based on model complexity:
-- **DIAG** for: base, +RE, +ICAR, +pCAR, +RW1/RW2/AR1, +ZI/Hurdle, +crossed, +TVC
-- **DENSE** (with OAS shrinkage) for: BYM2, correlated slopes, GP, HSGP, MSGP, temporal GP, multiscale temporal, SVC, spatiotemporal, latent factors
+- **DIAG** for: base, +RE, +ICAR, +pCAR, +RW1/RW2/AR1, +ZI/Hurdle, +crossed, +TVC, correlated slopes, temporal GP, HSGP
+- **DENSE** (with OAS shrinkage) for: BYM2, GP, MSGP, multiscale temporal, SVC, spatiotemporal, latent factors
+- **Note** (2026-03-03): Removed correlated slopes and temporal GP from DENSE triggers. NC parameterization decorrelates z params, making DENSE O(p^2) overhead unjustified. DIAG matches or beats DENSE eps for these models.
 
 **Pre-allocated NUTS buffers**: All per-iteration (11 vectors) and per-tree-merge (4×depth vectors) allocations eliminated via `NUTSWorkspace`.
 

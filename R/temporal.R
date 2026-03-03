@@ -1062,9 +1062,11 @@ temporal_gp <- function(time_var,
                         period = NULL,
                         group_var = NULL,
                         shared = TRUE,
-                        scale_coords = TRUE) {
+                        scale_coords = TRUE,
+                        parameterization = c("noncentered", "centered")) {
 
   cov <- match.arg(cov)
+  parameterization <- match.arg(parameterization)
 
   if (!is.character(time_var) || length(time_var) != 1) {
     stop("`time_var` must be a single character string", call. = FALSE)
@@ -1111,6 +1113,7 @@ temporal_gp <- function(time_var,
       period = if (cov == "periodic") period else NULL,
       shared = shared,
       scale_coords = scale_coords,
+      parameterization = parameterization,
       cyclic = FALSE,
       # Filled in during validation
       n_times = NULL,

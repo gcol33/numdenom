@@ -121,7 +121,7 @@ struct ModelData {
   // Multi-term RE structure
   int n_re_terms;                              // Number of RE terms (0 if none)
   std::vector<std::vector<int>> re_group_multi; // [term][obs] -> group index (1-based) LEGACY
-  std::vector<int> re_group_multi_flat;        // [term * N + obs] -> group index (1-based), contiguous
+  std::vector<int> re_group_multi_flat;        // [obs * n_re_terms + term] -> group index (1-based), obs-major
   std::vector<int> re_n_groups_multi;          // Groups per term
   std::vector<int> re_offsets;                 // Offset in flattened RE parameter vector per term
   int total_re_groups;                         // Sum of all groups across terms
@@ -215,6 +215,7 @@ struct ModelData {
   double temporal_gp_sigma2_prior_alpha = 0.01;
   double temporal_gp_phi_prior_lower = 0.01;  // Uniform prior bounds for range
   double temporal_gp_phi_prior_upper = 10.0;
+  int temporal_gp_parameterization = 1;       // 0=centered, 1=non-centered (default NC)
 
   // HSGP (Hilbert Space GP) structure
   ratiod_hsgp::HSGPData hsgp_data;
@@ -238,6 +239,7 @@ struct ModelData {
   // Spatiotemporal interaction
   bool has_spatiotemporal = false;
   SpatiotemporalData spatiotemporal_data;
+  int st_parameterization = 0;            // 0=centered, 1=non-centered (NC requires spectral decomposition)
   double st_sigma2_prior_U = 1.0;       // PC prior for interaction variance
   double st_sigma2_prior_alpha = 0.01;
   double st_phi_space_prior_lower = 0.01;  // Uniform bounds for spatial range
@@ -679,6 +681,7 @@ struct DenseMassMatrix {
   // Sample momentum: p ~ N(0, M) where M = C^{-1}
   // DIAG: p[i] = z * sqrt_mass_diag[i]
   // DENSE: solve L^T * p = z  (back-substitution)
+  // Uses Eigen triangular solve for dense case (n>=16) for SIMD acceleration.
   void sample_momentum(double* p, std::mt19937& rng) const {
     std::normal_distribution<double> normal(0.0, 1.0);
     if (type == MassMatrixType::DIAG || !adapted) {
@@ -692,26 +695,45 @@ struct DenseMassMatrix {
       for (int i = 0; i < n; i++) {
         z[i] = normal(rng);
       }
-      ratiod_linalg::tri_solve_upper_transpose(L_inv_mass.data(), z.data(), p, n);
+      if (n >= 16) {
+        Eigen::Map<const Eigen::MatrixXd> Lm(L_inv_mass.data(), n, n);
+        Eigen::Map<const Eigen::VectorXd> zv(z.data(), n);
+        Eigen::Map<Eigen::VectorXd> pv(p, n);
+        // Solve L^T * p = z: transpose L then use upper-triangular solve
+        pv.noalias() = Lm.transpose().triangularView<Eigen::Upper>().solve(zv);
+      } else {
+        ratiod_linalg::tri_solve_upper_transpose(L_inv_mass.data(), z.data(), p, n);
+      }
     }
   }
 
   // Kinetic energy: 0.5 * p^T * C * p  where C = M^{-1}
+  // Uses Eigen BLAS for dense case (n>=16) for SIMD acceleration.
   double kinetic_energy(const double* p) const {
     if (type == MassMatrixType::DIAG || !adapted) {
       return 0.5 * ratiod_linalg::weighted_norm_squared(p, inv_mass_diag.data(), n);
+    } else if (n >= 16) {
+      Eigen::Map<const Eigen::MatrixXd> Am(inv_mass_dense.data(), n, n);
+      Eigen::Map<const Eigen::VectorXd> pv(p, n);
+      return 0.5 * pv.dot(Am.selfadjointView<Eigen::Lower>() * pv);
     } else {
       return 0.5 * ratiod_linalg::quadratic_form(p, inv_mass_dense.data(), n);
     }
   }
 
   // Compute C * p (for leapfrog position update: q += eps * C * p)
-  // Result written to `result` buffer
+  // Result written to `result` buffer.
+  // Uses Eigen BLAS for dense case (n>=16) for SIMD acceleration.
   void inv_mass_times_p(const double* p, double* result) const {
     if (type == MassMatrixType::DIAG || !adapted) {
       for (int i = 0; i < n; i++) {
         result[i] = inv_mass_diag[i] * p[i];
       }
+    } else if (n >= 16) {
+      Eigen::Map<const Eigen::MatrixXd> Am(inv_mass_dense.data(), n, n);
+      Eigen::Map<const Eigen::VectorXd> pv(p, n);
+      Eigen::Map<Eigen::VectorXd> rv(result, n);
+      rv.noalias() = Am.selfadjointView<Eigen::Lower>() * pv;
     } else {
       ratiod_linalg::symmatvec(inv_mass_dense.data(), p, result, n);
     }
