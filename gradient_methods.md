@@ -156,27 +156,28 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 |-----|-------|----------|------|:-----:|--------|
 | 6 | PG+BYM2 | 3.4s | 13.2s | **3.9x WIN** | |
 | 36 | NB+BYM2 | 7.4s | 86.0s | **11.6x WIN** | |
-| 66 | Bin+BYM2 | 18.4s | 12.4s | 1.5x LOSS | architectural (dense mass) |
+| 66 | Bin+BYM2 | 4.4s | 12.4s | **2.8x WIN** | was 18.4s (binomial logistic opt) |
 | 19 | PG+BYM2+RW1 | 6.9s | 96.3s | **13.9x WIN** | |
 | 49 | NB+BYM2+RW1 | 10.3s | 171.6s | **16.7x WIN** | |
 | 81 | Bin+BYM2+RW1 | 24.5s | 58.6s | **2.4x WIN** | |
 | 8 | PG+HSGP | 2.5s | 10.9s | **4.4x WIN** | was 19.0s (7.6x speedup) |
 | 38 | NB+HSGP | 23.0s | 24.2s | **1.1x WIN** | |
-| 68 | Bin+HSGP | 6.6s | 2.9s | 2.3x LOSS | per-step overhead |
+| 68 | Bin+HSGP | 2.4s | 2.9s | **1.2x WIN** | was 6.6s (binomial logistic opt) |
 | 25 | PG+slopes+ICAR | 6.9s | 15.4s | **2.2x WIN** | was 50.8s (7.4x speedup) |
 | 55 | NB+slopes+ICAR | 13.8s | 46.6s | **3.4x WIN** | was 70.0s (5.1x speedup) |
 | 87 | Bin+slopes+ICAR | 14.2s | 14.5s | ~parity | was 25.3s (1.8x speedup) |
-| 14 | PG+GP_t | 11.9s | 10.0s | 1.2x LOSS | was 40.6s (3.4x speedup) |
+| 14 | PG+GP_t | 10.8s | 10.0s | 1.1x LOSS | was 11.9s (binomial logistic opt) |
 | 44 | NB+GP_t | 20.1s | 21.3s | **1.1x WIN** | was 47-97s (2.3-4.8x speedup) |
-| 74 | Bin+GP_t | 9.7s | 3.3s | 2.9x LOSS | NUTS variance, per-step improved |
+| 74 | Bin+GP_t | 5.1s | 3.3s | 1.5x LOSS | was 9.7s (binomial logistic opt) |
 | 29 | PG+ST_IV | 87.2s | 82.5s | 1.1x LOSS | was 190.8s (2.2x speedup) |
 | 59 | NB+ST_IV | 111.0s | 133.5s | **1.2x WIN** | was 287.9s (2.6x speedup) |
-| 91 | Bin+ST_IV | 80.7s | 56.0s | 1.4x LOSS | NUTS variance (td=10 saturated) |
+| 91 | Bin+ST_IV | 73.1s | 56.0s | 1.3x LOSS | was 80.7s (binomial logistic opt) |
 
-**Summary (18 "slow" models):** 13 WIN or parity, 5 LOSS.
-Wins: BYM2 (all 6), HSGP (PG/NB), slopes+ICAR (all 3), GP_t (NB), ST_IV (NB).
-Losses: Bin+BYM2 (architectural), Bin+HSGP (per-step), Bin+GP_t (NUTS), PG+GP_t (1.2x), Bin+ST_IV (1.4x).
-**Vectorization converted 6 LOSSes to WINs** (HSGP PG, slopes+ICAR PG/NB/Bin, GP_t NB, ST_IV NB/PG near-parity).
+**Summary (18 "slow" models):** 15 WIN or parity, 3 LOSS.
+Wins: BYM2 (all 6), HSGP (all 3), slopes+ICAR (all 3), GP_t (NB), ST_IV (NB).
+Losses: Bin+GP_t (1.5x), PG+GP_t (1.1x), Bin+ST_IV (1.3x).
+**Binomial logistic optimization converted 2 more LOSSes to WINs** (Bin+BYM2 1.5x→2.8x WIN, Bin+HSGP 2.3x→1.2x WIN).
+Previous: **Vectorization converted 6 LOSSes to WINs** (HSGP PG, slopes+ICAR PG/NB/Bin, GP_t NB, ST_IV NB/PG near-parity).
 
 **2026-03-03 metric optimization**: Removed `has_re_correlated_slopes` and `is_temporal_gp` from
 `needs_dense`. NC parameterization decorrelates z params, making DENSE mass O(p^2) overhead
@@ -377,7 +378,7 @@ Priority order for creating joint Stan models:
 | 11 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | 45.0 | | ✓Stan (joint) |
 | 12 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | H | 2.9 | | 42.5 | | ✓Stan (joint) |
 | 13 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H | 6.4 | | 42.3 | | ✓Stan (joint) |
-| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 11.9 | | | | ✓Stan (joint, Stan 10.0s, 1.2x LOSS). Was 40.6s (vectorized obs loop) |
+| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 10.8 | | | | ✓Stan (joint, Stan 10.0s, 1.1x LOSS). Was 11.9s (binomial logistic opt) |
 | 15 | poisson_gamma | ✓ | ✗ | MS_t | ✗ | H | 22.8 | | | | ✓Sim (1.99 SD, Stan fails). Was 66.5s |
 | 16 | poisson_gamma | ✓ | ✗ | ✗ | ZI | H | 1.8 | | 42.7 | | ✓Stan (joint) |
 | 17 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H | 50.6 | | 42.7 | | ✓Stan (joint). H mode works now (was N fallback) |
@@ -443,15 +444,15 @@ Priority order for creating joint Stan models:
 | 63 | binomial | slopes | ✗ | ✗ | ✗ | H | 20.2 | | | | ✓Stan. Was 140.3s (NC fix 2026-03-03) |
 | 64 | binomial | crossed | ✗ | ✗ | ✗ | H | 2.9 | 13.1 | 13.2 | 13.8 | ✓Stan (9.1x) |
 | 65 | binomial | ✓ | ICAR | ✗ | ✗ | H | 3.8 | 13.0 | 13.2 | 12.8 | ✓Stan |
-| 66 | binomial | ✓ | BYM2 | ✗ | ✗ | H | 18.4 | 13.1 | 13.2 | 13.1 | ✓Stan (Stan 12.4s, 1.5x LOSS, 20 div). Was 139.0s |
+| 66 | binomial | ✓ | BYM2 | ✗ | ✗ | H | 4.4 | 13.1 | 13.2 | 13.1 | ✓Stan (Stan 12.4s, 2.8x WIN). Was 18.4s (binomial logistic opt) |
 | 67 | binomial | ✓ | GP | ✗ | ✗ | H | >600 | | | | ✓Sim (0.63 SD, O(N³), NUTS timeout) |
-| 68 | binomial | ✓ | HSGP | ✗ | ✗ | H | 6.6 | | | | ✓Sim (Stan 2.9s, 2.3x LOSS). Was 50.9s |
+| 68 | binomial | ✓ | HSGP | ✗ | ✗ | H | 2.4 | | | | ✓Sim (Stan 2.9s, 1.2x WIN). Was 6.6s (binomial logistic opt) |
 | 69 | binomial | ✓ | MSGP | ✗ | ✗ | H | 116.1 | | | | ✓Sim (eta cor=0.91, prediction recovery) |
 | 70 | binomial | ✓ | pCAR | ✗ | ✗ | H | 2.9 | | | | ✓Stan (3.2x) |
 | 71 | binomial | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | | | ✓Stan |
 | 72 | binomial | ✓ | ✗ | RW2 | ✗ | H | 3.3 | | | | ✓Stan |
 | 73 | binomial | ✓ | ✗ | AR1 | ✗ | H | 1.6 | | | | ✓Stan. Was 82.9s (anomaly resolved 2026-03-03) |
-| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 9.7 | | | 32.4 | ✓Stan (Stan 3.3s, 2.9x LOSS, 7 div). Was 13.9s (DIAG fix) |
+| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 5.1 | | | 32.4 | ✓Stan (Stan 3.3s, 1.5x LOSS). Was 9.7s (binomial logistic opt) |
 | 75 | binomial | ✓ | ✗ | MS_t | ✗ | H | 24.1 | | | | ✓Sim MS_t (0.55 SD) |
 | 76 | binomial | ✓ | ✗ | ✗ | ZI | H | 2.2 | 14.8 | 14.7 | 14.4 | ✓Stan |
 | 77 | binomial | ✓ | ✗ | ✗ | Hurdle | H | 1.9 | 13.1 | 13.5 | 13.3 | ✓Stan (custom, 5.5x faster) |
@@ -468,7 +469,7 @@ Priority order for creating joint Stan models:
 | 88 | binomial | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim (eta cor=0.83, NUTS timeout) |
 | 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 2.7 | | | | ✓Stan (17.1x) |
 | 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 4.1 | | | | ✓Stan ST-I (joint, 0.4 SE). Was 44.1s |
-| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 80.7 | | | | ✓Sim ST-IV (Stan 56.0s, 1.4x LOSS, td=10) |
+| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 73.1 | | | | ✓Sim ST-IV (Stan 56.0s, 1.3x LOSS). Was 80.7s (binomial logistic opt) |
 | 92 | binomial | ✓ | ✗ | ✗ | ✗ | H | 3.0 | | | | ✓Sim latent (1.97 SD) |
 
 ### Section 4: gamma_gamma Family (Rows 93-97)

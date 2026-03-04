@@ -183,7 +183,7 @@ ratiod <- function(formula,
                   re_param = c("noncentered", "centered"),
                   adapt_delta = NULL,
                   max_treedepth = 10,
-                  metric = c("auto", "dense", "diag"),
+                  metric = c("auto", "dense", "diag", "block_diag"),
                   riemannian = NULL,
                   ...) {
 

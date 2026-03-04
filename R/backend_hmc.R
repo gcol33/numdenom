@@ -56,6 +56,10 @@ NULL
 #' @param L Number of leapfrog steps per iteration
 #' @param seed Random seed for reproducibility
 #' @param verbose Print progress
+#' @param gradient_mode Gradient computation method: "auto", "H", "A_r", "A", "N"
+#' @param re_param Random effects parameterization: "centered" or "noncentered"
+#' @param metric Mass matrix type: "auto" (default), "diag", "dense", or "block_diag"
+#' @param riemannian Use Riemannian (SoftAbs) metric: NULL (auto), TRUE, or FALSE
 #'
 #' @return A ratiod_fit object
 #' @keywords internal
@@ -1480,6 +1484,8 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
       nu = temporal$nu %||% 1.5,
       period = temporal$period %||% 1.0,
       parameterization = temporal$parameterization %||% "noncentered",
+      phi_prior_lower = temporal$phi_prior_lower %||% 0.01,
+      phi_prior_upper = temporal$phi_prior_upper %||% 10.0,
       # TVC fields (not used)
       n_tvc = 0L,
       structure = "gp"
@@ -1977,10 +1983,7 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
       # log_tau_st (precision for interaction)
       q_init <- c(q_init, 0.0)
 
-      # log_tau_st2 for Type IV (Kronecker)
-      if (st_type == "IV") {
-        q_init <- c(q_init, 0.0)
-      }
+      # tau_st2 removed — single tau for all ST types
 
       # logit_rho_st for AR1 temporal in ST
       st_temporal_type <- spatiotemporal_info$temporal_type %||% "rw1"
@@ -2458,7 +2461,11 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
       # Temporal GP: sigma2 and phi instead of tau
       draws_list[["sigma2_temporal_gp"]] <- exp(samples[, idx])
       idx <- idx + 1
-      draws_list[["phi_temporal_gp"]] <- exp(samples[, idx])
+      # Logit-bounded phi: phi = lower + range * sigmoid(logit_phi)
+      phi_lower <- temporal_info$phi_prior_lower %||% 0.01
+      phi_upper <- temporal_info$phi_prior_upper %||% 10.0
+      phi_range <- phi_upper - phi_lower
+      draws_list[["phi_temporal_gp"]] <- phi_lower + phi_range / (1 + exp(-samples[, idx]))
       idx <- idx + 1
 
       # Temporal GP effects — extract z params, transform to f if NC
@@ -2859,13 +2866,14 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
 
   # Temporal effects
   temporal_effect <- NULL
-  if (temporal_info$type != "none") {
-    tau_temporal_ratio <- exp(samples[, idx])
-    idx <- idx + 1  # Skip log_tau_temporal
-    rho_ar1_ratio <- NULL
-    if (temporal_info$type == "ar1") {
-      rho_ar1_ratio <- 1 / (1 + exp(-samples[, idx]))
-      idx <- idx + 1  # Skip logit_rho_ar1
+  if (temporal_info$type != "none" && temporal_info$type != "tvc") {
+    if (temporal_info$type == "gp") {
+      idx <- idx + 2  # Skip log_sigma2_temporal_gp, logit_phi_temporal_gp
+    } else {
+      idx <- idx + 1  # Skip log_tau_temporal
+      if (temporal_info$type == "ar1") {
+        idx <- idx + 1  # Skip logit_rho_ar1
+      }
     }
 
     temporal_effect <- samples[, idx:(idx + temporal_info$n_temporal_params - 1), drop = FALSE]

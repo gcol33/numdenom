@@ -267,14 +267,14 @@ ParamLayout compute_param_layout(const ModelData& data) {
     if (layout.is_temporal_gp) {
       // Temporal GP: log_sigma2 + log_phi + effects
       layout.log_sigma2_temporal_gp_idx = idx++;
-      layout.log_phi_temporal_gp_idx = idx++;
+      layout.logit_phi_temporal_gp_idx = idx++;
       layout.log_tau_temporal_idx = -1;  // Not used for GP
       layout.logit_rho_ar1_idx = -1;
     } else {
       // RW1/RW2/AR1: log_tau + effects (+ rho for AR1)
       layout.log_tau_temporal_idx = idx++;
       layout.log_sigma2_temporal_gp_idx = -1;
-      layout.log_phi_temporal_gp_idx = -1;
+      layout.logit_phi_temporal_gp_idx = -1;
 
       // AR1 also has rho parameter
       if (layout.is_ar1) {
@@ -292,7 +292,7 @@ ParamLayout compute_param_layout(const ModelData& data) {
     layout.log_tau_temporal_idx = -1;
     layout.logit_rho_ar1_idx = -1;
     layout.log_sigma2_temporal_gp_idx = -1;
-    layout.log_phi_temporal_gp_idx = -1;
+    layout.logit_phi_temporal_gp_idx = -1;
     layout.temporal_start = layout.temporal_end = -1;
   }
 
@@ -461,12 +461,8 @@ ParamLayout compute_param_layout(const ModelData& data) {
     // log_tau for interaction precision
     layout.log_tau_st_idx = idx++;
 
-    // Second precision for Type IV (Kronecker)
-    if (data.spatiotemporal_data.type == STType::TYPE_IV) {
-      layout.log_tau_st2_idx = idx++;
-    } else {
-      layout.log_tau_st2_idx = -1;
-    }
+    // Second precision removed for Type IV (single tau suffices)
+    layout.log_tau_st2_idx = -1;
 
     // AR1 rho if temporal uses AR1
     if (data.spatiotemporal_data.temporal_type == TemporalType::AR1) {
@@ -677,7 +673,9 @@ double compute_log_post(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
-    bool skip_obs_loop
+    bool skip_obs_loop,
+    const double* precomputed_st_log_prior,
+    const double* precomputed_tgp_log_prior
 ) {
   // Extract parameters
   const double* beta_num = &params[layout.beta_num_start];
@@ -986,71 +984,82 @@ double compute_log_post(
     phi_temporal = &params[layout.temporal_start];
 
     if (layout.is_temporal_gp) {
-      // Temporal GP: sigma2 and phi (lengthscale) parameters
-      double log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
-      double log_phi = params[layout.log_phi_temporal_gp_idx];
-      sigma2_temporal_gp = std::exp(log_sigma2);
-      phi_temporal_gp = std::exp(log_phi);
-
-      // PC prior on sigma2 (favor smaller variance)
-      log_post += ratiod_temporal_gp::log_prior_temporal_sigma2_pc(
-          sigma2_temporal_gp, data.temporal_gp_sigma2_prior_U,
-          data.temporal_gp_sigma2_prior_alpha);
-      log_post += log_sigma2;  // Jacobian for log transform
-
-      // Uniform prior on phi within bounds
-      log_post += ratiod_temporal_gp::log_prior_temporal_phi_uniform(
-          phi_temporal_gp, data.temporal_gp_phi_prior_lower,
-          data.temporal_gp_phi_prior_upper);
-      log_post += log_phi;  // Jacobian
-
-      // GP log-likelihood for temporal effects
-      int T = data.n_times;
-      int n_temporal = data.n_temporal_groups * T;
-
-      if (data.temporal_gp_parameterization == 1) {
-        // Non-centered: params store z ~ N(0,I), reconstruct f for obs loop
-        // z ~ N(0, I) prior
-        for (int t = 0; t < n_temporal; t++) {
-          log_post += -0.5 * phi_temporal[t] * phi_temporal[t];
-        }
-
-        // Jacobian of NC transform: log|det(df/dz)| per group
-        double sigma = std::sqrt(sigma2_temporal_gp);
-        for (int g = 0; g < data.n_temporal_groups; g++) {
-          log_post += T * std::log(sigma);
-          for (int t = 1; t < T; t++) {
-            double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
-            double rho = std::exp(-dt / phi_temporal_gp);
-            double one_minus_rho2 = 1.0 - rho * rho;
-            if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
-            log_post += 0.5 * std::log(one_minus_rho2);
-          }
-        }
-
-        // Forward transform z -> f
-        temporal_f_nc.resize(n_temporal);
-        for (int g = 0; g < data.n_temporal_groups; g++) {
-          int off = g * T;
-          temporal_f_nc[off] = sigma * phi_temporal[off];
-          for (int t = 1; t < T; t++) {
-            double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
-            double rho = std::exp(-dt / phi_temporal_gp);
-            double one_minus_rho2 = 1.0 - rho * rho;
-            if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
-            double a_t = sigma * std::sqrt(one_minus_rho2);
-            temporal_f_nc[off + t] = rho * temporal_f_nc[off + t - 1] + a_t * phi_temporal[off + t];
-          }
-        }
-        // Override phi_temporal pointer to use reconstructed f
-        phi_temporal = temporal_f_nc.data();
-
+      if (precomputed_tgp_log_prior) {
+        // Fused path: all temporal GP prior terms already computed by gradient function
+        log_post += *precomputed_tgp_log_prior;
       } else {
-        // Centered: GP log-likelihood for temporal effects
-        for (int g = 0; g < data.n_temporal_groups; g++) {
-          std::vector<double> phi_g_vec(phi_temporal + g * T, phi_temporal + (g + 1) * T);
-          log_post += ratiod_temporal_gp::temporal_gp_log_lik(
-              phi_g_vec, data.temporal_gp_data, sigma2_temporal_gp, phi_temporal_gp);
+        // Temporal GP: sigma2 and phi (lengthscale) parameters
+        double log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
+        double logit_phi = params[layout.logit_phi_temporal_gp_idx];
+        sigma2_temporal_gp = std::exp(log_sigma2);
+
+        // Logit-bounded phi: phi = lower + (upper - lower) * sigmoid(logit_phi)
+        double phi_lower = data.temporal_gp_phi_prior_lower;
+        double phi_upper = data.temporal_gp_phi_prior_upper;
+        double phi_range = phi_upper - phi_lower;
+        double sigmoid_val = 1.0 / (1.0 + std::exp(-logit_phi));
+        phi_temporal_gp = phi_lower + phi_range * sigmoid_val;
+
+        // PC prior on sigma2 (favor smaller variance)
+        log_post += ratiod_temporal_gp::log_prior_temporal_sigma2_pc(
+            sigma2_temporal_gp, data.temporal_gp_sigma2_prior_U,
+            data.temporal_gp_sigma2_prior_alpha);
+        log_post += log_sigma2;  // Jacobian for log transform
+
+        // Uniform prior on phi within bounds (always satisfied by construction)
+        // Jacobian: log(phi - lower) + log(upper - phi) - log(upper - lower)
+        log_post += std::log(phi_temporal_gp - phi_lower)
+                  + std::log(phi_upper - phi_temporal_gp)
+                  - std::log(phi_range);
+
+        // GP log-likelihood for temporal effects
+        int T = data.n_times;
+        int n_temporal = data.n_temporal_groups * T;
+
+        if (data.temporal_gp_parameterization == 1) {
+          // Non-centered: params store z ~ N(0,I), reconstruct f for obs loop
+          // z ~ N(0, I) prior
+          for (int t = 0; t < n_temporal; t++) {
+            log_post += -0.5 * phi_temporal[t] * phi_temporal[t];
+          }
+
+          // Jacobian of NC transform: log|det(df/dz)| per group
+          double sigma = std::sqrt(sigma2_temporal_gp);
+          for (int g = 0; g < data.n_temporal_groups; g++) {
+            log_post += T * std::log(sigma);
+            for (int t = 1; t < T; t++) {
+              double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
+              double rho = std::exp(-dt / phi_temporal_gp);
+              double one_minus_rho2 = 1.0 - rho * rho;
+              if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
+              log_post += 0.5 * std::log(one_minus_rho2);
+            }
+          }
+
+          // Forward transform z -> f
+          temporal_f_nc.resize(n_temporal);
+          for (int g = 0; g < data.n_temporal_groups; g++) {
+            int off = g * T;
+            temporal_f_nc[off] = sigma * phi_temporal[off];
+            for (int t = 1; t < T; t++) {
+              double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
+              double rho = std::exp(-dt / phi_temporal_gp);
+              double one_minus_rho2 = 1.0 - rho * rho;
+              if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
+              double a_t = sigma * std::sqrt(one_minus_rho2);
+              temporal_f_nc[off + t] = rho * temporal_f_nc[off + t - 1] + a_t * phi_temporal[off + t];
+            }
+          }
+          // Override phi_temporal pointer to use reconstructed f
+          phi_temporal = temporal_f_nc.data();
+
+        } else {
+          // Centered: GP log-likelihood for temporal effects
+          for (int g = 0; g < data.n_temporal_groups; g++) {
+            std::vector<double> phi_g_vec(phi_temporal + g * T, phi_temporal + (g + 1) * T);
+            log_post += ratiod_temporal_gp::temporal_gp_log_lik(
+                phi_g_vec, data.temporal_gp_data, sigma2_temporal_gp, phi_temporal_gp);
+          }
         }
       }
 
@@ -1375,16 +1384,8 @@ double compute_log_post(
     log_post += std::log(lambda) - lambda * sigma_st - std::log(2.0 * sigma_st);
     log_post += log_tau_st;  // Jacobian for log transform
 
-    // Second precision for Type IV
-    if (layout.log_tau_st2_idx >= 0) {
-      double log_tau_st2 = params[layout.log_tau_st2_idx];
-      tau_st2 = std::exp(log_tau_st2);
-
-      // PC prior on tau2
-      double sigma_st2 = 1.0 / std::sqrt(tau_st2);
-      log_post += std::log(lambda) - lambda * sigma_st2 - std::log(2.0 * sigma_st2);
-      log_post += log_tau_st2;  // Jacobian
-    }
+    // Single precision for all ST types (including Type IV)
+    // tau_st2 always 1.0 — removed non-identifiable second precision
 
     // AR1 rho parameter
     if (layout.logit_rho_st_idx >= 0) {
@@ -1417,61 +1418,69 @@ double compute_log_post(
     }
 
     // Spatiotemporal interaction effects
-    const double* z_or_delta = &params[layout.st_delta_start];
-    int S = data.spatiotemporal_data.n_spatial;
-    int T = data.spatiotemporal_data.n_times;
-    int ST = S * T;
-
-    // NC reparameterization for Type IV: store z, reconstruct delta
-    const bool st_use_nc = (data.st_parameterization == 1 &&
-                            data.spatiotemporal_data.type == STType::TYPE_IV);
-
-    static thread_local std::vector<double> st_delta_nc;
-    if (st_use_nc) {
-      // Forward transform: delta = z / sqrt(tau_st * tau_st2)
-      double inv_scale = 1.0 / std::sqrt(tau_st * tau_st2);
-      st_delta_nc.resize(ST);
-      for (int k = 0; k < ST; k++) {
-        st_delta_nc[k] = z_or_delta[k] * inv_scale;
-      }
-      st_delta = st_delta_nc.data();
-
-      // NC prior: -0.5 * z^T (Q_s ⊗ Q_t) z  (tau-free GMRF)
-      log_post += ratiod_spatiotemporal::spatiotemporal_log_prior(
-        z_or_delta, 1.0, 1.0, rho_st, phi_st_space, phi_st_time,
-        data.spatiotemporal_data
-      );
-      // The spatiotemporal_log_prior with tau=1 returns:
-      //   0.5 * rank * log(1) - 0.5 * z^T Q z = -0.5 * z^T Q z
-
-      // Add the rank term with actual tau and Jacobian correction
-      int rank_space = S - 1;
-      int rank_time = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? (T - 1) : (T - 2);
-      if (data.spatiotemporal_data.temporal_cyclic) rank_time = T;
-      int total_rank = rank_space * rank_time;
-      // GMRF normalization: 0.5 * rank * log(tau*tau2)
-      // NC Jacobian: -ST/2 * log(tau*tau2)
-      // Combined: 0.5 * (rank - ST) * log(tau*tau2)
-      log_post += 0.5 * (total_rank - ST) * std::log(tau_st * tau_st2);
-
-      // Sum-to-zero on reconstructed delta
-      log_post += ratiod_spatiotemporal::st_sum_to_zero_penalty(
-        st_delta, S, T, 0.001, true, true
-      );
+    // When precomputed_st_log_prior is provided (from gradient function), use it
+    // to avoid recomputing the expensive Kronecker quadratic form (O(S*T^2) with
+    // heap allocations). The precomputed value includes:
+    //   - GMRF quadratic form (spatiotemporal_log_prior)
+    //   - Rank/Jacobian terms
+    //   - Sum-to-zero penalty
+    if (precomputed_st_log_prior) {
+      log_post += *precomputed_st_log_prior;
     } else {
-      // Centered parameterization (original)
-      st_delta = z_or_delta;
+      const double* z_or_delta = &params[layout.st_delta_start];
+      int S = data.spatiotemporal_data.n_spatial;
+      int T = data.spatiotemporal_data.n_times;
+      int ST = S * T;
 
-      // Apply spatiotemporal log-prior from hmc_spatiotemporal.h
-      log_post += ratiod_spatiotemporal::spatiotemporal_log_prior(
-        st_delta, tau_st, tau_st2, rho_st, phi_st_space, phi_st_time,
-        data.spatiotemporal_data
-      );
+      // NC reparameterization for Type IV: store z, reconstruct delta
+      const bool st_use_nc = (data.st_parameterization == 1 &&
+                              data.spatiotemporal_data.type == STType::TYPE_IV);
 
-      // Soft sum-to-zero constraint for identifiability
-      log_post += ratiod_spatiotemporal::st_sum_to_zero_penalty(
-        st_delta, S, T, 0.001, true, true
-      );
+      static thread_local std::vector<double> st_delta_nc;
+      if (st_use_nc) {
+        // Forward transform: delta = z / sqrt(tau_st)
+        double inv_scale = 1.0 / std::sqrt(tau_st);
+        st_delta_nc.resize(ST);
+        for (int k = 0; k < ST; k++) {
+          st_delta_nc[k] = z_or_delta[k] * inv_scale;
+        }
+        st_delta = st_delta_nc.data();
+
+        // NC prior: -0.5 * z^T (Q_s ⊗ Q_t) z  (tau-free GMRF)
+        log_post += ratiod_spatiotemporal::spatiotemporal_log_prior(
+          z_or_delta, 1.0, 1.0, rho_st, phi_st_space, phi_st_time,
+          data.spatiotemporal_data
+        );
+
+        // Add the rank term with actual tau and Jacobian correction
+        int rank_space = S - 1;
+        int rank_time = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? (T - 1) : (T - 2);
+        if (data.spatiotemporal_data.temporal_cyclic) rank_time = T;
+        int total_rank = rank_space * rank_time;
+        // GMRF normalization: 0.5 * rank * log(tau)
+        // NC Jacobian: -ST/2 * log(tau)
+        // Combined: 0.5 * (rank - ST) * log(tau)
+        log_post += 0.5 * (total_rank - ST) * std::log(tau_st);
+
+        // Sum-to-zero on reconstructed delta
+        log_post += ratiod_spatiotemporal::st_sum_to_zero_penalty(
+          st_delta, S, T, 0.001, true, true
+        );
+      } else {
+        // Centered parameterization (original)
+        st_delta = z_or_delta;
+
+        // Apply spatiotemporal log-prior from hmc_spatiotemporal.h
+        log_post += ratiod_spatiotemporal::spatiotemporal_log_prior(
+          st_delta, tau_st, tau_st2, rho_st, phi_st_space, phi_st_time,
+          data.spatiotemporal_data
+        );
+
+        // Soft sum-to-zero constraint for identifiability
+        log_post += ratiod_spatiotemporal::st_sum_to_zero_penalty(
+          st_delta, S, T, 0.001, true, true
+        );
+      }
     }
   }
 
@@ -4718,10 +4727,12 @@ void compute_gradient_temporal_gp_handcoded(
     double* log_post_out = nullptr
 ) {
     // Fused log-posterior: accumulate obs log-lik during gradient loop,
-    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass)
+    // then add prior/structural terms via skip_obs_loop=true (avoids 2nd O(N) pass).
+    // Also fuse temporal GP prior to avoid redundant NC forward pass in compute_log_post.
     const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
     if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
     double obs_log_lik = 0.0;
+    double tgp_lp_accum = 0.0;  // Accumulates temporal GP prior terms
     int n_params = params.size();
     grad.assign(n_params, 0.0);
 
@@ -4734,9 +4745,20 @@ void compute_gradient_temporal_gp_handcoded(
     double phi_num = cp.phi_num;
     double phi_denom = cp.phi_denom;
 
-    // Temporal GP hyperparameters (on log scale in params)
+    // Temporal GP hyperparameters
     double sigma2_tgp = std::exp(params[layout.log_sigma2_temporal_gp_idx]);
-    double phi_tgp = std::exp(params[layout.log_phi_temporal_gp_idx]);
+    double logit_phi_val = params[layout.logit_phi_temporal_gp_idx];
+
+    // Logit-bounded phi: phi = lower + range * sigmoid(logit_phi)
+    double phi_lower = data.temporal_gp_phi_prior_lower;
+    double phi_upper = data.temporal_gp_phi_prior_upper;
+    double phi_range = phi_upper - phi_lower;
+    double sigmoid_val = 1.0 / (1.0 + std::exp(-logit_phi_val));
+    double phi_tgp = phi_lower + phi_range * sigmoid_val;
+
+    // Conversion factor: grad_logit = grad_log * chi
+    // where chi = (phi - lower)(upper - phi) / (phi * range)
+    double chi_tgp = (phi_tgp - phi_lower) * (phi_upper - phi_tgp) / (phi_tgp * phi_range);
 
     // Temporal effects: n_temporal_groups * n_times parameters
     int T_times = data.n_times;
@@ -4767,15 +4789,14 @@ void compute_gradient_temporal_gp_handcoded(
     // Temporal GP hyperparameter priors
     // sigma2: PC prior => d/d(log_sigma2) [ log(rate) - rate*sqrt(sigma2) - log(2*sqrt(sigma2)) + log_sigma2 ]
     //       = -0.5 * rate * sqrt(sigma2) + 0.5
+    double sigma_tgp = std::sqrt(sigma2_tgp);
     double rate_tgp = -std::log(data.temporal_gp_sigma2_prior_alpha) / data.temporal_gp_sigma2_prior_U;
-    grad[layout.log_sigma2_temporal_gp_idx] = -0.5 * rate_tgp * std::sqrt(sigma2_tgp) + 0.5;
+    grad[layout.log_sigma2_temporal_gp_idx] = -0.5 * rate_tgp * sigma_tgp + 0.5;
 
-    // phi: Uniform prior on (lower, upper), parameterized on log scale
-    if (phi_tgp < data.temporal_gp_phi_prior_lower || phi_tgp > data.temporal_gp_phi_prior_upper) {
-        grad[layout.log_phi_temporal_gp_idx] = (phi_tgp < data.temporal_gp_phi_prior_lower) ? 1e6 : -1e6;
-        return;
-    }
-    grad[layout.log_phi_temporal_gp_idx] = 1.0;
+    // phi: Logit-bounded Jacobian gradient
+    // Jacobian = log(phi - lower) + log(upper - phi) - log(range)
+    // d/d(logit_phi) = (upper + lower - 2*phi) / range
+    grad[layout.logit_phi_temporal_gp_idx] = (phi_upper + phi_lower - 2.0 * phi_tgp) / phi_range;
 
     if (use_nc) {
         // ---- NC prior: z ~ N(0, I) ----
@@ -4784,8 +4805,9 @@ void compute_gradient_temporal_gp_handcoded(
         // d/d(log_sigma2) of Jacobian = T/2 per group
         grad[layout.log_sigma2_temporal_gp_idx] += 0.5 * T_times * n_groups;
 
-        // d/d(log_phi) of Jacobian = -sum rho^2*(dt/phi) / (1-rho^2) per group
-        double jac_phi = 0.0;
+        // d/d(log_phi) of Jacobian = -sum rho^2*(dt/phi) / (1-rho^2)
+        // Convert to logit scale: multiply by chi
+        double jac_phi_log = 0.0;
         for (int t = 1; t < T_times; t++) {
             double rho_t = nc_ws.rho[t - 1];
             double rho2 = rho_t * rho_t;
@@ -4793,13 +4815,37 @@ void compute_gradient_temporal_gp_handcoded(
             double dt_over_phi = dt / phi_tgp;
             double one_minus_rho2 = 1.0 - rho2;
             if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
-            jac_phi -= rho2 * dt_over_phi / one_minus_rho2;
+            jac_phi_log -= rho2 * dt_over_phi / one_minus_rho2;
         }
-        grad[layout.log_phi_temporal_gp_idx] += jac_phi * n_groups;
+        grad[layout.logit_phi_temporal_gp_idx] += jac_phi_log * n_groups * chi_tgp;
 
         // z prior: d/dz = -z (each z ~ N(0,1))
         for (int t = 0; t < T_len; t++) {
             grad[layout.temporal_start + t] = -phi_temporal[t];
+        }
+
+        // Fuse temporal GP prior log-prob (avoids redundant NC forward pass in compute_log_post)
+        if (fuse_lp) {
+            double log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
+            // sigma2 PC prior + Jacobian
+            tgp_lp_accum += std::log(rate_tgp) - rate_tgp * sigma_tgp
+                          - std::log(2.0 * sigma_tgp) + log_sigma2;
+            // phi logit Jacobian
+            tgp_lp_accum += std::log(phi_tgp - phi_lower)
+                          + std::log(phi_upper - phi_tgp)
+                          - std::log(phi_range);
+            // NC Jacobian: T*log(sigma) + 0.5*sum log(1-rho^2)  per group
+            double nc_jac = T_times * std::log(sigma_tgp);
+            for (int t = 1; t < T_times; t++) {
+                double one_m_rho2 = 1.0 - nc_ws.rho[t-1] * nc_ws.rho[t-1];
+                if (one_m_rho2 < 1e-10) one_m_rho2 = 1e-10;
+                nc_jac += 0.5 * std::log(one_m_rho2);
+            }
+            tgp_lp_accum += nc_jac * n_groups;
+            // z ~ N(0,I) prior
+            for (int t = 0; t < T_len; t++) {
+                tgp_lp_accum += -0.5 * phi_temporal[t] * phi_temporal[t];
+            }
         }
     } else {
         // ---- Centered: temporal GP prior gradients (state-space exponential form) ----
@@ -4837,12 +4883,14 @@ void compute_gradient_temporal_gp_handcoded(
             }
 
             grad[layout.log_sigma2_temporal_gp_idx] += grad_log_sigma2_prior;
-            grad[layout.log_phi_temporal_gp_idx] += grad_log_phi_prior;
+            grad[layout.logit_phi_temporal_gp_idx] += grad_log_phi_prior * chi_tgp;
         }
     }
 
     // ---- Likelihood gradients (vectorized) ----
-    std::vector<double> grad_temporal_lik(T_len, 0.0);
+    // Thread-local buffer avoids heap allocation per gradient call
+    static thread_local std::vector<double> grad_temporal_lik;
+    grad_temporal_lik.assign(T_len, 0.0);
 
     const int N = data.N;
     const bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
@@ -4878,9 +4926,9 @@ void compute_gradient_temporal_gp_handcoded(
         }
     }
 
-    // Add temporal GP effect to eta (f_temporal: reconstructed f for NC, raw params for C)
+    // Add temporal GP effect to eta
     for (int i = 0; i < N; i++) {
-        if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+        if (!data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
             int t = data.temporal_time_idx[i] - 1;
             int g = (i < (int)data.temporal_group_idx.size() && data.temporal_group_idx[i] > 0)
                     ? data.temporal_group_idx[i] - 1 : 0;
@@ -4913,7 +4961,7 @@ void compute_gradient_temporal_gp_handcoded(
 
     // Scatter residuals to temporal lik gradient
     for (int i = 0; i < N; i++) {
-        if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+        if (!data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
             int t = data.temporal_time_idx[i] - 1;
             int g = (i < (int)data.temporal_group_idx.size() && data.temporal_group_idx[i] > 0)
                     ? data.temporal_group_idx[i] - 1 : 0;
@@ -4930,20 +4978,15 @@ void compute_gradient_temporal_gp_handcoded(
         std::memcpy(nc_ws.dL_df.data(), grad_temporal_lik.data(), T_len * sizeof(double));
 
         double grad_log_sigma2_lik = 0.0, grad_log_phi_lik_tgp = 0.0;
-        std::vector<double> grad_z_lik(T_len);
+        // Write z gradients directly to grad[] (backward uses = not +=, safe)
         ratiod_temporal_gp::temporal_gp_nc_backward(
             phi_temporal, T_times, n_groups,
             sigma2_tgp, phi_tgp,
             data.temporal_gp_data.time_values,
-            nc_ws, grad_z_lik.data(),
+            nc_ws, &grad[layout.temporal_start],
             grad_log_sigma2_lik, grad_log_phi_lik_tgp);
-
-        // Overwrite z gradients (backward includes prior -z + likelihood chain rule)
-        for (int t = 0; t < T_len; t++) {
-            grad[layout.temporal_start + t] = grad_z_lik[t];
-        }
         grad[layout.log_sigma2_temporal_gp_idx] += grad_log_sigma2_lik;
-        grad[layout.log_phi_temporal_gp_idx] += grad_log_phi_lik_tgp;
+        grad[layout.logit_phi_temporal_gp_idx] += grad_log_phi_lik_tgp * chi_tgp;
     } else {
         // Centered: add likelihood contribution to temporal effects directly
         for (int t = 0; t < T_len; t++) {
@@ -4956,7 +4999,16 @@ void compute_gradient_temporal_gp_handcoded(
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
 
-    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+    if (fuse_lp) {
+        if (use_nc && tgp_lp_accum != 0.0) {
+            // Fused: temporal GP prior already accumulated, skip in compute_log_post
+            *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true,
+                                             nullptr, &tgp_lp_accum) + obs_log_lik;
+        } else {
+            // Centered or no accumulation: let compute_log_post do the temporal GP prior
+            *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+        }
+    }
 }
 
 // =====================================================================
@@ -6887,8 +6939,7 @@ void compute_gradient_spatiotemporal_handcoded(
     int T = st.n_times;
     int ST = st.n_params;
     double tau_st = std::exp(params[layout.log_tau_st_idx]);
-    double tau_st2 = 1.0;
-    if (layout.log_tau_st2_idx >= 0) tau_st2 = std::exp(params[layout.log_tau_st2_idx]);
+    double tau_st2 = 1.0;  // Always 1.0 — single tau for all ST types
 
     // NC reparameterization: params store z, reconstruct delta
     const bool st_use_nc = (data.st_parameterization == 1 &&
@@ -6898,7 +6949,7 @@ void compute_gradient_spatiotemporal_handcoded(
     const double* delta;
     double inv_scale = 1.0;
     if (st_use_nc) {
-        inv_scale = 1.0 / std::sqrt(tau_st * tau_st2);
+        inv_scale = 1.0 / std::sqrt(tau_st);
         st_delta_buf.resize(ST);
         for (int k = 0; k < ST; k++) st_delta_buf[k] = z_or_delta[k] * inv_scale;
         delta = st_delta_buf.data();
@@ -6953,11 +7004,7 @@ void compute_gradient_spatiotemporal_handcoded(
         //                  = 0.5 * lambda * sigma + 0.5 + 1
         grad[layout.log_tau_st_idx] = 0.5 * lambda * sigma_st + 0.5 + 1.0;
     }
-    if (layout.log_tau_st2_idx >= 0) {
-        double sigma_st2 = 1.0 / std::sqrt(tau_st2);
-        double lambda = -std::log(data.st_sigma2_prior_alpha) / data.st_sigma2_prior_U;
-        grad[layout.log_tau_st2_idx] = 0.5 * lambda * sigma_st2 + 0.5 + 1.0;
-    }
+    // tau_st2 removed — single tau for all ST types
 
     // =========================================================================
     // =========================================================================
@@ -7093,6 +7140,9 @@ void compute_gradient_spatiotemporal_handcoded(
     // Spatiotemporal interaction prior gradients (Type I-IV)
     // =========================================================================
     // delta is stored column-major: delta[s*T + t]
+    // Accumulate ST delta log-prior alongside gradient to avoid recomputing
+    // the expensive Kronecker quadratic form in compute_log_post.
+    double st_lp_accum = 0.0;
     if (st.type == STType::TYPE_I) {
         // IID: log p = 0.5*n*log(tau) - 0.5*tau*sum(delta^2)
         double qf = 0.0;
@@ -7101,6 +7151,7 @@ void compute_gradient_spatiotemporal_handcoded(
             qf += delta[k] * delta[k];
         }
         grad[layout.log_tau_st_idx] += 0.5 * ST - 0.5 * tau_st * qf;
+        st_lp_accum = 0.5 * ST * std::log(tau_st) - 0.5 * tau_st * qf;
 
     } else if (st.type == STType::TYPE_II) {
         // Structured time per spatial unit: temporal GMRF applied to delta[s,:]
@@ -7133,6 +7184,7 @@ void compute_gradient_spatiotemporal_handcoded(
         int rank_per_unit = (st.temporal_type == TemporalType::RW1) ? (T - 1) :
                             (st.temporal_type == TemporalType::RW2) ? (T - 2) : T;
         grad[layout.log_tau_st_idx] += 0.5 * S * rank_per_unit - 0.5 * tau_st * total_qf;
+        st_lp_accum = 0.5 * S * rank_per_unit * std::log(tau_st) - 0.5 * tau_st * total_qf;
 
     } else if (st.type == STType::TYPE_III) {
         // Structured space per time point: ICAR applied to delta[:,t]
@@ -7160,6 +7212,7 @@ void compute_gradient_spatiotemporal_handcoded(
         }
         int rank_spatial = S - 1;
         grad[layout.log_tau_st_idx] += 0.5 * T * rank_spatial - 0.5 * tau_st * total_qf;
+        st_lp_accum = 0.5 * T * rank_spatial * std::log(tau_st) - 0.5 * tau_st * total_qf;
 
     } else if (st.type == STType::TYPE_IV) {
         // Kronecker: Q_delta = Q_s ⊗ Q_t
@@ -7209,13 +7262,13 @@ void compute_gradient_spatiotemporal_handcoded(
                 qs_v += n_neigh * v[s * T + t];
 
                 if (st_use_nc) {
-                    // NC: grad_z = -(Q z)_k + dL/d(delta_k) / sqrt(tau*tau2)
+                    // NC: grad_z = -(Q z)_k + dL/d(delta_k) / sqrt(tau)
                     grad[layout.st_delta_start + s * T + t] =
                         grad_delta_lik[s * T + t] * inv_scale - qs_v;
                 } else {
-                    // Centered: grad_delta = dL/d(delta_k) - tau*tau2 * (Q delta)_k
+                    // Centered: grad_delta = dL/d(delta_k) - tau * (Q delta)_k
                     grad[layout.st_delta_start + s * T + t] =
-                        grad_delta_lik[s * T + t] - tau_st * tau_st2 * qs_v;
+                        grad_delta_lik[s * T + t] - tau_st * qs_v;
                 }
                 total_qf += stencil_input[s * T + t] * qs_v;
             }
@@ -7235,15 +7288,12 @@ void compute_gradient_spatiotemporal_handcoded(
                 lik_tau_grad += grad_delta_lik[k] * delta[k];
             }
             grad[layout.log_tau_st_idx] += 0.5 * (total_rank - ST) - 0.5 * lik_tau_grad;
-            if (layout.log_tau_st2_idx >= 0) {
-                grad[layout.log_tau_st2_idx] += 0.5 * (total_rank - ST) - 0.5 * lik_tau_grad;
-            }
+            // NC log-prior: -0.5*qf + 0.5*(rank-ST)*log(tau)
+            st_lp_accum = -0.5 * total_qf + 0.5 * (total_rank - ST) * std::log(tau_st);
         } else {
-            // Centered tau gradient: 0.5*rank - 0.5*tau*tau2*qf
-            grad[layout.log_tau_st_idx] += 0.5 * total_rank - 0.5 * tau_st * tau_st2 * total_qf;
-            if (layout.log_tau_st2_idx >= 0) {
-                grad[layout.log_tau_st2_idx] += 0.5 * total_rank - 0.5 * tau_st * tau_st2 * total_qf;
-            }
+            // Centered tau gradient: 0.5*rank - 0.5*tau*qf
+            grad[layout.log_tau_st_idx] += 0.5 * total_rank - 0.5 * tau_st * total_qf;
+            st_lp_accum = 0.5 * total_rank * std::log(tau_st) - 0.5 * tau_st * total_qf;
         }
     }
 
@@ -7287,16 +7337,17 @@ void compute_gradient_spatiotemporal_handcoded(
             for (int s = 0; s < S; s++) tau_stz_grad += col_sums_buf[s] * col_sums_buf[s];
             tau_stz_grad *= 0.5 * lambda_stz;
             grad[layout.log_tau_st_idx] += tau_stz_grad;
-            if (layout.log_tau_st2_idx >= 0) {
-                grad[layout.log_tau_st2_idx] += tau_stz_grad;
-            }
         }
+
+        // Accumulate sum-to-zero penalty into ST log-prior
+        for (int t = 0; t < T; t++) st_lp_accum -= 0.5 * lambda_stz * row_sums_buf[t] * row_sums_buf[t];
+        for (int s = 0; s < S; s++) st_lp_accum -= 0.5 * lambda_stz * col_sums_buf[s] * col_sums_buf[s];
     }
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
 
-    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true, &st_lp_accum) + obs_log_lik;
 }
 
 // g_gradient_mode defined earlier in file (before verify_gradient_runtime)
@@ -8114,7 +8165,20 @@ double nuts_compute_hamiltonian_fast(double log_prob, const double* p,
 bool nuts_check_uturn_fast(const double* q_minus, const double* q_plus,
                            const double* p_minus, const double* p_plus,
                            const DenseMassMatrix& mass, double* scratch, int n) {
-  if (mass.type == MassMatrixType::DIAG || !mass.adapted) {
+  if (mass.type == MassMatrixType::BLOCK_DIAG && mass.adapted) {
+    // Block-diagonal: use inv_mass_times_p which handles blocks correctly
+    mass.inv_mass_times_p(p_plus, scratch);
+    double dot_fwd = 0.0;
+    for (int i = 0; i < n; i++) {
+      dot_fwd += (q_plus[i] - q_minus[i]) * scratch[i];
+    }
+    mass.inv_mass_times_p(p_minus, scratch);
+    double dot_bwd = 0.0;
+    for (int i = 0; i < n; i++) {
+      dot_bwd += (q_plus[i] - q_minus[i]) * scratch[i];
+    }
+    return (dot_fwd < 0.0) || (dot_bwd < 0.0);
+  } else if (mass.type == MassMatrixType::DIAG || !mass.adapted) {
     // Diagonal path (fast, unrolled)
     double dot_fwd = 0.0, dot_bwd = 0.0;
     const double* inv_mass = mass.inv_mass_diag.data();
@@ -8178,6 +8242,21 @@ LeapfrogInPlaceResult leapfrog_step_inplace(
   if (!mass.adapted) {
     // Identity mass: q += eps * p
     ratiod_linalg::axpy(epsilon, p, q, n);
+  } else if (mass.type == MassMatrixType::BLOCK_DIAG) {
+    // Block-diagonal: diagonal for non-block params, dense for block params
+    // First pass: diagonal for all params
+    ratiod_linalg::axpy_weighted(epsilon, mass.inv_mass_diag.data(), p, q, n);
+    // Second pass: overwrite block params with dense contribution
+    for (const auto& blk : mass.blocks) {
+      if (blk.adapted) {
+        double tmp[4];
+        blk.matvec(p, tmp);
+        for (int i = 0; i < blk.size; i++) {
+          // Undo diagonal contribution, apply block contribution
+          q[blk.start + i] += epsilon * (tmp[i] - mass.inv_mass_diag[blk.start + i] * p[blk.start + i]);
+        }
+      }
+    }
   } else if (mass.type == MassMatrixType::DIAG) {
     // Diagonal: q[i] += eps * inv_mass[i] * p[i]
     ratiod_linalg::axpy_weighted(epsilon, mass.inv_mass_diag.data(), p, q, n);
@@ -8595,6 +8674,12 @@ HMCResultCpp run_hmc_chain_cpp(
         nuts_target_accept = std::max(nuts_target_accept, 0.90);
       }
 
+      // Temporal GP NC: z ~ N(0,1) decorrelates parameters, lower target OK
+      // Benchmarked: 0.70 gives 20% fewer LF steps and 50% less seed variance
+      if (layout.is_temporal_gp && nuts_target_accept > 0.70) {
+        nuts_target_accept = 0.70;
+      }
+
       nuts_target_accept = std::min(0.99, nuts_target_accept);
     }
     da.target_accept = nuts_target_accept;
@@ -8630,45 +8715,166 @@ HMCResultCpp run_hmc_chain_cpp(
   constexpr int DENSE_MAX_PARAMS = 200;
   MassMatrixType effective_metric = metric_type;
   bool auto_selected_diag = false;
+  // Block specs for BLOCK_DIAG: (start_index, block_size) pairs
+  std::vector<std::pair<int,int>> block_specs;
+
   if (effective_metric == MassMatrixType::AUTO) {
-    // Only models with inherently correlated structure that benefits from
-    // adapted dense mass start with DENSE. The O(n²) per-step cost is
-    // justified only when the adapted covariance captures correlations
-    // that dramatically improve trajectory efficiency.
-    // 2026-03-03: Removed has_re_correlated_slopes and is_temporal_gp.
-    // NC parameterization decorrelates z params -> DENSE mass adds O(p^2) cost
-    // without capturing useful correlations. Benchmarked: DIAG matches DENSE eps
-    // for GP_t (32.3s vs 36.5s) and slopes+ICAR (39.9s vs 57.9s).
-    bool needs_dense = layout.is_bym2 ||
-                       layout.is_gp ||
-                       layout.is_multiscale_gp ||
-                       layout.has_multiscale_temporal ||
-                       layout.has_svc ||
-                       layout.has_latent ||
-                       layout.has_spatiotemporal;
-    effective_metric = needs_dense ? MassMatrixType::DENSE : MassMatrixType::DIAG;
-    auto_selected_diag = !needs_dense;
-    if (verbose) {
-      REprintf("  [METRIC] auto -> %s (p=%d",
-               effective_metric == MassMatrixType::DENSE ? "dense" : "diag", n_params);
-      if (needs_dense) {
-        if (layout.has_re) REprintf(", re");
-        if (layout.has_re_correlated_slopes) REprintf(", correlated_slopes");
-        if (layout.has_temporal) REprintf(", temporal");
-        if (layout.is_bym2) REprintf(", bym2");
-        if (layout.is_hsgp) REprintf(", hsgp");
-        if (layout.is_gp) REprintf(", gp");
-        if (layout.is_multiscale_gp) REprintf(", msgp");
-        if (layout.is_temporal_gp) REprintf(", temporal_gp");
-        if (layout.has_multiscale_temporal) REprintf(", ms_temporal");
-        if (layout.has_svc) REprintf(", svc");
-        if (layout.has_spatiotemporal) REprintf(", spatiotemporal");
-        if (layout.has_latent) REprintf(", latent");
-        if (layout.has_tvc) REprintf(", tvc");
+    // Build block_specs from param layout: detect pairs of correlated hyperparameters.
+    // Each block captures a small dense correlation (2-4 params) at O(block²) cost,
+    // avoiding full O(n²) DENSE while handling the key correlations DIAG misses.
+    // NOTE: temporal_gp excluded — DIAG is faster (2.11s vs 2.39s, 5 seeds Bin+GP_t).
+    // The 2×2 sigma2-phi block doesn't reduce leapfrog steps enough to offset overhead.
+    if (layout.is_hsgp && layout.log_sigma2_hsgp_idx >= 0 &&
+        layout.log_lengthscale_hsgp_idx == layout.log_sigma2_hsgp_idx + 1) {
+      block_specs.push_back({layout.log_sigma2_hsgp_idx, 2});
+    }
+    if (layout.is_bym2 && layout.log_sigma_bym2_idx >= 0 &&
+        layout.logit_rho_bym2_idx == layout.log_sigma_bym2_idx + 1) {
+      block_specs.push_back({layout.log_sigma_bym2_idx, 2});
+    }
+    if (layout.is_gp && layout.log_sigma2_gp_idx >= 0 &&
+        layout.log_phi_gp_idx == layout.log_sigma2_gp_idx + 1) {
+      block_specs.push_back({layout.log_sigma2_gp_idx, 2});
+    }
+    if (layout.is_multiscale_gp) {
+      if (layout.log_sigma2_gp_local_idx >= 0 &&
+          layout.log_phi_gp_local_idx == layout.log_sigma2_gp_local_idx + 1) {
+        block_specs.push_back({layout.log_sigma2_gp_local_idx, 2});
       }
+      if (layout.log_sigma2_gp_regional_idx >= 0 &&
+          layout.log_phi_gp_regional_idx == layout.log_sigma2_gp_regional_idx + 1) {
+        block_specs.push_back({layout.log_sigma2_gp_regional_idx, 2});
+      }
+    }
+    if (layout.has_svc && layout.log_sigma2_svc_start >= 0 &&
+        layout.log_phi_svc_start >= 0) {
+      int n_svc = layout.log_sigma2_svc_end - layout.log_sigma2_svc_start;
+      for (int t = 0; t < n_svc; t++) {
+        int sigma_idx = layout.log_sigma2_svc_start + t;
+        int phi_idx = layout.log_phi_svc_start + t;
+        if (phi_idx == sigma_idx + n_svc) {
+          // SVC sigma2 and phi are in separate contiguous blocks; can't form a 2x2 block
+          // unless they're consecutive. Skip non-consecutive pairs.
+        }
+      }
+      // SVC layout: [sigma2_0, sigma2_1, ..., phi_0, phi_1, ...]
+      // These aren't consecutive pairs, so we'd need per-SVC blocks of non-contiguous params.
+      // For now, only handle n_svc=1 where sigma2 and phi are adjacent:
+      if (n_svc == 1 && layout.log_phi_svc_start == layout.log_sigma2_svc_start + 1) {
+        block_specs.push_back({layout.log_sigma2_svc_start, 2});
+      }
+    }
+    if (layout.is_st_gp && layout.log_phi_st_space_idx >= 0 &&
+        layout.log_phi_st_time_idx == layout.log_phi_st_space_idx + 1) {
+      block_specs.push_back({layout.log_phi_st_space_idx, 2});
+    }
+    if (layout.has_multiscale_temporal) {
+      // Multiscale temporal has 3-4 hyperparams (trend, seasonal, short-term sigmas + rho)
+      // These may benefit from a block but layout varies; keep DENSE for now
+    }
+    // Correlated slopes: Cholesky params form a natural block
+    if (layout.has_re_correlated_slopes) {
+      for (size_t t = 0; t < layout.chol_re_start_multi.size(); t++) {
+        if (layout.re_correlated_multi[t]) {
+          int chol_start = layout.chol_re_start_multi[t];
+          int chol_size = layout.chol_re_end_multi[t] - chol_start;
+          // Also include the corresponding sigma params
+          // For now, just handle the Cholesky block if size <= 4
+          if (chol_size >= 2 && chol_size <= 4) {
+            block_specs.push_back({chol_start, chol_size});
+          }
+        }
+      }
+    }
+
+    // Decision: BLOCK_DIAG if we found blocks, else check for DENSE needs
+    if (!block_specs.empty()) {
+      // Models that previously needed DENSE but DON'T benefit from full dense
+      // (temporal_gp, hsgp, gp, bym2, svc, st_gp, correlated slopes)
+      // are now served by BLOCK_DIAG which captures the key correlations.
+      // Only models with many interacting hyperparameters need full DENSE.
+      bool needs_full_dense = layout.has_latent ||  // N×K latent factors
+                              layout.has_multiscale_temporal;  // 3-4 correlated hyperparams
+      if (needs_full_dense) {
+        effective_metric = MassMatrixType::DENSE;
+        block_specs.clear();  // Don't use blocks
+        auto_selected_diag = false;
+      } else {
+        effective_metric = MassMatrixType::BLOCK_DIAG;
+        auto_selected_diag = false;
+      }
+    } else {
+      // No blocks detected — pure DIAG
+      effective_metric = MassMatrixType::DIAG;
+      auto_selected_diag = true;
+    }
+
+    if (verbose) {
+      REprintf("  [METRIC] auto -> %s (p=%d", metric_name(effective_metric), n_params);
+      if (effective_metric == MassMatrixType::BLOCK_DIAG) {
+        REprintf(", %d blocks:", (int)block_specs.size());
+        for (const auto& bs : block_specs) {
+          REprintf(" [%d,%d)", bs.first, bs.first + bs.second);
+        }
+      }
+      if (layout.has_re) REprintf(", re");
+      if (layout.has_re_correlated_slopes) REprintf(", correlated_slopes");
+      if (layout.has_temporal) REprintf(", temporal");
+      if (layout.is_bym2) REprintf(", bym2");
+      if (layout.is_hsgp) REprintf(", hsgp");
+      if (layout.is_gp) REprintf(", gp");
+      if (layout.is_multiscale_gp) REprintf(", msgp");
+      if (layout.is_temporal_gp) REprintf(", temporal_gp");
+      if (layout.has_multiscale_temporal) REprintf(", ms_temporal");
+      if (layout.has_svc) REprintf(", svc");
+      if (layout.has_spatiotemporal) REprintf(", spatiotemporal");
+      if (layout.has_latent) REprintf(", latent");
+      if (layout.has_tvc) REprintf(", tvc");
       REprintf(")\n");
     }
   }
+  // Also build block_specs when user explicitly requests BLOCK_DIAG
+  if (effective_metric == MassMatrixType::BLOCK_DIAG && block_specs.empty()) {
+    // User forced block_diag but AUTO didn't run — detect blocks from layout
+    if (layout.is_temporal_gp && layout.log_sigma2_temporal_gp_idx >= 0 &&
+        layout.logit_phi_temporal_gp_idx == layout.log_sigma2_temporal_gp_idx + 1) {
+      block_specs.push_back({layout.log_sigma2_temporal_gp_idx, 2});
+    }
+    if (layout.is_hsgp && layout.log_sigma2_hsgp_idx >= 0 &&
+        layout.log_lengthscale_hsgp_idx == layout.log_sigma2_hsgp_idx + 1) {
+      block_specs.push_back({layout.log_sigma2_hsgp_idx, 2});
+    }
+    if (layout.is_bym2 && layout.log_sigma_bym2_idx >= 0 &&
+        layout.logit_rho_bym2_idx == layout.log_sigma_bym2_idx + 1) {
+      block_specs.push_back({layout.log_sigma_bym2_idx, 2});
+    }
+    if (layout.is_gp && layout.log_sigma2_gp_idx >= 0 &&
+        layout.log_phi_gp_idx == layout.log_sigma2_gp_idx + 1) {
+      block_specs.push_back({layout.log_sigma2_gp_idx, 2});
+    }
+    if (layout.is_multiscale_gp) {
+      if (layout.log_sigma2_gp_local_idx >= 0 &&
+          layout.log_phi_gp_local_idx == layout.log_sigma2_gp_local_idx + 1) {
+        block_specs.push_back({layout.log_sigma2_gp_local_idx, 2});
+      }
+      if (layout.log_sigma2_gp_regional_idx >= 0 &&
+          layout.log_phi_gp_regional_idx == layout.log_sigma2_gp_regional_idx + 1) {
+        block_specs.push_back({layout.log_sigma2_gp_regional_idx, 2});
+      }
+    }
+    if (layout.is_st_gp && layout.log_phi_st_space_idx >= 0 &&
+        layout.log_phi_st_time_idx == layout.log_phi_st_space_idx + 1) {
+      block_specs.push_back({layout.log_phi_st_space_idx, 2});
+    }
+    // If still no blocks found, fall back to DIAG
+    if (block_specs.empty()) {
+      effective_metric = MassMatrixType::DIAG;
+      if (verbose) {
+        REprintf("  [BLOCK_DIAG] No correlated hyperparameter pairs found, falling back to DIAG\n");
+      }
+    }
+  }
+
   // Auto-downgrade dense to diagonal when n_params too large
   // Dense needs O(p^2) storage and O(p^3) Cholesky; also needs n_warmup >= p samples
   if (effective_metric == MassMatrixType::DENSE && n_params > DENSE_MAX_PARAMS) {
@@ -8681,7 +8887,11 @@ HMCResultCpp run_hmc_chain_cpp(
 
   DenseMassMatrix mass;
   try {
-    mass.init(n_params, effective_metric);
+    if (effective_metric == MassMatrixType::BLOCK_DIAG && !block_specs.empty()) {
+      mass.init_block_diag(n_params, block_specs);
+    } else {
+      mass.init(n_params, effective_metric);
+    }
   } catch (const std::bad_alloc&) {
     if (effective_metric == MassMatrixType::DENSE) {
       if (verbose) {
@@ -8769,6 +8979,18 @@ HMCResultCpp run_hmc_chain_cpp(
       any_informed = true;
     }
 
+    // Temporal GP: NC z ~ N(0,1), logit_phi has wider posterior scale
+    if (layout.is_temporal_gp) {
+      for (int j = layout.temporal_start; j < layout.temporal_end; j++) {
+        inv_m[j] = 1.0;  // z ~ N(0,1) for NC
+      }
+      if (layout.log_sigma2_temporal_gp_idx >= 0)
+        inv_m[layout.log_sigma2_temporal_gp_idx] = 1.0;
+      if (layout.logit_phi_temporal_gp_idx >= 0)
+        inv_m[layout.logit_phi_temporal_gp_idx] = 4.0;  // logit scale: wider
+      any_informed = true;
+    }
+
     if (any_informed) {
       // Compute sqrt_mass from inv_mass
       for (int i = 0; i < n_params; i++) {
@@ -8815,6 +9037,10 @@ HMCResultCpp run_hmc_chain_cpp(
   if (effective_metric == MassMatrixType::DENSE && n_params > 100) {
     term_buffer = 75;  // 50% more final adaptation
   }
+
+  // Note: For p~24, first mass window (25 samples < 29 needed) fails,
+  // but this is fine — better to wait for more samples than set a poor
+  // mass estimate early. The second window (100+ samples) gives good mass.
 
   // Adjust for short warmup
   if (n_warmup < init_buffer + term_buffer + init_window) {
@@ -8904,6 +9130,13 @@ HMCResultCpp run_hmc_chain_cpp(
   // Note: warmup divergences are normal for DIAG models and resolve via dual
   // averaging — only final epsilon matters (checked at warmup end).
 
+  if (verbose && layout.is_temporal_gp) {
+    REprintf("  [MASS-WINDOWS] n_warmup=%d, windows=[", n_warmup);
+    for (size_t w = 0; w < mass_window_ends.size(); w++) {
+      REprintf("%d%s", mass_window_ends[w], w + 1 < mass_window_ends.size() ? "," : "");
+    }
+    REprintf("]\n");
+  }
   for (int iter = 0; iter < n_iter; iter++) {
     bool is_warmup = (iter < n_warmup);
     // Check if we've reached a mass adaptation window boundary
@@ -8948,11 +9181,65 @@ HMCResultCpp run_hmc_chain_cpp(
           mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
           use_mass_matrix = true;
         }
+      } else if (mass.type == MassMatrixType::BLOCK_DIAG) {
+        // Block-diagonal: set diagonal for all params, then adapt block covariances
+        if (mass_stats.n >= 10) {
+          mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
+          use_mass_matrix = true;
+        }
+        int n_adapted = 0;
+        for (auto& blk : mass.blocks) {
+          if (blk.update_from_welford()) {
+            n_adapted++;
+          }
+        }
+        if (verbose && n_adapted > 0) {
+          REprintf("  [BLOCK_DIAG] Window %d (iter %d): %d/%d blocks adapted (n=%d)\n",
+                   next_window_idx, iter, n_adapted, (int)mass.blocks.size(), mass_stats.n);
+        }
+        // Reset block Welford accumulators for next window
+        for (auto& blk : mass.blocks) {
+          blk.reset_welford();
+        }
       } else if (mass_stats.n >= 10) {
         // Diagonal path
         mass.set_diagonal(mass_stats.inv_mass(), mass_stats.sqrt_mass());
         use_mass_matrix = true;
       }
+
+      // Temporal GP NC: z ~ N(0,1) by construction → optimal diag mass ≈ 1.0.
+      // With limited warmup samples, noisy variance estimates for 20 z params
+      // create unbalanced mass → small epsilon. Fix z entries to 1.0 so the
+      // step size is driven by the hyperparameters (beta, sigma2, phi) only.
+      if (verbose && layout.is_temporal_gp) {
+        REprintf("  [Z-DEBUG] Window %d (iter %d): use_mass=%d, tgp=%d, nc=%d, ts=%d, te=%d, mass_n=%d\n",
+                 next_window_idx, iter, (int)use_mass_matrix,
+                 (int)layout.is_temporal_gp, data.temporal_gp_parameterization,
+                 layout.temporal_start, layout.temporal_end, mass_stats.n);
+      }
+      if (use_mass_matrix && layout.is_temporal_gp &&
+          data.temporal_gp_parameterization == 1 &&
+          layout.temporal_start >= 0 && layout.temporal_end > layout.temporal_start) {
+        if (verbose) {
+          REprintf("  [Z-FREEZE] Window %d: z mass before=[", next_window_idx);
+          for (int j = layout.temporal_start; j < std::min(layout.temporal_end, layout.temporal_start + 5); j++) {
+            REprintf("%.3f%s", mass.inv_mass_diag[j], j < layout.temporal_start + 4 ? "," : "");
+          }
+          REprintf("...], hyper=[");
+          // Print beta and hyperparams
+          for (int j = 0; j < std::min(4, layout.temporal_start); j++) {
+            REprintf("%.3f%s", mass.inv_mass_diag[j], j < 3 ? "," : "");
+          }
+          REprintf("], sigma2=%.3f, phi=%.3f\n",
+                   layout.log_sigma2_temporal_gp_idx >= 0 ? mass.inv_mass_diag[layout.log_sigma2_temporal_gp_idx] : -1.0,
+                   layout.logit_phi_temporal_gp_idx >= 0 ? mass.inv_mass_diag[layout.logit_phi_temporal_gp_idx] : -1.0);
+        }
+        for (int j = layout.temporal_start; j < layout.temporal_end; j++) {
+          mass.inv_mass_diag[j] = 1.0;
+          mass.sqrt_mass_diag[j] = 1.0;
+        }
+      }
+
       mass_stats.reset();
       // For dense: only reset cov_stats when full covariance was successfully
       // computed THIS window. Otherwise keep accumulating across windows until
@@ -9425,24 +9712,58 @@ HMCResultCpp run_hmc_chain_cpp(
           if (mass.type == MassMatrixType::DENSE) {
             cov_stats.update(q);
           }
+          if (mass.type == MassMatrixType::BLOCK_DIAG) {
+            for (auto& blk : mass.blocks) {
+              blk.welford_update(q.data());
+            }
+          }
         }
         if (iter == n_warmup - 1) {
           epsilon = da.final_epsilon();
 
-          // DIAG→DENSE recovery at warmup end: if AUTO selected DIAG but the
+          // DIAG→BLOCK_DIAG→DENSE recovery at warmup end: if AUTO selected DIAG but the
           // final adapted epsilon is catastrophic (>2.0), DIAG can't capture the
-          // posterior geometry. Switch to DENSE with identity mass. This is a
-          // last resort — identity mass isn't ideal but prevents 100% divergences.
+          // posterior geometry. Try BLOCK_DIAG first if block_specs available,
+          // otherwise fall back to DENSE with identity mass.
           if (auto_selected_diag && mass.type == MassMatrixType::DIAG &&
-              epsilon > 2.0 && n_params <= DENSE_MAX_PARAMS) {
-            if (verbose) {
-              REprintf("  [DIAG->DENSE] Warmup end: final epsilon=%.4f (catastrophic). "
-                       "Switching to DENSE identity mass.\n", epsilon);
+              epsilon > 2.0) {
+            if (!block_specs.empty()) {
+              // Try BLOCK_DIAG recovery first (cheaper than full DENSE)
+              if (verbose) {
+                REprintf("  [DIAG->BLOCK_DIAG] Warmup end: final epsilon=%.4f (catastrophic). "
+                         "Switching to BLOCK_DIAG (adapted=false).\n", epsilon);
+              }
+              mass.init_block_diag(n_params, block_specs);
+              effective_metric = MassMatrixType::BLOCK_DIAG;
+              auto_selected_diag = false;
+              epsilon = find_reasonable_epsilon(q, data, layout, rng);
+              da = DualAveraging(epsilon, n_params, target_boost);
+              if (use_nuts) da.target_accept = nuts_target_accept;
+              epsilon = da.final_epsilon();
+            } else if (n_params <= DENSE_MAX_PARAMS) {
+              if (verbose) {
+                REprintf("  [DIAG->DENSE] Warmup end: final epsilon=%.4f (catastrophic). "
+                         "Switching to DENSE identity mass.\n", epsilon);
+              }
+              mass.init(n_params, MassMatrixType::DENSE);
+              effective_metric = MassMatrixType::DENSE;
+              auto_selected_diag = false;
+              epsilon = find_reasonable_epsilon(q, data, layout, rng);
+              da = DualAveraging(epsilon, n_params, target_boost);
+              if (use_nuts) da.target_accept = nuts_target_accept;
+              epsilon = da.final_epsilon();
             }
-            mass.init(n_params, MassMatrixType::DENSE);
-            effective_metric = MassMatrixType::DENSE;
-            auto_selected_diag = false;
-            epsilon = find_reasonable_epsilon(q, data, layout, rng);
+          }
+
+          // BLOCK_DIAG→DIAG fallback: if epsilon still catastrophic after BLOCK_DIAG
+          if (epsilon > 2.0 && mass.type == MassMatrixType::BLOCK_DIAG) {
+            if (verbose) {
+              REprintf("  [BLOCK_DIAG->DIAG] WARNING: epsilon=%.4f still catastrophic. "
+                       "Falling back to DIAG.\n", epsilon);
+            }
+            mass.init(n_params, MassMatrixType::DIAG);
+            effective_metric = MassMatrixType::DIAG;
+            epsilon = find_reasonable_epsilon(q, data, layout, rng, mass.inv_mass_diag);
             da = DualAveraging(epsilon, n_params, target_boost);
             if (use_nuts) da.target_accept = nuts_target_accept;
             epsilon = da.final_epsilon();
@@ -9464,9 +9785,8 @@ HMCResultCpp run_hmc_chain_cpp(
           }
 
           if (verbose) {
-            REprintf("  [DENSE] Warmup done: epsilon=%.6f, mass.type=%s, mass.adapted=%d\n",
-                     epsilon, (mass.type == MassMatrixType::DENSE ? "DENSE" : "DIAG"),
-                     (int)mass.adapted);
+            REprintf("  [METRIC] Warmup done: epsilon=%.6f, mass.type=%s, mass.adapted=%d\n",
+                     epsilon, metric_name(mass.type), (int)mass.adapted);
           }
           // Proactive SoftAbs at warmup→sampling transition (improvement #4):
           // Pre-compute SoftAbs metric so it's ready for retry attempts.
@@ -9495,7 +9815,7 @@ HMCResultCpp run_hmc_chain_cpp(
         // Print tree depth for last 10 warmup iterations
         if (verbose && iter >= n_warmup - 10) {
           REprintf("  [%s] warmup iter %d: treedepth=%d, epsilon=%.6f\n",
-                   mass.type == MassMatrixType::DENSE ? "DENSE" : "DIAG",
+                   metric_name(mass.type),
                    iter, iter_treedepth, epsilon);
         }
       }
@@ -9708,7 +10028,7 @@ HMCResultCpp run_hmc_chain_cpp(
     for (int i = 0; i < result.n_sample; i++) sampling_total_lf += result.n_leapfrog[i];
     REprintf("  [STATS] Chain %d: metric=%s, adapted=%d, warmup_LF=%d, sampling_LF=%d, total_LF=%d, epsilon=%.6f\n",
              chain_id + 1,
-             mass.type == MassMatrixType::DENSE ? "DENSE" : "DIAG",
+             metric_name(mass.type),
              (int)mass.adapted,
              warmup_total_leapfrog, sampling_total_lf,
              warmup_total_leapfrog + sampling_total_lf, result.epsilon);

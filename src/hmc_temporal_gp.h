@@ -462,12 +462,14 @@ static inline void temporal_gp_nc_backward(
             double dt_over_phi = dt / phi;
             double rho_t = ws.rho[t - 1];
             double rho2 = rho_t * rho_t;
-            double one_minus_rho2 = 1.0 - rho2;
-            if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
 
             // Source 1: through a[t]
             // da[t]/d(log_phi) = -sigma * rho^2 * (dt/phi) / sqrt(1-rho^2)
-            double da_dphi = -sigma * rho2 * dt_over_phi / std::sqrt(one_minus_rho2);
+            // Reuse cached ws.a[t] = sigma * sqrt(1-rho^2), so sqrt(1-rho^2) = ws.a[t]/sigma
+            double sqrt_1mr2 = (sigma > 1e-15) ? ws.a[t] / sigma : 0.0;
+            double da_dphi = (sqrt_1mr2 > 1e-15)
+                ? -sigma * rho2 * dt_over_phi / sqrt_1mr2
+                : 0.0;
             g_phi += adj[t] * da_dphi * z[off + t];
 
             // Source 2: through rho[t]

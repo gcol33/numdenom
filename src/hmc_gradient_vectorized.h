@@ -263,17 +263,31 @@ inline void compute_residuals_impl(
 
   for (int i = 0; i < N; i++) {
     const double eta = eta_num[i];
-    const double p = 1.0 / (1.0 + std::exp(-eta));
     const int n_trials = data.y_denom[i];
     const int y = data.y_num[i];
+
+    // Numerically stable logistic: 1 exp + 1 log (was 3 exp + 2 log)
+    // Identity: log(1-p) = -eta + log(p) when eta >= 0
+    //           log(p) = eta + log(1-p) when eta < 0
+    double p, log_p, log_1mp;
+    if (eta >= 0.0) {
+      const double exp_neg = std::exp(-eta);
+      const double denom = 1.0 + exp_neg;
+      p = 1.0 / denom;
+      log_p = -std::log(denom);
+      log_1mp = -eta + log_p;
+    } else {
+      const double exp_pos = std::exp(eta);
+      const double denom = 1.0 + exp_pos;
+      p = exp_pos / denom;
+      log_1mp = -std::log(denom);
+      log_p = eta + log_1mp;
+    }
+
     resid_num[i] = y - n_trials * p;
     resid_denom[i] = 0.0;
 
     if (compute_lp) {
-      // Inline log-lik with precomputed lchoose (saves 3 lgamma per obs)
-      // Use log1p(-p) = log(1-p) = -log(1+exp(eta)) for stability
-      const double log_p = -std::log(1.0 + std::exp(-eta));
-      const double log_1mp = -std::log(1.0 + std::exp(eta));
       ll += y * log_p + (n_trials - y) * log_1mp + ws.lchoose_cache[i];
     }
   }
@@ -604,7 +618,11 @@ inline void compute_residuals_impl(
   double ll = 0.0;
 
   for (int i = 0; i < N; i++) {
-    const double p = 1.0 / (1.0 + std::exp(-eta_num[i]));
+    // Numerically stable sigmoid (avoids exp overflow for |eta| > 700)
+    const double eta = eta_num[i];
+    const double p = (eta >= 0.0)
+        ? 1.0 / (1.0 + std::exp(-eta))
+        : std::exp(eta) / (1.0 + std::exp(eta));
     const int y_i = data.y_num[i];
     const int n_i = data.y_denom[i];
     const double alpha = p * phi_num;
@@ -1195,13 +1213,25 @@ void compute_gradient_fused(
         }
       }
       else if constexpr (MT == ModelType::BINOMIAL) {
-        const double p = 1.0 / (1.0 + std::exp(-eta_n));
         const int n_trials = data.y_denom[i];
         const int y = data.y_num[i];
+        // Numerically stable logistic: 1 exp + 1 log (was 3 exp + 2 log)
+        double p, log_p, log_1mp;
+        if (eta_n >= 0.0) {
+          const double exp_neg = std::exp(-eta_n);
+          const double denom = 1.0 + exp_neg;
+          p = 1.0 / denom;
+          log_p = -std::log(denom);
+          log_1mp = -eta_n + log_p;
+        } else {
+          const double exp_pos = std::exp(eta_n);
+          const double denom = 1.0 + exp_pos;
+          p = exp_pos / denom;
+          log_1mp = -std::log(denom);
+          log_p = eta_n + log_1mp;
+        }
         resid_n = y - n_trials * p;
         if (compute_lp) {
-          const double log_p = -std::log(1.0 + std::exp(-eta_n));
-          const double log_1mp = -std::log(1.0 + std::exp(eta_n));
           ll += y * log_p + (n_trials - y) * log_1mp + ws.lchoose_cache[i];
         }
       }
@@ -1220,7 +1250,10 @@ void compute_gradient_fused(
         }
       }
       else if constexpr (MT == ModelType::BETA_BINOMIAL) {
-        const double p = 1.0 / (1.0 + std::exp(-eta_n));
+        // Numerically stable sigmoid (avoids exp overflow for |eta| > 700)
+        const double p = (eta_n >= 0.0)
+            ? 1.0 / (1.0 + std::exp(-eta_n))
+            : std::exp(eta_n) / (1.0 + std::exp(eta_n));
         const int y_i = data.y_num[i];
         const int n_i = data.y_denom[i];
         const double alpha = p * phi_num;

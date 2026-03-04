@@ -151,9 +151,14 @@ T compute_log_post_impl(
         if (layout.is_temporal_gp) {
             // Temporal GP: sigma2 and phi (lengthscale) parameters
             T log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
-            T log_phi = params[layout.log_phi_temporal_gp_idx];
+            T logit_phi = params[layout.logit_phi_temporal_gp_idx];
             sigma2_temporal_gp = safe_exp(log_sigma2);
-            phi_temporal_gp = safe_exp(log_phi);
+
+            // Logit-bounded phi: phi = lower + range * sigmoid(logit_phi)
+            T sigmoid_phi = inv_logit(logit_phi);
+            double phi_lower_lp = data.temporal_gp_phi_prior_lower;
+            double phi_range_lp = data.temporal_gp_phi_prior_upper - phi_lower_lp;
+            phi_temporal_gp = T(phi_lower_lp) + T(phi_range_lp) * sigmoid_phi;
         } else {
             // RW1/RW2/AR1: tau-based parameterization
             T log_tau = params[layout.log_tau_temporal_idx];
@@ -418,9 +423,8 @@ T compute_log_post_impl(
         int T_times = data.n_times;
 
         if (layout.is_temporal_gp) {
-            // Temporal GP: PC prior on sigma2, uniform on phi (lengthscale)
+            // Temporal GP: PC prior on sigma2, logit-bounded phi (lengthscale)
             T log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
-            T log_phi = params[layout.log_phi_temporal_gp_idx];
 
             // PC prior on sigma2 (favor smaller variance)
             double rate = -std::log(data.temporal_gp_sigma2_prior_alpha) / data.temporal_gp_sigma2_prior_U;
@@ -428,13 +432,14 @@ T compute_log_post_impl(
             log_post = log_post + T(std::log(rate)) - T(rate) * sigma_gp - safe_log(T(2.0) * sigma_gp);
             log_post = log_post + log_sigma2;  // Jacobian for log transform
 
-            // Uniform prior on phi within bounds
-            double phi_val = get_value(phi_temporal_gp);
-            if (phi_val < data.temporal_gp_phi_prior_lower || phi_val > data.temporal_gp_phi_prior_upper) {
-                return T(-INFINITY);
-            }
-            log_post = log_post - T(std::log(data.temporal_gp_phi_prior_upper - data.temporal_gp_phi_prior_lower));
-            log_post = log_post + log_phi;  // Jacobian
+            // Uniform prior on phi: logit-bounded parameterization guarantees bounds
+            // Jacobian: log(phi - lower) + log(upper - phi) - log(range)
+            double phi_lower_pr = data.temporal_gp_phi_prior_lower;
+            double phi_upper_pr = data.temporal_gp_phi_prior_upper;
+            double phi_range_pr = phi_upper_pr - phi_lower_pr;
+            log_post = log_post + safe_log(phi_temporal_gp - T(phi_lower_pr))
+                     + safe_log(T(phi_upper_pr) - phi_temporal_gp)
+                     - T(std::log(phi_range_pr));
 
             const bool use_nc = (data.temporal_gp_parameterization == 1);
 
