@@ -640,29 +640,31 @@ inline double compute_obs_ll(
 // ICAR quadratic form: phi' Q phi
 // =====================================================================
 
-double icar_quadratic_form(
-    const std::vector<double>& phi,
+// Pointer-based version (zero allocation, used in hot gradient path)
+static inline double icar_quadratic_form_ptr(
+    const double* phi, int J,
     const ModelData& data
 ) {
   double quad_form = 0.0;
-  int J = data.n_spatial_units;
-
   for (int i = 0; i < J; i++) {
-    // Diagonal: n_i * phi_i^2
     quad_form += data.n_neighbors[i] * phi[i] * phi[i];
-
-    // Off-diagonal: -2 * sum over neighbors (count each edge once)
     int row_start = data.adj_row_ptr[i];
     int row_end = data.adj_row_ptr[i + 1];
     for (int k = row_start; k < row_end; k++) {
       int j = data.adj_col_idx[k];
-      if (j > i) {  // Count each edge once
+      if (j > i) {
         quad_form -= 2.0 * phi[i] * phi[j];
       }
     }
   }
-
   return quad_form;
+}
+
+double icar_quadratic_form(
+    const std::vector<double>& phi,
+    const ModelData& data
+) {
+  return icar_quadratic_form_ptr(phi.data(), data.n_spatial_units, data);
 }
 
 // =====================================================================
@@ -1543,23 +1545,22 @@ double compute_log_post(
   }
 
   // ============ SVC (Spatially-Varying Coefficients) ============
-  std::vector<double> svc_sigma2;
-  std::vector<double> svc_phi;
-  std::vector<double> svc_w_flat;
-  std::vector<double> svc_eta;
+  // Uses pre-allocated workspace buffers in data.svc_data (no per-call heap allocation)
+  double* svc_eta_ptr = nullptr;
 
   if (layout.has_svc && data.svc_data.n_svc > 0) {
     int n_svc = data.svc_data.n_svc;
     int n_obs = data.svc_data.n_obs;
+    double* svc_sigma2 = data.svc_data.sigma2_ws.data();
+    double* svc_phi = data.svc_data.phi_ws.data();
+    double* svc_w_flat = data.svc_data.w_flat_ws.data();
 
     // Extract sigma2 (spatial variance) parameters
-    svc_sigma2.resize(n_svc);
     for (int j = 0; j < n_svc; j++) {
       double log_sigma2 = params[layout.log_sigma2_svc_start + j];
       svc_sigma2[j] = std::exp(log_sigma2);
 
       // Half-Cauchy prior on sigma = sqrt(sigma2)
-      // p(sigma) ∝ 1 / (1 + (sigma/scale)^2)
       double sigma = std::sqrt(svc_sigma2[j]);
       double scale = data.svc_sigma2_prior_scale;
       log_post += -std::log(1.0 + (sigma * sigma) / (scale * scale));
@@ -1567,14 +1568,10 @@ double compute_log_post(
     }
 
     // Extract phi (spatial range) parameters
-    svc_phi.resize(n_svc);
     for (int j = 0; j < n_svc; j++) {
       double log_phi = params[layout.log_phi_svc_start + j];
       svc_phi[j] = std::exp(log_phi);
 
-      // Uniform prior on phi (transformed to log scale)
-      // p(phi) ∝ 1 for phi in [lower, upper]
-      // Jacobian: log_phi => phi * d(log_phi) = phi
       if (svc_phi[j] < data.svc_phi_prior_lower || svc_phi[j] > data.svc_phi_prior_upper) {
         return -INFINITY;
       }
@@ -1583,29 +1580,31 @@ double compute_log_post(
 
     // Extract SVC values
     int n_svc_params = n_svc * n_obs;
-    svc_w_flat.resize(n_svc_params);
     for (int k = 0; k < n_svc_params; k++) {
       svc_w_flat[k] = params[layout.svc_w_start + k];
     }
 
-    // NNGP prior on each SVC term
+    // NNGP prior on each SVC term (reuse w_j workspace)
+    double* w_j = data.svc_data.w_j_ws.data();
     for (int j = 0; j < n_svc; j++) {
-      // Extract w_j (the j-th SVC term at all locations)
-      std::vector<double> w_j(n_obs);
       for (int i = 0; i < n_obs; i++) {
         w_j[i] = svc_w_flat[j * n_obs + i];
       }
 
-      // NNGP log-likelihood
-      log_post += ratiod_svc::nngp_log_lik(w_j, svc_sigma2[j], svc_phi[j], data.svc_data);
+      // nngp_log_lik takes const vector ref - wrap pointer
+      // TODO: add pointer-based overload to avoid this
+      std::vector<double> w_j_vec(w_j, w_j + n_obs);
+      log_post += ratiod_svc::nngp_log_lik(w_j_vec, svc_sigma2[j], svc_phi[j], data.svc_data);
     }
 
-    // Soft sum-to-zero constraint for identifiability (mean(w) ~ N(0,1))
-    log_post += ratiod_svc::svc_sum_to_zero_penalty(svc_w_flat, data.svc_data, 1.0);
+    // Soft sum-to-zero constraint for identifiability
+    std::vector<double> svc_w_flat_vec(svc_w_flat, svc_w_flat + n_svc_params);
+    log_post += ratiod_svc::svc_sum_to_zero_penalty(svc_w_flat_vec, data.svc_data, 1.0);
 
     // Precompute SVC contribution to linear predictor
-    svc_eta.resize(data.N, 0.0);
-    ratiod_svc::compute_svc_eta(svc_w_flat, data.svc_data, svc_eta);
+    svc_eta_ptr = data.svc_data.eta_ws.data();
+    std::fill(svc_eta_ptr, svc_eta_ptr + data.N, 0.0);
+    ratiod_svc::compute_svc_eta(svc_w_flat_vec, data.svc_data, data.svc_data.eta_ws);
   }
 
   // ============ LIKELIHOOD (parallelized) ============
@@ -1839,8 +1838,8 @@ double compute_log_post(
     }
 
     // Add SVC (Spatially-Varying Coefficients) effect
-    if (layout.has_svc && !svc_eta.empty()) {
-      double svc_effect = svc_eta[i];
+    if (layout.has_svc && svc_eta_ptr != nullptr) {
+      double svc_effect = svc_eta_ptr[i];
       if (data.svc_data.shared) {
         eta_num += svc_effect;
         eta_denom += svc_effect;
@@ -4489,7 +4488,7 @@ static inline void spatial_gmrf_prior_grad(
             }
             grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad;
         }
-        double icar_qf = icar_quadratic_form(std::vector<double>(spatial_phi, spatial_phi + S), data);
+        double icar_qf = icar_quadratic_form_ptr(spatial_phi, S, data);
         grad[layout.log_tau_spatial_idx] += 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
     }
 }
@@ -4563,49 +4562,66 @@ void compute_gradient_gp_handcoded(
     grad[layout.log_phi_gp_idx] += nngp_grads.grad_log_phi;
 
     // =========================================================================
-    // Data likelihood loop
+    // Data likelihood loop (vectorized eta + per-obs scatter)
     // =========================================================================
-    for (int i = 0; i < data.N; i++) {
-        // Linear predictors
-        double eta_num = 0.0, eta_denom = 0.0;
-        for (int j = 0; j < data.p_num; j++) {
-            eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
-        }
-        for (int j = 0; j < data.p_denom; j++) {
-            eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        }
+    const int N = data.N;
+    const bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
+                              data.model_type == ModelType::BETA_BINOMIAL);
 
-        // Random effects (handles NC parameterization)
+    // --- Pass 1: Vectorized eta computation (Eigen matvec) ---
+    using RowMajorMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using VectorXd = Eigen::VectorXd;
+
+    vec_grad_ws.init(N);
+    Eigen::Map<const RowMajorMatrix> X_num(data.X_num_flat.data(), N, data.p_num);
+    Eigen::Map<const VectorXd> b_num(beta_num, data.p_num);
+    Eigen::Map<VectorXd> eta_n(vec_grad_ws.eta_num.data(), N);
+    eta_n.noalias() = X_num * b_num;
+
+    if (!is_binomial) {
+        Eigen::Map<const RowMajorMatrix> X_denom(data.X_denom_flat.data(), N, data.p_denom);
+        Eigen::Map<const VectorXd> b_denom(beta_denom, data.p_denom);
+        Eigen::Map<VectorXd> eta_d(vec_grad_ws.eta_denom.data(), N);
+        eta_d.noalias() = X_denom * b_denom;
+    } else {
+        std::memset(vec_grad_ws.eta_denom.data(), 0, N * sizeof(double));
+    }
+
+    // Add RE + GP effects per-obs
+    for (int i = 0; i < N; i++) {
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
             double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
-            eta_num += re_eff;
-            eta_denom += re_eff;
+            vec_grad_ws.eta_num[i] += re_eff;
+            if (!is_binomial) vec_grad_ws.eta_denom[i] += re_eff;
         }
-
-        // GP spatial effect (map observation to unique location)
         int loc_i = data.gp_data.obs_to_loc[i];
         double gp_effect = gp_w[loc_i];
-        if (data.gp_data.shared) {
-            eta_num += gp_effect;
-            eta_denom += gp_effect;
-        } else {
-            eta_num += gp_effect;
+        vec_grad_ws.eta_num[i] += gp_effect;
+        if (!is_binomial && data.gp_data.shared) vec_grad_ws.eta_denom[i] += gp_effect;
+    }
+
+    // --- Pass 2+3: Vectorized residuals + beta grads (template-dispatched) ---
+    {
+        double grad_phi_num_lik = 0.0, grad_phi_denom_lik = 0.0;
+        vectorized::dispatch_residuals_and_beta_grads(
+            data, layout,
+            vec_grad_ws.eta_num.data(), vec_grad_ws.eta_denom.data(),
+            vec_grad_ws.resid_num.data(), vec_grad_ws.resid_denom.data(),
+            grad.data(), grad_phi_num_lik, grad_phi_denom_lik,
+            obs_log_lik, fuse_lp, phi_num, phi_denom, vec_grad_ws);
+    }
+
+    // Scatter residuals to RE and GP gradients
+    for (int i = 0; i < N; i++) {
+        if (layout.has_re && data.re_group[i] > 0) {
+            grad[layout.re_start + data.re_group[i] - 1] += vec_grad_ws.resid_num[i] + vec_grad_ws.resid_denom[i];
         }
-
-        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
-
-        double dLL_deta_num = 0.0, dLL_deta_denom = 0.0;
-        compute_obs_residuals(data, i, eta_num, eta_denom, phi_num, phi_denom, dLL_deta_num, dLL_deta_denom);
-
-        scatter_beta_gradients(data, layout, i, dLL_deta_num, dLL_deta_denom, grad.data());
-        scatter_re_gradient(data, layout, i, dLL_deta_num, dLL_deta_denom, grad.data());
-
-        // GP spatial gradient
-        double dLL_dspatial = data.gp_data.shared ? (dLL_deta_num + dLL_deta_denom) : dLL_deta_num;
+        int loc_i = data.gp_data.obs_to_loc[i];
+        double dLL_dspatial = data.gp_data.shared
+            ? (vec_grad_ws.resid_num[i] + vec_grad_ws.resid_denom[i])
+            : vec_grad_ws.resid_num[i];
         grad[layout.gp_w_start + loc_i] += dLL_dspatial;
-
-        accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -4670,38 +4686,71 @@ void compute_gradient_gp_temporal_handcoded(
     grad[layout.log_sigma2_gp_idx] += nngp_grads.grad_log_sigma2;
     grad[layout.log_phi_gp_idx] += nngp_grads.grad_log_phi;
 
-    // Likelihood
+    // Likelihood (vectorized eta + per-obs scatter)
+    const int N = data.N;
+    const bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
+                              data.model_type == ModelType::BETA_BINOMIAL);
     std::vector<double> grad_temporal_lik(T_len, 0.0);
-    for (int i = 0; i < data.N; i++) {
-        double eta_num = 0.0, eta_denom = 0.0;
-        for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
-        for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        if (layout.has_re && data.re_group[i] > 0) { double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization); eta_num += re_eff; eta_denom += re_eff; }
-        int loc_i = data.gp_data.obs_to_loc[i];
-        if (data.gp_data.shared) { eta_num += gp_w[loc_i]; eta_denom += gp_w[loc_i]; } else { eta_num += gp_w[loc_i]; }
+    std::vector<int> obs_t_idx(N, -1);
 
-        int t_idx = -1;
+    using RowMajorMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using VectorXd = Eigen::VectorXd;
+    vec_grad_ws.init(N);
+    Eigen::Map<const RowMajorMatrix> X_num(data.X_num_flat.data(), N, data.p_num);
+    Eigen::Map<const VectorXd> b_num(beta_num, data.p_num);
+    Eigen::Map<VectorXd> eta_n(vec_grad_ws.eta_num.data(), N);
+    eta_n.noalias() = X_num * b_num;
+    if (!is_binomial) {
+        Eigen::Map<const RowMajorMatrix> X_denom(data.X_denom_flat.data(), N, data.p_denom);
+        Eigen::Map<const VectorXd> b_denom(beta_denom, data.p_denom);
+        Eigen::Map<VectorXd> eta_d(vec_grad_ws.eta_denom.data(), N);
+        eta_d.noalias() = X_denom * b_denom;
+    } else {
+        std::memset(vec_grad_ws.eta_denom.data(), 0, N * sizeof(double));
+    }
+
+    for (int i = 0; i < N; i++) {
+        if (layout.has_re && data.re_group[i] > 0) {
+            double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization);
+            vec_grad_ws.eta_num[i] += re_eff;
+            if (!is_binomial) vec_grad_ws.eta_denom[i] += re_eff;
+        }
+        int loc_i = data.gp_data.obs_to_loc[i];
+        double gp_effect = gp_w[loc_i];
+        vec_grad_ws.eta_num[i] += gp_effect;
+        if (!is_binomial && data.gp_data.shared) vec_grad_ws.eta_denom[i] += gp_effect;
+
         if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
             int t = data.temporal_time_idx[i] - 1;
             int g = data.temporal_group_idx[i] - 1;
-            t_idx = g * data.n_times + t;  // Panel temporal: flat index
+            int t_idx = g * data.n_times + t;
             if (t_idx >= 0 && t_idx < T_len) {
-                if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
-                else { eta_num += phi_temporal[t_idx]; }
+                obs_t_idx[i] = t_idx;
+                vec_grad_ws.eta_num[i] += phi_temporal[t_idx];
+                if (!is_binomial && data.temporal_shared) vec_grad_ws.eta_denom[i] += phi_temporal[t_idx];
             }
         }
+    }
 
-        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+    {
+        double grad_phi_num_lik = 0.0, grad_phi_denom_lik = 0.0;
+        vectorized::dispatch_residuals_and_beta_grads(
+            data, layout,
+            vec_grad_ws.eta_num.data(), vec_grad_ws.eta_denom.data(),
+            vec_grad_ws.resid_num.data(), vec_grad_ws.resid_denom.data(),
+            grad.data(), grad_phi_num_lik, grad_phi_denom_lik,
+            obs_log_lik, fuse_lp, phi_num, phi_denom, vec_grad_ws);
+    }
 
-        double dLL_num = 0.0, dLL_denom = 0.0;
-        compute_obs_residuals(data, i, eta_num, eta_denom, phi_num, phi_denom, dLL_num, dLL_denom);
-
-        scatter_beta_gradients(data, layout, i, dLL_num, dLL_denom, grad.data());
-        scatter_re_gradient(data, layout, i, dLL_num, dLL_denom, grad.data());
+    for (int i = 0; i < N; i++) {
+        double dLL_num = vec_grad_ws.resid_num[i];
+        double dLL_denom = vec_grad_ws.resid_denom[i];
+        if (layout.has_re && data.re_group[i] > 0) {
+            grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
+        }
+        int loc_i = data.gp_data.obs_to_loc[i];
         grad[layout.gp_w_start + loc_i] += data.gp_data.shared ? (dLL_num + dLL_denom) : dLL_num;
-        if (t_idx >= 0 && t_idx < T_len) grad_temporal_lik[t_idx] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
-
-        accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
+        if (obs_t_idx[i] >= 0) grad_temporal_lik[obs_t_idx[i]] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
     }
 
     // Temporal GMRF gradients
@@ -5107,47 +5156,74 @@ void compute_gradient_msgp_temporal_handcoded(
     grad[layout.log_phi_gp_regional_idx] += nngp_grads_regional.grad_log_phi;
 
     // =========================================================================
-    // Likelihood loop
+    // Likelihood loop (vectorized eta + per-obs scatter)
     // =========================================================================
+    const int N = data.N;
+    const bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
+                              data.model_type == ModelType::BETA_BINOMIAL);
     std::vector<double> grad_temporal_lik(T_len, 0.0);
-    for (int i = 0; i < data.N; i++) {
-        double eta_num = 0.0, eta_denom = 0.0;
-        for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
-        for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        if (layout.has_re && data.re_group[i] > 0) { double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization); eta_num += re_eff; eta_denom += re_eff; }
+    std::vector<int> obs_t_idx(N, -1);
 
-        // Multi-scale GP spatial effect (map observation to unique location)
+    using RowMajorMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using VectorXd = Eigen::VectorXd;
+    vec_grad_ws.init(N);
+    Eigen::Map<const RowMajorMatrix> X_num(data.X_num_flat.data(), N, data.p_num);
+    Eigen::Map<const VectorXd> b_num(beta_num, data.p_num);
+    Eigen::Map<VectorXd> eta_n(vec_grad_ws.eta_num.data(), N);
+    eta_n.noalias() = X_num * b_num;
+    if (!is_binomial) {
+        Eigen::Map<const RowMajorMatrix> X_denom(data.X_denom_flat.data(), N, data.p_denom);
+        Eigen::Map<const VectorXd> b_denom(beta_denom, data.p_denom);
+        Eigen::Map<VectorXd> eta_d(vec_grad_ws.eta_denom.data(), N);
+        eta_d.noalias() = X_denom * b_denom;
+    } else {
+        std::memset(vec_grad_ws.eta_denom.data(), 0, N * sizeof(double));
+    }
+
+    for (int i = 0; i < N; i++) {
+        if (layout.has_re && data.re_group[i] > 0) {
+            double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization);
+            vec_grad_ws.eta_num[i] += re_eff;
+            if (!is_binomial) vec_grad_ws.eta_denom[i] += re_eff;
+        }
         int loc_i = data.multiscale_gp_data.obs_to_loc[i];
         double ms_spatial = w_local[loc_i] + w_regional[loc_i];
-        if (data.multiscale_gp_data.shared) { eta_num += ms_spatial; eta_denom += ms_spatial; }
-        else { eta_num += ms_spatial; }
+        vec_grad_ws.eta_num[i] += ms_spatial;
+        if (!is_binomial && data.multiscale_gp_data.shared) vec_grad_ws.eta_denom[i] += ms_spatial;
 
-        int t_idx = -1;
         if (!data.temporal_time_idx.empty() && i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
             int t = data.temporal_time_idx[i] - 1;
             int g = data.temporal_group_idx[i] - 1;
-            t_idx = g * data.n_times + t;  // Panel temporal: flat index
+            int t_idx = g * data.n_times + t;
             if (t_idx >= 0 && t_idx < T_len) {
-                if (data.temporal_shared) { eta_num += phi_temporal[t_idx]; eta_denom += phi_temporal[t_idx]; }
-                else { eta_num += phi_temporal[t_idx]; }
+                obs_t_idx[i] = t_idx;
+                vec_grad_ws.eta_num[i] += phi_temporal[t_idx];
+                if (!is_binomial && data.temporal_shared) vec_grad_ws.eta_denom[i] += phi_temporal[t_idx];
             }
         }
+    }
 
-        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+    {
+        double grad_phi_num_lik = 0.0, grad_phi_denom_lik = 0.0;
+        vectorized::dispatch_residuals_and_beta_grads(
+            data, layout,
+            vec_grad_ws.eta_num.data(), vec_grad_ws.eta_denom.data(),
+            vec_grad_ws.resid_num.data(), vec_grad_ws.resid_denom.data(),
+            grad.data(), grad_phi_num_lik, grad_phi_denom_lik,
+            obs_log_lik, fuse_lp, phi_num, phi_denom, vec_grad_ws);
+    }
 
-        double dLL_num = 0.0, dLL_denom = 0.0;
-        compute_obs_residuals(data, i, eta_num, eta_denom, phi_num, phi_denom, dLL_num, dLL_denom);
-
-        scatter_beta_gradients(data, layout, i, dLL_num, dLL_denom, grad.data());
-        scatter_re_gradient(data, layout, i, dLL_num, dLL_denom, grad.data());
-
+    for (int i = 0; i < N; i++) {
+        double dLL_num = vec_grad_ws.resid_num[i];
+        double dLL_denom = vec_grad_ws.resid_denom[i];
+        if (layout.has_re && data.re_group[i] > 0) {
+            grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
+        }
+        int loc_i = data.multiscale_gp_data.obs_to_loc[i];
         double dLL_dspatial = data.multiscale_gp_data.shared ? (dLL_num + dLL_denom) : dLL_num;
         grad[layout.gp_local_start + loc_i] += dLL_dspatial;
         grad[layout.gp_regional_start + loc_i] += dLL_dspatial;
-
-        if (t_idx >= 0 && t_idx < T_len) grad_temporal_lik[t_idx] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
-
-        accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
+        if (obs_t_idx[i] >= 0) grad_temporal_lik[obs_t_idx[i]] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
     }
 
     // Temporal GMRF gradients
@@ -5193,7 +5269,9 @@ void compute_gradient_svc_handcoded(
     int n_svc = data.svc_data.n_svc;
     int N_obs = data.svc_data.n_obs;
 
-    std::vector<double> svc_sigma2(n_svc), svc_phi(n_svc);
+    // Use pre-allocated workspace buffers
+    double* svc_sigma2 = data.svc_data.sigma2_ws.data();
+    double* svc_phi = data.svc_data.phi_ws.data();
     for (int j = 0; j < n_svc; j++) {
         svc_sigma2[j] = std::exp(params[layout.log_sigma2_svc_start + j]);
         svc_phi[j] = std::exp(params[layout.log_phi_svc_start + j]);
@@ -5204,8 +5282,8 @@ void compute_gradient_svc_handcoded(
         }
     }
 
-    // Extract SVC spatial effects
-    std::vector<double> svc_w_flat(N_obs * n_svc);
+    // Extract SVC spatial effects (pre-allocated workspace)
+    double* svc_w_flat = data.svc_data.w_flat_ws.data();
     for (int k = 0; k < N_obs * n_svc; k++) {
         svc_w_flat[k] = params[layout.svc_w_start + k];
     }
@@ -5234,15 +5312,18 @@ void compute_gradient_svc_handcoded(
     // =========================================================================
     // Compute NNGP gradients w.r.t. SVC effects (analytical)
     // =========================================================================
+    // Reuse w_j workspace buffer across SVC terms
+    double* w_j_ptr = data.svc_data.w_j_ws.data();
     for (int j = 0; j < n_svc; j++) {
-        // Extract w for this SVC term
-        std::vector<double> w_j(N_obs);
+        // Extract w for this SVC term into workspace
         for (int i = 0; i < N_obs; i++) {
-            w_j[i] = svc_w_flat[j * N_obs + i];
+            w_j_ptr[i] = svc_w_flat[j * N_obs + i];
         }
 
+        // nngp_gradients takes vector ref - wrap workspace pointer
+        std::vector<double> w_j_vec(w_j_ptr, w_j_ptr + N_obs);
         ratiod_svc::SVCGradients svc_grads;
-        ratiod_svc::svc_nngp_gradients(w_j, svc_sigma2[j], svc_phi[j], data.svc_data, svc_grads);
+        ratiod_svc::svc_nngp_gradients(w_j_vec, svc_sigma2[j], svc_phi[j], data.svc_data, svc_grads);
 
         // Add NNGP prior gradient contributions for w
         for (int i = 0; i < N_obs; i++) {
@@ -5256,7 +5337,7 @@ void compute_gradient_svc_handcoded(
         // Sum-to-zero gradient: d/dw_k [-0.5 * lambda_mean * N * mean(w)^2] = -lambda_mean * mean(w)
         double sum_w = 0.0;
         for (int i = 0; i < N_obs; i++) {
-            sum_w += w_j[i];
+            sum_w += w_j_ptr[i];
         }
         double mean_w = sum_w / N_obs;
         double stz_grad = -1.0 * mean_w;  // lambda_mean = 1.0
@@ -5266,57 +5347,62 @@ void compute_gradient_svc_handcoded(
     }
 
     // =========================================================================
-    // Data likelihood loop
+    // Data likelihood loop (vectorized eta + per-obs scatter)
     // =========================================================================
-    for (int i = 0; i < data.N; i++) {
-        // Linear predictors
-        double eta_num = 0.0, eta_denom = 0.0;
-        for (int j = 0; j < data.p_num; j++) {
-            eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
-        }
-        for (int j = 0; j < data.p_denom; j++) {
-            eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        }
+    const int N = data.N;
+    const bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
+                              data.model_type == ModelType::BETA_BINOMIAL);
 
-        // Random effects (handles NC parameterization)
+    using RowMajorMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using VectorXd = Eigen::VectorXd;
+    vec_grad_ws.init(N);
+    Eigen::Map<const RowMajorMatrix> X_num(data.X_num_flat.data(), N, data.p_num);
+    Eigen::Map<const VectorXd> b_num(beta_num, data.p_num);
+    Eigen::Map<VectorXd> eta_n(vec_grad_ws.eta_num.data(), N);
+    eta_n.noalias() = X_num * b_num;
+    if (!is_binomial) {
+        Eigen::Map<const RowMajorMatrix> X_denom(data.X_denom_flat.data(), N, data.p_denom);
+        Eigen::Map<const VectorXd> b_denom(beta_denom, data.p_denom);
+        Eigen::Map<VectorXd> eta_d(vec_grad_ws.eta_denom.data(), N);
+        eta_d.noalias() = X_denom * b_denom;
+    } else {
+        std::memset(vec_grad_ws.eta_denom.data(), 0, N * sizeof(double));
+    }
+
+    for (int i = 0; i < N; i++) {
         if (layout.has_re && data.re_group[i] > 0) {
-            int g = data.re_group[i] - 1;
-            double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
-            eta_num += re_eff;
-            eta_denom += re_eff;
+            double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization);
+            vec_grad_ws.eta_num[i] += re_eff;
+            if (!is_binomial) vec_grad_ws.eta_denom[i] += re_eff;
         }
-
-        // SVC effect: sum_j X_svc[i,j] * w_j[i]
         double svc_effect = 0.0;
         for (int j = 0; j < n_svc; j++) {
-            double x_ij = data.svc_data.X_svc[i * n_svc + j];
-            double w_ij = svc_w_flat[j * N_obs + i];
-            svc_effect += x_ij * w_ij;
+            svc_effect += data.svc_data.X_svc[i * n_svc + j] * svc_w_flat[j * N_obs + i];
         }
-        if (data.svc_data.shared) {
-            eta_num += svc_effect;
-            eta_denom += svc_effect;
-        } else {
-            eta_num += svc_effect;
+        vec_grad_ws.eta_num[i] += svc_effect;
+        if (!is_binomial && data.svc_data.shared) vec_grad_ws.eta_denom[i] += svc_effect;
+    }
+
+    {
+        double grad_phi_num_lik = 0.0, grad_phi_denom_lik = 0.0;
+        vectorized::dispatch_residuals_and_beta_grads(
+            data, layout,
+            vec_grad_ws.eta_num.data(), vec_grad_ws.eta_denom.data(),
+            vec_grad_ws.resid_num.data(), vec_grad_ws.resid_denom.data(),
+            grad.data(), grad_phi_num_lik, grad_phi_denom_lik,
+            obs_log_lik, fuse_lp, phi_num, phi_denom, vec_grad_ws);
+    }
+
+    for (int i = 0; i < N; i++) {
+        double dLL_num = vec_grad_ws.resid_num[i];
+        double dLL_denom = vec_grad_ws.resid_denom[i];
+        if (layout.has_re && data.re_group[i] > 0) {
+            grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
         }
-
-        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
-
-        double dLL_deta_num = 0.0, dLL_deta_denom = 0.0;
-        compute_obs_residuals(data, i, eta_num, eta_denom, phi_num, phi_denom, dLL_deta_num, dLL_deta_denom);
-
-        scatter_beta_gradients(data, layout, i, dLL_deta_num, dLL_deta_denom, grad.data());
-        scatter_re_gradient(data, layout, i, dLL_deta_num, dLL_deta_denom, grad.data());
-
-        // Gradients for SVC spatial effects (from likelihood)
-        double dLL_dsvc = data.svc_data.shared ?
-                          (dLL_deta_num + dLL_deta_denom) : dLL_deta_num;
+        double dLL_dsvc = data.svc_data.shared ? (dLL_num + dLL_denom) : dLL_num;
         for (int j = 0; j < n_svc; j++) {
-            double x_ij = data.svc_data.X_svc[i * n_svc + j];
-            grad[layout.svc_w_start + j * N_obs + i] += dLL_dsvc * x_ij;
+            grad[layout.svc_w_start + j * N_obs + i] += dLL_dsvc * data.svc_data.X_svc[i * n_svc + j];
         }
-
-        accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
     // Non-centered RE chain rule transformation
@@ -5450,46 +5536,63 @@ void compute_gradient_tvc_handcoded(
     }
 
     // =========================================================================
-    // Data likelihood loop
+    // Data likelihood loop (vectorized eta + per-obs scatter)
     // =========================================================================
-    for (int i = 0; i < data.N; i++) {
-        // Linear predictors
-        double eta_num = 0.0, eta_denom = 0.0;
-        for (int j = 0; j < data.p_num; j++) {
-            eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
-        }
-        for (int j = 0; j < data.p_denom; j++) {
-            eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        }
+    const int N = data.N;
+    const bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
+                              data.model_type == ModelType::BETA_BINOMIAL);
 
-        // Random effects (handles NC parameterization)
+    // --- Pass 1: Vectorized eta computation (Eigen matvec) ---
+    using RowMajorMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using VectorXd = Eigen::VectorXd;
+
+    vec_grad_ws.init(N);
+    Eigen::Map<const RowMajorMatrix> X_num(data.X_num_flat.data(), N, data.p_num);
+    Eigen::Map<const VectorXd> b_num(beta_num, data.p_num);
+    Eigen::Map<VectorXd> eta_n(vec_grad_ws.eta_num.data(), N);
+    eta_n.noalias() = X_num * b_num;
+
+    if (!is_binomial) {
+        Eigen::Map<const RowMajorMatrix> X_denom(data.X_denom_flat.data(), N, data.p_denom);
+        Eigen::Map<const VectorXd> b_denom(beta_denom, data.p_denom);
+        Eigen::Map<VectorXd> eta_d(vec_grad_ws.eta_denom.data(), N);
+        eta_d.noalias() = X_denom * b_denom;
+    } else {
+        std::memset(vec_grad_ws.eta_denom.data(), 0, N * sizeof(double));
+    }
+
+    // Add RE + TVC effects per-obs
+    for (int i = 0; i < N; i++) {
         if (layout.has_re && data.re_group[i] > 0) {
             int g = data.re_group[i] - 1;
             double re_eff = re_value_for_eta(re, g, sigma_re, data.re_parameterization);
-            eta_num += re_eff;
-            eta_denom += re_eff;
+            vec_grad_ws.eta_num[i] += re_eff;
+            if (!is_binomial) vec_grad_ws.eta_denom[i] += re_eff;
         }
-
-        // TVC effect
         double tvc_effect = tvc_eta[i];
-        if (data.tvc_data.shared) {
-            eta_num += tvc_effect;
-            eta_denom += tvc_effect;
-        } else {
-            eta_num += tvc_effect;
+        vec_grad_ws.eta_num[i] += tvc_effect;
+        if (!is_binomial && data.tvc_data.shared) vec_grad_ws.eta_denom[i] += tvc_effect;
+    }
+
+    // --- Pass 2+3: Vectorized residuals + beta grads (template-dispatched) ---
+    {
+        double grad_phi_num_lik = 0.0, grad_phi_denom_lik = 0.0;
+        vectorized::dispatch_residuals_and_beta_grads(
+            data, layout,
+            vec_grad_ws.eta_num.data(), vec_grad_ws.eta_denom.data(),
+            vec_grad_ws.resid_num.data(), vec_grad_ws.resid_denom.data(),
+            grad.data(), grad_phi_num_lik, grad_phi_denom_lik,
+            obs_log_lik, fuse_lp, phi_num, phi_denom, vec_grad_ws);
+    }
+
+    // Scatter residuals to RE and TVC gradients
+    for (int i = 0; i < N; i++) {
+        if (layout.has_re && data.re_group[i] > 0) {
+            grad[layout.re_start + data.re_group[i] - 1] += vec_grad_ws.resid_num[i] + vec_grad_ws.resid_denom[i];
         }
-
-        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
-
-        double dLL_deta_num = 0.0, dLL_deta_denom = 0.0;
-        compute_obs_residuals(data, i, eta_num, eta_denom, phi_num, phi_denom, dLL_deta_num, dLL_deta_denom);
-
-        scatter_beta_gradients(data, layout, i, dLL_deta_num, dLL_deta_denom, grad.data());
-        scatter_re_gradient(data, layout, i, dLL_deta_num, dLL_deta_denom, grad.data());
-
-        // Gradients for TVC w values (from likelihood)
-        double dLL_dtvc = data.tvc_data.shared ?
-                          (dLL_deta_num + dLL_deta_denom) : dLL_deta_num;
+        double dLL_dtvc = data.tvc_data.shared
+            ? (vec_grad_ws.resid_num[i] + vec_grad_ws.resid_denom[i])
+            : vec_grad_ws.resid_num[i];
         int t = data.tvc_data.time_index[i] - 1;
         int g = data.tvc_data.group_index[i] - 1;
         for (int j = 0; j < n_tvc; j++) {
@@ -5497,11 +5600,8 @@ void compute_gradient_tvc_handcoded(
             int w_idx = (g * n_tvc + j) * n_times + t;
             grad[layout.tvc_w_start + w_idx] += dLL_dtvc * x_ij;
         }
-
-        accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
-    // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
 
     if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
@@ -6773,28 +6873,50 @@ void compute_gradient_ms_temporal_handcoded(
     std::vector<double> grad_theta_lik;
     if (layout.is_bym2) grad_theta_lik.assign(data.n_spatial_units, 0.0);
 
-    for (int i = 0; i < data.N; i++) {
-        double eta_num = 0.0, eta_denom = 0.0;
-        for (int j = 0; j < data.p_num; j++) eta_num += data.X_num_flat[i * data.p_num + j] * beta_num[j];
-        for (int j = 0; j < data.p_denom; j++) eta_denom += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
-        if (layout.has_re && data.re_group[i] > 0) { double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization); eta_num += re_eff; eta_denom += re_eff; }
+    // Vectorized eta computation
+    const int N = data.N;
+    const bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
+                              data.model_type == ModelType::BETA_BINOMIAL);
+    using RowMajorMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using VectorXd = Eigen::VectorXd;
+    vec_grad_ws.init(N);
+    Eigen::Map<const RowMajorMatrix> X_num(data.X_num_flat.data(), N, data.p_num);
+    Eigen::Map<const VectorXd> b_num(beta_num, data.p_num);
+    Eigen::Map<VectorXd> eta_n(vec_grad_ws.eta_num.data(), N);
+    eta_n.noalias() = X_num * b_num;
+    if (!is_binomial) {
+        Eigen::Map<const RowMajorMatrix> X_denom(data.X_denom_flat.data(), N, data.p_denom);
+        Eigen::Map<const VectorXd> b_denom(beta_denom, data.p_denom);
+        Eigen::Map<VectorXd> eta_d(vec_grad_ws.eta_denom.data(), N);
+        eta_d.noalias() = X_denom * b_denom;
+    } else {
+        std::memset(vec_grad_ws.eta_denom.data(), 0, N * sizeof(double));
+    }
 
-        // Spatial effect
-        int s_unit = -1;
-        if (layout.has_spatial && data.spatial_group[i] > 0) {
-            s_unit = data.spatial_group[i] - 1;
-            if (layout.is_bym2) {
-                double spatial_eff = sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s_unit] + sigma_u_bym2 * theta_bym2[s_unit];
-                eta_num += spatial_eff; eta_denom += spatial_eff;
-            } else {
-                eta_num += spatial_phi[s_unit]; eta_denom += spatial_phi[s_unit];
-            }
+    // Per-obs: add RE + spatial + multiscale temporal effects
+    std::vector<int> obs_s_unit(N, -1);
+    std::vector<int> obs_t_idx(N, -1);
+    for (int i = 0; i < N; i++) {
+        if (layout.has_re && data.re_group[i] > 0) {
+            double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization);
+            vec_grad_ws.eta_num[i] += re_eff;
+            if (!is_binomial) vec_grad_ws.eta_denom[i] += re_eff;
         }
-
-        // Multiscale temporal effect
-        int t_idx = -1;
+        if (layout.has_spatial && data.spatial_group[i] > 0) {
+            int s_unit = data.spatial_group[i] - 1;
+            obs_s_unit[i] = s_unit;
+            double spatial_eff;
+            if (layout.is_bym2) {
+                spatial_eff = sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s_unit] + sigma_u_bym2 * theta_bym2[s_unit];
+            } else {
+                spatial_eff = spatial_phi[s_unit];
+            }
+            vec_grad_ws.eta_num[i] += spatial_eff;
+            if (!is_binomial) vec_grad_ws.eta_denom[i] += spatial_eff;
+        }
         if (!mst.time_index.empty() && i < (int)mst.time_index.size() && mst.time_index[i] > 0) {
-            t_idx = mst.time_index[i] - 1;
+            int t_idx = mst.time_index[i] - 1;
+            obs_t_idx[i] = t_idx;
             double ms_effect = 0.0;
             if (trend != nullptr && t_idx < n_trend) ms_effect += trend[t_idx];
             if (seasonal != nullptr && mst.seasonal_period > 0) {
@@ -6802,31 +6924,35 @@ void compute_gradient_ms_temporal_handcoded(
                 if (s_idx < n_seasonal) ms_effect += seasonal[s_idx];
             }
             if (short_term != nullptr && t_idx < n_short) ms_effect += short_term[t_idx];
-            if (mst.shared) { eta_num += ms_effect; eta_denom += ms_effect; }
-            else { eta_num += ms_effect; }
+            vec_grad_ws.eta_num[i] += ms_effect;
+            if (!is_binomial && mst.shared) vec_grad_ws.eta_denom[i] += ms_effect;
         }
+    }
 
-        if (fuse_lp) obs_log_lik += compute_obs_ll(data, i, eta_num, eta_denom, phi_num, phi_denom);
+    {
+        double grad_phi_num_lik = 0.0, grad_phi_denom_lik = 0.0;
+        vectorized::dispatch_residuals_and_beta_grads(
+            data, layout,
+            vec_grad_ws.eta_num.data(), vec_grad_ws.eta_denom.data(),
+            vec_grad_ws.resid_num.data(), vec_grad_ws.resid_denom.data(),
+            grad.data(), grad_phi_num_lik, grad_phi_denom_lik,
+            obs_log_lik, fuse_lp, phi_num, phi_denom, vec_grad_ws);
+    }
 
-        double dLL_num = 0.0, dLL_denom = 0.0;
-        compute_obs_residuals(data, i, eta_num, eta_denom, phi_num, phi_denom, dLL_num, dLL_denom);
-
-        scatter_beta_gradients(data, layout, i, dLL_num, dLL_denom, grad.data());
-        scatter_re_gradient(data, layout, i, dLL_num, dLL_denom, grad.data());
-
+    // Scatter residuals
+    for (int i = 0; i < N; i++) {
+        double dLL_num = vec_grad_ws.resid_num[i];
+        double dLL_denom = vec_grad_ws.resid_denom[i];
+        if (layout.has_re && data.re_group[i] > 0) {
+            grad[layout.re_start + data.re_group[i] - 1] += dLL_num + dLL_denom;
+        }
         double dLL_shared = dLL_num + dLL_denom;
-
-        // Spatial likelihood gradient
+        int s_unit = obs_s_unit[i];
         if (layout.has_spatial && s_unit >= 0) {
-            if (layout.is_bym2) {
-                grad_spatial_lik[s_unit] += dLL_shared;
-                grad_theta_lik[s_unit] += dLL_shared;
-            } else {
-                grad_spatial_lik[s_unit] += dLL_shared;
-            }
+            grad_spatial_lik[s_unit] += dLL_shared;
+            if (layout.is_bym2) grad_theta_lik[s_unit] += dLL_shared;
         }
-
-        // Multiscale temporal likelihood gradients
+        int t_idx = obs_t_idx[i];
         if (t_idx >= 0) {
             double dLL_temporal = mst.shared ? dLL_shared : dLL_num;
             if (trend != nullptr && t_idx < n_trend) grad_trend_lik[t_idx] += dLL_temporal;
@@ -6836,8 +6962,6 @@ void compute_gradient_ms_temporal_handcoded(
             }
             if (short_term != nullptr && t_idx < n_short) grad_short_lik[t_idx] += dLL_temporal;
         }
-
-        accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
 
     // Spatial GMRF prior gradients (ICAR/BYM2)
@@ -7234,17 +7358,46 @@ void compute_gradient_spatiotemporal_handcoded(
                 }
             }
         } else if (st.temporal_type == TemporalType::RW2) {
+            // Unrolled RW2 stencil: Q_t is the second-difference precision matrix.
+            // For each t, Q_t[t,:] * x gives a linear combination of second differences.
+            // Instead of irregular max/min bounds, handle boundary cases explicitly.
             for (int s = 0; s < S; s++) {
                 const double* d_s = &stencil_input[s * T];
-                for (int t = 0; t < T; t++) {
-                    double qt_val = 0.0;
-                    for (int k = std::max(0, t - 2); k <= std::min(T - 3, t); k++) {
-                        int pos = t - k;
-                        double coef = (pos == 1) ? -2.0 : 1.0;
-                        double d2 = d_s[k] - 2.0 * d_s[k + 1] + d_s[k + 2];
-                        qt_val += coef * d2;
+                double* v_s = &v[s * T];
+                if (T >= 3) {
+                    // Precompute second differences d2[k] = d_s[k] - 2*d_s[k+1] + d_s[k+2]
+                    // Reused by multiple t values, avoids redundant subtraction
+                    const int n_d2 = T - 2;
+                    // Use stack for small T (typical: T=20), heap only if huge
+                    double d2_stack[64];
+                    double* d2 = (n_d2 <= 64) ? d2_stack : new double[n_d2];
+                    for (int k = 0; k < n_d2; k++) {
+                        d2[k] = d_s[k] - 2.0 * d_s[k + 1] + d_s[k + 2];
                     }
-                    v[s * T + t] = qt_val;
+
+                    // t=0: only k=0 contributes (pos=0, coef=1)
+                    v_s[0] = d2[0];
+                    // t=1: k=0 (pos=1, coef=-2) + k=1 (pos=0, coef=1) if T>=4
+                    v_s[1] = -2.0 * d2[0];
+                    if (n_d2 > 1) v_s[1] += d2[1];
+                    // Interior: t=2..T-3, all three contributions present
+                    for (int t = 2; t < T - 2; t++) {
+                        v_s[t] = d2[t - 2] - 2.0 * d2[t - 1] + d2[t];
+                    }
+                    // t=T-2: k=T-4 (pos=2, coef=1) + k=T-3 (pos=1, coef=-2)
+                    if (T >= 4) {
+                        v_s[T - 2] = d2[n_d2 - 2] - 2.0 * d2[n_d2 - 1];
+                    } else {
+                        // T==3: t=1 already handled, t=T-2=1 is same slot
+                        // Just set directly
+                        v_s[T - 2] = -2.0 * d2[0];
+                    }
+                    // t=T-1: k=T-3 (pos=2, coef=1)
+                    v_s[T - 1] = d2[n_d2 - 1];
+
+                    if (n_d2 > 64) delete[] d2;
+                } else {
+                    // T < 3: no second differences possible, v stays zero
                 }
             }
         }
@@ -8282,14 +8435,15 @@ LeapfrogInPlaceResult leapfrog_step_inplace(
   // Half step for momentum using new gradient
   ratiod_linalg::axpy(0.5 * epsilon, grad, p, n);
 
-  // Divergence check
+  // Divergence check (skip param scan if log_prob already non-finite)
   if (!std::isfinite(result.log_prob)) {
     result.divergent = true;
-  }
-  for (int i = 0; i < n; i++) {
-    if (std::abs(q[i]) > 1e10 || !std::isfinite(q[i])) {
-      result.divergent = true;
-      break;
+  } else {
+    for (int i = 0; i < n; i++) {
+      if (std::abs(q[i]) > 1e10 || !std::isfinite(q[i])) {
+        result.divergent = true;
+        break;
+      }
     }
   }
 
@@ -8455,18 +8609,13 @@ TreeStats build_tree_fast(
   const double* final_far_psharp = (direction == 1) ? stats.p_sharp_end.data() : stats.p_sharp_beg.data();
 
   // Check 2: Init subtree + seam from final (rho = rho_init + p_final_beg)
-  for (int i = 0; i < n; i++) {
-    rho_check[i] = rho_init[i] + p_final_beg_ptr[i];
-  }
-  persist &= compute_criterion(init_far_psharp, p_sharp_final_beg_ptr,
-                                rho_check, n);
+  // Fused: rho construction + dot product in single O(n) pass
+  persist &= compute_criterion_fused(init_far_psharp, p_sharp_final_beg_ptr,
+                                     rho_init, p_final_beg_ptr, rho_check, n);
 
   // Check 3: Seam from init + final subtree (rho = rho_final + p_init_end)
-  for (int i = 0; i < n; i++) {
-    rho_check[i] = outer.rho[i] + p_init_end[i];
-  }
-  persist &= compute_criterion(p_sharp_init_end, final_far_psharp,
-                                rho_check, n);
+  persist &= compute_criterion_fused(p_sharp_init_end, final_far_psharp,
+                                     outer.rho.data(), p_init_end, rho_check, n);
 
   stats.stop = outer.stop || !persist;
 
@@ -8664,7 +8813,7 @@ HMCResultCpp run_hmc_chain_cpp(
       if (data.spatial_type == SpatialType::BYM2) {
         nuts_target_accept = 0.90;
       }
-      // ICAR: correlated spatial params, less severe than BYM2
+      // ICAR: correlated spatial params need slightly higher target
       else if (data.spatial_type == SpatialType::ICAR) {
         nuts_target_accept = 0.85;
       }
@@ -8723,7 +8872,6 @@ HMCResultCpp run_hmc_chain_cpp(
     // Each block captures a small dense correlation (2-4 params) at O(block²) cost,
     // avoiding full O(n²) DENSE while handling the key correlations DIAG misses.
     // NOTE: temporal_gp excluded — DIAG is faster (2.11s vs 2.39s, 5 seeds Bin+GP_t).
-    // The 2×2 sigma2-phi block doesn't reduce leapfrog steps enough to offset overhead.
     if (layout.is_hsgp && layout.log_sigma2_hsgp_idx >= 0 &&
         layout.log_lengthscale_hsgp_idx == layout.log_sigma2_hsgp_idx + 1) {
       block_specs.push_back({layout.log_sigma2_hsgp_idx, 2});
@@ -8787,24 +8935,40 @@ HMCResultCpp run_hmc_chain_cpp(
       }
     }
 
-    // Decision: BLOCK_DIAG if we found blocks, else check for DENSE needs
-    if (!block_specs.empty()) {
-      // Models that previously needed DENSE but DON'T benefit from full dense
-      // (temporal_gp, hsgp, gp, bym2, svc, st_gp, correlated slopes)
-      // are now served by BLOCK_DIAG which captures the key correlations.
-      // Only models with many interacting hyperparameters need full DENSE.
-      bool needs_full_dense = layout.has_latent ||  // N×K latent factors
-                              layout.has_multiscale_temporal;  // 3-4 correlated hyperparams
-      if (needs_full_dense) {
-        effective_metric = MassMatrixType::DENSE;
-        block_specs.clear();  // Don't use blocks
-        auto_selected_diag = false;
-      } else {
-        effective_metric = MassMatrixType::BLOCK_DIAG;
-        auto_selected_diag = false;
-      }
+    // NB phi params: overdispersion params are often correlated
+    // A 2×2 block captures their joint curvature cheaply (4 extra multiplies/step)
+    if (layout.has_phi_num && layout.has_phi_denom &&
+        layout.log_phi_denom_idx == layout.log_phi_num_idx + 1) {
+      block_specs.push_back({layout.log_phi_num_idx, 2});
+    }
+
+    // First check if model needs full DENSE (before block decision)
+    // NB+ICAR: NegBin's digamma curvature creates strong correlations between
+    // spatial phi params and overdispersion that BLOCK_DIAG's small blocks can't
+    // capture. DENSE mass doubles the step size, cutting treedepth from 8-9 to 5-6,
+    // which more than pays for the O(n²) per-step cost at p~108.
+    // GP_t: NC z-sigma2-phi funnel creates erratic treedepth (2-10) with DIAG.
+    // At p≤50, DENSE overhead is negligible.
+    bool is_nb_family = (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                         data.model_type == ModelType::NEGBIN_GAMMA);
+    bool is_icar = (data.spatial_type == SpatialType::ICAR);
+    bool is_binomial_family = (data.model_type == ModelType::BINOMIAL ||
+                              data.model_type == ModelType::BETA_BINOMIAL);
+    bool needs_full_dense = layout.has_latent ||  // N×K latent factors
+                            layout.has_multiscale_temporal ||  // 3-4 correlated hyperparams
+                            (is_nb_family && is_icar && n_params <= DENSE_MAX_PARAMS) ||  // NB+ICAR
+                            (is_binomial_family && is_icar && n_params <= DENSE_MAX_PARAMS);  // Bin+ICAR
+
+    if (needs_full_dense) {
+      effective_metric = MassMatrixType::DENSE;
+      block_specs.clear();
+      auto_selected_diag = false;
+    } else if (!block_specs.empty()) {
+      // BLOCK_DIAG: captures key correlations without full O(n²)
+      effective_metric = MassMatrixType::BLOCK_DIAG;
+      auto_selected_diag = false;
     } else {
-      // No blocks detected — pure DIAG
+      // No blocks detected, no DENSE needed — fall back to DIAG
       effective_metric = MassMatrixType::DIAG;
       auto_selected_diag = true;
     }
@@ -8866,6 +9030,10 @@ HMCResultCpp run_hmc_chain_cpp(
         layout.log_phi_st_time_idx == layout.log_phi_st_space_idx + 1) {
       block_specs.push_back({layout.log_phi_st_space_idx, 2});
     }
+    if (layout.has_phi_num && layout.has_phi_denom &&
+        layout.log_phi_denom_idx == layout.log_phi_num_idx + 1) {
+      block_specs.push_back({layout.log_phi_num_idx, 2});
+    }
     // If still no blocks found, fall back to DIAG
     if (block_specs.empty()) {
       effective_metric = MassMatrixType::DIAG;
@@ -8924,6 +9092,19 @@ HMCResultCpp run_hmc_chain_cpp(
       }
       inv_m[layout.log_sigma2_hsgp_idx] = 1.0;
       inv_m[layout.log_lengthscale_hsgp_idx] = 1.0;
+      any_informed = true;
+    }
+
+    // ICAR: phi[s] precision ≈ degree (number of neighbors)
+    // Higher degree → smaller variance → tighter mass
+    if (layout.has_spatial && !layout.is_bym2 &&
+        data.spatial_type == SpatialType::ICAR && !data.adj_row_ptr.empty()) {
+      for (int s = 0; s < (layout.spatial_end - layout.spatial_start); s++) {
+        int degree = data.adj_row_ptr[s + 1] - data.adj_row_ptr[s];
+        // ICAR precision diagonal ≈ degree; variance ≈ 1/degree
+        double var_est = 1.0 / std::max(1.0, (double)degree);
+        inv_m[layout.spatial_start + s] = var_est;
+      }
       any_informed = true;
     }
 
@@ -9004,6 +9185,12 @@ HMCResultCpp run_hmc_chain_cpp(
     }
   }
 
+  // Recompute epsilon with warm-start mass (if informed)
+  // This gives the dual averaging a better starting point when mass is pre-set
+  if (mass.type != MassMatrixType::DIAG && !mass.inv_mass_diag.empty()) {
+    epsilon = find_reasonable_epsilon(q, data, layout, rng, mass.inv_mass_diag);
+  }
+
   WelfordStats mass_stats(n_params);              // Always track diagonal
   WelfordCovStats cov_stats(n_params);            // Only used when dense
   bool use_mass_matrix = false;
@@ -9028,14 +9215,26 @@ HMCResultCpp run_hmc_chain_cpp(
   //   Windows double in size: 25, 50, 100, 200, ...
   //   Last window extends to fill remaining space
   // Phase 3: [n_warmup - term_buffer, n_warmup) - final step size tuning
-  int init_buffer = 75;
+  // Models with structured warm-start (ICAR degree, BYM2 scale, HSGP) already
+  // have reasonable mass, so we can start adaptation earlier (init_buffer=25).
+  // This saves ~50 iterations of deep-tree warmup. Temporal_gp warm-start is
+  // trivial (identity-like) so it still needs the full 75 iterations.
+  bool has_structured_warmstart = layout.is_hsgp || layout.is_bym2 ||
+    (layout.has_spatial && !layout.is_bym2 && data.spatial_type == SpatialType::ICAR && !data.adj_row_ptr.empty());
+  int init_buffer = has_structured_warmstart ? 25 : 75;
   int term_buffer = 50;
-  int init_window = 25;
+  // For high-dimensional models (p>80), a 25-sample first mass window gives
+  // very noisy variance estimates (25 samples / 108 params = 0.23 samples/param).
+  // Skip the tiny first window by using a larger init_window (=50), so the first
+  // mass update has ~50 samples. This trades one less mass update for better quality.
+  int init_window = (n_params > 80) ? 50 : 25;
 
-  // Dense mass models with many params need longer step size tuning
-  // after the dense mass is set. Scale term_buffer proportionally.
+  // Dense mass models: balance final step size tuning vs warmup budget.
+  // Models with p>100 need sufficient mass adaptation windows (warmup is fixed),
+  // so keep term_buffer moderate. Previous 75 was too aggressive — used 30%
+  // of warmup for final tuning, leaving fewer samples for mass adaptation.
   if (effective_metric == MassMatrixType::DENSE && n_params > 100) {
-    term_buffer = 75;  // 50% more final adaptation
+    term_buffer = 60;  // Reduced from 75 — saves 15 iterations for mass adaptation
   }
 
   // Note: For p~24, first mass window (25 samples < 29 needed) fails,
@@ -10795,6 +10994,9 @@ Rcpp::List cpp_hmc_fit(
     data.svc_sigma2_prior_scale = svc_sigma2_scale;
     data.svc_phi_prior_lower = svc_phi_lower;
     data.svc_phi_prior_upper = svc_phi_upper;
+
+    // Pre-allocate SVC workspace buffers
+    data.svc_data.init_workspace();
   } else {
     data.svc_data.n_svc = 0;
     data.svc_data.n_obs = data.N;
@@ -10924,8 +11126,16 @@ Rcpp::List cpp_hmc_fit_gp(
     int n_threads,
     bool verbose,
     int max_treedepth = 10,
-    double adapt_delta = -1.0
+    double adapt_delta = -1.0,
+    std::string metric_str = "auto",
+    std::string gradient_mode_str = "auto"
 ) {
+  using namespace ratiod_hmc;
+
+  // Parse metric and gradient mode from string parameters
+  GradientMode grad_mode = parse_gradient_mode(gradient_mode_str);
+  set_gradient_mode(grad_mode);
+  MassMatrixType metric_type = parse_metric_type(metric_str);
   // Force all Rcpp parameter extractions into eagerly-copied std::vectors FIRST
   // This prevents R garbage collection from invalidating lazy Rcpp views during C++ execution
   // The original debug output workaround worked because I/O forced R to sync; this achieves
@@ -11313,7 +11523,7 @@ Rcpp::List cpp_hmc_fit_gp(
     ParamLayout layout = compute_param_layout(data);
     HMCResult result = run_hmc_chain(
       q0, data, layout, n_iter, n_warmup, L, 0, seed, verbose, max_treedepth,
-      MassMatrixType::DIAG, adapt_delta, -1
+      metric_type, adapt_delta, -1
     );
 
     return Rcpp::List::create(
@@ -11335,7 +11545,7 @@ Rcpp::List cpp_hmc_fit_gp(
     // Multiple chains
     std::vector<HMCResult> results = run_hmc_parallel_chains(
       q0, data, n_iter, n_warmup, L, n_chains, seed, verbose, max_treedepth,
-      MassMatrixType::DIAG, adapt_delta, -1
+      metric_type, adapt_delta, -1
     );
 
     // Combine results
@@ -11422,14 +11632,23 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
   if (args.containsElementNamed("adapt_delta")) {
     adapt_delta = Rcpp::as<double>(args["adapt_delta"]);
   }
+  std::string metric_str = "auto";
+  if (args.containsElementNamed("metric_str")) {
+    metric_str = Rcpp::as<std::string>(args["metric_str"]);
+  }
+  std::string gradient_mode_str = "auto";
+  if (args.containsElementNamed("gradient_mode_str")) {
+    gradient_mode_str = Rcpp::as<std::string>(args["gradient_mode_str"]);
+  }
 
-  // Delegate to the original implementation
+  // Delegate to the original implementation (metric/gradient parsed inside)
   return cpp_hmc_fit_gp(
     q_init, y_num, y_denom, y_denom_cont,
     X_num, X_denom, re_group, n_re_groups,
     model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params,
     sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate,
     zi_type_str, X_zi, zi_prior_sd,
-    n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta
+    n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta,
+    metric_str, gradient_mode_str
   );
 }

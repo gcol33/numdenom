@@ -443,6 +443,20 @@ T compute_log_post_impl(
 
             const bool use_nc = (data.temporal_gp_parameterization == 1);
 
+            // Precompute shared rho[t] and derived quantities once (same dt for all groups)
+                std::vector<T> rho_shared(T_times > 1 ? T_times - 1 : 0);
+                std::vector<T> log_one_minus_rho2_shared(T_times > 1 ? T_times - 1 : 0);
+                std::vector<T> a_shared(T_times > 1 ? T_times - 1 : 0);
+                T sigma_t = safe_sqrt(sigma2_temporal_gp);
+                for (int t = 1; t < T_times; t++) {
+                    double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
+                    rho_shared[t - 1] = safe_exp(T(-dt) / phi_temporal_gp);
+                    T one_minus_rho2 = T(1.0) - rho_shared[t - 1] * rho_shared[t - 1];
+                    T one_minus_rho2_safe = safe_max(one_minus_rho2, T(1e-10));
+                    log_one_minus_rho2_shared[t - 1] = safe_log(one_minus_rho2_safe);
+                    a_shared[t - 1] = sigma_t * safe_sqrt(one_minus_rho2_safe);
+                }
+
             if (use_nc) {
                 // Non-centered: params store z ~ N(0,1)
                 // Prior: z ~ N(0, I) for each temporal effect
@@ -453,32 +467,21 @@ T compute_log_post_impl(
 
                 // Jacobian of transform f = g(z, sigma2, phi):
                 // log|det(df/dz)| = T*log(sigma) + 0.5*sum_{t>=1} log(1 - rho_t^2) per group
-                T sigma_t = safe_sqrt(sigma2_temporal_gp);
-                for (int g = 0; g < data.n_temporal_groups; g++) {
-                    log_post = log_post + T(T_times) * safe_log(sigma_t);
-                    for (int t = 1; t < T_times; t++) {
-                        double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
-                        T rho = safe_exp(T(-dt) / phi_temporal_gp);
-                        T one_minus_rho2 = T(1.0) - rho * rho;
-                        T one_minus_rho2_safe = safe_max(one_minus_rho2, T(1e-10));
-                        log_post = log_post + T(0.5) * safe_log(one_minus_rho2_safe);
-                    }
+                T log_jac_per_group = T(T_times) * safe_log(sigma_t);
+                for (int t = 1; t < T_times; t++) {
+                    log_jac_per_group = log_jac_per_group + T(0.5) * log_one_minus_rho2_shared[t - 1];
                 }
+                log_post = log_post + T(data.n_temporal_groups) * log_jac_per_group;
 
                 // Forward transform z -> f: overwrite phi_temporal for use in obs loop
                 // f[0] = sigma * z[0]
-                // f[t] = rho_t * f[t-1] + sigma * sqrt(1 - rho_t^2) * z[t]
+                // f[t] = rho_t * f[t-1] + a_t * z[t]
                 std::vector<T> f_reconstructed(n_temporal);
                 for (int g = 0; g < data.n_temporal_groups; g++) {
                     int off = g * T_times;
                     f_reconstructed[off] = sigma_t * phi_temporal[off];
                     for (int t = 1; t < T_times; t++) {
-                        double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
-                        T rho = safe_exp(T(-dt) / phi_temporal_gp);
-                        T one_minus_rho2 = T(1.0) - rho * rho;
-                        T one_minus_rho2_safe = safe_max(one_minus_rho2, T(1e-10));
-                        T a_t = sigma_t * safe_sqrt(one_minus_rho2_safe);
-                        f_reconstructed[off + t] = rho * f_reconstructed[off + t - 1] + a_t * phi_temporal[off + t];
+                        f_reconstructed[off + t] = rho_shared[t - 1] * f_reconstructed[off + t - 1] + a_shared[t - 1] * phi_temporal[off + t];
                     }
                 }
                 // Replace phi_temporal with reconstructed f for observation loop
@@ -494,11 +497,9 @@ T compute_log_post_impl(
                         T f_prev = phi_temporal[g * T_times + t - 1];
                         T f_curr = phi_temporal[g * T_times + t];
 
-                        double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
-                        T rho = safe_exp(T(-dt) / phi_temporal_gp);
-                        T cond_var = sigma2_temporal_gp * (T(1.0) - rho * rho);
+                        T cond_var = sigma2_temporal_gp * (T(1.0) - rho_shared[t - 1] * rho_shared[t - 1]);
                         T cond_var_safe = safe_max(cond_var, T(1e-10));
-                        T cond_mean = rho * f_prev;
+                        T cond_mean = rho_shared[t - 1] * f_prev;
                         T resid = f_curr - cond_mean;
 
                         log_post = log_post - T(0.5) * safe_log(T(2.0 * M_PI) * cond_var_safe);

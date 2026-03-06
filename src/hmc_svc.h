@@ -39,6 +39,22 @@ struct SVCData {
 
   CovType cov_type;
   bool shared;                        // Whether SVC is shared between num/denom
+
+  // Pre-allocated workspace buffers (avoid per-gradient-call heap allocation)
+  mutable std::vector<double> w_flat_ws;    // n_obs * n_svc
+  mutable std::vector<double> sigma2_ws;    // n_svc
+  mutable std::vector<double> phi_ws;       // n_svc
+  mutable std::vector<double> w_j_ws;       // n_obs (reused per SVC term)
+  mutable std::vector<double> eta_ws;       // n_obs (SVC contribution to eta)
+
+  void init_workspace() const {
+    if (n_obs <= 0 || n_svc <= 0) return;
+    w_flat_ws.resize(n_obs * n_svc);
+    sigma2_ws.resize(n_svc);
+    phi_ws.resize(n_svc);
+    w_j_ws.resize(n_obs);
+    eta_ws.resize(n_obs);
+  }
 };
 
 // -----------------------------------------------------------------------------

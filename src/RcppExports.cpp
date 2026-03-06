@@ -176,8 +176,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_hmc_fit_gp
-Rcpp::List cpp_hmc_fit_gp(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type_str, Rcpp::List gp_params, Rcpp::List ms_gp_params, Rcpp::List ms_temporal_params, Rcpp::List rsr_params, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose, int max_treedepth, double adapt_delta);
-RcppExport SEXP _numdenom_cpp_hmc_fit_gp(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP gp_paramsSEXP, SEXP ms_gp_paramsSEXP, SEXP ms_temporal_paramsSEXP, SEXP rsr_paramsSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP, SEXP max_treedepthSEXP, SEXP adapt_deltaSEXP) {
+Rcpp::List cpp_hmc_fit_gp(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::IntegerVector re_group, int n_re_groups, std::string model_type_str, Rcpp::List gp_params, Rcpp::List ms_gp_params, Rcpp::List ms_temporal_params, Rcpp::List rsr_params, double sigma_beta, double sigma_re_scale, double phi_prior_shape, double phi_prior_rate, std::string zi_type_str, Rcpp::NumericMatrix X_zi, double zi_prior_sd, int n_iter, int n_warmup, int L, int n_chains, unsigned int seed, int n_threads, bool verbose, int max_treedepth, double adapt_delta, std::string metric_str, std::string gradient_mode_str);
+RcppExport SEXP _numdenom_cpp_hmc_fit_gp(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP re_groupSEXP, SEXP n_re_groupsSEXP, SEXP model_type_strSEXP, SEXP gp_paramsSEXP, SEXP ms_gp_paramsSEXP, SEXP ms_temporal_paramsSEXP, SEXP rsr_paramsSEXP, SEXP sigma_betaSEXP, SEXP sigma_re_scaleSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP zi_type_strSEXP, SEXP X_ziSEXP, SEXP zi_prior_sdSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP LSEXP, SEXP n_chainsSEXP, SEXP seedSEXP, SEXP n_threadsSEXP, SEXP verboseSEXP, SEXP max_treedepthSEXP, SEXP adapt_deltaSEXP, SEXP metric_strSEXP, SEXP gradient_mode_strSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -210,7 +210,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
     Rcpp::traits::input_parameter< int >::type max_treedepth(max_treedepthSEXP);
     Rcpp::traits::input_parameter< double >::type adapt_delta(adapt_deltaSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit_gp(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta));
+    Rcpp::traits::input_parameter< std::string >::type metric_str(metric_strSEXP);
+    Rcpp::traits::input_parameter< std::string >::type gradient_mode_str(gradient_mode_strSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_hmc_fit_gp(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta, metric_str, gradient_mode_str));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1774,7 +1776,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_numdenom_cpp_gpu_info", (DL_FUNC) &_numdenom_cpp_gpu_info, 0},
     {"_numdenom_cpp_hmc_fit", (DL_FUNC) &_numdenom_cpp_hmc_fit, 29},
     {"_numdenom_cpp_get_max_threads", (DL_FUNC) &_numdenom_cpp_get_max_threads, 0},
-    {"_numdenom_cpp_hmc_fit_gp", (DL_FUNC) &_numdenom_cpp_hmc_fit_gp, 29},
+    {"_numdenom_cpp_hmc_fit_gp", (DL_FUNC) &_numdenom_cpp_hmc_fit_gp, 31},
     {"_numdenom_cpp_hmc_fit_gp_v2", (DL_FUNC) &_numdenom_cpp_hmc_fit_gp_v2, 1},
     {"_numdenom_cpp_laplace_fit", (DL_FUNC) &_numdenom_cpp_laplace_fit, 11},
     {"_numdenom_cpp_laplace_get_max_threads", (DL_FUNC) &_numdenom_cpp_laplace_get_max_threads, 0},

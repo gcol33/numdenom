@@ -529,6 +529,34 @@ inline bool compute_criterion(const double* p_sharp_minus, const double* p_sharp
   return (dot_fwd > 0.0) && (dot_bwd > 0.0);
 }
 
+// Fused U-turn criterion: constructs rho = a + b and computes dot products in one O(n) pass.
+// Also writes constructed rho to rho_out for downstream use.
+inline bool compute_criterion_fused(const double* p_sharp_minus, const double* p_sharp_plus,
+                                    const double* a, const double* b,
+                                    double* rho_out, int n) {
+  double dot_fwd = 0.0, dot_bwd = 0.0;
+  int i = 0;
+  for (; i + 3 < n; i += 4) {
+    double r0 = a[i]   + b[i];
+    double r1 = a[i+1] + b[i+1];
+    double r2 = a[i+2] + b[i+2];
+    double r3 = a[i+3] + b[i+3];
+    rho_out[i]   = r0; rho_out[i+1] = r1;
+    rho_out[i+2] = r2; rho_out[i+3] = r3;
+    dot_fwd += p_sharp_plus[i]   * r0 + p_sharp_plus[i+1]  * r1
+             + p_sharp_plus[i+2] * r2 + p_sharp_plus[i+3]  * r3;
+    dot_bwd += p_sharp_minus[i]   * r0 + p_sharp_minus[i+1] * r1
+             + p_sharp_minus[i+2] * r2 + p_sharp_minus[i+3] * r3;
+  }
+  for (; i < n; i++) {
+    double r = a[i] + b[i];
+    rho_out[i] = r;
+    dot_fwd += p_sharp_plus[i] * r;
+    dot_bwd += p_sharp_minus[i] * r;
+  }
+  return (dot_fwd > 0.0) && (dot_bwd > 0.0);
+}
+
 // Pre-allocated buffer pool for NUTS tree building
 // Eliminates all heap allocations in the build_tree hot path
 struct NUTSWorkspace {

@@ -453,7 +453,8 @@ fit_hmc <- function(formula,
       verbose = verbose,
       gradient_mode_str = gradient_mode,
       max_treedepth = as.integer(max_treedepth),
-      adapt_delta = adapt_delta_value
+      adapt_delta = adapt_delta_value,
+      metric_str = metric
     ))
   } else {
     # Bundle parameters into lists to stay under R's 65-argument limit for .Call

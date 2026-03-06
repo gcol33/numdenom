@@ -1,11 +1,11 @@
 # =============================================================================
 # Single-row benchmark runner (called as subprocess)
-# Usage: Rscript benchmarks/bench_single_row.R <row_number> [gradient_mode] [timeout]
+# Usage: Rscript benchmarks/bench_single_row.R <row_number> [gradient_mode] [timeout] [seed]
 # Output: RESULT:<row>:<mode>:<time_or_error>
 # =============================================================================
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 1) stop("Usage: Rscript bench_single_row.R <row_number> [gradient_mode] [timeout]")
+if (length(args) < 1) stop("Usage: Rscript bench_single_row.R <row_number> [gradient_mode] [timeout] [seed]")
 ROW_NUM <- as.integer(args[1])
 GRAD_MODE <- if (length(args) >= 2) args[2] else "H"
 
@@ -24,8 +24,8 @@ N_SITES_GP  <- 20L
 N_TIMES_GP  <- 10L
 N_SITES_LATENT <- 10L
 N_TIMES_LAT <- 10L
-SEED        <- 123L
 TIMEOUT_SEC <- if (length(args) >= 3) as.integer(args[3]) else 600L
+SEED        <- if (length(args) >= 4) as.integer(args[4]) else 123L
 
 set.seed(SEED)
 

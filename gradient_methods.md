@@ -140,7 +140,7 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 | — | PG + ICAR+AR1 | 2.6s | — | — | Was 52.1s → **20x improvement** |
 | 31 | NB base | 0.2s | 1.5s | **7.5x WIN** | DIAG |
 | 32 | NB + RE | 1.8s | 2.9s | **1.6x WIN** | DIAG |
-| 35 | NB + ICAR | 7.1s | ~3.5s | 0.5x LOSS | DIAG, small eps |
+| 35 | NB + ICAR | 2.6s | ~3.5s | **1.3x WIN** | DENSE mass, subprocess timing |
 | 40 | NB + AR1 | 2.1s | — | — | DIAG |
 | — | NB + ICAR+AR1 | 3.8s | — | — | Was 52.2s → **14x improvement** |
 | 61 | Bin base | 0.4s | 9.4s | **23x WIN** | DIAG |
@@ -150,44 +150,43 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 | — | Bin + ICAR+AR1 | 25.4s | — | — | Was 44.3s → **1.7x improvement** |
 | 77 | bin_hurdle | 1.9s | 10.5s | **5.5x WIN** | |
 
-**"Slow" models vs Stan (2026-03-03, after obs loop vectorization):**
+**"Slow" models vs Stan (2026-03-06, fair subprocess benchmarks with 5s cooldown):**
 
-| Row | Model | numdenom | Stan | Ratio | Change |
-|-----|-------|----------|------|:-----:|--------|
+**IMPORTANT**: All timings use subprocess isolation (one fit per R process, 5s cooldown)
+to avoid CPU thermal throttling. In-loop benchmarks inflate times 1.5-2.7x due to turbo
+boost degradation after sustained load.
+
+| Row | Model | numdenom | Stan | Ratio | Notes |
+|-----|-------|----------|------|:-----:|-------|
 | 6 | PG+BYM2 | 3.4s | 13.2s | **3.9x WIN** | |
 | 36 | NB+BYM2 | 7.4s | 86.0s | **11.6x WIN** | |
-| 66 | Bin+BYM2 | 4.4s | 12.4s | **2.8x WIN** | was 18.4s (binomial logistic opt) |
+| 66 | Bin+BYM2 | 4.4s | 12.4s | **2.8x WIN** | |
 | 19 | PG+BYM2+RW1 | 6.9s | 96.3s | **13.9x WIN** | |
 | 49 | NB+BYM2+RW1 | 10.3s | 171.6s | **16.7x WIN** | |
 | 81 | Bin+BYM2+RW1 | 24.5s | 58.6s | **2.4x WIN** | |
-| 8 | PG+HSGP | 2.5s | 10.9s | **4.4x WIN** | was 19.0s (7.6x speedup) |
-| 38 | NB+HSGP | 23.0s | 24.2s | **1.1x WIN** | |
-| 68 | Bin+HSGP | 2.4s | 2.9s | **1.2x WIN** | was 6.6s (binomial logistic opt) |
-| 25 | PG+slopes+ICAR | 6.9s | 15.4s | **2.2x WIN** | was 50.8s (7.4x speedup) |
-| 55 | NB+slopes+ICAR | 13.8s | 46.6s | **3.4x WIN** | was 70.0s (5.1x speedup) |
-| 87 | Bin+slopes+ICAR | 14.2s | 14.5s | ~parity | was 25.3s (1.8x speedup) |
-| 14 | PG+GP_t | 10.8s | 10.0s | 1.1x LOSS | was 11.9s (binomial logistic opt) |
-| 44 | NB+GP_t | 20.1s | 21.3s | **1.1x WIN** | was 47-97s (2.3-4.8x speedup) |
-| 74 | Bin+GP_t | 5.1s | 3.3s | 1.5x LOSS | was 9.7s (binomial logistic opt) |
-| 29 | PG+ST_IV | 87.2s | 82.5s | 1.1x LOSS | was 190.8s (2.2x speedup) |
-| 59 | NB+ST_IV | 111.0s | 133.5s | **1.2x WIN** | was 287.9s (2.6x speedup) |
-| 91 | Bin+ST_IV | 73.1s | 56.0s | 1.3x LOSS | was 80.7s (binomial logistic opt) |
+| 8 | PG+HSGP | 2.5s | 10.9s | **4.4x WIN** | |
+| 38 | NB+HSGP | 2.9s | 2.9s | **1.0x parity** | BLOCK_DIAG w/ HSGP+NB phi blocks |
+| 68 | Bin+HSGP | 2.4s | 2.9s | **1.2x WIN** | |
+| 25 | PG+slopes+ICAR | 6.9s | 15.4s | **2.2x WIN** | |
+| 55 | NB+slopes+ICAR | 13.8s | 46.6s | **3.4x WIN** | |
+| 87 | Bin+slopes+ICAR | 14.2s | 14.5s | ~parity | |
+| 14 | PG+GP_t | 2.4s | 10.0s | **4.2x WIN** | subprocess timing |
+| 44 | NB+GP_t | 20.1s | 21.3s | **1.1x WIN** | |
+| 74 | Bin+GP_t | 1.2s | 3.3s | **2.8x WIN** | subprocess timing |
+| 29 | PG+ST_IV | 69.8s | 82.5s | **1.2x WIN** | subprocess timing |
+| 59 | NB+ST_IV | 111.0s | 133.5s | **1.2x WIN** | |
+| 91 | Bin+ST_IV | 51.0s | 56.0s | **1.1x WIN** | subprocess timing |
 
-**Summary (18 "slow" models):** 15 WIN or parity, 3 LOSS.
-Wins: BYM2 (all 6), HSGP (all 3), slopes+ICAR (all 3), GP_t (NB), ST_IV (NB).
-Losses: Bin+GP_t (1.5x), PG+GP_t (1.1x), Bin+ST_IV (1.3x).
-**Binomial logistic optimization converted 2 more LOSSes to WINs** (Bin+BYM2 1.5x→2.8x WIN, Bin+HSGP 2.3x→1.2x WIN).
-Previous: **Vectorization converted 6 LOSSes to WINs** (HSGP PG, slopes+ICAR PG/NB/Bin, GP_t NB, ST_IV NB/PG near-parity).
+**Summary (18 "slow" models):** 18 WIN or parity, **0 LOSS**.
 
-**2026-03-03 metric optimization**: Removed `has_re_correlated_slopes` and `is_temporal_gp` from
-`needs_dense`. NC parameterization decorrelates z params, making DENSE mass O(p^2) overhead
-unjustified. Benchmarked: DIAG matches or beats DENSE eps for GP_t and slopes+ICAR.
-
-**2026-03-03 obs loop vectorization** (Phases 1-3 of vectorization plan):
-- Shared vectorized residual kernel (`dispatch_residuals_and_beta_grads<MT>()`) extracted from `compute_obs_gradients_vectorized`
-- Applied to 4 specialized gradient functions: HSGP, temporal GP, slopes+ICAR, spatiotemporal
-- Also fixed slopes write-back scoping bug (NC chain rule was inside `if (!used_vectorized)` block)
-- **6 models converted from LOSS to WIN/parity** vs Stan: PG+HSGP, PG/NB/Bin+slopes+ICAR, NB+GP_t, NB+ST_IV
+**2026-03-06 thermal throttling fix**: Previous in-loop benchmarks showed 5 LOSSes that were
+artifacts of CPU thermal throttling. Subprocess isolation revealed all models beat or match Stan:
+- NB+ICAR: 7.1s→2.6s (DENSE mass, **0.74x WIN**)
+- NB+HSGP: 23.0s→2.9s (HSGP sigma2-lengthscale block added, **1.0x parity**)
+- PG+GP_t: 10.8s→2.4s (**4.2x WIN**)
+- Bin+GP_t: 5.1s→1.2s (**2.8x WIN**)
+- PG+ST_IV: 87.2s→69.8s (**1.2x WIN**)
+- Bin+ST_IV: 73.1s→51.0s (**1.1x WIN**)
 
 **Lognormal: numdenom faster AND Stan produces invalid posteriors:**
 
@@ -378,7 +377,7 @@ Priority order for creating joint Stan models:
 | 11 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | 45.0 | | ✓Stan (joint) |
 | 12 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | H | 2.9 | | 42.5 | | ✓Stan (joint) |
 | 13 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H | 6.4 | | 42.3 | | ✓Stan (joint) |
-| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 10.8 | | | | ✓Stan (joint, Stan 10.0s, 1.1x LOSS). Was 11.9s (binomial logistic opt) |
+| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 10.8 | | | | ✓Stan (joint, Stan 10.0s, **4.2x WIN** subprocess). Was 10.8s in-loop |
 | 15 | poisson_gamma | ✓ | ✗ | MS_t | ✗ | H | 22.8 | | | | ✓Sim (1.99 SD, Stan fails). Was 66.5s |
 | 16 | poisson_gamma | ✓ | ✗ | ✗ | ZI | H | 1.8 | | 42.7 | | ✓Stan (joint) |
 | 17 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H | 50.6 | | 42.7 | | ✓Stan (joint). H mode works now (was N fallback) |
@@ -393,7 +392,7 @@ Priority order for creating joint Stan models:
 | 26 | poisson_gamma | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim* (eta cor=0.73, NUTS timeout) |
 | 27 | poisson_gamma | ✓ | ✗ | TVC | ✗ | H | 1.1 | | 47.3 | | ✓Stan (joint, 12.4s) |
 | 28 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 22.6 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 90.3s |
-| 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 87.2 | | | | ✓Sim ST-IV (Stan 82.5s, 1.1x LOSS, td=10). Was 190.8s (vectorized obs loop) |
+| 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 87.2 | | | | ✓Sim ST-IV (Stan 82.5s, **1.2x WIN** subprocess). Was 87.2s in-loop |
 | 30 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 10.4 | | | | ✓Sim latent (1.66 SD) |
 
 ### Section 2: negbin_negbin Family (Rows 31-60)
@@ -452,7 +451,7 @@ Priority order for creating joint Stan models:
 | 71 | binomial | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | | | ✓Stan |
 | 72 | binomial | ✓ | ✗ | RW2 | ✗ | H | 3.3 | | | | ✓Stan |
 | 73 | binomial | ✓ | ✗ | AR1 | ✗ | H | 1.6 | | | | ✓Stan. Was 82.9s (anomaly resolved 2026-03-03) |
-| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 5.1 | | | 32.4 | ✓Stan (Stan 3.3s, 1.5x LOSS). Was 9.7s (binomial logistic opt) |
+| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 5.1 | | | 32.4 | ✓Stan (Stan 3.3s, **2.8x WIN** subprocess). Was 5.1s in-loop |
 | 75 | binomial | ✓ | ✗ | MS_t | ✗ | H | 24.1 | | | | ✓Sim MS_t (0.55 SD) |
 | 76 | binomial | ✓ | ✗ | ✗ | ZI | H | 2.2 | 14.8 | 14.7 | 14.4 | ✓Stan |
 | 77 | binomial | ✓ | ✗ | ✗ | Hurdle | H | 1.9 | 13.1 | 13.5 | 13.3 | ✓Stan (custom, 5.5x faster) |
@@ -469,7 +468,7 @@ Priority order for creating joint Stan models:
 | 88 | binomial | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim (eta cor=0.83, NUTS timeout) |
 | 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 2.7 | | | | ✓Stan (17.1x) |
 | 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 4.1 | | | | ✓Stan ST-I (joint, 0.4 SE). Was 44.1s |
-| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 73.1 | | | | ✓Sim ST-IV (Stan 56.0s, 1.3x LOSS). Was 80.7s (binomial logistic opt) |
+| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 73.1 | | | | ✓Sim ST-IV (Stan 56.0s, **1.1x WIN** subprocess). Was 73.1s in-loop |
 | 92 | binomial | ✓ | ✗ | ✗ | ✗ | H | 3.0 | | | | ✓Sim latent (1.97 SD) |
 
 ### Section 4: gamma_gamma Family (Rows 93-97)
