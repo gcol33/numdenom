@@ -1801,7 +1801,7 @@ plot.ratiod_tvc_posterior <- function(x, term = 1, type = "ribbon", ...) {
         x = "Time",
         y = "Time-Varying Effect"
       ) +
-      ggplot2::theme_minimal()
+      theme_ratiod()
 
     return(p)
   }
@@ -2300,7 +2300,7 @@ plot.ratiod_temporal_posterior <- function(x, component = NULL, type = "ribbon",
         x = "Time",
         y = "Effect"
       ) +
-      ggplot2::theme_minimal()
+      theme_ratiod()
 
     return(p)
   }

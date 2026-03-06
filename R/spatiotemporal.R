@@ -662,7 +662,7 @@ plot.ratiod_st_summary <- function(x, type = "heatmap", ...) {
           y = "Space",
           fill = "Effect"
         ) +
-        ggplot2::theme_minimal()
+        theme_ratiod()
 
       return(p)
     }
@@ -694,7 +694,7 @@ plot.ratiod_st_summary <- function(x, type = "heatmap", ...) {
           y = "Interaction Effect",
           color = "Location"
         ) +
-        ggplot2::theme_minimal()
+        theme_ratiod()
 
       return(p)
     }

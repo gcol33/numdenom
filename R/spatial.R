@@ -737,7 +737,7 @@ print.ratiod_gp <- function(x, ...) {
 #' @param coords A one-sided formula specifying coordinate columns (e.g.,
 #'   `~ lon + lat`), or a character vector of length 2 with column names.
 #' @param m Number of basis functions per dimension. Total basis functions
-#'   will be m^2. Default 8. Higher values give better approximation but
+#'   will be m^2. Default 6. Higher values give better approximation but
 #'   slower computation. Recommended range: 5-15.
 #' @param c Boundary factor controlling domain extension beyond data range.
 #'   Default 1.5. The domain is extended to [-c*L, c*L] where L is half the
@@ -814,7 +814,7 @@ print.ratiod_gp <- function(x, ...) {
 #'
 #' @export
 spatial_hsgp <- function(coords,
-                         m = 8,
+                         m = 6,
                          c = 1.5,
                          shared = TRUE,
                          scale_coords = TRUE) {
@@ -1863,7 +1863,7 @@ plot.ratiod_svc_posterior <- function(x, term = 1, type = "mean", ...) {
         color = "Effect"
       ) +
       ggplot2::coord_fixed() +
-      ggplot2::theme_minimal()
+      theme_ratiod()
 
     return(p)
   }

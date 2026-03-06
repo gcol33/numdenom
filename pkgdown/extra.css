@@ -124,13 +124,26 @@ svg.inline-svg .svg-bg {
   stroke: none !important;
 }
 
-/* Dark mode strokes - only override elements WITHOUT explicit inline stroke colors */
-/* This preserves custom colors (like edge colors in graphs) while converting default strokes */
-[data-bs-theme="dark"] svg.inline-svg .svglite line:not([style*="stroke: #"]),
-[data-bs-theme="dark"] svg.inline-svg .svglite polyline:not([style*="stroke: #"]),
-[data-bs-theme="dark"] svg.inline-svg .svglite polygon:not([style*="stroke: #"]),
-[data-bs-theme="dark"] svg.inline-svg .svglite path:not([style*="stroke: #"]),
-[data-bs-theme="dark"] svg.inline-svg .svglite circle:not([style*="stroke: #"]) {
+/* Dark mode strokes - convert default-colored strokes (#3E3F3A) to light */
+[data-bs-theme="dark"] svg.inline-svg .svglite line[style*="stroke: #3E3F3A"],
+[data-bs-theme="dark"] svg.inline-svg .svglite line[style*="stroke: #3e3f3a"],
+[data-bs-theme="dark"] svg.inline-svg .svglite polyline[style*="stroke: #3E3F3A"],
+[data-bs-theme="dark"] svg.inline-svg .svglite polyline[style*="stroke: #3e3f3a"],
+[data-bs-theme="dark"] svg.inline-svg .svglite polygon[style*="stroke: #3E3F3A"],
+[data-bs-theme="dark"] svg.inline-svg .svglite polygon[style*="stroke: #3e3f3a"],
+[data-bs-theme="dark"] svg.inline-svg .svglite path[style*="stroke: #3E3F3A"],
+[data-bs-theme="dark"] svg.inline-svg .svglite path[style*="stroke: #3e3f3a"],
+[data-bs-theme="dark"] svg.inline-svg .svglite circle[style*="stroke: #3E3F3A"],
+[data-bs-theme="dark"] svg.inline-svg .svglite circle[style*="stroke: #3e3f3a"] {
+  stroke: #DFD7CA !important;
+}
+
+/* Dark mode strokes - convert elements without any inline stroke style */
+[data-bs-theme="dark"] svg.inline-svg .svglite line:not([style*="stroke"]),
+[data-bs-theme="dark"] svg.inline-svg .svglite polyline:not([style*="stroke"]),
+[data-bs-theme="dark"] svg.inline-svg .svglite polygon:not([style*="stroke"]),
+[data-bs-theme="dark"] svg.inline-svg .svglite path:not([style*="stroke"]),
+[data-bs-theme="dark"] svg.inline-svg .svglite circle:not([style*="stroke"]) {
   stroke: #DFD7CA !important;
 }
 

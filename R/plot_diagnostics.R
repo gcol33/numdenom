@@ -20,6 +20,12 @@ ratiod_diag_colors <- list(
             "#66a61e", "#e6ab02", "#a6761d", "#666666")
 )
 
+# Internal theme: minimal without grid lines (cleaner diagnostic plots)
+theme_ratiod <- function() {
+  ggplot2::theme_minimal() +
+    ggplot2::theme(panel.grid = ggplot2::element_blank())
+}
+
 
 #' Plot Rhat Convergence Diagnostic
 #'
@@ -114,7 +120,7 @@ plot_rhat <- function(fit, threshold = 1.01, pars = NULL) {
         y = NULL,
         caption = paste0("Threshold: ", threshold, " (dashed line)")
       ) +
-      ggplot2::theme_minimal() +
+      theme_ratiod() +
       ggplot2::theme(
         plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
         panel.grid.major.y = ggplot2::element_line(color = "gray90")
@@ -231,7 +237,7 @@ plot_ess <- function(fit, type = c("bulk", "tail"), threshold = 400, pars = NULL
         y = NULL,
         caption = paste0("Threshold: ", threshold, " (dashed line)")
       ) +
-      ggplot2::theme_minimal() +
+      theme_ratiod() +
       ggplot2::theme(
         plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
         panel.grid.major.y = ggplot2::element_line(color = "gray90")
@@ -356,7 +362,7 @@ plot_acf <- function(fit, pars = NULL, lags = 25, n_pars = 6) {
         x = "Lag",
         y = "ACF"
       ) +
-      ggplot2::theme_minimal() +
+      theme_ratiod() +
       ggplot2::theme(
         plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
         strip.text = ggplot2::element_text(face = "bold")
@@ -658,7 +664,7 @@ plot_divergences_parcoord <- function(draws_df, pars) {
         x = "Parameter",
         y = "Scaled Value"
       ) +
-      ggplot2::theme_minimal() +
+      theme_ratiod() +
       ggplot2::theme(
         plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
         axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)
@@ -725,7 +731,7 @@ plot_divergences_scatter <- function(draws_df, pars) {
         x = pars[1],
         y = pars[2]
       ) +
-      ggplot2::theme_minimal() +
+      theme_ratiod() +
       ggplot2::theme(
         plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")
       )
@@ -804,7 +810,7 @@ plot_energy <- function(fit) {
         y = "Count",
         fill = NULL
       ) +
-      ggplot2::theme_minimal() +
+      theme_ratiod() +
       ggplot2::theme(
         plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
         legend.position = "bottom"
@@ -1143,7 +1149,7 @@ plot_diagnostics <- function(fit, pars = NULL) {
     p_trace <- ggplot2::ggplot(trace_data, ggplot2::aes(x = .data$iteration, y = .data$value)) +
       ggplot2::geom_line(color = ratiod_diag_colors$chain[1], alpha = 0.7) +
       ggplot2::labs(title = paste("Trace:", worst_par), x = "Iteration", y = "Value") +
-      ggplot2::theme_minimal() +
+      theme_ratiod() +
       ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"))
   } else {
     p_trace <- ggplot2::ggplot() +
