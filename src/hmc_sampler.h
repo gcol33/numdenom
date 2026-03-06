@@ -515,6 +515,15 @@ struct TreeStats {
   std::vector<double> p_sharp_end;  // M^{-1} * p at trajectory end
   std::vector<double> p_beg;        // Raw momentum at trajectory beginning
   std::vector<double> p_end;        // Raw momentum at trajectory end
+
+  // Pre-allocate all U-turn vectors to avoid heap allocation at every leaf node
+  void init_vectors(int n) {
+    rho.resize(n);
+    p_sharp_beg.resize(n);
+    p_sharp_end.resize(n);
+    p_beg.resize(n);
+    p_end.resize(n);
+  }
 };
 
 // Generalized U-turn criterion: check if momenta are aligned with integrated direction
@@ -522,7 +531,14 @@ struct TreeStats {
 inline bool compute_criterion(const double* p_sharp_minus, const double* p_sharp_plus,
                               const double* rho, int n) {
   double dot_fwd = 0.0, dot_bwd = 0.0;
-  for (int i = 0; i < n; i++) {
+  int i = 0;
+  for (; i + 3 < n; i += 4) {
+    dot_fwd += p_sharp_plus[i]   * rho[i]   + p_sharp_plus[i+1] * rho[i+1]
+             + p_sharp_plus[i+2] * rho[i+2] + p_sharp_plus[i+3] * rho[i+3];
+    dot_bwd += p_sharp_minus[i]   * rho[i]   + p_sharp_minus[i+1] * rho[i+1]
+             + p_sharp_minus[i+2] * rho[i+2] + p_sharp_minus[i+3] * rho[i+3];
+  }
+  for (; i < n; i++) {
     dot_fwd += p_sharp_plus[i] * rho[i];
     dot_bwd += p_sharp_minus[i] * rho[i];
   }

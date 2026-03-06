@@ -8463,6 +8463,7 @@ TreeStats build_tree_fast(
   TreeStats stats;
 
   if (depth == 0) {
+    stats.init_vectors(n);  // Pre-allocate U-turn vectors (avoids per-leaf heap allocation)
     // Base case: single leapfrog step in-place on input_slot
     LeapfrogInPlaceResult lf = leapfrog_step_inplace(
       ws, input_slot, direction * epsilon, mass, data, layout
@@ -8495,11 +8496,6 @@ TreeStats build_tree_fast(
 
     // Generalized U-turn: track rho, p_sharp, p at this leaf
     const double* p_ptr = ws.p_at(input_slot);
-    stats.rho.resize(n);
-    stats.p_beg.resize(n);
-    stats.p_end.resize(n);
-    stats.p_sharp_beg.resize(n);
-    stats.p_sharp_end.resize(n);
 
     std::memcpy(stats.rho.data(), p_ptr, n * sizeof(double));
     std::memcpy(stats.p_beg.data(), p_ptr, n * sizeof(double));

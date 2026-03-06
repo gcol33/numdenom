@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
-# Benchmark hot-path optimizations (2026-03-06)
-# Compare against known baselines from memory/MEMORY.md
+# Benchmark hot-path optimizations (updated 2026-03-06)
+# Baselines: v1.3.1 (before pointer views), Current: v1.3.2 (pointer views + unrolling)
 
 library(numdenom)
 
@@ -16,7 +16,7 @@ df <- data.frame(y = rpois(N, exp(0.5 + 0.3*x)), effort = rgamma(N, 10, 10), x =
 t0 <- proc.time()[3]
 fit <- ratiod(y | effort ~ x, data = df, family = ratiod_poisson_gamma(),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 0.30s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 0.05s)\n", proc.time()[3] - t0))
 
 # --- PG+RE ---
 cat("=== PG+RE ===\n")
@@ -26,7 +26,7 @@ t0 <- proc.time()[3]
 fit <- ratiod(y | effort ~ x, data = df2, family = ratiod_poisson_gamma(),
               random = ~ (1 | site),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 0.30s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 0.04s)\n", proc.time()[3] - t0))
 
 # --- NB base ---
 cat("=== NB base ===\n")
@@ -34,7 +34,7 @@ df3 <- data.frame(y_num = rnbinom(N, mu=10, size=5), y_den = rnbinom(N, mu=10, s
 t0 <- proc.time()[3]
 fit <- ratiod(y_num | y_den ~ x, data = df3, family = ratiod_negbin_negbin(),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 0.20s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 0.06s)\n", proc.time()[3] - t0))
 
 # --- NB+RE ---
 cat("=== NB+RE ===\n")
@@ -44,7 +44,7 @@ t0 <- proc.time()[3]
 fit <- ratiod(y_num | y_den ~ x, data = df4, family = ratiod_negbin_negbin(),
               random = ~ (1 | site),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 1.80s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 0.05s)\n", proc.time()[3] - t0))
 
 # --- Bin base ---
 cat("=== Bin base ===\n")
@@ -52,7 +52,7 @@ df5 <- data.frame(y = rbinom(N, 20, 0.5), trials = 20L, x = x)
 t0 <- proc.time()[3]
 fit <- ratiod(y | trials ~ x, data = df5, family = ratiod_binomial(),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 0.40s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 0.06s)\n", proc.time()[3] - t0))
 
 # --- NB+ICAR ---
 cat("=== NB+ICAR ===\n")
@@ -65,7 +65,7 @@ t0 <- proc.time()[3]
 fit <- ratiod(y_num | y_den ~ x, data = df6, family = ratiod_negbin_negbin(),
               spatial = spatial_car(adj, group_var = "site"),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 7.10s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 0.33s)\n", proc.time()[3] - t0))
 
 # --- NB+AR1 ---
 cat("=== NB+AR1 ===\n")
@@ -75,7 +75,7 @@ t0 <- proc.time()[3]
 fit <- ratiod(y_num | y_den ~ x, data = df7, family = ratiod_negbin_negbin(),
               temporal = temporal_ar1(time_var = "time", group_var = "site"),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 2.10s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 0.85s)\n", proc.time()[3] - t0))
 
 # --- PG+ICAR+AR1 ---
 cat("=== PG+ICAR+AR1 ===\n")
@@ -86,6 +86,6 @@ fit <- ratiod(y | effort ~ x, data = df8, family = ratiod_poisson_gamma(),
               spatial = spatial_car(adj, group_var = "site"),
               temporal = temporal_ar1(time_var = "time", group_var = "site"),
               mode = "hmc", iter = 500, warmup = 250, chains = 1, verbose = FALSE)
-cat(sprintf("  Time: %.2fs (baseline: 2.60s)\n", proc.time()[3] - t0))
+cat(sprintf("  Time: %.2fs (baseline: 1.05s)\n", proc.time()[3] - t0))
 
 cat("\nDone.\n")

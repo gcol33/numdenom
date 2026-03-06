@@ -49,15 +49,9 @@ T compute_log_post_impl(
     // Extract parameters
     // ========================================================================
 
-    // Fixed effects
-    std::vector<T> beta_num(data.p_num);
-    std::vector<T> beta_denom(data.p_denom);
-    for (int j = 0; j < data.p_num; j++) {
-        beta_num[j] = params[layout.beta_num_start + j];
-    }
-    for (int j = 0; j < data.p_denom; j++) {
-        beta_denom[j] = params[layout.beta_denom_start + j];
-    }
+    // Fixed effects — pointer views into params (no copy, read-only access)
+    const T* beta_num = &params[layout.beta_num_start];
+    const T* beta_denom = &params[layout.beta_denom_start];
 
     // Random effects
     // For non-centered parameterization (re_parameterization == 1):
@@ -101,19 +95,15 @@ T compute_log_post_impl(
         phi_denom = safe_exp(log_phi);
     }
 
-    // Spatial effects
-    std::vector<T> phi_spatial;
+    // Spatial effects — pointer views into params (no copy, read-only access)
+    const T* phi_spatial = nullptr;
     T tau_spatial = T(1.0);
     T sigma_s_bym2 = T(1.0);
     T sigma_u_bym2 = T(1.0);
-    std::vector<T> theta_bym2;
+    const T* theta_bym2 = nullptr;
 
     if (layout.has_spatial) {
-        int n_spatial = data.n_spatial_units;
-        phi_spatial.resize(n_spatial);
-        for (int s = 0; s < n_spatial; s++) {
-            phi_spatial[s] = params[layout.spatial_start + s];
-        }
+        phi_spatial = &params[layout.spatial_start];
 
         if (layout.is_bym2) {
             // Riebler reparameterization: sigma_total, rho -> sigma_s, sigma_u
@@ -123,10 +113,7 @@ T compute_log_post_impl(
             sigma_s_bym2 = sigma_total_bym2 * sqrt(rho_bym2);
             sigma_u_bym2 = sigma_total_bym2 * sqrt(T(1.0) - rho_bym2);
 
-            theta_bym2.resize(n_spatial);
-            for (int s = 0; s < n_spatial; s++) {
-                theta_bym2[s] = params[layout.theta_bym2_start + s];
-            }
+            theta_bym2 = &params[layout.theta_bym2_start];
         } else {
             T log_tau = params[layout.log_tau_spatial_idx];
             tau_spatial = safe_exp(log_tau);
