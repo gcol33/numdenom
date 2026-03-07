@@ -8424,6 +8424,28 @@ LeapfrogInPlaceResult leapfrog_step_inplace(
       ratiod_linalg::axpy_matvec(epsilon, mass.inv_mass_dense.data(), p, q, n);
     }
   }
+  // Precision/Kronecker blocks: undo base contribution, apply block M^{-1}
+  if (mass.precision_block.active) {
+    const auto& pb = mass.precision_block;
+    std::vector<double> tmp(pb.size);
+    pb.matvec(p, tmp.data());
+    for (int i = 0; i < pb.size; i++) {
+      // Undo the diagonal (or dense) contribution that was already applied
+      q[pb.start + i] -= epsilon * mass.inv_mass_diag[pb.start + i] * p[pb.start + i];
+      // Apply precision block contribution
+      q[pb.start + i] += epsilon * tmp[i];
+    }
+  }
+  if (mass.kronecker_block.active) {
+    const auto& kb = mass.kronecker_block;
+    int ST = kb.S * kb.T;
+    std::vector<double> tmp(ST);
+    kb.matvec(p, tmp.data());
+    for (int i = 0; i < ST; i++) {
+      q[kb.start + i] -= epsilon * mass.inv_mass_diag[kb.start + i] * p[kb.start + i];
+      q[kb.start + i] += epsilon * tmp[i];
+    }
+  }
 
   // Compute gradient + log_prob at new position (fused: single O(N) pass)
   // Uses pre-resolved function pointer to skip 15+ branch dispatch per leapfrog step
@@ -9178,6 +9200,21 @@ HMCResultCpp run_hmc_chain_cpp(
       if (verbose) {
         REprintf("  [WARMSTART] Initialized mass matrix from model structure\n");
       }
+    }
+  }
+
+  // Initialize sparse GMRF block for ST_IV spatiotemporal interaction.
+  // Uses sparse Cholesky of posterior precision Q = tau*(Q_s⊗Q_t) + diag(H_lik).
+  // At warmup end, extracts diag(Q^{-1}) to set precision-informed diagonal mass.
+  // NOTE: Factorization happens later (after warmup discovers tau and H_lik).
+  bool use_sparse_gmrf_mass = true;
+  if (use_sparse_gmrf_mass && data.has_spatiotemporal && data.spatiotemporal_data.type == STType::TYPE_IV) {
+    int st_S = data.spatiotemporal_data.n_spatial;
+    int st_T = data.spatiotemporal_data.n_times;
+    mass.sparse_gmrf.init(layout.st_delta_start, st_S, st_T);
+    if (verbose) {
+      REprintf("  [SPARSE_GMRF] ST_IV block initialized: %dx%d=%d params at offset %d\n",
+               st_S, st_T, st_S * st_T, layout.st_delta_start);
     }
   }
 
@@ -9979,6 +10016,92 @@ HMCResultCpp run_hmc_chain_cpp(
             epsilon = da.final_epsilon();
           }
 
+          // Precision-informed diagonal mass for ST_IV at warmup end.
+          // Build Q_post = tau*(Q_s⊗Q_t) + diag(h_lik), factorize, extract diag(Q^{-1}).
+          if (mass.sparse_gmrf.active && !mass.sparse_gmrf.factorized) {
+            int st_S = data.spatiotemporal_data.n_spatial;
+            int st_T = data.spatiotemporal_data.n_times;
+            int ST = st_S * st_T;
+            double tau_st = std::exp(q[layout.log_tau_st_idx]);
+
+            // Compute likelihood Hessian diagonal for each ST cell
+            std::vector<double> h_lik(ST, 0.0);
+            for (int i = 0; i < data.N; i++) {
+              if (data.spatiotemporal_data.st_flat[i] <= 0) continue;
+              int k = data.spatiotemporal_data.st_flat[i] - 1;
+              double eta_i = 0.0;
+              for (int p2 = 0; p2 < data.p_num; p2++)
+                eta_i += data.X_num_flat[static_cast<size_t>(i) * data.p_num + p2] * q[layout.beta_num_start + p2];
+              if (layout.has_re && data.re_group[i] > 0)
+                eta_i += re_value_for_eta(&q[layout.re_start], data.re_group[i] - 1,
+                                           std::exp(q[layout.log_sigma_re_idx]), data.re_parameterization);
+              if (layout.has_spatial && data.spatial_group[i] > 0)
+                eta_i += q[layout.spatial_start + data.spatial_group[i] - 1];
+              if (layout.has_temporal && !data.temporal_time_idx.empty() &&
+                  i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
+                int t_idx = data.temporal_time_idx[i] - 1;
+                int g_idx = data.temporal_group_idx[i] - 1;
+                int t_base = g_idx * data.n_times + t_idx;
+                if (t_base >= 0 && t_base < (int)q.size()) eta_i += q[layout.temporal_start + t_base];
+              }
+              eta_i += q[layout.st_delta_start + k];
+              double mu_i = std::exp(eta_i);
+              double h_i = 0.0;
+              if (data.model_type == ModelType::POISSON_GAMMA) {
+                h_i = mu_i;
+              } else if (data.model_type == ModelType::BINOMIAL) {
+                double p_i = 1.0 / (1.0 + std::exp(-eta_i));
+                h_i = data.y_denom[i] * p_i * (1.0 - p_i);
+              } else if (data.model_type == ModelType::NEGBIN_NEGBIN ||
+                         data.model_type == ModelType::NEGBIN_GAMMA) {
+                double phi = std::exp(q[layout.log_phi_num_idx]);
+                h_i = mu_i / (1.0 + mu_i / phi);
+              } else {
+                h_i = mu_i;
+              }
+              if (data.spatiotemporal_data.shared) h_i *= 2.0;
+              h_lik[k] += std::max(h_i, 1e-6);
+            }
+
+            mass.sparse_gmrf.build_and_factorize(
+                data.spatiotemporal_data.adj_row_ptr,
+                data.spatiotemporal_data.adj_col_idx,
+                data.spatiotemporal_data.temporal_type,
+                data.spatiotemporal_data.temporal_cyclic,
+                tau_st, h_lik.data(), 0.001
+            );
+
+            if (mass.sparse_gmrf.factorized) {
+              // Extract diag(Q^{-1}) and set diagonal mass for ST params
+              int n_set = 0;
+              double sum_var = 0.0;
+              for (int k = 0; k < ST; k++) {
+                Eigen::VectorXd ek = Eigen::VectorXd::Zero(ST);
+                ek[k] = 1.0;
+                Eigen::VectorXd col_k = mass.sparse_gmrf.llt.solve(ek);
+                double var_k = col_k[k];
+                if (var_k > 1e-10 && var_k < 100.0) {
+                  mass.inv_mass_diag[layout.st_delta_start + k] = var_k;
+                  n_set++;
+                  sum_var += var_k;
+                }
+              }
+              // Deactivate sparse GMRF — diagonal mass is now informed
+              mass.sparse_gmrf.active = false;
+              // Recompute epsilon with new mass
+              epsilon = find_reasonable_epsilon(q, data, layout, rng, mass.inv_mass_diag);
+              da = DualAveraging(epsilon, n_params, target_boost);
+              if (use_nuts) da.target_accept = nuts_target_accept;
+              epsilon = da.final_epsilon();
+              if (verbose) {
+                REprintf("  [SPARSE_GMRF] Diagonal mass set for %d/%d ST params, avg_var=%.6f, tau=%.4f, new epsilon=%.6f\n",
+                         n_set, ST, n_set > 0 ? sum_var / n_set : 0.0, tau_st, epsilon);
+              }
+            } else if (verbose) {
+              REprintf("  [SPARSE_GMRF] WARNING: Cholesky failed, keeping adapted diagonal mass\n");
+            }
+          }
+
           if (verbose) {
             REprintf("  [METRIC] Warmup done: epsilon=%.6f, mass.type=%s, mass.adapted=%d\n",
                      epsilon, metric_name(mass.type), (int)mass.adapted);
@@ -10481,6 +10604,19 @@ Rcpp::List cpp_hmc_fit(
   std::vector<int> n_neighbors = Rcpp::as<std::vector<int>>(spatial_params["n_neighbors"]);
   double bym2_scale_factor = Rcpp::as<double>(spatial_params["bym2_scale"]);
 
+  // Precision mass matrix data (Q_inv and L_Q for ICAR/BYM2)
+  std::vector<double> spatial_Q_inv;
+  std::vector<double> spatial_L_Q;
+  if (spatial_params.containsElementNamed("Q_inv") &&
+      spatial_params.containsElementNamed("L_Q")) {
+    SEXP qi_sexp = spatial_params["Q_inv"];
+    SEXP lq_sexp = spatial_params["L_Q"];
+    if (!Rf_isNull(qi_sexp) && !Rf_isNull(lq_sexp)) {
+      spatial_Q_inv = Rcpp::as<std::vector<double>>(qi_sexp);
+      spatial_L_Q = Rcpp::as<std::vector<double>>(lq_sexp);
+    }
+  }
+
   // Temporal parameters (eager deep copies)
   std::string temporal_type_str = Rcpp::as<std::string>(temporal_params["type"]);
   std::vector<int> temporal_time_idx = Rcpp::as<std::vector<int>>(temporal_params["time_idx"]);
@@ -10697,6 +10833,8 @@ Rcpp::List cpp_hmc_fit(
   data.adj_col_idx = adj_col_idx;
   data.n_neighbors = n_neighbors;
   data.bym2_scale_factor = bym2_scale_factor;
+  data.spatial_Q_inv = std::move(spatial_Q_inv);
+  data.spatial_L_Q = std::move(spatial_L_Q);
 
   // Temporal structure
   if (temporal_type_str == "rw1") {
@@ -10880,6 +11018,22 @@ Rcpp::List cpp_hmc_fit(
     if (st_params.containsElementNamed("parameterization")) {
       std::string st_param_str = Rcpp::as<std::string>(st_params["parameterization"]);
       data.st_parameterization = (st_param_str == "centered") ? 0 : 1;
+    }
+
+    // Kronecker precision data for ST_IV (precomputed in R)
+    if (st_params.containsElementNamed("Qs_inv") &&
+        st_params.containsElementNamed("Qt_inv")) {
+      SEXP qs_sexp = st_params["Qs_inv"];
+      SEXP ls_sexp = st_params["Ls"];
+      SEXP qt_sexp = st_params["Qt_inv"];
+      SEXP lt_sexp = st_params["Lt"];
+      if (!Rf_isNull(qs_sexp) && !Rf_isNull(qt_sexp) &&
+          !Rf_isNull(ls_sexp) && !Rf_isNull(lt_sexp)) {
+        data.st_Qs_inv = Rcpp::as<std::vector<double>>(qs_sexp);
+        data.st_Ls = Rcpp::as<std::vector<double>>(ls_sexp);
+        data.st_Qt_inv = Rcpp::as<std::vector<double>>(qt_sexp);
+        data.st_Lt = Rcpp::as<std::vector<double>>(lt_sexp);
+      }
     }
   } else {
     data.spatiotemporal_data.type = STType::NONE;

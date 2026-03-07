@@ -480,7 +480,9 @@ fit_hmc <- function(formula,
       adj_row_ptr = as.integer(spatial_info$adj_row_ptr),
       adj_col_idx = as.integer(spatial_info$adj_col_idx),
       n_neighbors = as.integer(spatial_info$n_neighbors),
-      bym2_scale = spatial_info$bym2_scale
+      bym2_scale = spatial_info$bym2_scale,
+      Q_inv = spatial_info$Q_inv,
+      L_Q = spatial_info$L_Q
     )
 
     temporal_params <- list(
@@ -550,7 +552,12 @@ fit_hmc <- function(formula,
       adj_row_ptr = as.integer(spatiotemporal_info$spatial_Q$adj_row_ptr %||% integer(0)),
       adj_col_idx = as.integer(spatiotemporal_info$spatial_Q$adj_col_idx %||% integer(0)),
       sigma2_prior_U = priors$st_sigma2_prior_U %||% 1.0,
-      sigma2_prior_alpha = priors$st_sigma2_prior_alpha %||% 0.01
+      sigma2_prior_alpha = priors$st_sigma2_prior_alpha %||% 0.01,
+      # Kronecker precision mass data
+      Qs_inv = spatiotemporal_info$spatial_Q$Q_inv,
+      Ls = spatiotemporal_info$spatial_Q$L_Q,
+      Qt_inv = spatiotemporal_info$temporal_Q$Q_time_inv,
+      Lt = spatiotemporal_info$temporal_Q$L_time
     )
 
     # TVC (Temporally-Varying Coefficients) parameters
@@ -1058,6 +1065,22 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     }
   }
 
+  # Precision mass matrix: compute Q_inv and L_Q for ICAR/BYM2
+  # This provides the known correlation structure to the HMC mass matrix,
+  # avoiding under-determined OAS estimation for 50+ spatial params.
+  Q_inv_flat <- NULL
+  L_Q_flat <- NULL
+  if (spatial_type %in% c("icar", "bym2", "car", "car_proper") && n_units >= 5) {
+    Q <- diag(n_neighbors) - adj
+    Q_reg <- Q + 0.01 * diag(n_units)  # Regularize rank-deficient Q
+    Q_inv <- solve(Q_reg)
+    L_Q <- chol(Q_reg)  # Upper Cholesky: L^T * L = Q_reg
+    # Convert to lower Cholesky (column-major): L * L^T = Q_reg
+    L_Q_lower <- t(L_Q)
+    Q_inv_flat <- as.numeric(Q_inv)      # Column-major flat [S x S]
+    L_Q_flat <- as.numeric(L_Q_lower)    # Column-major flat [S x S]
+  }
+
   list(
     type = spatial_type,
     group = spatial_group,
@@ -1066,7 +1089,9 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     adj_col_idx = adj_col_idx,
     n_neighbors = n_neighbors,
     bym2_scale = bym2_scale,
-    group_var = spatial$group_var  # Preserve for prediction lookup
+    group_var = spatial$group_var,  # Preserve for prediction lookup
+    Q_inv = Q_inv_flat,
+    L_Q = L_Q_flat
   )
 }
 

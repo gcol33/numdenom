@@ -474,6 +474,12 @@ prepare_spatial_precision <- function(spatial) {
 
     n_neighbors <- diff(row_ptr)
 
+    # Compute Q_inv and L_Q for precision mass matrix
+    Q <- diag(n_neighbors) - adj
+    Q_reg <- Q + 0.01 * diag(n)
+    Q_inv <- solve(Q_reg)
+    L_Q_lower <- t(chol(Q_reg))  # Lower Cholesky
+
     list(
       type = if (spatial$type == "bym2") "bym2" else "car",
       n = n,
@@ -481,7 +487,9 @@ prepare_spatial_precision <- function(spatial) {
       adj_col_idx = col_idx,
       n_neighbors = n_neighbors,
       proper = isTRUE(spatial$proper),
-      scale_factor = spatial$scale_factor
+      scale_factor = spatial$scale_factor,
+      Q_inv = as.numeric(Q_inv),
+      L_Q = as.numeric(L_Q_lower)
     )
   }
 }
@@ -500,10 +508,50 @@ prepare_temporal_precision <- function(temporal) {
   type <- temporal$type
   cyclic <- isTRUE(temporal$cyclic)
 
+  # Build temporal precision matrix Q_time for Kronecker mass
+  Q_time <- NULL
+  Q_time_inv_flat <- NULL
+  L_time_flat <- NULL
+  if (T >= 3) {
+    if (type == "rw1") {
+      # RW1: Q[i,i] = 2 (interior), 1 (boundary), Q[i,i+1] = Q[i+1,i] = -1
+      Q_time <- matrix(0, T, T)
+      for (i in 1:(T-1)) {
+        Q_time[i, i] <- Q_time[i, i] + 1
+        Q_time[i+1, i+1] <- Q_time[i+1, i+1] + 1
+        Q_time[i, i+1] <- -1
+        Q_time[i+1, i] <- -1
+      }
+    } else if (type == "rw2") {
+      # RW2: second-order differences
+      D <- matrix(0, T-2, T)
+      for (i in 1:(T-2)) {
+        D[i, i] <- 1; D[i, i+1] <- -2; D[i, i+2] <- 1
+      }
+      Q_time <- t(D) %*% D
+    } else if (type == "ar1") {
+      # AR1 with rho=0.5 as default (approximate)
+      Q_time <- diag(T)
+      for (i in 1:(T-1)) {
+        Q_time[i, i+1] <- -0.5
+        Q_time[i+1, i] <- -0.5
+      }
+    }
+    if (!is.null(Q_time)) {
+      Q_time_reg <- Q_time + 0.01 * diag(T)
+      Q_time_inv <- solve(Q_time_reg)
+      L_time_lower <- t(chol(Q_time_reg))
+      Q_time_inv_flat <- as.numeric(Q_time_inv)
+      L_time_flat <- as.numeric(L_time_lower)
+    }
+  }
+
   list(
     type = type,
     T = T,
-    cyclic = cyclic
+    cyclic = cyclic,
+    Q_time_inv = Q_time_inv_flat,
+    L_time = L_time_flat
   )
 }
 
