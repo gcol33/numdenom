@@ -1005,6 +1005,10 @@ validate_temporal_multiscale <- function(temporal, data) {
 #'   numerator and denominator.
 #' @param scale_coords Logical; if TRUE (default), time values are scaled to
 #'   unit variance before computing distances.
+#' @param parameterization Parameterization for GP effects:
+#'   `"noncentered"` (default) stores z ~ N(0,1) and scales by covariance
+#'   (better for weakly-informed effects);
+#'   `"centered"` stores effects directly (better for strongly-informed effects).
 #'
 #' @return A `ratiod_temporal_gp` object
 #'

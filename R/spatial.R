@@ -599,11 +599,12 @@ spatial_gp <- function(coords,
                        cg_tol = 1e-6,
                        cg_maxiter = 100,
                        shared = TRUE,
-                       scale_coords = TRUE) {
+                       scale_coords = TRUE,
+                       parameterization = c("centered", "noncentered", "collapsed")) {
 
   cov <- match.arg(cov)
   solver <- match.arg(solver)
-
+  parameterization <- match.arg(parameterization)
 
   # Check GPU availability if requested
 
@@ -673,6 +674,7 @@ if (solver == "gpu" && !gpu_available()) {
       cg_maxiter = cg_maxiter,
       shared = shared,
       scale_coords = scale_coords,
+      parameterization = parameterization,
       # Filled in during validation
       n_obs = NULL,
       n_spatial = NULL,
@@ -1331,9 +1333,13 @@ spatial_svc <- function(coords,
                         cov = c("exponential", "matern", "gaussian", "spherical"),
                         nn = 15,
                         shared = TRUE,
-                        scale_coords = TRUE) {
+                        scale_coords = TRUE,
+                        approx = c("nngp", "hsgp"),
+                        m = 6,
+                        c_boundary = 1.5) {
 
   cov <- match.arg(cov)
+  approx <- match.arg(approx)
 
   # Parse coordinate specification
   if (inherits(coords, "formula")) {
@@ -1362,11 +1368,24 @@ spatial_svc <- function(coords,
          call. = FALSE)
   }
 
-  # Validate nn
-  if (!is.numeric(nn) || length(nn) != 1 || nn < 1) {
-    stop("`nn` must be a positive integer", call. = FALSE)
+  # Validate nn (only relevant for NNGP)
+  if (approx == "nngp") {
+    if (!is.numeric(nn) || length(nn) != 1 || nn < 1) {
+      stop("`nn` must be a positive integer", call. = FALSE)
+    }
+    nn <- as.integer(nn)
   }
-  nn <- as.integer(nn)
+
+  # Validate HSGP parameters
+  if (approx == "hsgp") {
+    if (!is.numeric(m) || length(m) != 1 || m < 3 || m > 50) {
+      stop("`m` must be an integer between 3 and 50", call. = FALSE)
+    }
+    m <- as.integer(m)
+    if (!is.numeric(c_boundary) || length(c_boundary) != 1 || c_boundary < 1.0) {
+      stop("`c_boundary` must be a number >= 1.0", call. = FALSE)
+    }
+  }
 
   # Warning for non-shared SVCs
   if (!shared) {
@@ -1387,6 +1406,9 @@ spatial_svc <- function(coords,
       nn = nn,
       shared = shared,
       scale_coords = scale_coords,
+      approx = approx,
+      m = m,
+      c_boundary = c_boundary,
       # Filled in during validation
       n_obs = NULL,
       n_svc = NULL,
@@ -1522,9 +1544,14 @@ validate_svc <- function(svc, data, X) {
     }
   }
 
-  # Compute nearest neighbors
-  nn <- min(svc$nn, N - 1)  # Can't have more neighbors than observations - 1
-  neighbor_info <- compute_nngp_neighbors(coords, nn)
+  # Compute nearest neighbors (NNGP only)
+  approx <- svc$approx %||% "nngp"
+  if (approx == "nngp") {
+    nn <- min(svc$nn, N - 1)
+    neighbor_info <- compute_nngp_neighbors(coords, nn)
+  } else {
+    neighbor_info <- NULL
+  }
 
   # Update SVC object
   svc$n_obs <- N
@@ -1535,7 +1562,12 @@ validate_svc <- function(svc, data, X) {
   svc$neighbor_info <- neighbor_info
 
   # Set spatial parameters for parameter layout
-  svc$n_spatial = svc$n_obs * svc$n_svc  # Total SVC parameters
+  if (approx == "hsgp") {
+    m <- svc$m %||% 6L
+    svc$n_spatial <- length(svc_indices) * as.integer(m)^2  # m^2 basis per SVC term
+  } else {
+    svc$n_spatial <- svc$n_obs * svc$n_svc  # N effects per SVC term
+  }
 
   svc
 }

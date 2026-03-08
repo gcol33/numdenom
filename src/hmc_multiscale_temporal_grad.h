@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <cmath>
+#include <cstring>
 #include "hmc_temporal_multiscale.h"
 
 namespace ratiod_temporal_grad {
@@ -15,14 +16,21 @@ using ratiod_temporal::MultiscaleTemporalData;
 using ratiod_temporal::TemporalType;
 
 // Structure to hold multiscale temporal gradient results
+// Pre-allocate with init() and reuse across iterations to avoid heap churn
 struct MultiscaleTemporalGradients {
     std::vector<double> grad_trend;           // Gradient w.r.t. trend effects
     std::vector<double> grad_seasonal;        // Gradient w.r.t. seasonal effects
     std::vector<double> grad_short_term;      // Gradient w.r.t. short-term effects
-    double grad_log_sigma2_trend;             // Gradient w.r.t. log(sigma2_trend)
-    double grad_log_sigma2_seasonal;          // Gradient w.r.t. log(sigma2_seasonal)
-    double grad_log_sigma2_short;             // Gradient w.r.t. log(sigma2_short)
-    double grad_logit_rho_short;              // Gradient w.r.t. logit(rho_short) (AR1 only)
+    double grad_log_sigma2_trend = 0.0;
+    double grad_log_sigma2_seasonal = 0.0;
+    double grad_log_sigma2_short = 0.0;
+    double grad_logit_rho_short = 0.0;
+
+    void init(int n_trend, int n_seasonal, int n_short) {
+        if ((int)grad_trend.size() != n_trend) grad_trend.resize(n_trend);
+        if ((int)grad_seasonal.size() != n_seasonal) grad_seasonal.resize(n_seasonal);
+        if ((int)grad_short_term.size() != n_short) grad_short_term.resize(n_short);
+    }
 };
 
 // =============================================================================
@@ -70,33 +78,38 @@ inline void rw1_cyclic_grad_phi(const double* phi, int n, double sigma2, double*
 
     double inv_sigma2 = 1.0 / (sigma2 + 1e-10);
 
-    // All interior differences: phi[t] - phi[t-1]
-    for (int t = 0; t < n; t++) {
-        grad_phi[t] = 0.0;
+    // Each diff d[t] = phi[t] - phi[t-1] contributes:
+    //   grad_phi[t]   -= inv_sigma2 * d[t]   (from its own diff)
+    //   grad_phi[t-1] += inv_sigma2 * d[t]   (from next diff)
+    // Accumulate in-place without modulo by handling boundaries explicitly.
+    std::memset(grad_phi, 0, n * sizeof(double));
 
-        // From diff[t+1] = phi[t+1] - phi[t]: coef = 1 for phi[t+1], -1 for phi[t]
-        // From diff[t] = phi[t] - phi[t-1]: coef = 1 for phi[t], -1 for phi[t-1]
-
-        int t_prev = (t - 1 + n) % n;
-        int t_next = (t + 1) % n;
-
-        // Contribution from diff at t: phi[t] - phi[t_prev]
-        grad_phi[t] -= inv_sigma2 * (phi[t] - phi[t_prev]);
-
-        // Contribution from diff at t_next: phi[t_next] - phi[t]
-        grad_phi[t] += inv_sigma2 * (phi[t_next] - phi[t]);
+    // Interior diffs: t = 1..n-1
+    for (int t = 1; t < n; t++) {
+        double neg_inv_d = -inv_sigma2 * (phi[t] - phi[t-1]);
+        grad_phi[t]   += neg_inv_d;
+        grad_phi[t-1] -= neg_inv_d;
+    }
+    // Cyclic wrap: diff from phi[0] - phi[n-1]
+    {
+        double neg_inv_d = -inv_sigma2 * (phi[0] - phi[n-1]);
+        grad_phi[0]   += neg_inv_d;
+        grad_phi[n-1] -= neg_inv_d;
     }
 }
 
 inline double rw1_cyclic_grad_log_sigma2(const double* phi, int n, double sigma2) {
     double quad = 0.0;
-    for (int t = 0; t < n; t++) {
-        int t_prev = (t - 1 + n) % n;
-        double diff = phi[t] - phi[t_prev];
+    // Interior diffs
+    for (int t = 1; t < n; t++) {
+        double diff = phi[t] - phi[t-1];
         quad += diff * diff;
     }
-    // d/d(sigma2) = -0.5*n/sigma2 + 0.5*quad/sigma2^2
-    // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
+    // Cyclic wrap
+    {
+        double diff = phi[0] - phi[n-1];
+        quad += diff * diff;
+    }
     return -0.5 * n + 0.5 * quad / (sigma2 + 1e-10);
 }
 
@@ -112,26 +125,17 @@ inline void rw2_grad_phi(const double* phi, int n, double sigma2, double* grad_p
 
     double inv_sigma2 = 1.0 / (sigma2 + 1e-10);
 
-    // Compute second differences
-    std::vector<double> d(n);
-    for (int t = 2; t < n; t++) {
-        d[t] = phi[t] - 2.0 * phi[t-1] + phi[t-2];
-    }
+    // RW2: log p = -0.5/sigma2 * sum_{t=2}^{n-1} (phi[t] - 2*phi[t-1] + phi[t-2])^2
+    // d/d(phi[k]) sums contributions from d[k] (coef=1), d[k+1] (coef=-2), d[k+2] (coef=1)
+    // Compute in-place using a sliding window of 3 second-differences
+    std::memset(grad_phi, 0, n * sizeof(double));
 
-    // Gradient w.r.t. phi[k]
-    for (int k = 0; k < n; k++) {
-        grad_phi[k] = 0.0;
-        // d[t] depends on phi[t], phi[t-1], phi[t-2]
-        // So phi[k] affects d[k] (coef=1), d[k+1] (coef=-2), d[k+2] (coef=1)
-        if (k >= 2 && k < n) {
-            grad_phi[k] += -inv_sigma2 * d[k] * 1.0;
-        }
-        if (k >= 1 && k+1 < n && k+1 >= 2) {
-            grad_phi[k] += -inv_sigma2 * d[k+1] * (-2.0);
-        }
-        if (k+2 < n) {
-            grad_phi[k] += -inv_sigma2 * d[k+2] * 1.0;
-        }
+    for (int t = 2; t < n; t++) {
+        double d_t = phi[t] - 2.0 * phi[t-1] + phi[t-2];
+        double neg_inv_d = -inv_sigma2 * d_t;
+        grad_phi[t]   += neg_inv_d;          // coef = 1
+        grad_phi[t-1] += neg_inv_d * (-2.0); // coef = -2
+        grad_phi[t-2] += neg_inv_d;          // coef = 1  (note: -inv*d * 1 = same sign reversal)
     }
 }
 
@@ -278,10 +282,11 @@ inline void multiscale_temporal_prior_gradients(
     const MultiscaleTemporalData& temp_data,
     MultiscaleTemporalGradients& grads
 ) {
-    // Initialize gradients
-    grads.grad_trend.assign(n_trend, 0.0);
-    grads.grad_seasonal.assign(n_seasonal, 0.0);
-    grads.grad_short_term.assign(n_short, 0.0);
+    // Initialize gradients (reuse allocated memory)
+    grads.init(n_trend, n_seasonal, n_short);
+    if (n_trend > 0) std::memset(grads.grad_trend.data(), 0, n_trend * sizeof(double));
+    if (n_seasonal > 0) std::memset(grads.grad_seasonal.data(), 0, n_seasonal * sizeof(double));
+    if (n_short > 0) std::memset(grads.grad_short_term.data(), 0, n_short * sizeof(double));
     grads.grad_log_sigma2_trend = 0.0;
     grads.grad_log_sigma2_seasonal = 0.0;
     grads.grad_log_sigma2_short = 0.0;

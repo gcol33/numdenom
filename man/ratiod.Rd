@@ -32,7 +32,7 @@ ratiod(
   re_param = c("noncentered", "centered"),
   adapt_delta = NULL,
   max_treedepth = 10,
-  metric = c("auto", "dense", "diag"),
+  metric = c("auto", "dense", "diag", "block_diag"),
   riemannian = NULL,
   ...
 )
@@ -147,9 +147,11 @@ complexity: 0.80 for simple models, 0.85 for ICAR, 0.90 for BYM2 and
 correlated random slopes. Manual range: 0.80--0.99.}
 
 \item{metric}{Mass matrix type for NUTS:
-\code{"dense"} (default) full dense mass matrix with Ledoit-Wolf shrinkage
+\code{"auto"} (default) selects automatically based on model complexity;
+\code{"dense"} full dense mass matrix with Ledoit-Wolf shrinkage
 (handles correlated posteriors: random slopes, BYM2, HSGP, TVC models);
-\code{"diag"} diagonal mass matrix (faster per step but may require deeper trees).
+\code{"diag"} diagonal mass matrix (faster per step but may require deeper trees);
+\code{"block_diag"} block-diagonal mass matrix (separate blocks per parameter group).
 Auto-falls back to diagonal when p > 2000.}
 
 \item{riemannian}{Logical or NULL. Enable per-trajectory SoftAbs metric

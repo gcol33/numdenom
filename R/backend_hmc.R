@@ -78,7 +78,7 @@ fit_hmc <- function(formula,
                     cores = NULL,
                     L = 0,
                     adapt_delta = NULL,
-                    max_treedepth = 10,
+                    max_treedepth = NULL,
                     seed = NULL,
                     verbose = TRUE,
                     gradient_mode = "auto",
@@ -131,6 +131,7 @@ fit_hmc <- function(formula,
                          adj_col_idx = integer(0), n_neighbors = integer(0),
                          bym2_scale = 1.0,
                          hsgp_m = gp_info$hsgp_m,  # HSGP: basis functions per dim
+                         parameterization = gp_info$parameterization,
                          # Range bounds for proper initialization (from prepare_gp_for_hmc)
                          range_local_lower = gp_info$range_local_lower,
                          range_local_upper = gp_info$range_local_upper,
@@ -139,6 +140,20 @@ fit_hmc <- function(formula,
   } else {
     gp_info <- NULL
     spatial_info <- prepare_spatial_for_hmc(spatial, data, hmc_data$N)
+  }
+
+  # Auto-cap max_treedepth for GP/MSGP spatial models (many spatial params → deep trees)
+  if (is.null(max_treedepth)) {
+    gp_type <- if (!is.null(gp_info)) gp_info$gp_type else "none"
+    if (gp_type %in% c("gp", "multiscale_gp")) {
+      max_treedepth <- 8L
+      if (verbose) {
+        message("  Auto-capping max_treedepth to 8 for GP spatial model ",
+                "(use max_treedepth = 10 to override)")
+      }
+    } else {
+      max_treedepth <- 10L
+    }
   }
 
   # Prepare temporal structure
@@ -363,7 +378,9 @@ fit_hmc <- function(formula,
       cg_maxiter = as.integer(gp_info$cg_maxiter %||% 100L),
       # Observation-to-location mapping (1-based)
       gp_obs_to_loc = as.integer(gp_info$gp_obs_to_loc),
-      n_unique = as.integer(gp_info$n_unique)
+      n_unique = as.integer(gp_info$n_unique),
+      # GP parameterization
+      parameterization = gp_info$parameterization %||% "centered"
     )
 
     # Bundle multiscale GP parameters
@@ -599,13 +616,24 @@ fit_hmc <- function(formula,
       phi_prior_lower = svc_info$phi_prior_lower %||% 0.01,
       phi_prior_upper = svc_info$phi_prior_upper %||% 10.0,
       tau_shape = priors$svc_tau_shape %||% 1.0,
-      tau_rate = priors$svc_tau_rate %||% 0.01
+      tau_rate = priors$svc_tau_rate %||% 0.01,
+      svc_approx = svc_info$svc_approx %||% "nngp",
+      hsgp_m = as.integer(svc_info$hsgp_m %||% 0L),
+      hsgp_c = svc_info$hsgp_c %||% 0.0
     )
 
     # Populate spatial_info with SVC details for output conversion
     if (svc_info$has_svc) {
       spatial_info$n_svc <- svc_info$n_svc
       spatial_info$svc_names <- svc_info$svc_names
+      spatial_info$svc_approx <- svc_info$svc_approx %||% "nngp"
+      spatial_info$svc_hsgp_m <- svc_info$hsgp_m %||% 0L
+      spatial_info$svc_hsgp_c <- svc_info$hsgp_c %||% 1.5
+      spatial_info$svc_coords <- if (!is.null(svc_info$coords)) {
+        matrix(svc_info$coords, ncol = 2, byrow = TRUE)
+      } else {
+        NULL
+      }
       spatial_info$X_svc <- if (!is.null(svc_info$X_svc)) {
         matrix(svc_info$X_svc, nrow = hmc_data$N, ncol = svc_info$n_svc)
       } else {
@@ -1298,9 +1326,12 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
     idx <- idx + 1
     draws_list[["phi_gp"]] <- exp(samples[, idx])
     idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
+    gp_param_draw <- spatial_info$parameterization %||% "centered"
+    if (gp_param_draw != "collapsed") {
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
     }
   } else if (spatial_info$type == "multiscale_gp") {
     draws_list[["sigma2_gp_local"]] <- exp(samples[, idx])
@@ -1396,9 +1427,12 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
         sigma_u[s] * theta[s, ]
     }
   } else if (spatial_info$type == "gp") {
+    gp_param_ratio <- spatial_info$parameterization %||% "centered"
     idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp
-    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
+    if (gp_param_ratio != "collapsed") {
+      spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+    }
   } else if (spatial_info$type == "multiscale_gp") {
     idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
     gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
@@ -1652,38 +1686,61 @@ prepare_svc_for_hmc <- function(svc, data, N, X_num) {
   # Flatten coords to row-major for C++ (x1, y1, x2, y2, ...)
   coords_flat <- as.numeric(t(coords_matrix))
 
-  # Flatten neighbor indices and distances (N x nn matrices)
-  # NOTE: C++ expects 1-based indices (converts with -1 internally)
-  # R's nn_idx uses 0 for "no neighbor" which C++ also expects (checks > 0)
-  nn_idx_flat <- as.integer(t(neighbor_info$nn_idx))
-  nn_dist_flat <- as.numeric(t(neighbor_info$nn_dist))
+  approx <- svc$approx %||% "nngp"
 
-  list(
-    has_svc = TRUE,
-    n_svc = as.integer(n_svc),
-    n_obs = as.integer(N),
-    nn = as.integer(nn),
-    shared = svc$shared %||% TRUE,
-    cov_type = svc$cov %||% "exponential",
-    coords = coords_flat,
-    svc_indices = as.integer(svc_indices),
-    X_svc = X_svc,
-    nn_idx = nn_idx_flat,
-    nn_dist = nn_dist_flat,
-    # IMPORTANT: Convert nn_order from R's 1-based to C++'s 0-based indexing
-    # C++ uses nn_order[i] directly as index into w[] and coords[]
-    nn_order = as.integer(neighbor_info$nn_order - 1L),
-    nn_order_inv = as.integer(neighbor_info$nn_order_inv - 1L),
-    sigma2_prior_scale = 1.0,
-    # Increased phi_prior_lower from 0.01 to 0.3 to prevent ill-conditioned matrices
-    # Very small phi values (short range correlations) cause near-singular covariances
-    phi_prior_lower = 0.3,
-    # Increased phi_prior_upper from 10 to 30 to give more room for long-range correlations
-    # When coordinates span [0,10], phi=30 means correlations decay over ~1 unit (practical range = 3/phi)
-    phi_prior_upper = 30.0,
-    tau_shape = 1.0,
-    tau_rate = 0.01
-  )
+  if (approx == "hsgp") {
+    list(
+      has_svc = TRUE,
+      svc_approx = "hsgp",
+      n_svc = as.integer(n_svc),
+      n_obs = as.integer(N),
+      nn = 0L,
+      shared = svc$shared %||% TRUE,
+      cov_type = "exponential",
+      coords = coords_flat,
+      svc_indices = as.integer(svc_indices),
+      X_svc = X_svc,
+      nn_idx = integer(0),
+      nn_dist = numeric(0),
+      nn_order = integer(0),
+      nn_order_inv = integer(0),
+      sigma2_prior_scale = 1.0,
+      phi_prior_lower = 0.3,
+      phi_prior_upper = 30.0,
+      tau_shape = 1.0,
+      tau_rate = 0.01,
+      hsgp_m = as.integer(svc$m %||% 6L),
+      hsgp_c = svc$c_boundary %||% 1.5
+    )
+  } else {
+    # Flatten neighbor indices and distances (N x nn matrices)
+    nn_idx_flat <- as.integer(t(neighbor_info$nn_idx))
+    nn_dist_flat <- as.numeric(t(neighbor_info$nn_dist))
+
+    list(
+      has_svc = TRUE,
+      svc_approx = "nngp",
+      n_svc = as.integer(n_svc),
+      n_obs = as.integer(N),
+      nn = as.integer(nn),
+      shared = svc$shared %||% TRUE,
+      cov_type = svc$cov %||% "exponential",
+      coords = coords_flat,
+      svc_indices = as.integer(svc_indices),
+      X_svc = X_svc,
+      nn_idx = nn_idx_flat,
+      nn_dist = nn_dist_flat,
+      nn_order = as.integer(neighbor_info$nn_order - 1L),
+      nn_order_inv = as.integer(neighbor_info$nn_order_inv - 1L),
+      sigma2_prior_scale = 1.0,
+      phi_prior_lower = 0.3,
+      phi_prior_upper = 30.0,
+      tau_shape = 1.0,
+      tau_rate = 0.01,
+      hsgp_m = 0L,
+      hsgp_c = 0.0
+    )
+  }
 }
 
 
@@ -1900,9 +1957,14 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
   } else if (spatial_info$type == "bym2") {
     q_init <- c(q_init, rep(0.0, 2 + 2 * spatial_info$n_units))
   } else if (spatial_info$type == "gp") {
-    # Layout: log_sigma2, log_phi, w[n_units]
-    # Default phi prior range [0.01, 100] has geometric mean = 1.0, so log(1.0) = 0
-    q_init <- c(q_init, rep(0.0, 2 + spatial_info$n_units))
+    # Layout: log_sigma2, log_phi, w[n_units] (or just log_sigma2, log_phi for collapsed)
+    gp_param <- spatial_info$parameterization %||% "centered"
+    if (gp_param == "collapsed") {
+      # Collapsed: only hyperparams, GP effects marginalized
+      q_init <- c(q_init, rep(0.0, 2))
+    } else {
+      q_init <- c(q_init, rep(0.0, 2 + spatial_info$n_units))
+    }
   } else if (spatial_info$type == "multiscale_gp") {
     # Initialize phi to geometric mean of range bounds (on log scale)
     range_local_lower <- spatial_info$range_local_lower %||% 0.01
@@ -2032,8 +2094,15 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
     n_svc <- svc_info$n_svc %||% 0L
     n_obs <- svc_info$n_obs %||% hmc_data$N
     if (n_svc > 0) {
-      # log_sigma2_svc (n_svc) + log_phi_svc (n_svc) + svc_w (n_svc * n_obs)
-      q_init <- c(q_init, rep(0.0, 2 * n_svc + n_svc * n_obs))
+      svc_approx <- svc_info$svc_approx %||% "nngp"
+      if (svc_approx == "hsgp") {
+        m_total <- as.integer(svc_info$hsgp_m)^2
+        # log_sigma2_svc (n_svc) + log_lengthscale_svc (n_svc) + beta (n_svc * m^2)
+        q_init <- c(q_init, rep(0.0, 2 * n_svc + n_svc * m_total))
+      } else {
+        # log_sigma2_svc (n_svc) + log_phi_svc (n_svc) + svc_w (n_svc * n_obs)
+        q_init <- c(q_init, rep(0.0, 2 * n_svc + n_svc * n_obs))
+      }
     }
   }
 
@@ -2083,9 +2152,10 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
   colnames(draws) <- names(draws_list)
 
   # Compute ratios
+  gp_w_star <- fit_raw$gp_w_star  # NULL if not collapsed GP
   ratio_draws <- compute_ratio_draws_hmc_full(
     all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type,
-    re_param = re_param
+    re_param = re_param, gp_w_star = gp_w_star
   )
 
   # Diagnostics
@@ -2370,6 +2440,7 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
     n_svc <- spatial_info$n_svc %||% 0L
     N_obs <- spatial_info$n_units %||% 0L
     svc_names <- spatial_info$svc_names
+    svc_approx <- spatial_info$svc_approx %||% "nngp"
 
     if (n_svc > 0 && N_obs > 0) {
       # Extract log_sigma2 for each SVC term (variance parameter)
@@ -2383,28 +2454,44 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
         idx <- idx + 1
       }
 
-      # Extract log_phi for each SVC term (range parameter)
+      # Extract log_phi/log_lengthscale for each SVC term
       for (j in seq_len(n_svc)) {
+        param_name <- if (svc_approx == "hsgp") "lengthscale_svc" else "phi_svc"
         name <- if (!is.null(svc_names) && j <= length(svc_names)) {
-          paste0("phi_svc[", svc_names[j], "]")
+          paste0(param_name, "[", svc_names[j], "]")
         } else {
-          paste0("phi_svc[", j, "]")
+          paste0(param_name, "[", j, "]")
         }
         draws_list[[name]] <- exp(samples[, idx])
         idx <- idx + 1
       }
 
-      # Extract SVC coefficients: w[j, i] for each term j and observation i
-      # Layout in C++ is w_flat[j * n_obs + i]
-      for (j in seq_len(n_svc)) {
-        term_name <- if (!is.null(svc_names) && j <= length(svc_names)) {
-          svc_names[j]
-        } else {
-          as.character(j)
+      if (svc_approx == "hsgp") {
+        # HSGP-SVC: extract basis coefficients (m^2 per term)
+        m_total <- as.integer(spatial_info$svc_hsgp_m)^2
+        for (j in seq_len(n_svc)) {
+          term_name <- if (!is.null(svc_names) && j <= length(svc_names)) {
+            svc_names[j]
+          } else {
+            as.character(j)
+          }
+          for (k in seq_len(m_total)) {
+            draws_list[[paste0("svc_beta[", term_name, ",", k, "]")]] <- samples[, idx]
+            idx <- idx + 1
+          }
         }
-        for (i in seq_len(N_obs)) {
-          draws_list[[paste0("svc[", term_name, ",", i, "]")]] <- samples[, idx]
-          idx <- idx + 1
+      } else {
+        # NNGP-SVC: extract spatial coefficients (N per term)
+        for (j in seq_len(n_svc)) {
+          term_name <- if (!is.null(svc_names) && j <= length(svc_names)) {
+            svc_names[j]
+          } else {
+            as.character(j)
+          }
+          for (i in seq_len(N_obs)) {
+            draws_list[[paste0("svc[", term_name, ",", i, "]")]] <- samples[, idx]
+            idx <- idx + 1
+          }
         }
       }
     }
@@ -2448,9 +2535,12 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
     idx <- idx + 1
     draws_list[["phi_gp"]] <- exp(samples[, idx])
     idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
+    gp_param_draw <- spatial_info$parameterization %||% "centered"
+    if (gp_param_draw != "collapsed") {
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
     }
   } else if (spatial_info$type == "multiscale_gp") {
     draws_list[["sigma2_gp_local"]] <- exp(samples[, idx])
@@ -2664,7 +2754,8 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
 #' @keywords internal
 compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
                                           temporal_info, zi_info, model_type,
-                                          re_param = "noncentered") {
+                                          re_param = "noncentered",
+                                          gp_w_star = NULL) {
   n_samples <- nrow(samples)
   N <- hmc_data$N
 
@@ -2828,23 +2919,36 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
   if (spatial_info$type == "svc") {
     n_svc <- spatial_info$n_svc %||% 0L
     N_obs <- spatial_info$n_units %||% 0L
+    svc_approx <- spatial_info$svc_approx %||% "nngp"
 
     if (n_svc > 0 && N_obs > 0) {
-      # Skip hyperparameters
+      # Extract hyperparameters
+      log_sigma2_svc <- samples[, idx:(idx + n_svc - 1), drop = FALSE]
       idx <- idx + n_svc  # log_sigma2
-      idx <- idx + n_svc  # log_phi
+      log_ls_svc <- samples[, idx:(idx + n_svc - 1), drop = FALSE]
+      idx <- idx + n_svc  # log_phi / log_lengthscale
 
-      # Extract SVC coefficients: w_flat[j * n_obs + i]
-      n_svc_params <- n_svc * N_obs
+      if (svc_approx == "hsgp") {
+        # HSGP-SVC: extract basis coefficients
+        m_total <- as.integer(spatial_info$svc_hsgp_m)^2
+        n_svc_params <- n_svc * m_total
+      } else {
+        # NNGP-SVC: extract w values
+        n_svc_params <- n_svc * N_obs
+      }
       svc_w <- samples[, idx:(idx + n_svc_params - 1), drop = FALSE]
       idx <- idx + n_svc_params
 
-      # svc_effect will be computed per sample in the ratio loop
       svc_effect <- list(
         w = svc_w,
+        log_sigma2 = log_sigma2_svc,
+        log_ls = log_ls_svc,
         n_svc = n_svc,
         N_obs = N_obs,
-        X_svc = spatial_info$X_svc  # The covariate matrix for SVC
+        X_svc = spatial_info$X_svc,
+        approx = svc_approx,
+        hsgp_m = spatial_info$svc_hsgp_m %||% 0L,
+        coords = spatial_info$svc_coords
       )
     }
   }
@@ -2877,9 +2981,17 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
         sigma_u[s] * theta[s, ]
     }
   } else if (spatial_info$type == "gp") {
+    gp_param_ratio <- spatial_info$parameterization %||% "centered"
     idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp
-    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
+    if (gp_param_ratio == "collapsed") {
+      # Use w* from inner Laplace optimization (stored during sampling)
+      if (!is.null(gp_w_star)) {
+        spatial_effect <- gp_w_star
+      }
+    } else {
+      spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+    }
   } else if (spatial_info$type == "multiscale_gp") {
     idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
     gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
@@ -2908,6 +3020,34 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
 
   # ZI coefficients (skip for ratio computation - they affect likelihood, not ratio)
   # ZI parameters are used for P(Y=0) vs P(Y>0), not the mean ratio
+
+  # Precompute HSGP-SVC basis matrix (if needed)
+  svc_hsgp_basis <- NULL
+  if (!is.null(svc_effect) && (svc_effect$approx %||% "nngp") == "hsgp") {
+    m_per_dim <- as.integer(svc_effect$hsgp_m)
+    m_total <- m_per_dim^2
+    coords <- svc_effect$coords
+    c_val <- spatial_info$svc_hsgp_c %||% 1.5
+    L1 <- c_val * (max(coords[, 1]) - min(coords[, 1])) / 2
+    L2 <- c_val * (max(coords[, 2]) - min(coords[, 2])) / 2
+    center1 <- (max(coords[, 1]) + min(coords[, 1])) / 2
+    center2 <- (max(coords[, 2]) + min(coords[, 2])) / 2
+    eigenvals <- numeric(m_total)
+    phi_basis <- matrix(0, N, m_total)
+    k <- 0
+    for (m1 in seq_len(m_per_dim)) {
+      for (m2 in seq_len(m_per_dim)) {
+        k <- k + 1
+        lam1 <- (pi * m1 / (2 * L1))^2
+        lam2 <- (pi * m2 / (2 * L2))^2
+        eigenvals[k] <- lam1 + lam2
+        phi1 <- sin(pi * m1 * (coords[, 1] - center1 + L1) / (2 * L1)) / sqrt(L1)
+        phi2 <- sin(pi * m2 * (coords[, 2] - center2 + L2) / (2 * L2)) / sqrt(L2)
+        phi_basis[, k] <- phi1 * phi2
+      }
+    }
+    svc_hsgp_basis <- list(phi = phi_basis, eigenvals = eigenvals, m_total = m_total)
+  }
 
   # Compute ratios
   ratio_draws <- matrix(NA_real_, nrow = n_samples, ncol = N)
@@ -2992,19 +3132,37 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
       N_obs <- svc_effect$N_obs
       X_svc <- svc_effect$X_svc
       svc_w <- svc_effect$w
+      svc_approx_local <- svc_effect$approx %||% "nngp"
 
-      # For each observation, compute sum of w_j[i] * x_j[i]
-      for (i in seq_len(N)) {
-        svc_contrib <- 0
+      if (svc_approx_local == "hsgp" && !is.null(svc_hsgp_basis)) {
+        # HSGP-SVC: reconstruct spatial field from basis coefficients
+        m_total <- svc_hsgp_basis$m_total
         for (j in seq_len(n_svc)) {
-          # Index in svc_w: (j-1) * N_obs + i
-          w_ji <- svc_w[s, (j - 1) * N_obs + i]
-          x_ji <- if (!is.null(X_svc)) X_svc[i, j] else 1.0
-          svc_contrib <- svc_contrib + w_ji * x_ji
+          sigma2_j <- exp(svc_effect$log_sigma2[s, j])
+          ls_j <- exp(svc_effect$log_ls[s, j])
+          beta_j <- svc_w[s, ((j - 1) * m_total + 1):(j * m_total)]
+          # Spectral density: S(w) = sigma2 * sqrt(2*pi) * ls * exp(-0.5*ls^2*w)
+          S_k <- sigma2_j * sqrt(2 * pi) * ls_j *
+                 exp(-0.5 * ls_j^2 * svc_hsgp_basis$eigenvals)
+          sqrt_S_k <- sqrt(pmax(S_k, 0))
+          # f_j = Phi %*% (sqrt_S_k * beta_j)
+          f_j <- svc_hsgp_basis$phi %*% (sqrt_S_k * beta_j)
+          x_j <- if (!is.null(X_svc)) X_svc[, j] else rep(1.0, N)
+          eta_num <- eta_num + as.numeric(f_j) * x_j
+          eta_denom <- eta_denom + as.numeric(f_j) * x_j
         }
-        # SVC effect is shared between numerator and denominator
-        eta_num[i] <- eta_num[i] + svc_contrib
-        eta_denom[i] <- eta_denom[i] + svc_contrib
+      } else {
+        # NNGP-SVC: direct w values
+        for (i in seq_len(N)) {
+          svc_contrib <- 0
+          for (j in seq_len(n_svc)) {
+            w_ji <- svc_w[s, (j - 1) * N_obs + i]
+            x_ji <- if (!is.null(X_svc)) X_svc[i, j] else 1.0
+            svc_contrib <- svc_contrib + w_ji * x_ji
+          }
+          eta_num[i] <- eta_num[i] + svc_contrib
+          eta_denom[i] <- eta_denom[i] + svc_contrib
+        }
       }
     }
 
@@ -3187,6 +3345,7 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nu = gp$nu,
       shared = gp$shared,
       sampler = gp$sampler %||% "noncentered",
+      parameterization = gp$parameterization %||% "centered",
       # Solver config (multiscale uses Cholesky by default)
       solver = "cholesky",
       cg_tol = 1e-6,
@@ -3239,6 +3398,7 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       cov_type = gp$cov,
       nu = gp$nu,
       shared = gp$shared,
+      parameterization = gp$parameterization %||% "centered",
       # Solver config
       solver = gp$solver %||% "auto",
       cg_tol = gp$cg_tol %||% 1e-6,

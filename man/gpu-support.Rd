@@ -2,8 +2,6 @@
 % Please edit documentation in R/gpu.R
 \name{gpu-support}
 \alias{gpu-support}
-\alias{gpu_available}
-\alias{gpu_info}
 \title{GPU Support Utilities}
 \description{
 Functions to check GPU availability and capabilities for accelerated

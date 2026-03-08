@@ -195,6 +195,10 @@ struct ModelData {
   // SVC (Spatially-Varying Coefficients) structure
   ratiod_svc::SVCData svc_data;
   bool has_svc = false;
+  bool svc_is_hsgp = false;             // HSGP approximation for SVC
+  ratiod_hsgp::HSGPData svc_hsgp_data;  // Shared HSGP basis for all SVC terms
+  int svc_hsgp_m_per_dim = 6;           // Basis functions per dimension for SVC-HSGP
+  double svc_hsgp_boundary_factor = 1.5;
   double svc_sigma2_prior_scale = 1.0;  // Half-Cauchy scale for sigma2
   double svc_phi_prior_lower = 0.01;    // Uniform prior lower bound for phi
   double svc_phi_prior_upper = 10.0;    // Uniform prior upper bound for phi
@@ -206,6 +210,8 @@ struct ModelData {
   double gp_sigma2_prior_alpha = 0.01;
   double gp_phi_prior_lower = 0.01;     // Uniform prior bounds for range
   double gp_phi_prior_upper = 10.0;
+  int gp_parameterization = 1;          // 0=centered, 1=non-centered (default NC)
+  bool gp_collapsed = false;            // 2=collapsed (marginalize w via inner Laplace)
 
   // Multi-scale GP spatial structure
   MultiscaleGPData multiscale_gp_data;
@@ -410,6 +416,7 @@ struct ParamLayout {
   bool has_spatial = false;
   bool is_bym2 = false;
   bool is_gp = false;
+  bool is_gp_collapsed = false;
   bool is_multiscale_gp = false;
   bool is_hsgp = false;
   bool has_temporal = false;
@@ -1724,6 +1731,10 @@ struct HMCResultCpp {
   int n_max_treedepth = 0;       // Count of iterations hitting max treedepth
   std::string sampler;           // Sampler name (e.g., "NUTS", "HMC", "NUTS->HMC(L=10)")
 
+  // Collapsed GP: w* draws (n_sample x n_gp, row-major)
+  std::vector<double> gp_w_star_flat;
+  int n_gp_collapsed = 0;
+
   // Row access for flat storage
   double* sample_row(int i) { return &samples_flat[i * n_params_stored]; }
   const double* sample_row(int i) const { return &samples_flat[i * n_params_stored]; }
@@ -1742,6 +1753,10 @@ struct HMCResult {
   int n_sample;
   int chain_id;
   std::string sampler;
+
+  // Collapsed GP: w* draws (n_sample x n_gp)
+  Rcpp::NumericMatrix gp_w_star;
+  int n_gp_collapsed = 0;
 };
 
 // Convert C++ result to R result (call outside parallel region)
@@ -1769,6 +1784,18 @@ inline HMCResult cpp_to_r_result(const HMCResultCpp& cpp_result, int n_params) {
     r_result.n_leapfrog[i] = cpp_result.n_leapfrog[i];
     r_result.treedepth[i] = cpp_result.treedepth[i];
     r_result.divergent[i] = cpp_result.divergent[i];
+  }
+
+  // Collapsed GP: copy w* draws
+  if (cpp_result.n_gp_collapsed > 0) {
+    int n_gp = cpp_result.n_gp_collapsed;
+    r_result.n_gp_collapsed = n_gp;
+    r_result.gp_w_star = Rcpp::NumericMatrix(cpp_result.n_sample, n_gp);
+    for (int i = 0; i < cpp_result.n_sample; i++) {
+      for (int j = 0; j < n_gp; j++) {
+        r_result.gp_w_star(i, j) = cpp_result.gp_w_star_flat[i * n_gp + j];
+      }
+    }
   }
 
   return r_result;

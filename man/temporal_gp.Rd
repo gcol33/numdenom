@@ -11,7 +11,8 @@ temporal_gp(
   period = NULL,
   group_var = NULL,
   shared = TRUE,
-  scale_coords = TRUE
+  scale_coords = TRUE,
+  parameterization = c("noncentered", "centered")
 )
 }
 \arguments{
@@ -42,6 +43,11 @@ numerator and denominator.}
 
 \item{scale_coords}{Logical; if TRUE (default), time values are scaled to
 unit variance before computing distances.}
+
+\item{parameterization}{Parameterization for GP effects:
+\code{"noncentered"} (default) stores z ~ N(0,1) and scales by covariance
+(better for weakly-informed effects);
+\code{"centered"} stores effects directly (better for strongly-informed effects).}
 }
 \value{
 A \code{ratiod_temporal_gp} object

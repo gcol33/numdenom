@@ -161,7 +161,7 @@ all_models <- c(
 )
 stan_ref <- c(
   PG_base = 1.2, PG_RE = 2.5, PG_ICAR = 3.0,
-  NB_base = 1.5, NB_RE = 2.9, NB_ICAR = 3.5, NB_HSGP = 2.9,
+  NB_base = 1.5, NB_RE = 2.9, NB_ICAR = 3.5, NB_HSGP = 21.0,
   Bin_base = 9.4, Bin_RE = NA,
   PG_GPt = 10.0, Bin_GPt = 3.3, NB_GPt = 21.3,
   PG_BYM2 = 13.2, NB_BYM2 = 86.0, Bin_BYM2 = 12.4,

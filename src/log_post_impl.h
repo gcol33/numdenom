@@ -661,58 +661,98 @@ T compute_log_post_impl(
         int n_svc = data.svc_data.n_svc;
         int n_obs = data.svc_data.n_obs;
 
-        // Extract sigma2 (spatial variance) parameters
-        svc_sigma2.resize(n_svc);
-        for (int j = 0; j < n_svc; j++) {
-            T log_sigma2 = params[layout.log_sigma2_svc_start + j];
-            svc_sigma2[j] = safe_exp(log_sigma2);
+        if (data.svc_is_hsgp) {
+            // HSGP-based SVC: basis function approximation
+            int m_total = data.svc_hsgp_data.m_total;
 
-            // Half-Cauchy prior on sigma = sqrt(sigma2)
-            T sigma = safe_sqrt(svc_sigma2[j]);
-            double scale = data.svc_sigma2_prior_scale;
-            log_post = log_post - safe_log(T(1.0) + sigma * sigma / T(scale * scale));
-            log_post = log_post + log_sigma2;  // Jacobian for log transform
-        }
+            // Per-term: sigma2, lengthscale, beta[m_total]
+            svc_eta.resize(n_obs, T(0.0));
+            for (int j = 0; j < n_svc; j++) {
+                T log_sigma2 = params[layout.log_sigma2_svc_start + j];
+                T sigma2_j = safe_exp(log_sigma2);
 
-        // Extract phi (spatial range) parameters
-        svc_phi.resize(n_svc);
-        for (int j = 0; j < n_svc; j++) {
-            T log_phi = params[layout.log_phi_svc_start + j];
-            svc_phi[j] = safe_exp(log_phi);
+                // PC prior on sigma
+                T sigma_j = safe_sqrt(sigma2_j);
+                double rate_sigma = 4.6;
+                log_post = log_post - rate_sigma * sigma_j + T(0.5) * log_sigma2;
 
-            // Uniform prior on phi (transformed to log scale)
-            double phi_val = get_value(svc_phi[j]);
-            if (phi_val < data.svc_phi_prior_lower || phi_val > data.svc_phi_prior_upper) {
-                return T(-INFINITY);
+                T log_ls = params[layout.log_phi_svc_start + j];
+                T ls_j = safe_exp(log_ls);
+
+                // LogNormal(0,1) on lengthscale
+                log_post = log_post - T(0.5) * log_ls * log_ls;
+
+                // Extract beta_j and compute f_j = Phi * (sqrt(S_j) * beta_j)
+                // N(0, I) prior on beta
+                for (int k = 0; k < m_total; k++) {
+                    T beta_jk = params[layout.svc_w_start + j * m_total + k];
+                    log_post = log_post - T(0.5) * beta_jk * beta_jk;
+
+                    // Compute scaled beta: sqrt(S(eigenvalue_k, sigma2_j, ls_j)) * beta_jk
+                    double omega_sq = data.svc_hsgp_data.eigenvalues[k];
+                    T S_k = sigma2_j * T(std::sqrt(2.0 * M_PI)) * ls_j *
+                            safe_exp(T(-0.5) * ls_j * ls_j * T(omega_sq));
+                    T sqrt_S_k = safe_sqrt(S_k);
+
+                    // Accumulate f_j[i] = sum_k phi[i,k] * sqrt_S_k * beta_jk
+                    for (int i = 0; i < n_obs; i++) {
+                        double phi_ik = data.svc_hsgp_data.phi_flat[i * m_total + k];
+                        svc_eta[i] = svc_eta[i] + T(phi_ik) * sqrt_S_k * beta_jk *
+                                     T(data.svc_data.X_svc[i * n_svc + j]);
+                    }
+                }
             }
-            log_post = log_post + log_phi;  // Jacobian for log transform
-        }
+        } else {
+            // NNGP-based SVC (original path)
 
-        // Extract SVC values
-        int n_svc_params = n_svc * n_obs;
-        svc_w_flat.resize(n_svc_params);
-        for (int k = 0; k < n_svc_params; k++) {
-            svc_w_flat[k] = params[layout.svc_w_start + k];
-        }
+            // Extract sigma2 (spatial variance) parameters
+            svc_sigma2.resize(n_svc);
+            for (int j = 0; j < n_svc; j++) {
+                T log_sigma2 = params[layout.log_sigma2_svc_start + j];
+                svc_sigma2[j] = safe_exp(log_sigma2);
 
-        // NNGP prior on each SVC term
-        for (int j = 0; j < n_svc; j++) {
-            // Extract w_j (the j-th SVC term at all locations)
-            std::vector<T> w_j(n_obs);
-            for (int k = 0; k < n_obs; k++) {
-                w_j[k] = svc_w_flat[j * n_obs + k];
+                T sigma = safe_sqrt(svc_sigma2[j]);
+                double scale = data.svc_sigma2_prior_scale;
+                log_post = log_post - safe_log(T(1.0) + sigma * sigma / T(scale * scale));
+                log_post = log_post + log_sigma2;
             }
 
-            // NNGP log-likelihood
-            log_post = log_post + ratiod_svc_ad::nngp_log_lik(w_j, svc_sigma2[j], svc_phi[j], data.svc_data);
+            // Extract phi (spatial range) parameters
+            svc_phi.resize(n_svc);
+            for (int j = 0; j < n_svc; j++) {
+                T log_phi = params[layout.log_phi_svc_start + j];
+                svc_phi[j] = safe_exp(log_phi);
+
+                double phi_val = get_value(svc_phi[j]);
+                if (phi_val < data.svc_phi_prior_lower || phi_val > data.svc_phi_prior_upper) {
+                    return T(-INFINITY);
+                }
+                log_post = log_post + log_phi;
+            }
+
+            // Extract SVC values
+            int n_svc_params = n_svc * n_obs;
+            svc_w_flat.resize(n_svc_params);
+            for (int k = 0; k < n_svc_params; k++) {
+                svc_w_flat[k] = params[layout.svc_w_start + k];
+            }
+
+            // NNGP prior on each SVC term
+            for (int j = 0; j < n_svc; j++) {
+                std::vector<T> w_j(n_obs);
+                for (int k = 0; k < n_obs; k++) {
+                    w_j[k] = svc_w_flat[j * n_obs + k];
+                }
+                log_post = log_post + ratiod_svc_ad::nngp_log_lik(w_j, svc_sigma2[j], svc_phi[j], data.svc_data);
+            }
+
+            // Soft sum-to-zero constraint
+            log_post = log_post + ratiod_svc_ad::svc_sum_to_zero_penalty(svc_w_flat, data.svc_data, 1.0);
+
+            // Precompute SVC contribution to linear predictor
+            svc_eta.resize(n_obs, T(0.0));
+            ratiod_svc_ad::compute_svc_eta(svc_w_flat, data.svc_data, svc_eta);
         }
-
-        // Soft sum-to-zero constraint for identifiability
-        log_post = log_post + ratiod_svc_ad::svc_sum_to_zero_penalty(svc_w_flat, data.svc_data, 1.0);
-
-        // Precompute SVC contribution to linear predictor
-        svc_eta.resize(n_obs, T(0.0));
-        ratiod_svc_ad::compute_svc_eta(svc_w_flat, data.svc_data, svc_eta);
     }
 
     // TVC (Temporally-Varying Coefficients) parameters and priors

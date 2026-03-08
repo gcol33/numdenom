@@ -15,9 +15,9 @@ augmentation to count data with overdispersion.
 
 \strong{Model (NB2 parameterization):}
 \itemize{
-\item Y_i ~ NB(r, p_i)
-\item E\link{Y_i} = r * p_i / (1 - p_i)
-\item logit(p_i) = X_i * beta + Z_i * b
+\item \eqn{Y_i \sim NB(r, p_i)}
+\item \eqn{E[Y_i] = r \cdot p_i / (1 - p_i)}
+\item \eqn{logit(p_i) = X_i \beta + Z_i b}
 }
 
 \strong{Augmentation scheme:}

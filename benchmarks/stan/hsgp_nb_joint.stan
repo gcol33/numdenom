@@ -1,5 +1,5 @@
-// Joint NegBin-NegBin model with HSGP spatial - matches numdenom exactly
-// Both processes share the same HSGP spatial effect
+// Joint NegBin-NegBin model with SHARED RE + HSGP spatial - matches numdenom exactly
+// Both processes share the same RE and HSGP spatial effect
 // Uses Hilbert Space GP approximation (Riutort-Mayol et al. 2023)
 
 functions {
@@ -31,6 +31,10 @@ data {
   array[N] int<lower=0> y_denom; // Denominator counts
   vector[N] x;              // Covariate
   matrix[N, 2] coords;      // Spatial coordinates (lon, lat)
+
+  // Random effects
+  int<lower=1> n_groups;                              // Number of RE groups
+  array[N] int<lower=1,upper=n_groups> group_idx;     // Group assignment
 
   // Boundary factor
   real<lower=0> c;          // L = c * max_range (default 1.5)
@@ -101,6 +105,10 @@ parameters {
   real beta_denom_1;
   real<lower=0> phi_denom;
 
+  // SHARED random effects (non-centered)
+  vector[n_groups] z_re;
+  real<lower=0> sigma_re;
+
   // HSGP parameters - match numdenom priors
   real<lower=0> sigma_gp;  // Standard deviation (not variance)
   real<lower=0.01> lengthscale;  // Positive lengthscale (LogNormal prior in model block)
@@ -109,6 +117,7 @@ parameters {
 
 transformed parameters {
   real<lower=0> sigma2_gp = sigma_gp * sigma_gp;
+  vector[n_groups] re = sigma_re * z_re;
 
   // Compute HSGP spatial effects: f(x) = sum_j phi_j(x) * sqrt(S(lambda_j)) * beta_j
   vector[N] gp_effects;
@@ -137,6 +146,10 @@ model {
   phi_num ~ gamma(2, 0.5);
   phi_denom ~ gamma(2, 0.5);
 
+  // RE priors
+  z_re ~ std_normal();
+  sigma_re ~ cauchy(0, 2.5);
+
   // PC prior on sigma_gp (exponential prior, simpler than full PC prior)
   sigma_gp ~ exponential(pc_rate);
 
@@ -146,10 +159,15 @@ model {
   // Standard normal prior on basis coefficients
   beta_hsgp ~ std_normal();
 
-  // Likelihood - vectorized for speed
-  mu_num = exp(beta_num_0 + beta_num_1 * x + gp_effects);
-  mu_denom = exp(beta_denom_0 + beta_denom_1 * x + gp_effects);
-
-  y_num ~ neg_binomial_2(mu_num, phi_num);
-  y_denom ~ neg_binomial_2(mu_denom, phi_denom);
+  // Linear predictors with SHARED RE and SHARED HSGP
+  {
+    vector[N] eta_num = beta_num_0 + beta_num_1 * x + gp_effects;
+    vector[N] eta_denom = beta_denom_0 + beta_denom_1 * x + gp_effects;
+    for (n in 1:N) {
+      eta_num[n] += re[group_idx[n]];
+      eta_denom[n] += re[group_idx[n]];
+    }
+    y_num ~ neg_binomial_2(exp(eta_num), phi_num);
+    y_denom ~ neg_binomial_2(exp(eta_denom), phi_denom);
+  }
 }

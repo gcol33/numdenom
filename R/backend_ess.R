@@ -262,6 +262,11 @@ fit_ess <- function(formula,
 
 
 #' Print method for ratiod_ess objects
+#'
+#' @param x A `ratiod_ess` fit object.
+#' @param digits Number of significant digits to print (default 3).
+#' @param ... Additional arguments passed to [print()].
+#'
 #' @export
 print.ratiod_ess <- function(x, digits = 3, ...) {
   cat("Elliptical Slice Sampling Fit\n")

@@ -6,6 +6,13 @@
 \usage{
 \method{print}{ratiod_sgld}(x, digits = 3, ...)
 }
+\arguments{
+\item{x}{A \code{ratiod_sgld} fit object.}
+
+\item{digits}{Number of significant digits to print (default 3).}
+
+\item{...}{Additional arguments passed to \code{\link[=print]{print()}}.}
+}
 \description{
 Print method for ratiod_sgld objects
 }

@@ -90,9 +90,11 @@
 #'   with dense mass matrix. `TRUE` forces on, `FALSE` forces off.
 #'   Cost: ~(p+1) gradient evaluations per divergent trajectory only.
 #' @param metric Mass matrix type for NUTS:
-#'   `"dense"` (default) full dense mass matrix with Ledoit-Wolf shrinkage
+#'   `"auto"` (default) selects automatically based on model complexity;
+#'   `"dense"` full dense mass matrix with Ledoit-Wolf shrinkage
 #'   (handles correlated posteriors: random slopes, BYM2, HSGP, TVC models);
-#'   `"diag"` diagonal mass matrix (faster per step but may require deeper trees).
+#'   `"diag"` diagonal mass matrix (faster per step but may require deeper trees);
+#'   `"block_diag"` block-diagonal mass matrix (separate blocks per parameter group).
 #'   Auto-falls back to diagonal when p > 2000.
 #' @param re_param Random effects parameterization:
 #'   `"noncentered"` (default) stores z ~ N(0,1) and computes re = σ*z (or re = diag(σ)*L*z for correlated).
@@ -182,7 +184,7 @@ ratiod <- function(formula,
                   gradient_mode = c("auto", "N", "A", "A_r", "A_t", "H"),
                   re_param = c("noncentered", "centered"),
                   adapt_delta = NULL,
-                  max_treedepth = 10,
+                  max_treedepth = NULL,
                   metric = c("auto", "dense", "diag", "block_diag"),
                   riemannian = NULL,
                   ...) {

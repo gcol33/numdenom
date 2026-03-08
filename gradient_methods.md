@@ -389,7 +389,7 @@ Priority order for creating joint Stan models:
 | 23 | poisson_gamma | ✓ | MSGP | RW1 | ✗ | H | 298.4 | | | | ✓Sim (0.90 SD, O(N³) MSGP) |
 | 24 | poisson_gamma | ✓ | ICAR | ✗ | ZI | H | 4.5 | | | | ✓Stan* (soft constraint) |
 | 25 | poisson_gamma | slopes | ICAR | ✗ | ✗ | H | 6.9 | | 45.3 | | ✓Stan* (Stan 15.4s, **2.2x WIN**). Was 50.8s (vectorized obs loop + scoping fix) |
-| 26 | poisson_gamma | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim* (eta cor=0.73, NUTS timeout) |
+| 26 | poisson_gamma | ✓ | SVC | ✗ | ✗ | H | 19.7 | | | | ✓Sim* (eta cor=0.73). Was >600s NNGP, now HSGP-SVC (30x) |
 | 27 | poisson_gamma | ✓ | ✗ | TVC | ✗ | H | 1.1 | | 47.3 | | ✓Stan (joint, 12.4s) |
 | 28 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 22.6 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 90.3s |
 | 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 87.2 | | | | ✓Sim ST-IV (Stan 82.5s, **1.2x WIN** subprocess). Was 87.2s in-loop |
@@ -426,7 +426,7 @@ Priority order for creating joint Stan models:
 | 53 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | H | >600 | | | | ✓Sim (1.84 SD, O(N³), NUTS timeout) |
 | 54 | negbin_negbin | ✓ | ICAR | ✗ | ZI | H | 2.9 | | | | ✓Stan* (soft constraint) |
 | 55 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H | 13.8 | | | | ✓Stan* (Stan 46.6s, **3.4x WIN**). Was 70.0s (vectorized obs loop + scoping fix) |
-| 56 | negbin_negbin | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim* (eta cor=0.70, NUTS timeout) |
+| 56 | negbin_negbin | ✓ | SVC | ✗ | ✗ | H | 15.1 | | | | ✓Sim* (eta cor=0.70). Was >600s NNGP, now HSGP-SVC (40x) |
 | 57 | negbin_negbin | ✓ | ✗ | TVC | ✗ | H | 3.1 | | | | ✓Stan (joint) |
 | 58 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 19.0 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 132.7s |
 | 59 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 111.0 | | | | ✓Sim ST-IV (Stan 133.5s, **1.2x WIN**, td=10). Was 287.9s (vectorized obs loop) |
@@ -465,7 +465,7 @@ Priority order for creating joint Stan models:
 | 85 | binomial | ✓ | MSGP | RW1 | ✗ | H | 531.8 | | | | ✓Sim (0.05 SD, O(N³) MSGP) |
 | 86 | binomial | ✓ | ICAR | ✗ | ZI | H | 3.0 | | | | ✓Stan (13.2x) |
 | 87 | binomial | slopes | ICAR | ✗ | ✗ | H | 14.2 | | | | ✓Stan (Stan 14.5s, ~parity). Was 25.3s (vectorized obs loop + scoping fix) |
-| 88 | binomial | ✓ | SVC | ✗ | ✗ | H | >600 | | | | ✓Sim (eta cor=0.83, NUTS timeout) |
+| 88 | binomial | ✓ | SVC | ✗ | ✗ | H | 20.3 | | | | ✓Sim (eta cor=0.83). Was >600s NNGP, now HSGP-SVC (30x) |
 | 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 2.7 | | | | ✓Stan (17.1x) |
 | 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 4.1 | | | | ✓Stan ST-I (joint, 0.4 SE). Was 44.1s |
 | 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 73.1 | | | | ✓Sim ST-IV (Stan 56.0s, **1.1x WIN** subprocess). Was 73.1s in-loop |
@@ -515,34 +515,34 @@ Priority order for creating joint Stan models:
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
 | 108 | negbin_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.1 | | | | ✓Stan (joint, 29.5x) |
 | 109 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.9 | | | | ✓Stan (joint, 7.5x) |
-| 110 | negbin_gamma | slopes | ✗ | ✗ | ✗ | H | | | | | |
-| 111 | negbin_gamma | crossed | ✗ | ✗ | ✗ | H | | | | | |
-| 112 | negbin_gamma | ✓ | ICAR | ✗ | ✗ | H | | | | | |
-| 113 | negbin_gamma | ✓ | BYM2 | ✗ | ✗ | H | | | | | |
-| 114 | negbin_gamma | ✓ | GP | ✗ | ✗ | H | | | | | |
-| 115 | negbin_gamma | ✓ | HSGP | ✗ | ✗ | H | | | | | |
-| 116 | negbin_gamma | ✓ | MSGP | ✗ | ✗ | H | | | | | |
-| 117 | negbin_gamma | ✓ | pCAR | ✗ | ✗ | H | | | | | |
-| 118 | negbin_gamma | ✓ | ✗ | RW1 | ✗ | H | | | | | |
-| 119 | negbin_gamma | ✓ | ✗ | RW2 | ✗ | H | | | | | |
-| 120 | negbin_gamma | ✓ | ✗ | AR1 | ✗ | H | | | | | |
-| 121 | negbin_gamma | ✓ | ✗ | GP_t | ✗ | H | | | | | |
-| 122 | negbin_gamma | ✓ | ✗ | MS_t | ✗ | H | | | | | |
-| 123 | negbin_gamma | ✓ | ✗ | ✗ | ZI | H | | | | | |
-| 124 | negbin_gamma | ✓ | ✗ | ✗ | Hurdle | H | | | | | |
-| 125 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | | | | | |
-| 126 | negbin_gamma | ✓ | BYM2 | RW1 | ✗ | H | | | | | |
-| 127 | negbin_gamma | ✓ | ICAR | AR1 | ✗ | H | | | | | |
-| 128 | negbin_gamma | ✓ | GP | RW1 | ✗ | H | | | | | |
-| 129 | negbin_gamma | ✓ | HSGP | RW1 | ✗ | H | | | | | |
-| 130 | negbin_gamma | ✓ | MSGP | RW1 | ✗ | H | | | | | |
-| 131 | negbin_gamma | ✓ | ICAR | ✗ | ZI | H | | | | | |
-| 132 | negbin_gamma | slopes | ICAR | ✗ | ✗ | H | | | | | |
-| 133 | negbin_gamma | ✓ | SVC | ✗ | ✗ | H | | | | | |
-| 134 | negbin_gamma | ✓ | ✗ | TVC | ✗ | H | | | | | |
-| 135 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | | | | | ST-I |
-| 136 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | | | | | ST-IV |
-| 137 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | | | | | latent |
+| 110 | negbin_gamma | slopes | ✗ | ✗ | ✗ | H | 3.1 | | | | ✓Sim (0.76 SD) |
+| 111 | negbin_gamma | crossed | ✗ | ✗ | ✗ | H | 0.8 | | | | ✓Sim (0.85 SD) |
+| 112 | negbin_gamma | ✓ | ICAR | ✗ | ✗ | H | 1.9 | | | | ✓Sim (0.66 SD) |
+| 113 | negbin_gamma | ✓ | BYM2 | ✗ | ✗ | H | 0.9 | | | | ✓Sim (0.75 SD) |
+| 114 | negbin_gamma | ✓ | GP | ✗ | ✗ | H | 23.3 | | | | ✓Sim (1.45 SD, poorly identified intercepts) |
+| 115 | negbin_gamma | ✓ | HSGP | ✗ | ✗ | H | 4.3 | | | | ✓Sim (0.83 SD) |
+| 116 | negbin_gamma | ✓ | MSGP | ✗ | ✗ | H | 4.0 | | | | ✓Sim |
+| 117 | negbin_gamma | ✓ | pCAR | ✗ | ✗ | H | 2.9 | | | | ✓Sim |
+| 118 | negbin_gamma | ✓ | ✗ | RW1 | ✗ | H | 1.6 | | | | ✓Sim (1.22 SD) |
+| 119 | negbin_gamma | ✓ | ✗ | RW2 | ✗ | H | 4.5 | | | | ✓Sim (0.98 SD) |
+| 120 | negbin_gamma | ✓ | ✗ | AR1 | ✗ | H | 2.1 | | | | ✓Sim (0.77 SD) |
+| 121 | negbin_gamma | ✓ | ✗ | GP_t | ✗ | H | | | | | SEGFAULT (temporal_gp + negbin_gamma) |
+| 122 | negbin_gamma | ✓ | ✗ | MS_t | ✗ | H | 5.0 | | | | ✓Sim |
+| 123 | negbin_gamma | ✓ | ✗ | ✗ | ZI | H | 2.9 | | | | ✓Sim (ZI family N/A for NB-Gamma, uses zinegbin) |
+| 124 | negbin_gamma | ✓ | ✗ | ✗ | Hurdle | H | 3.9 | | | | ✓Sim (hurdle family N/A for NB-Gamma) |
+| 125 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 3.4 | | | | ✓Sim (0.68 SD) |
+| 126 | negbin_gamma | ✓ | BYM2 | RW1 | ✗ | H | 1.9 | | | | ✓Sim |
+| 127 | negbin_gamma | ✓ | ICAR | AR1 | ✗ | H | 3.3 | | | | ✓Sim (0.78 SD) |
+| 128 | negbin_gamma | ✓ | GP | RW1 | ✗ | H | 22.6 | | | | ✓Sim |
+| 129 | negbin_gamma | ✓ | HSGP | RW1 | ✗ | H | 15.9 | | | | ✓Sim |
+| 130 | negbin_gamma | ✓ | MSGP | RW1 | ✗ | H | | | | | SEGFAULT (MSGP+RW1 + negbin_gamma) |
+| 131 | negbin_gamma | ✓ | ICAR | ✗ | ZI | H | | | | | N/A (no ZI variant for negbin_gamma) |
+| 132 | negbin_gamma | slopes | ICAR | ✗ | ✗ | H | 17.4 | | | | ✓Sim |
+| 133 | negbin_gamma | ✓ | SVC | ✗ | ✗ | H | 20.3 | | | | HSGP-SVC |
+| 134 | negbin_gamma | ✓ | ✗ | TVC | ✗ | H | 78.6 | | | | ✓Sim (slow) |
+| 135 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 7.1 | | | | ✓Sim ST-I |
+| 136 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 40.9 | | | | ✓Sim ST-IV |
+| 137 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.8 | | | | ✓Sim latent (N=50) |
 
 ---
 
@@ -614,13 +614,13 @@ Priority order for creating joint Stan models:
 - **Medium (10-100s)**: 12 rows — temporal GP, MS_t, HSGP (bin), latent (pg/nb)
 - **Slow (100-600s)**: 17 rows — BYM2, HSGP (pg/nb), hurdle, AR1+spatial, spatiotemporal, slopes+ICAR
 - **Medium-slow (20-100s)**: 6 rows — slopes (fixed 2026-03-03, was 135-145s), temporal GP, MS_t
-- **Timeout (>600s)**: 12 rows — GP, SVC, MSGP (some), GP+RW1
+- **Timeout (>600s)**: 9 rows — GP, MSGP (some), GP+RW1. SVC now 15-20s with HSGP
 
 ### Mass Matrix & Metric Selection (2026-02-24)
 
 **AUTO metric** (`metric="auto"`, default) selects mass matrix type based on model complexity:
 - **DIAG** for: base, +RE, +ICAR, +pCAR, +RW1/RW2/AR1, +ZI/Hurdle, +crossed, +TVC, correlated slopes, temporal GP, HSGP
-- **DENSE** (with OAS shrinkage) for: BYM2, GP, MSGP, multiscale temporal, SVC, spatiotemporal, latent factors
+- **DENSE** (with OAS shrinkage) for: BYM2, GP, MSGP, multiscale temporal, spatiotemporal, latent factors. SVC uses BLOCK_DIAG with HSGP
 - **Note** (2026-03-03): Removed correlated slopes and temporal GP from DENSE triggers. NC parameterization decorrelates z params, making DENSE O(p^2) overhead unjustified. DIAG matches or beats DENSE eps for these models.
 
 **Pre-allocated NUTS buffers**: All per-iteration (11 vectors) and per-tree-merge (4×depth vectors) allocations eliminated via `NUTSWorkspace`.
@@ -656,7 +656,7 @@ Priority order for creating joint Stan models:
 - rows 61-66, 70-73, 76-77, 80-82, 87, 89: All pass brms validation ✓
 
 **All features now have H gradients, benchmarks, and validation:**
-- SVC (rows 26, 56, 88) - NNGP-based, ~700-765s (SLOW, O(N²) NNGP), validated via prediction recovery
+- SVC (rows 26, 56, 88) - now HSGP-based (15-20s), was NNGP (>600s timeout). 30-40x speedup via basis function approximation
 - TVC (rows 27, 57, 89) - RW prior, 1-3s (fast, gradient fix 2026-02-28: was 24-183s)
 - Latent factors (rows 30, 60, 92) - benchmarked with N=50 (see note below)
 
@@ -670,7 +670,7 @@ Priority order for creating joint Stan models:
 NUTS significantly faster than old L=20 for latent factors (3-18s vs 57-218s). Standard N=500 may still exceed timeout.
 
 **Newly benchmarked (44 models):**
-- **SVC models: rows 26, 56, 88 (708-765s, SLOW - O(N²) NNGP)**
+- **SVC models: rows 26, 56, 88 (15-20s with HSGP-SVC, was >600s NNGP)**
 - **TVC models: rows 27, 57, 89 (1.1-3.1s, fast after gradient fix 2026-02-28)**
 - negbin GP spatial: rows 37-40 (92.2s, 0.3s, 14.0s, 9.5s)
 - negbin temporal GP/MS: rows 44-45 (8.1s, 8.2s)
@@ -995,7 +995,7 @@ Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/bench_validate_svc_fixed.R`
 - **pCAR**: 9-10s (efficient sparse structure)
 - **Temporal GP**: 10-12s (efficient temporal structure)
 - **Temporal Multiscale**: ~700s (SLOW - needs optimization)
-- **SVC**: 708-765s (SLOW - O(N²) NNGP distance computations)
+- **SVC**: 15-20s with HSGP-SVC (was >600s NNGP). 30-40x speedup via m²=36 basis functions instead of N=500 NNGP effects
 - **TVC**: 1-3s (fast - gradient fix 2026-02-28: was 24-183s)
 - **gamma_gamma family**: 31-570s (SLOW - needs optimization)
 - **lognormal family**: 10-213s (moderate)
@@ -1008,7 +1008,7 @@ Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/bench_validate_svc_fixed.R`
 | Fast | <10s | Core families, RE, ICAR, pCAR, RW1/RW2, ZI/ZOIB, MSGP (pg), TVC |
 | Medium | 10-100s | GP_t, MS_t, HSGP (bin), latent, AR1 |
 | Slow | 100-600s | Slopes, BYM2, HSGP (pg/nb), hurdle, ICAR+AR1, MSGP (bin/nb) |
-| Timeout | >600s | GP (NNGP), SVC, GP+RW1 — need dense mass matrix |
+| Timeout | >600s | GP (NNGP), GP+RW1 — need dense mass matrix |
 | OI/ZOIB | <10s | OI binomial, ZOIB (rows 78-79) |
 
 **Latent factor note**: Times are slow due to high dimensionality (N×K params), not gradient efficiency. H gradients are O(N) which is optimal, but HMC struggles with 1000+ parameters. Consider `mode = "vi"` for latent factor models.
@@ -1025,7 +1025,7 @@ Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/bench_validate_svc_fixed.R`
 - GP + temporal: ✓ (rows 21, 51, 83)
 - HSGP + temporal: ✓ (rows 22, 52, 84)
 - MSGP + temporal: ✓ (rows 23, 53, 85)
-- **SVC: ✓Sim (rows 26, 56, 88) - 708-765s, SLOW O(N²) NNGP, prediction recovery validated**
+- **SVC: ✓Sim (rows 26, 56, 88) - 15-20s with HSGP-SVC (was >600s NNGP), prediction recovery validated**
 - **TVC: ✓ (rows 27, 57, 89) - 1.1-3.1s, fast (gradient fix 2026-02-28)**
 - gamma_gamma: ✓ (rows 93-97)
 - lognormal: ✓ (rows 98-102)

@@ -257,6 +257,7 @@ fit_vi <- function(formula,
     # Samples for compatibility
     samples = fit_raw$samples,
     n_samples = nrow(fit_raw$samples),
+    draws = NULL,  # Will be set below after param_names
 
     # Model information
     formula = formula,
@@ -273,6 +274,16 @@ fit_vi <- function(formula,
     backend = "vi",
     seed = seed
   ), class = c("ratiod_vi", "ratiod_fit"))
+
+  # Name the samples matrix and create draws field
+  if (!is.null(result$samples) && ncol(result$samples) == length(result$param_names)) {
+    colnames(result$samples) <- result$param_names
+    result$draws <- result$samples
+  } else if (!is.null(result$samples) && ncol(result$samples) <= length(result$param_names)) {
+    # Partial match: use first n param names
+    colnames(result$samples) <- result$param_names[seq_len(ncol(result$samples))]
+    result$draws <- result$samples
+  }
 
   # Add diagnostic warnings
   if (!fit_raw$converged) {
@@ -345,6 +356,11 @@ get_param_names_vi <- function(hmc_data, spatial_info, temporal_info, zi_info, m
 
 
 #' Print method for ratiod_vi objects
+#'
+#' @param x A `ratiod_vi` fit object.
+#' @param digits Number of significant digits to print (default 3).
+#' @param ... Additional arguments passed to [print()].
+#'
 #' @export
 print.ratiod_vi <- function(x, digits = 3, ...) {
   variant_names <- c(

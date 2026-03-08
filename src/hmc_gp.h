@@ -1052,6 +1052,347 @@ inline void gp_gradient_w(
   }
 }
 
+// =============================================================================
+// Non-centered NNGP parameterization
+// =============================================================================
+// Instead of sampling w ~ NNGP(0, sigma2, phi) directly (centered),
+// sample z ~ N(0, I) and transform z -> w via the NNGP autoregressive structure:
+//   w[order[0]] = sqrt(sigma2) * z[0]
+//   w[order[i]] = sum_j B[i,j] * w[nb_j(i)] + sqrt(d_i) * z[i]
+// where B[i,:] = C_nb^{-1} c_i (regression coefficients) and
+//       d_i = sigma2 - c_i' C_nb^{-1} c_i (conditional variance).
+//
+// This improves posterior geometry for large N, reducing NUTS treedepth.
+// The prior on z is N(0,I), and no Jacobian is needed since we sample in z-space.
+
+struct NNGPNCWorkspace {
+    int N = 0, nn = 0;
+    std::vector<double> w;          // Transformed spatial effects (N)
+    std::vector<double> sqrt_d;     // sqrt(conditional variance) per obs (N)
+    std::vector<double> B_flat;     // Regression coefficients (N * nn)
+    std::vector<int> B_n_nb;        // Number of actual neighbors per obs (N)
+    std::vector<int> nb_idx_flat;   // Neighbor indices per obs (N * nn), 0-based in w
+    std::vector<double> adj;        // Adjoint accumulator (N)
+
+    void init(int N_, int nn_) {
+        if (N == N_ && nn == nn_) return;
+        N = N_; nn = nn_;
+        w.resize(N);
+        sqrt_d.resize(N);
+        B_flat.assign(N * nn, 0.0);
+        B_n_nb.resize(N, 0);
+        nb_idx_flat.assign(N * nn, -1);
+        adj.resize(N, 0.0);
+    }
+};
+
+// Forward pass: z -> w via NNGP autoregressive structure
+// z and w are both indexed by LOCATION (0-based), matching the parameter layout.
+// Caches B, sqrt_d, nb_idx for backward pass.
+// O(N * nn^3) due to per-observation Cholesky.
+inline void nngp_nc_forward(
+    const double* z,          // z[loc_idx], indexed by location, length N
+    double sigma2, double phi,
+    const GPData& gp_data,
+    NNGPNCWorkspace& ws
+) {
+    int N = gp_data.n_obs;
+    int nn = gp_data.nn;
+    ws.init(N, nn);
+
+    // Work arrays for Cholesky
+    std::vector<double> c_vec(nn), C_mat(nn * nn), L(nn * nn);
+    std::vector<double> y_vec(nn), alpha(nn);
+
+    // First observation: marginal N(0, sigma2)
+    int first_loc = gp_data.nn_order[0];  // Location index
+    ws.sqrt_d[0] = std::sqrt(sigma2);
+    ws.w[first_loc] = ws.sqrt_d[0] * z[first_loc];
+    ws.B_n_nb[0] = 0;
+
+    for (int i = 1; i < N; i++) {
+        int obs_loc = gp_data.nn_order[i];  // Location index for NNGP order i
+        if (obs_loc < 0 || obs_loc >= N) {
+            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
+            ws.B_n_nb[i] = 0;
+            continue;
+        }
+
+        // Count neighbors
+        int n_nb = 0;
+        for (int j = 0; j < nn && gp_data.nn_idx[i * nn + j] > 0; j++) n_nb++;
+
+        if (n_nb == 0) {
+            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
+            ws.B_n_nb[i] = 0;
+            continue;
+        }
+
+        // Build c_vec (covariance between obs and its neighbors)
+        for (int j = 0; j < n_nb; j++) {
+            double d = gp_data.nn_dist[i * nn + j];
+            c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
+        }
+
+        // Build C_mat (covariance among neighbors) and get neighbor location indices
+        bool ok = true;
+        for (int j1 = 0; j1 < n_nb && ok; j1++) {
+            int raw1 = gp_data.nn_idx[i * nn + j1];
+            if (raw1 - 1 < 0 || raw1 - 1 >= (int)gp_data.nn_order.size()) { ok = false; break; }
+            int loc1 = gp_data.nn_order[raw1 - 1];
+            if (loc1 < 0 || loc1 >= N) { ok = false; break; }
+            ws.nb_idx_flat[i * nn + j1] = loc1;
+
+            for (int j2 = 0; j2 < n_nb; j2++) {
+                if (j1 == j2) {
+                    C_mat[j1 * n_nb + j2] = sigma2;
+                } else {
+                    double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
+                    C_mat[j1 * n_nb + j2] = compute_cov(d12, sigma2, phi, gp_data.cov_type);
+                }
+            }
+        }
+
+        if (!ok) {
+            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
+            ws.B_n_nb[i] = 0;
+            continue;
+        }
+
+        // Cholesky: C = LL'
+        std::fill(L.begin(), L.begin() + n_nb * n_nb, 0.0);
+        for (int j = 0; j < n_nb; j++) {
+            double s = 0.0;
+            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * L[j * n_nb + k];
+            double diag = C_mat[j * n_nb + j] - s;
+            L[j * n_nb + j] = (diag > 0) ? std::sqrt(diag) : 1e-5;
+            for (int k = j + 1; k < n_nb; k++) {
+                double t = 0.0;
+                for (int m = 0; m < j; m++) t += L[k * n_nb + m] * L[j * n_nb + m];
+                L[k * n_nb + j] = (C_mat[k * n_nb + j] - t) / L[j * n_nb + j];
+            }
+        }
+
+        // Solve L*y = c, L'*alpha = y => alpha = C^{-1}c (regression coefficients B[i,:])
+        for (int j = 0; j < n_nb; j++) {
+            double s = 0.0;
+            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
+            y_vec[j] = (c_vec[j] - s) / L[j * n_nb + j];
+        }
+        for (int j = n_nb - 1; j >= 0; j--) {
+            double s = 0.0;
+            for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
+            alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
+        }
+
+        // Store B and compute conditional variance d_i
+        double c_alpha = 0.0;
+        for (int j = 0; j < n_nb; j++) {
+            ws.B_flat[i * nn + j] = alpha[j];
+            c_alpha += c_vec[j] * alpha[j];
+        }
+        ws.B_n_nb[i] = n_nb;
+
+        double d_i = std::max(sigma2 - c_alpha, 1e-10);
+        ws.sqrt_d[i] = std::sqrt(d_i);
+
+        // Forward transform: w[loc] = B @ w_neighbors + sqrt(d_i) * z[loc]
+        double mu = 0.0;
+        for (int j = 0; j < n_nb; j++) {
+            mu += alpha[j] * ws.w[ws.nb_idx_flat[i * nn + j]];
+        }
+        ws.w[obs_loc] = mu + ws.sqrt_d[i] * z[obs_loc];
+    }
+}
+
+// Backward pass: given dL/dw from likelihood, compute gradients for z, log_sigma2, log_phi.
+// z and grad_z are indexed by LOCATION (matching parameter layout).
+// adj is indexed by NNGP order (internal).
+//
+// Adjoint propagation (reverse NNGP order):
+//   adj[i] = dL/dw[order[i]]   (direct likelihood contribution)
+//   For i = N-1 down to 1:
+//     For each neighbor j of obs i:
+//       adj[NNGP_index_of(nb_j)] += B[i,j] * adj[i]
+//
+// Then: grad_z[loc] = -z[loc] + sqrt_d[nngp_i] * adj[nngp_i]
+//
+// Outputs:
+//   grad_z: full gradient for z[loc] (prior + likelihood), location-indexed
+//   grad_log_sigma2_lik: likelihood contribution to d/d(log_sigma2)
+//   grad_log_phi_lik: likelihood contribution to d/d(log_phi)
+//   grad_log_phi_jac: Jacobian contribution to d/d(log_phi) = 0.5 * sum(dd_dphi/d_i * phi)
+inline void nngp_nc_backward(
+    const double* z,            // z[loc_idx], location-indexed
+    double sigma2, double phi,
+    const GPData& gp_data,
+    const NNGPNCWorkspace& ws,
+    const double* dL_dw,        // Likelihood gradient w.r.t. w[loc] (location-indexed)
+    double* grad_z,             // Output: full gradient for z[loc] (prior + likelihood)
+    double& grad_log_sigma2_lik,// Output: likelihood contribution to sigma2 gradient
+    double& grad_log_phi_lik,   // Output: likelihood contribution to phi gradient
+    double& grad_log_phi_jac    // Output: Jacobian contribution to phi gradient
+) {
+    int N = gp_data.n_obs;
+    int nn = gp_data.nn;
+    const std::vector<int>& nn_order_inv = gp_data.nn_order_inv;
+
+    // Initialize adjoint from direct likelihood contribution (NNGP-order indexed)
+    std::vector<double>& adj = const_cast<NNGPNCWorkspace&>(ws).adj;
+    for (int i = 0; i < N; i++) {
+        int loc = gp_data.nn_order[i];
+        adj[i] = dL_dw[loc];
+    }
+
+    // Backward adjoint propagation (reverse NNGP order)
+    for (int i = N - 1; i >= 1; i--) {
+        int n_nb = ws.B_n_nb[i];
+        for (int j = 0; j < n_nb; j++) {
+            int nb_loc = ws.nb_idx_flat[i * nn + j];
+            if (nb_loc >= 0 && nb_loc < N) {
+                int nb_nngp = nn_order_inv[nb_loc];
+                if (nb_nngp >= 0 && nb_nngp < N) {
+                    adj[nb_nngp] += ws.B_flat[i * nn + j] * adj[i];
+                }
+            }
+        }
+    }
+
+    // z gradients: prior (-z) + likelihood (sqrt_d * adj)
+    // Map from NNGP order to location order
+    for (int i = 0; i < N; i++) {
+        int loc = gp_data.nn_order[i];
+        grad_z[loc] = -z[loc] + ws.sqrt_d[i] * adj[i];
+    }
+
+    // --- Hyperparameter gradients ---
+
+    // sigma2 likelihood gradient:
+    // B independent of sigma2, d_i = sigma2 * d_tilde_i
+    // dw[loc]/d(log_sigma2) = 0.5 * sqrt(d_i) * z[loc]
+    grad_log_sigma2_lik = 0.0;
+    for (int i = 0; i < N; i++) {
+        int loc = gp_data.nn_order[i];
+        grad_log_sigma2_lik += adj[i] * 0.5 * ws.sqrt_d[i] * z[loc];
+    }
+
+    // phi gradients (likelihood + Jacobian):
+    // Both B and d depend on phi. Need per-obs dB/dphi and dd/dphi.
+    grad_log_phi_lik = 0.0;
+    grad_log_phi_jac = 0.0;
+
+    // Work arrays
+    std::vector<double> c_vec(nn), dc_vec(nn), C_mat(nn * nn), L(nn * nn);
+    std::vector<double> y_vec(nn), alpha(nn), dalpha(nn);
+
+    // First observation: d[0] = sigma2, independent of phi → no contribution
+
+    for (int i = 1; i < N; i++) {
+        int obs_loc = gp_data.nn_order[i];
+        int n_nb = ws.B_n_nb[i];
+        if (n_nb == 0 || obs_loc < 0 || obs_loc >= N) continue;
+
+        // Rebuild c_vec, dc_vec, C_mat for phi derivatives
+        for (int j = 0; j < n_nb; j++) {
+            double d = gp_data.nn_dist[i * nn + j];
+            c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
+            dc_vec[j] = dcov_dphi(d, phi, c_vec[j], gp_data.cov_type);
+        }
+
+        for (int j1 = 0; j1 < n_nb; j1++) {
+            for (int j2 = 0; j2 < n_nb; j2++) {
+                if (j1 == j2) {
+                    C_mat[j1 * n_nb + j2] = sigma2;
+                } else {
+                    double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
+                    C_mat[j1 * n_nb + j2] = compute_cov(d12, sigma2, phi, gp_data.cov_type);
+                }
+            }
+        }
+
+        // Cholesky of C
+        std::fill(L.begin(), L.begin() + n_nb * n_nb, 0.0);
+        for (int j = 0; j < n_nb; j++) {
+            double s = 0.0;
+            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * L[j * n_nb + k];
+            double diag = C_mat[j * n_nb + j] - s;
+            L[j * n_nb + j] = (diag > 0) ? std::sqrt(diag) : 1e-5;
+            for (int k = j + 1; k < n_nb; k++) {
+                double t = 0.0;
+                for (int m = 0; m < j; m++) t += L[k * n_nb + m] * L[j * n_nb + m];
+                L[k * n_nb + j] = (C_mat[k * n_nb + j] - t) / L[j * n_nb + j];
+            }
+        }
+
+        // alpha = C^{-1} c
+        for (int j = 0; j < n_nb; j++) {
+            double s = 0.0;
+            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
+            y_vec[j] = (c_vec[j] - s) / L[j * n_nb + j];
+        }
+        for (int j = n_nb - 1; j >= 0; j--) {
+            double s = 0.0;
+            for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
+            alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
+        }
+
+        // dC/dphi * alpha
+        std::vector<double> dC_alpha(n_nb, 0.0);
+        for (int j1 = 0; j1 < n_nb; j1++) {
+            for (int j2 = 0; j2 < n_nb; j2++) {
+                double dC_jk = 0.0;
+                if (j1 != j2) {
+                    double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
+                    dC_jk = dcov_dphi(d12, phi, C_mat[j1 * n_nb + j2], gp_data.cov_type);
+                }
+                dC_alpha[j1] += dC_jk * alpha[j2];
+            }
+        }
+
+        // dalpha/dphi = C^{-1} (dc/dphi - dC/dphi * alpha)
+        std::vector<double> rhs(n_nb);
+        for (int j = 0; j < n_nb; j++) rhs[j] = dc_vec[j] - dC_alpha[j];
+        for (int j = 0; j < n_nb; j++) {
+            double s = 0.0;
+            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
+            y_vec[j] = (rhs[j] - s) / L[j * n_nb + j];
+        }
+        for (int j = n_nb - 1; j >= 0; j--) {
+            double s = 0.0;
+            for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * dalpha[k];
+            dalpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
+        }
+
+        // dd/dphi = -2 * dc' * alpha + alpha' * dC * alpha
+        double alpha_dc = 0.0, alpha_dC_alpha = 0.0;
+        for (int j = 0; j < n_nb; j++) {
+            alpha_dc += alpha[j] * dc_vec[j];
+            alpha_dC_alpha += alpha[j] * dC_alpha[j];
+        }
+        double dd_dphi = -2.0 * alpha_dc + alpha_dC_alpha;
+
+        // Likelihood: dw[loc]/dphi = sum_j dalpha[j]*w[nb_j] + dd_dphi/(2*sqrt(d_i))*z[loc]
+        double dw_dphi = 0.0;
+        for (int j = 0; j < n_nb; j++) {
+            dw_dphi += dalpha[j] * ws.w[ws.nb_idx_flat[i * nn + j]];
+        }
+        double sqrt_di = ws.sqrt_d[i];
+        if (sqrt_di > 1e-15) {
+            dw_dphi += dd_dphi / (2.0 * sqrt_di) * z[obs_loc];
+        }
+        grad_log_phi_lik += adj[i] * dw_dphi * phi;
+
+        // Jacobian: d/d(phi) [0.5*log(d_i)] = 0.5 * dd_dphi / d_i
+        double d_i = sqrt_di * sqrt_di;
+        if (d_i > 1e-15) {
+            grad_log_phi_jac += 0.5 * dd_dphi / d_i * phi;
+        }
+    }
+}
+
 } // namespace ratiod_gp
 
 #endif // RATIOD_HMC_GP_H

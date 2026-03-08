@@ -57,6 +57,14 @@ fit_hmc(
 \item{seed}{Random seed for reproducibility}
 
 \item{verbose}{Print progress}
+
+\item{gradient_mode}{Gradient computation method: "auto", "H", "A_r", "A", "N"}
+
+\item{re_param}{Random effects parameterization: "centered" or "noncentered"}
+
+\item{metric}{Mass matrix type: "auto" (default), "diag", "dense", or "block_diag"}
+
+\item{riemannian}{Use Riemannian (SoftAbs) metric: NULL (auto), TRUE, or FALSE}
 }
 \value{
 A ratiod_fit object

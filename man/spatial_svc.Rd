@@ -10,7 +10,10 @@ spatial_svc(
   cov = c("exponential", "matern", "gaussian", "spherical"),
   nn = 15,
   shared = TRUE,
-  scale_coords = TRUE
+  scale_coords = TRUE,
+  approx = c("nngp", "hsgp"),
+  m = 6,
+  c_boundary = 1.5
 )
 }
 \arguments{

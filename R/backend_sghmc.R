@@ -467,6 +467,11 @@ fit_sgld <- function(formula,
 
 
 #' Print method for ratiod_sghmc objects
+#'
+#' @param x A `ratiod_sghmc` fit object.
+#' @param digits Number of significant digits to print (default 3).
+#' @param ... Additional arguments passed to [print()].
+#'
 #' @export
 print.ratiod_sghmc <- function(x, digits = 3, ...) {
   cat("Stochastic Gradient HMC Fit\n")
@@ -502,6 +507,11 @@ print.ratiod_sghmc <- function(x, digits = 3, ...) {
 
 
 #' Print method for ratiod_sgld objects
+#'
+#' @param x A `ratiod_sgld` fit object.
+#' @param digits Number of significant digits to print (default 3).
+#' @param ... Additional arguments passed to [print()].
+#'
 #' @export
 print.ratiod_sgld <- function(x, digits = 3, ...) {
   cat("Stochastic Gradient Langevin Dynamics Fit\n")

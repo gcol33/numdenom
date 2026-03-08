@@ -4,14 +4,14 @@
 \alias{spatial_hsgp}
 \title{Hilbert Space Gaussian Process (HSGP) spatial structure}
 \usage{
-spatial_hsgp(coords, m = 8, c = 1.5, shared = TRUE, scale_coords = TRUE)
+spatial_hsgp(coords, m = 6, c = 1.5, shared = TRUE, scale_coords = TRUE)
 }
 \arguments{
 \item{coords}{A one-sided formula specifying coordinate columns (e.g.,
 \code{~ lon + lat}), or a character vector of length 2 with column names.}
 
 \item{m}{Number of basis functions per dimension. Total basis functions
-will be m^2. Default 8. Higher values give better approximation but
+will be m^2. Default 6. Higher values give better approximation but
 slower computation. Recommended range: 5-15.}
 
 \item{c}{Boundary factor controlling domain extension beyond data range.

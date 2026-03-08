@@ -1346,9 +1346,9 @@ convert_pg_rsr_to_ratiod_fit <- function(chain_results, formula, data, family,
 #' augmentation to count data with overdispersion.
 #'
 #' **Model (NB2 parameterization):**
-#' - Y_i ~ NB(r, p_i)
-#' - E[Y_i] = r * p_i / (1 - p_i)
-#' - logit(p_i) = X_i * beta + Z_i * b
+#' - \eqn{Y_i \sim NB(r, p_i)}
+#' - \eqn{E[Y_i] = r \cdot p_i / (1 - p_i)}
+#' - \eqn{logit(p_i) = X_i \beta + Z_i b}
 #'
 #' **Augmentation scheme:**
 #' - omega_i ~ PG(y_i + r, eta_i) for the logit component

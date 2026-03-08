@@ -4,7 +4,6 @@
 #' GP computations.
 #'
 #' @name gpu-support
-#' @aliases gpu_available gpu_info
 NULL
 
 #' Check if GPU support is available
