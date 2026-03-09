@@ -165,6 +165,8 @@ struct ModelData {
   std::vector<int> adj_col_idx;      // CSR format: column indices
   std::vector<int> n_neighbors;      // Number of neighbors per unit
   double bym2_scale_factor;          // For BYM2 scaling
+  bool icar_collapsed = false;       // Collapsed ICAR (marginalize phi via inner Laplace)
+  bool bym2_collapsed = false;       // Collapsed BYM2 (marginalize phi+theta via inner Laplace)
   // Precision mass matrix data (precomputed from Q)
   std::vector<double> spatial_Q_inv;    // (Q + lambda*I)^{-1}, column-major [S×S]
   std::vector<double> spatial_L_Q;      // Cholesky L of (Q + lambda*I), column-major [S×S]
@@ -417,6 +419,8 @@ struct ParamLayout {
   bool is_bym2 = false;
   bool is_gp = false;
   bool is_gp_collapsed = false;
+  bool is_icar_collapsed = false;
+  bool is_bym2_collapsed = false;
   bool is_multiscale_gp = false;
   bool is_hsgp = false;
   bool has_temporal = false;
@@ -1735,6 +1739,11 @@ struct HMCResultCpp {
   std::vector<double> gp_w_star_flat;
   int n_gp_collapsed = 0;
 
+  // Collapsed ICAR/BYM2: phi* and theta* draws (n_sample x S, row-major)
+  std::vector<double> icar_phi_star_flat;
+  std::vector<double> bym2_theta_star_flat;
+  int n_icar_collapsed = 0;  // S (spatial units), 0 if not collapsed
+
   // Row access for flat storage
   double* sample_row(int i) { return &samples_flat[i * n_params_stored]; }
   const double* sample_row(int i) const { return &samples_flat[i * n_params_stored]; }
@@ -1757,6 +1766,11 @@ struct HMCResult {
   // Collapsed GP: w* draws (n_sample x n_gp)
   Rcpp::NumericMatrix gp_w_star;
   int n_gp_collapsed = 0;
+
+  // Collapsed ICAR/BYM2: phi* and theta* draws
+  Rcpp::NumericMatrix icar_phi_star;
+  Rcpp::NumericMatrix bym2_theta_star;
+  int n_icar_collapsed = 0;
 };
 
 // Convert C++ result to R result (call outside parallel region)
@@ -1794,6 +1808,27 @@ inline HMCResult cpp_to_r_result(const HMCResultCpp& cpp_result, int n_params) {
     for (int i = 0; i < cpp_result.n_sample; i++) {
       for (int j = 0; j < n_gp; j++) {
         r_result.gp_w_star(i, j) = cpp_result.gp_w_star_flat[i * n_gp + j];
+      }
+    }
+  }
+
+  // Collapsed ICAR/BYM2: copy phi* and theta* draws
+  if (cpp_result.n_icar_collapsed > 0) {
+    int S = cpp_result.n_icar_collapsed;
+    r_result.n_icar_collapsed = S;
+    r_result.icar_phi_star = Rcpp::NumericMatrix(cpp_result.n_sample, S);
+    for (int i = 0; i < cpp_result.n_sample; i++) {
+      for (int j = 0; j < S; j++) {
+        r_result.icar_phi_star(i, j) = cpp_result.icar_phi_star_flat[i * S + j];
+      }
+    }
+    // BYM2: also copy theta*
+    if (!cpp_result.bym2_theta_star_flat.empty()) {
+      r_result.bym2_theta_star = Rcpp::NumericMatrix(cpp_result.n_sample, S);
+      for (int i = 0; i < cpp_result.n_sample; i++) {
+        for (int j = 0; j < S; j++) {
+          r_result.bym2_theta_star(i, j) = cpp_result.bym2_theta_star_flat[i * S + j];
+        }
       }
     }
   }

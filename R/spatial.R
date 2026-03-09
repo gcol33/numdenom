@@ -126,9 +126,11 @@ NULL
 #'
 #' @export
 spatial_car <- function(adjacency, level = c("group", "obs"),
-                        group_var = NULL, proper = FALSE, shared = TRUE) {
+                        group_var = NULL, proper = FALSE, shared = TRUE,
+                        parameterization = c("standard", "collapsed")) {
 
   level <- match.arg(level)
+  parameterization <- match.arg(parameterization)
 
   # Validate adjacency matrix
   if (!is.matrix(adjacency) && !inherits(adjacency, "Matrix")) {
@@ -147,6 +149,11 @@ spatial_car <- function(adjacency, level = c("group", "obs"),
   # Check for group_var if level = "group"
   if (level == "group" && is.null(group_var)) {
     stop("`group_var` is required when level = 'group'", call. = FALSE)
+  }
+
+  # Collapsed not supported with proper CAR
+  if (parameterization == "collapsed" && proper) {
+    stop("Collapsed parameterization is not supported with proper CAR", call. = FALSE)
   }
 
   # Compute eigenvalue bounds for proper CAR (needed for valid ρ range)
@@ -174,6 +181,7 @@ spatial_car <- function(adjacency, level = c("group", "obs"),
       proper = proper,
       rho_bounds = rho_bounds,
       shared = shared,
+      parameterization = parameterization,
       n_spatial = nrow(adjacency)
     ),
     class = c("ratiod_spatial", "list")
@@ -302,9 +310,11 @@ compute_car_rho_bounds <- function(adjacency) {
 #' @export
 spatial_bym2 <- function(adjacency, level = c("group", "obs"),
                          group_var = NULL, shared = TRUE,
-                         scale_factor = NULL) {
+                         scale_factor = NULL,
+                         parameterization = c("standard", "collapsed")) {
 
   level <- match.arg(level)
+  parameterization <- match.arg(parameterization)
 
   # Validate adjacency matrix
   if (!is.matrix(adjacency) && !inherits(adjacency, "Matrix")) {
@@ -345,6 +355,7 @@ spatial_bym2 <- function(adjacency, level = c("group", "obs"),
       level = level,
       group_var = group_var,
       shared = shared,
+      parameterization = parameterization,
       n_spatial = nrow(adjacency),
       scale_factor = scale_factor
     ),

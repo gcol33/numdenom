@@ -10,6 +10,7 @@
 #include "autodiff_utils.h"
 #include "hmc_gp_autodiff.h"
 #include "hmc_gp_collapsed.h"
+#include "hmc_icar_collapsed.h"
 #include "hmc_temporal_autodiff.h"
 #include "hmc_tvc_grad.h"
 #include "hmc_multiscale_temporal_grad.h"
@@ -228,25 +229,38 @@ ParamLayout compute_param_layout(const ModelData& data) {
   layout.has_spatial = (data.spatial_type == SpatialType::ICAR ||
                         data.spatial_type == SpatialType::BYM2);
   layout.is_bym2 = (data.spatial_type == SpatialType::BYM2);
+  layout.is_icar_collapsed = (data.spatial_type == SpatialType::ICAR && data.icar_collapsed);
+  layout.is_bym2_collapsed = (data.spatial_type == SpatialType::BYM2 && data.bym2_collapsed);
 
   if (layout.has_spatial) {
     if (layout.is_bym2) {
-      // BYM2 Riebler: log_sigma_total, logit_rho, phi_scaled, theta
+      // BYM2 Riebler: log_sigma_total, logit_rho, [phi_scaled, theta if not collapsed]
       layout.log_sigma_bym2_idx = idx++;
       layout.logit_rho_bym2_idx = idx++;
-      layout.spatial_start = idx;
-      idx += data.n_spatial_units;  // phi_scaled (structured)
-      layout.spatial_end = idx;
-      layout.theta_bym2_start = idx;
-      idx += data.n_spatial_units;  // theta (unstructured)
-      layout.theta_bym2_end = idx;
+      if (data.bym2_collapsed) {
+        // Collapsed: phi and theta marginalized out, not in param vector
+        layout.spatial_start = layout.spatial_end = -1;
+        layout.theta_bym2_start = layout.theta_bym2_end = -1;
+      } else {
+        layout.spatial_start = idx;
+        idx += data.n_spatial_units;  // phi_scaled (structured)
+        layout.spatial_end = idx;
+        layout.theta_bym2_start = idx;
+        idx += data.n_spatial_units;  // theta (unstructured)
+        layout.theta_bym2_end = idx;
+      }
       layout.log_tau_spatial_idx = -1;
     } else {
-      // ICAR: log_tau, phi
+      // ICAR: log_tau, [phi if not collapsed]
       layout.log_tau_spatial_idx = idx++;
-      layout.spatial_start = idx;
-      idx += data.n_spatial_units;
-      layout.spatial_end = idx;
+      if (data.icar_collapsed) {
+        // Collapsed: phi marginalized out, not in param vector
+        layout.spatial_start = layout.spatial_end = -1;
+      } else {
+        layout.spatial_start = idx;
+        idx += data.n_spatial_units;
+        layout.spatial_end = idx;
+      }
       layout.log_sigma_bym2_idx = -1;
       layout.logit_rho_bym2_idx = -1;
       layout.theta_bym2_start = layout.theta_bym2_end = -1;
@@ -684,6 +698,9 @@ double icar_quadratic_form(
 // Shared collapsed GP workspace (used by both compute_log_post and compute_gradient_gp_collapsed)
 static thread_local CollapsedGPWorkspace collapsed_gp_ws;
 
+// Shared collapsed ICAR/BYM2 workspace
+static thread_local CollapsedICARWorkspace collapsed_icar_ws;
+
 // =====================================================================
 // Log-posterior computation with OpenMP parallelization
 // =====================================================================
@@ -727,7 +744,6 @@ double compute_log_post(
   const double* theta_bym2 = nullptr;
 
   if (layout.has_spatial) {
-    phi_spatial = &params[layout.spatial_start];
     if (layout.is_bym2) {
       // Riebler reparameterization: sigma_total, rho -> sigma_s, sigma_u
       double sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
@@ -735,14 +751,107 @@ double compute_log_post(
       rho_bym2 = 1.0 / (1.0 + std::exp(-logit_rho));
       sigma_s_bym2 = sigma_total * std::sqrt(rho_bym2);
       sigma_u_bym2 = sigma_total * std::sqrt(1.0 - rho_bym2);
-      theta_bym2 = &params[layout.theta_bym2_start];
+      if (!data.bym2_collapsed) {
+        phi_spatial = &params[layout.spatial_start];
+        theta_bym2 = &params[layout.theta_bym2_start];
+      }
+      // For collapsed BYM2: phi_spatial remains nullptr, obs loop won't add spatial
     } else {
       log_tau_spatial = params[layout.log_tau_spatial_idx];
       tau_spatial = std::exp(log_tau_spatial);
+      if (!data.icar_collapsed) {
+        phi_spatial = &params[layout.spatial_start];
+      }
+      // For collapsed ICAR: phi_spatial remains nullptr initially
     }
   }
 
   double log_post = 0.0;
+  double collapsed_icar_prior_lp = 0.0;  // ICAR/BYM2 prior + Laplace at phi*
+
+  // Collapsed ICAR/BYM2: find phi* via inner Laplace, point phi_spatial at mode
+  if (data.icar_collapsed || data.bym2_collapsed) {
+    int S = data.n_spatial_units;
+
+    // Pre-compute actual RE values for mode finder (NC -> actual, intercept only)
+    std::vector<double> re_vals_collapsed;
+    if (layout.has_re) {
+      int n_re = layout.re_end - layout.re_start;
+      re_vals_collapsed.resize(n_re);
+      const double* re_ptr = &params[layout.re_start];
+      for (int g = 0; g < n_re; g++) {
+        re_vals_collapsed[g] = (data.re_parameterization == 1) ? sigma_re * re_ptr[g] : re_ptr[g];
+      }
+    }
+
+    const double* beta_num_ptr = &params[layout.beta_num_start];
+    const double* beta_denom_ptr = &params[layout.beta_denom_start];
+
+    if (data.bym2_collapsed) {
+      double sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
+      double logit_rho = params[layout.logit_rho_bym2_idx];
+      double rho = 1.0 / (1.0 + std::exp(-logit_rho));
+
+      double mode_lp = collapsed_bym2_find_mode(
+          beta_num_ptr, beta_denom_ptr, sigma_total, rho, data.bym2_scale_factor,
+          phi_num, phi_denom,
+          re_vals_collapsed.empty() ? nullptr : re_vals_collapsed.data(),
+          data, collapsed_icar_ws);
+
+      // Point phi_spatial and theta_bym2 at mode values for observation loop
+      phi_spatial = collapsed_icar_ws.phi_star.data();
+      theta_bym2 = collapsed_icar_ws.theta_star.data();
+
+      // Add BYM2 priors at (phi*, theta*) + Laplace correction
+      // (mode_lp = data_ll + bym2_prior, but obs loop recomputes data_ll)
+      // Extract just the prior part: mode_lp - data_ll
+      // Actually, recompute prior directly to avoid double-counting data LL:
+      // phi prior: -0.5 * phi'^T Q phi'
+      std::vector<double> Qphi(S);
+      icar_precision_matvec(collapsed_icar_ws.phi_star.data(), Qphi.data(), S,
+                            data.adj_row_ptr, data.adj_col_idx, data.n_neighbors);
+      double phiQphi = 0.0;
+      for (int i = 0; i < S; i++) phiQphi += collapsed_icar_ws.phi_star[i] * Qphi[i];
+      double sum_phi = 0.0;
+      for (int i = 0; i < S; i++) sum_phi += collapsed_icar_ws.phi_star[i];
+      collapsed_icar_prior_lp += -0.5 * phiQphi - 0.5 * 0.001 * sum_phi * sum_phi;
+
+      // theta prior: -0.5 * theta'^T theta'
+      for (int i = 0; i < S; i++) {
+        collapsed_icar_prior_lp -= 0.5 * collapsed_icar_ws.theta_star[i] * collapsed_icar_ws.theta_star[i];
+      }
+
+      // Laplace correction
+      collapsed_icar_prior_lp += collapsed_icar_ws.laplace_log_det;
+
+    } else {
+      // Collapsed ICAR
+      double mode_lp = collapsed_icar_find_mode(
+          beta_num_ptr, beta_denom_ptr, tau_spatial, phi_num, phi_denom,
+          re_vals_collapsed.empty() ? nullptr : re_vals_collapsed.data(),
+          data, collapsed_icar_ws);
+
+      // Point phi_spatial at mode values for observation loop
+      phi_spatial = collapsed_icar_ws.phi_star.data();
+
+      // Add ICAR prior at phi* + Laplace (not data LL, obs loop handles that)
+      std::vector<double> Qphi(S);
+      icar_precision_matvec(collapsed_icar_ws.phi_star.data(), Qphi.data(), S,
+                            data.adj_row_ptr, data.adj_col_idx, data.n_neighbors);
+      double phiQphi = 0.0;
+      for (int i = 0; i < S; i++) phiQphi += collapsed_icar_ws.phi_star[i] * Qphi[i];
+      double sum_phi = 0.0;
+      for (int i = 0; i < S; i++) sum_phi += collapsed_icar_ws.phi_star[i];
+      collapsed_icar_prior_lp += -0.5 * tau_spatial * phiQphi
+                                + 0.5 * (S - 1) * std::log(tau_spatial)
+                                - 0.5 * 0.001 * sum_phi * sum_phi;
+
+      // Laplace correction
+      collapsed_icar_prior_lp += collapsed_icar_ws.laplace_log_det;
+    }
+
+    log_post += collapsed_icar_prior_lp;
+  }
 
   // ============ PRIORS ============
 
@@ -929,7 +1038,7 @@ double compute_log_post(
     int J = data.n_spatial_units;
 
     if (layout.is_bym2) {
-      // BYM2 Riebler: Half-Cauchy on sigma_total
+      // BYM2 Riebler: Half-Cauchy on sigma_total (always needed, even collapsed)
       double sigma_total = sigma_s_bym2 / std::sqrt(rho_bym2);  // recover sigma_total
       double ratio = sigma_total / data.sigma_re_scale;
       log_post -= std::log(1.0 + ratio * ratio);
@@ -939,34 +1048,39 @@ double compute_log_post(
       // log p(logit_rho) = log(rho) + log(1-rho)
       log_post += std::log(rho_bym2) + std::log(1.0 - rho_bym2);
 
-      // phi_scaled ~ N(0, Q^{-1}) with soft sum-to-zero
-      std::vector<double> phi_vec(phi_spatial, phi_spatial + J);
-      double quad = icar_quadratic_form(phi_vec, data);
-      log_post -= 0.5 * quad;
+      if (!data.bym2_collapsed) {
+        // Standard: phi/theta are explicit params
+        // phi_scaled ~ N(0, Q^{-1}) with soft sum-to-zero
+        std::vector<double> phi_vec(phi_spatial, phi_spatial + J);
+        double quad = icar_quadratic_form(phi_vec, data);
+        log_post -= 0.5 * quad;
 
-      // Soft sum-to-zero constraint on ICAR phi: -0.5 * lambda * (sum(phi))^2
-      // Constrains the near-null eigenvalue mode of the ICAR precision,
-      // preventing slow-mixing drift that inflates NUTS treedepth.
-      {
-        double phi_sum = 0.0;
-        for (int j = 0; j < J; j++) phi_sum += phi_spatial[j];
-        log_post -= 0.5 * 0.01 * phi_sum * phi_sum;
-      }
+        {
+          double phi_sum = 0.0;
+          for (int j = 0; j < J; j++) phi_sum += phi_spatial[j];
+          log_post -= 0.5 * 0.01 * phi_sum * phi_sum;
+        }
 
-      // theta ~ N(0, I)
-      for (int j = 0; j < J; j++) {
-        log_post -= 0.5 * theta_bym2[j] * theta_bym2[j];
+        // theta ~ N(0, I)
+        for (int j = 0; j < J; j++) {
+          log_post -= 0.5 * theta_bym2[j] * theta_bym2[j];
+        }
       }
+      // Collapsed: phi/theta priors already included in collapsed_lp above
     } else {
-      // ICAR prior
-      // tau ~ Gamma(shape, rate)
+      // ICAR
+      // tau ~ Gamma(shape, rate) (always needed, even collapsed)
       log_post += (data.tau_spatial_shape - 1.0) * log_tau_spatial
                 - data.tau_spatial_rate * tau_spatial + log_tau_spatial;
 
-      // phi ~ ICAR(tau): p(phi|tau) propto tau^{(J-1)/2} exp(-0.5 * tau * phi'Qphi)
-      std::vector<double> phi_vec(phi_spatial, phi_spatial + J);
-      double quad = icar_quadratic_form(phi_vec, data);
-      log_post += 0.5 * (J - 1) * log_tau_spatial - 0.5 * tau_spatial * quad;
+      if (!data.icar_collapsed) {
+        // Standard: phi is explicit param
+        // phi ~ ICAR(tau): p(phi|tau) propto tau^{(J-1)/2} exp(-0.5 * tau * phi'Qphi)
+        std::vector<double> phi_vec(phi_spatial, phi_spatial + J);
+        double quad = icar_quadratic_form(phi_vec, data);
+        log_post += 0.5 * (J - 1) * log_tau_spatial - 0.5 * tau_spatial * quad;
+      }
+      // Collapsed: ICAR prior on phi* + 0.5*(J-1)*log(tau) already in collapsed_lp above
     }
   }
 
@@ -1821,15 +1935,17 @@ double compute_log_post(
     }
 
     // Add spatial effect (ICAR/BYM2, not GP which is handled separately)
-    if (layout.has_spatial && !data.spatial_group.empty() && data.spatial_group[i] > 0) {
+    if (layout.has_spatial && phi_spatial != nullptr &&
+        !data.spatial_group.empty() && data.spatial_group[i] > 0) {
       int s = data.spatial_group[i] - 1;
       double spatial_effect;
 
       if (layout.is_bym2) {
-        // BYM2: u = sigma_s * scale * phi + sigma_u * theta
+        // Standard BYM2: u = sigma_s * scale * phi + sigma_u * theta
         double scaled_phi = phi_spatial[s] * data.bym2_scale_factor;
         spatial_effect = sigma_s_bym2 * scaled_phi + sigma_u_bym2 * theta_bym2[s];
       } else {
+        // Standard ICAR
         spatial_effect = phi_spatial[s];
       }
 
@@ -2141,6 +2257,7 @@ bool can_use_analytical_gradient(const ModelData& data, const ParamLayout& layou
 
   return (is_basic_family &&
           !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
+          !layout.is_icar_collapsed && !layout.is_bym2_collapsed &&
           temporal_ok && spatial_ok && zi_ok && slopes_ok &&
           !layout.has_latent && !layout.has_spatiotemporal &&
           !layout.has_multiscale_temporal && !layout.has_tvc &&
@@ -4912,7 +5029,7 @@ void compute_gradient_gp_collapsed(
         phi_num, phi_denom, data,
         resid_num.data(), resid_denom.data());
 
-    // Scatter to beta gradients
+    // Scatter to beta gradients + phi likelihood gradient
     for (int i = 0; i < N; i++) {
         for (int p = 0; p < data.p_num; p++) {
             grad[layout.beta_num_start + p] += resid_num[i] * data.X_num_flat[i * data.p_num + p];
@@ -4925,6 +5042,28 @@ void compute_gradient_gp_collapsed(
         // Scatter to RE gradients
         if (layout.has_re && data.re_group.size() > (size_t)i && data.re_group[i] > 0) {
             grad[layout.re_start + data.re_group[i] - 1] += resid_num[i] + resid_denom[i];
+        }
+
+        // Phi (dispersion) likelihood gradient
+        if (layout.has_phi_num || layout.has_phi_denom) {
+            int loc_i = data.gp_data.obs_to_loc[i];
+            double eta_num_i = 0.0, eta_denom_i = 0.0;
+            for (int p = 0; p < data.p_num; p++)
+                eta_num_i += data.X_num_flat[i * data.p_num + p] * beta_num[p];
+            if (!is_binomial) {
+                for (int p = 0; p < data.p_denom; p++)
+                    eta_denom_i += data.X_denom_flat[i * data.p_denom + p] * beta_denom[p];
+            }
+            eta_num_i += collapsed_gp_ws.w_star[loc_i];
+            if (!is_binomial && data.gp_data.shared) eta_denom_i += collapsed_gp_ws.w_star[loc_i];
+            if (layout.has_re && data.re_group.size() > (size_t)i && data.re_group[i] > 0) {
+                double re_val = (data.re_parameterization == 1) ?
+                    sigma_re * re[data.re_group[i] - 1] : re[data.re_group[i] - 1];
+                eta_num_i += re_val;
+                if (!is_binomial) eta_denom_i += re_val;
+            }
+            accumulate_phi_likelihood_grad(data, layout, i, eta_num_i, eta_denom_i,
+                                            phi_num, phi_denom, grad.data());
         }
     }
 
@@ -4943,8 +5082,8 @@ void compute_gradient_gp_collapsed(
     // The Laplace log-det depends on w* which depends on ALL params implicitly.
     // We compute d/dθ [-0.5 log det(W+Q)] numerically for each outer param,
     // using warm-started Newton solves (1-2 iters each from current w*).
-    // Optimization: for non-GP params (beta, phi, RE), we reuse the NNGP
-    // structure from collapsed_gp_ws (Q doesn't change), skipping rebuild.
+    // For non-GP params (beta, phi, RE), we reuse the NNGP structure from
+    // collapsed_gp_ws (Q doesn't change), skipping NNGP rebuild.
     {
         const double eps = 1e-5;
         std::vector<double> params_pert = params;
@@ -5042,6 +5181,315 @@ void compute_gradient_gp_collapsed(
             double log_phi = params[layout.log_phi_denom_idx];
             lp += log_phi;
         }
+
+        *log_post_out = lp;
+    }
+}
+
+// =====================================================================
+// Collapsed ICAR/BYM2 gradient (analytical + numerical Laplace correction)
+// =====================================================================
+
+void compute_gradient_icar_collapsed(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& grad,
+    double* log_post_out = nullptr
+) {
+    int n_params = params.size();
+    grad.assign(n_params, 0.0);
+
+    // Extract common parameters
+    auto cp = extract_common_params(params, layout);
+    const double* beta_num = cp.beta_num;
+    const double* beta_denom = cp.beta_denom;
+    double sigma_re = cp.sigma_re;
+    const double* re = cp.re;
+    double phi_num = cp.phi_num;
+    double phi_denom = cp.phi_denom;
+
+    bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
+                        data.model_type == ModelType::BETA_BINOMIAL);
+    int N = data.N;
+    int S = data.n_spatial_units;
+
+    // Pre-compute actual RE values (NC → actual)
+    std::vector<double> re_vals;
+    if (layout.has_re) {
+        int n_re = layout.re_end - layout.re_start;
+        re_vals.resize(n_re);
+        for (int g = 0; g < n_re; g++) {
+            re_vals[g] = (data.re_parameterization == 1) ? sigma_re * re[g] : re[g];
+        }
+    }
+
+    // Spatial hyperparameters
+    bool is_bym2 = layout.is_bym2_collapsed;
+    double tau = 0.0, sigma_total = 0.0, rho = 0.0;
+    double a = 0.0, c_bym2 = 0.0;
+
+    if (is_bym2) {
+        sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
+        double logit_rho = params[layout.logit_rho_bym2_idx];
+        rho = 1.0 / (1.0 + std::exp(-logit_rho));
+        a = sigma_total * std::sqrt(rho) * data.bym2_scale_factor;
+        c_bym2 = sigma_total * std::sqrt(1.0 - rho);
+    } else {
+        tau = std::exp(params[layout.log_tau_spatial_idx]);
+    }
+
+    // ---- Inner Laplace: find phi* (and theta* for BYM2) ----
+    double collapsed_lp;
+    if (is_bym2) {
+        collapsed_lp = collapsed_bym2_find_mode(
+            beta_num, beta_denom, sigma_total, rho, data.bym2_scale_factor,
+            phi_num, phi_denom,
+            re_vals.empty() ? nullptr : re_vals.data(),
+            data, collapsed_icar_ws);
+    } else {
+        collapsed_lp = collapsed_icar_find_mode(
+            beta_num, beta_denom, tau, phi_num, phi_denom,
+            re_vals.empty() ? nullptr : re_vals.data(),
+            data, collapsed_icar_ws);
+    }
+
+    // ---- Prior gradients (outer params only) ----
+    beta_gradient_prior(data, layout, beta_num, beta_denom, grad.data());
+    re_gradient_prior(data, layout, re, grad.data(), sigma_re);
+    phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
+
+    // Spatial hyperparameter priors
+    if (is_bym2) {
+        // sigma_total: half-Cauchy prior
+        double ratio_sc = sigma_total / data.sigma_re_scale;
+        grad[layout.log_sigma_bym2_idx] = -2.0 * ratio_sc * sigma_total / (data.sigma_re_scale * (1.0 + ratio_sc * ratio_sc))
+                                            + 1.0;  // Jacobian for log transform
+        // rho: Beta(1,1) = Uniform, logit Jacobian
+        grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho;  // d/d(logit_rho) [log(rho) + log(1-rho) + logit_rho]
+    } else {
+        // tau: Gamma prior on log scale
+        grad[layout.log_tau_spatial_idx] =
+            (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau + 1.0;  // +1 Jacobian
+    }
+
+    // ---- Data likelihood gradient at mode ----
+    std::vector<double> resid_num(N), resid_denom(N);
+    collapsed_icar_compute_residuals(
+        collapsed_icar_ws, beta_num, beta_denom,
+        phi_num, phi_denom,
+        re_vals.empty() ? nullptr : re_vals.data(),
+        a, c_bym2, data,
+        resid_num.data(), resid_denom.data());
+
+    // Scatter to beta gradients
+    for (int i = 0; i < N; i++) {
+        for (int p = 0; p < data.p_num; p++) {
+            grad[layout.beta_num_start + p] += resid_num[i] * data.X_num_flat[i * data.p_num + p];
+        }
+        if (!is_binomial) {
+            for (int p = 0; p < data.p_denom; p++) {
+                grad[layout.beta_denom_start + p] += resid_denom[i] * data.X_denom_flat[i * data.p_denom + p];
+            }
+        }
+        // Scatter to RE gradients
+        if (layout.has_re && data.re_group.size() > (size_t)i && data.re_group[i] > 0) {
+            grad[layout.re_start + data.re_group[i] - 1] += resid_num[i] + resid_denom[i];
+        }
+
+        // Phi (dispersion) likelihood gradient
+        if (layout.has_phi_num || layout.has_phi_denom) {
+            int s = data.spatial_group[i] - 1;
+            double spatial_eff;
+            if (is_bym2) {
+                spatial_eff = a * collapsed_icar_ws.phi_star[s] + c_bym2 * collapsed_icar_ws.theta_star[s];
+            } else {
+                spatial_eff = collapsed_icar_ws.phi_star[s];
+            }
+            double eta_num_i = 0.0, eta_denom_i = 0.0;
+            for (int p = 0; p < data.p_num; p++)
+                eta_num_i += data.X_num_flat[i * data.p_num + p] * beta_num[p];
+            if (!is_binomial) {
+                for (int p = 0; p < data.p_denom; p++)
+                    eta_denom_i += data.X_denom_flat[i * data.p_denom + p] * beta_denom[p];
+            }
+            eta_num_i += spatial_eff;
+            if (!is_binomial) eta_denom_i += spatial_eff;
+            if (layout.has_re && data.re_group.size() > (size_t)i && data.re_group[i] > 0) {
+                eta_num_i += re_vals[data.re_group[i] - 1];
+                if (!is_binomial) eta_denom_i += re_vals[data.re_group[i] - 1];
+            }
+            accumulate_phi_likelihood_grad(data, layout, i, eta_num_i, eta_denom_i,
+                                            phi_num, phi_denom, grad.data());
+        }
+    }
+
+    // ---- Spatial hyperparameter gradients from prior at mode ----
+    if (is_bym2) {
+        // sigma_total gradient from data: chain rule through a and c
+        // dLL/d(log_sigma) = dLL/da * da/d(sigma) * sigma + dLL/dc * dc/d(sigma) * sigma
+        double grad_sigma_from_data = 0.0;
+        double grad_rho_from_data = 0.0;
+        for (int s = 0; s < S; s++) {
+            // Aggregate residual at unit s
+            double unit_resid = 0.0;
+            for (int i = 0; i < N; i++) {
+                if (data.spatial_group[i] - 1 == s)
+                    unit_resid += resid_num[i] + resid_denom[i];
+            }
+            // db_s/d(sigma) = sqrt(rho)*scale*phi_s + sqrt(1-rho)*theta_s = b_s / sigma_total
+            // db_s/d(rho) = 0.5*sigma*scale*phi_s/sqrt(rho) - 0.5*sigma*theta_s/sqrt(1-rho)
+            grad_sigma_from_data += unit_resid *
+                (std::sqrt(rho) * data.bym2_scale_factor * collapsed_icar_ws.phi_star[s] +
+                 std::sqrt(1.0 - rho) * collapsed_icar_ws.theta_star[s]);
+            if (rho > 1e-10 && rho < 1.0 - 1e-10) {
+                grad_rho_from_data += unit_resid * sigma_total *
+                    (0.5 * data.bym2_scale_factor * collapsed_icar_ws.phi_star[s] / std::sqrt(rho) -
+                     0.5 * collapsed_icar_ws.theta_star[s] / std::sqrt(1.0 - rho));
+            }
+        }
+        grad[layout.log_sigma_bym2_idx] += grad_sigma_from_data * sigma_total;  // chain rule d/d(log sigma)
+        grad[layout.logit_rho_bym2_idx] += grad_rho_from_data * rho * (1.0 - rho);  // chain rule logit
+    } else {
+        // ICAR: d/d(log_tau) of ICAR prior at phi*
+        // log p(phi|tau) = 0.5*(S-1)*log(tau) - 0.5*tau*phi'Q*phi
+        std::vector<double> Qphi(S);
+        icar_precision_matvec(collapsed_icar_ws.phi_star.data(), Qphi.data(), S,
+                              data.adj_row_ptr, data.adj_col_idx, data.n_neighbors);
+        double phiQphi = 0.0;
+        for (int i = 0; i < S; i++) phiQphi += collapsed_icar_ws.phi_star[i] * Qphi[i];
+        // d/d(log_tau) = 0.5*(S-1) - 0.5*tau*phi'Q*phi  (tau via chain rule)
+        grad[layout.log_tau_spatial_idx] += 0.5 * (S - 1) - 0.5 * tau * phiQphi;
+    }
+
+    // ---- Numerical Laplace correction gradient ----
+    {
+        const double eps = 1e-5;
+        std::vector<double> params_pert = params;
+
+        for (int j = 0; j < n_params; j++) {
+            double orig = params_pert[j];
+
+            // Forward perturbation
+            params_pert[j] = orig + eps;
+            auto cp_p = extract_common_params(params_pert, layout);
+            double phi_num_p = cp_p.phi_num;
+            double phi_denom_p = cp_p.phi_denom;
+            double sigma_re_p = cp_p.sigma_re;
+
+            // Pre-compute perturbed RE vals
+            std::vector<double> re_vals_p;
+            if (layout.has_re) {
+                int n_re = layout.re_end - layout.re_start;
+                re_vals_p.resize(n_re);
+                for (int g = 0; g < n_re; g++) {
+                    re_vals_p[g] = (data.re_parameterization == 1) ?
+                        sigma_re_p * cp_p.re[g] : cp_p.re[g];
+                }
+            }
+
+            double ld_plus;
+            if (is_bym2) {
+                double sigma_p = std::exp(params_pert[layout.log_sigma_bym2_idx]);
+                double logit_rho_p = params_pert[layout.logit_rho_bym2_idx];
+                double rho_p = 1.0 / (1.0 + std::exp(-logit_rho_p));
+                ld_plus = laplace_log_det_bym2_full(
+                    cp_p.beta_num, cp_p.beta_denom,
+                    sigma_p, rho_p, data.bym2_scale_factor,
+                    phi_num_p, phi_denom_p,
+                    re_vals_p.empty() ? nullptr : re_vals_p.data(),
+                    data, collapsed_icar_ws.phi_star, collapsed_icar_ws.theta_star);
+            } else {
+                double tau_p = std::exp(params_pert[layout.log_tau_spatial_idx]);
+                ld_plus = laplace_log_det_icar_full(
+                    cp_p.beta_num, cp_p.beta_denom, tau_p,
+                    phi_num_p, phi_denom_p,
+                    re_vals_p.empty() ? nullptr : re_vals_p.data(),
+                    data, collapsed_icar_ws.phi_star);
+            }
+
+            // Backward perturbation
+            params_pert[j] = orig - eps;
+            cp_p = extract_common_params(params_pert, layout);
+            phi_num_p = cp_p.phi_num;
+            phi_denom_p = cp_p.phi_denom;
+            sigma_re_p = cp_p.sigma_re;
+
+            if (layout.has_re) {
+                int n_re = layout.re_end - layout.re_start;
+                re_vals_p.resize(n_re);
+                for (int g = 0; g < n_re; g++) {
+                    re_vals_p[g] = (data.re_parameterization == 1) ?
+                        sigma_re_p * cp_p.re[g] : cp_p.re[g];
+                }
+            }
+
+            double ld_minus;
+            if (is_bym2) {
+                double sigma_p = std::exp(params_pert[layout.log_sigma_bym2_idx]);
+                double logit_rho_p = params_pert[layout.logit_rho_bym2_idx];
+                double rho_p = 1.0 / (1.0 + std::exp(-logit_rho_p));
+                ld_minus = laplace_log_det_bym2_full(
+                    cp_p.beta_num, cp_p.beta_denom,
+                    sigma_p, rho_p, data.bym2_scale_factor,
+                    phi_num_p, phi_denom_p,
+                    re_vals_p.empty() ? nullptr : re_vals_p.data(),
+                    data, collapsed_icar_ws.phi_star, collapsed_icar_ws.theta_star);
+            } else {
+                double tau_p = std::exp(params_pert[layout.log_tau_spatial_idx]);
+                ld_minus = laplace_log_det_icar_full(
+                    cp_p.beta_num, cp_p.beta_denom, tau_p,
+                    phi_num_p, phi_denom_p,
+                    re_vals_p.empty() ? nullptr : re_vals_p.data(),
+                    data, collapsed_icar_ws.phi_star);
+            }
+
+            grad[j] += (ld_plus - ld_minus) / (2.0 * eps);
+            params_pert[j] = orig;
+        }
+    }
+
+    // ---- NC transform for RE ----
+    re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
+
+    // ---- Log-posterior ----
+    if (log_post_out) {
+        double lp = collapsed_lp + collapsed_icar_ws.laplace_log_det;
+
+        // Beta priors
+        for (int p = 0; p < data.p_num; p++)
+            lp += -0.5 * beta_num[p] * beta_num[p] / (data.sigma_beta * data.sigma_beta);
+        for (int p = 0; p < data.p_denom; p++)
+            lp += -0.5 * beta_denom[p] * beta_denom[p] / (data.sigma_beta * data.sigma_beta);
+
+        // RE priors
+        if (layout.has_re) {
+            int n_re = layout.re_end - layout.re_start;
+            double sigma_re2 = sigma_re * sigma_re;
+            for (int g = 0; g < n_re; g++) {
+                if (data.re_parameterization == 1) {
+                    lp += -0.5 * re[g] * re[g];
+                } else {
+                    lp += -0.5 * re[g] * re[g] / sigma_re2;
+                }
+            }
+            double ratio_hc = sigma_re / data.sigma_re_scale;
+            lp += -std::log(1.0 + ratio_hc * ratio_hc) + params[layout.log_sigma_re_idx];
+        }
+
+        // Spatial hyperparameter priors
+        if (is_bym2) {
+            double ratio_sc = sigma_total / data.sigma_re_scale;
+            lp += -std::log(1.0 + ratio_sc * ratio_sc) + params[layout.log_sigma_bym2_idx];
+            lp += std::log(rho) + std::log(1.0 - rho);
+        } else {
+            lp += (data.tau_spatial_shape - 1.0) * std::log(tau) - data.tau_spatial_rate * tau
+                  + params[layout.log_tau_spatial_idx];
+        }
+
+        // Phi (dispersion) priors
+        if (layout.has_phi_num) lp += params[layout.log_phi_num_idx];
+        if (layout.has_phi_denom) lp += params[layout.log_phi_denom_idx];
 
         *log_post_out = lp;
     }
@@ -8161,6 +8609,9 @@ void compute_gradient(
     } else if (layout.is_gp_collapsed && data.has_gp && data.gp_collapsed) {
         // Collapsed GP: analytical gradient + numerical Laplace correction
         compute_gradient_gp_collapsed(params, data, layout, grad, log_post_out);
+    } else if (layout.is_icar_collapsed || layout.is_bym2_collapsed) {
+        // Collapsed ICAR/BYM2: analytical gradient + numerical Laplace correction
+        compute_gradient_icar_collapsed(params, data, layout, grad, log_post_out);
     } else if (layout.is_gp && data.has_gp && !layout.has_temporal) {
         // Single-scale GP uses hand-coded gradients (~3x faster than autodiff)
         compute_gradient_gp_handcoded(params, data, layout, grad, log_post_out);
@@ -8236,6 +8687,9 @@ GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const P
     // Collapsed GP: analytical gradient + numerical Laplace correction
     if (layout.is_gp_collapsed && data.has_gp && data.gp_collapsed)
         return &compute_gradient_gp_collapsed;
+    // Collapsed ICAR/BYM2: analytical gradient + numerical Laplace correction
+    if (layout.is_icar_collapsed || layout.is_bym2_collapsed)
+        return &compute_gradient_icar_collapsed;
     if (layout.is_gp && data.has_gp && !layout.has_temporal)
         return &compute_gradient_gp_handcoded;
     if (layout.is_multiscale_gp && data.has_multiscale_gp && layout.has_temporal)
@@ -9396,6 +9850,16 @@ HMCResultCpp run_hmc_chain_cpp(
   if (data.gp_collapsed && data.has_gp) {
       result.n_gp_collapsed = data.gp_data.n_obs;
       result.gp_w_star_flat.resize(static_cast<size_t>(n_sample) * data.gp_data.n_obs, 0.0);
+  }
+
+  // Collapsed ICAR/BYM2: allocate phi*/theta* storage
+  if (data.icar_collapsed || data.bym2_collapsed) {
+      int S = data.n_spatial_units;
+      result.n_icar_collapsed = S;
+      result.icar_phi_star_flat.resize(static_cast<size_t>(n_sample) * S, 0.0);
+      if (data.bym2_collapsed) {
+          result.bym2_theta_star_flat.resize(static_cast<size_t>(n_sample) * S, 0.0);
+      }
   }
 
   std::mt19937 rng(seed + chain_id * 12345);
@@ -11006,6 +11470,19 @@ HMCResultCpp run_hmc_chain_cpp(
                       N_gp * sizeof(double));
       }
 
+      // Collapsed ICAR/BYM2: store phi*/theta* from the last gradient evaluation
+      if ((data.icar_collapsed || data.bym2_collapsed) && result.n_icar_collapsed > 0) {
+          int S = result.n_icar_collapsed;
+          std::memcpy(&result.icar_phi_star_flat[sample_idx * S],
+                      collapsed_icar_ws.phi_star.data(),
+                      S * sizeof(double));
+          if (data.bym2_collapsed && !result.bym2_theta_star_flat.empty()) {
+              std::memcpy(&result.bym2_theta_star_flat[sample_idx * S],
+                          collapsed_icar_ws.theta_star.data(),
+                          S * sizeof(double));
+          }
+      }
+
       sample_idx++;
     } else {
       warmup_total_leapfrog += iter_n_leapfrog;  // TEMP: diagnostic
@@ -11513,6 +11990,20 @@ Rcpp::List cpp_hmc_fit(
   data.spatial_Q_inv = std::move(spatial_Q_inv);
   data.spatial_L_Q = std::move(spatial_L_Q);
 
+  // Collapsed ICAR/BYM2 parameterization
+  data.icar_collapsed = false;
+  data.bym2_collapsed = false;
+  if (spatial_params.containsElementNamed("parameterization")) {
+      std::string spatial_param_str = Rcpp::as<std::string>(spatial_params["parameterization"]);
+      if (spatial_param_str == "collapsed") {
+          if (data.spatial_type == SpatialType::ICAR) {
+              data.icar_collapsed = true;
+          } else if (data.spatial_type == SpatialType::BYM2) {
+              data.bym2_collapsed = true;
+          }
+      }
+  }
+
   // Temporal structure
   if (temporal_type_str == "rw1") {
     data.temporal_type = TemporalType::RW1;
@@ -11882,6 +12373,12 @@ Rcpp::List cpp_hmc_fit(
     );
     if (result.n_gp_collapsed > 0) {
       ret["gp_w_star"] = result.gp_w_star;
+    }
+    if (result.n_icar_collapsed > 0) {
+      ret["icar_phi_star"] = result.icar_phi_star;
+      if (result.bym2_theta_star.nrow() > 0) {
+        ret["bym2_theta_star"] = result.bym2_theta_star;
+      }
     }
     return ret;
   } else {

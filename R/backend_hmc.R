@@ -499,7 +499,8 @@ fit_hmc <- function(formula,
       n_neighbors = as.integer(spatial_info$n_neighbors),
       bym2_scale = spatial_info$bym2_scale,
       Q_inv = spatial_info$Q_inv,
-      L_Q = spatial_info$L_Q
+      L_Q = spatial_info$L_Q,
+      parameterization = spatial_info$parameterization %||% "standard"
     )
 
     temporal_params <- list(
@@ -1119,7 +1120,8 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     bym2_scale = bym2_scale,
     group_var = spatial$group_var,  # Preserve for prediction lookup
     Q_inv = Q_inv_flat,
-    L_Q = L_Q_flat
+    L_Q = L_Q_flat,
+    parameterization = spatial$parameterization %||% "standard"
   )
 }
 
@@ -1144,11 +1146,20 @@ initialize_hmc_params_spatial <- function(hmc_data, model_type, spatial_info) {
   }
 
   # Spatial
+  is_collapsed <- identical(spatial_info$parameterization, "collapsed")
   if (spatial_info$type == "icar") {
-    n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
+    if (is_collapsed) {
+      n_params <- n_params + 1  # log_tau only (phi marginalized)
+    } else {
+      n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
+    }
   } else if (spatial_info$type == "bym2") {
-    # log_sigma_total + logit_rho + phi_scaled + theta
-    n_params <- n_params + 2 + 2 * spatial_info$n_units
+    if (is_collapsed) {
+      n_params <- n_params + 2  # log_sigma_total + logit_rho only
+    } else {
+      # log_sigma_total + logit_rho + phi_scaled + theta
+      n_params <- n_params + 2 + 2 * spatial_info$n_units
+    }
   }
 
   rep(0.0, n_params)
@@ -1290,13 +1301,17 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
 
   # Spatial
   if (spatial_info$type == "icar") {
+    icar_param_draw <- spatial_info$parameterization %||% "standard"
     draws_list[["tau_spatial"]] <- exp(samples[, idx])
     idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
+    if (icar_param_draw != "collapsed") {
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
     }
   } else if (spatial_info$type == "bym2") {
+    bym2_param_draw <- spatial_info$parameterization %||% "standard"
     # Riebler parameterization: log_sigma_total, logit_rho
     sigma_total <- exp(samples[, idx])
     idx <- idx + 1
@@ -1311,15 +1326,17 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
     draws_list[["sigma_s_spatial"]] <- sigma_s
     draws_list[["sigma_u_spatial"]] <- sigma_u
 
-    # phi_scaled
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-    # theta
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
+    if (bym2_param_draw != "collapsed") {
+      # phi_scaled
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+      # theta
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
     }
   } else if (spatial_info$type == "gp") {
     draws_list[["sigma2_gp"]] <- exp(samples[, idx])
@@ -1404,10 +1421,17 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
   # Spatial effects
   spatial_effect <- NULL
   if (spatial_info$type == "icar") {
+    icar_param_ratio <- spatial_info$parameterization %||% "standard"
     idx <- idx + 1  # Skip log_tau
-    phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    spatial_effect <- phi_spatial
+    if (icar_param_ratio == "collapsed") {
+      # Collapsed: no phi in samples, would need phi_star from C++ (not available in spatial-only path)
+      # For now, spatial_effect remains NULL — collapsed should use full path
+    } else {
+      phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      spatial_effect <- phi_spatial
+    }
   } else if (spatial_info$type == "bym2") {
+    bym2_param_ratio <- spatial_info$parameterization %||% "standard"
     # Riebler parameterization: log_sigma_total, logit_rho
     sigma_total <- exp(samples[, idx])
     idx <- idx + 1
@@ -1416,15 +1440,19 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
     sigma_s <- sigma_total * sqrt(rho)
     sigma_u <- sigma_total * sqrt(1 - rho)
 
-    phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
-    theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    if (bym2_param_ratio == "collapsed") {
+      # Collapsed: no phi/theta in samples — use full path
+    } else {
+      phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+      theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
 
-    # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
-    spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
-    for (s in seq_len(n_samples)) {
-      spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
-        sigma_u[s] * theta[s, ]
+      # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
+      spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
+      for (s in seq_len(n_samples)) {
+        spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
+          sigma_u[s] * theta[s, ]
+      }
     }
   } else if (spatial_info$type == "gp") {
     gp_param_ratio <- spatial_info$parameterization %||% "centered"
@@ -1766,10 +1794,20 @@ initialize_hmc_params_spatial_temporal <- function(hmc_data, model_type,
 
   # Spatial
   if (spatial_info$type == "icar") {
-    n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
+    icar_param_init <- spatial_info$parameterization %||% "standard"
+    if (icar_param_init == "collapsed") {
+      n_params <- n_params + 1  # log_tau only
+    } else {
+      n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
+    }
   } else if (spatial_info$type == "bym2") {
-    # log_sigma_total + logit_rho + phi_scaled + theta
-    n_params <- n_params + 2 + 2 * spatial_info$n_units
+    bym2_param_init <- spatial_info$parameterization %||% "standard"
+    if (bym2_param_init == "collapsed") {
+      n_params <- n_params + 2  # log_sigma_total + logit_rho only
+    } else {
+      # log_sigma_total + logit_rho + phi_scaled + theta
+      n_params <- n_params + 2 + 2 * spatial_info$n_units
+    }
   }
 
   # Temporal
@@ -1953,9 +1991,19 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 
   # Spatial
   if (spatial_info$type == "icar") {
-    q_init <- c(q_init, rep(0.0, 1 + spatial_info$n_units))
+    icar_param <- spatial_info$parameterization %||% "standard"
+    if (icar_param == "collapsed") {
+      q_init <- c(q_init, rep(0.0, 1))  # log_tau only
+    } else {
+      q_init <- c(q_init, rep(0.0, 1 + spatial_info$n_units))
+    }
   } else if (spatial_info$type == "bym2") {
-    q_init <- c(q_init, rep(0.0, 2 + 2 * spatial_info$n_units))
+    bym2_param <- spatial_info$parameterization %||% "standard"
+    if (bym2_param == "collapsed") {
+      q_init <- c(q_init, rep(0.0, 2))  # log_sigma_total, logit_rho only
+    } else {
+      q_init <- c(q_init, rep(0.0, 2 + 2 * spatial_info$n_units))
+    }
   } else if (spatial_info$type == "gp") {
     # Layout: log_sigma2, log_phi, w[n_units] (or just log_sigma2, log_phi for collapsed)
     gp_param <- spatial_info$parameterization %||% "centered"
@@ -2153,9 +2201,12 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
 
   # Compute ratios
   gp_w_star <- fit_raw$gp_w_star  # NULL if not collapsed GP
+  icar_phi_star <- fit_raw$icar_phi_star  # NULL if not collapsed ICAR/BYM2
+  bym2_theta_star <- fit_raw$bym2_theta_star  # NULL if not collapsed BYM2
   ratio_draws <- compute_ratio_draws_hmc_full(
     all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type,
-    re_param = re_param, gp_w_star = gp_w_star
+    re_param = re_param, gp_w_star = gp_w_star,
+    icar_phi_star = icar_phi_star, bym2_theta_star = bym2_theta_star
   )
 
   # Diagnostics
@@ -2499,13 +2550,17 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
 
   # Spatial (ICAR, BYM2)
   if (spatial_info$type == "icar") {
+    icar_param_draw <- spatial_info$parameterization %||% "standard"
     draws_list[["tau_spatial"]] <- exp(samples[, idx])
     idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
+    if (icar_param_draw != "collapsed") {
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
     }
   } else if (spatial_info$type == "bym2") {
+    bym2_param_draw <- spatial_info$parameterization %||% "standard"
     # Riebler parameterization: log_sigma_total, logit_rho
     sigma_total <- exp(samples[, idx])
     idx <- idx + 1
@@ -2520,15 +2575,17 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
     draws_list[["sigma_s_spatial"]] <- sigma_s
     draws_list[["sigma_u_spatial"]] <- sigma_u
 
-    # phi_scaled
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-    # theta
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
+    if (bym2_param_draw != "collapsed") {
+      # phi_scaled
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+      # theta
+      for (s in seq_len(spatial_info$n_units)) {
+        draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
     }
   } else if (spatial_info$type == "gp") {
     draws_list[["sigma2_gp"]] <- exp(samples[, idx])
@@ -2755,7 +2812,9 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
 compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
                                           temporal_info, zi_info, model_type,
                                           re_param = "noncentered",
-                                          gp_w_star = NULL) {
+                                          gp_w_star = NULL,
+                                          icar_phi_star = NULL,
+                                          bym2_theta_star = NULL) {
   n_samples <- nrow(samples)
   N <- hmc_data$N
 
@@ -2956,11 +3015,20 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
   # Spatial effects (ICAR, BYM2)
   spatial_effect <- NULL
   if (spatial_info$type == "icar") {
+    icar_param_ratio <- spatial_info$parameterization %||% "standard"
     idx <- idx + 1  # Skip log_tau
-    phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    spatial_effect <- phi_spatial
-    idx <- idx + spatial_info$n_units
+    if (icar_param_ratio == "collapsed") {
+      # Use phi* from inner Laplace optimization (stored during sampling)
+      if (!is.null(icar_phi_star)) {
+        spatial_effect <- icar_phi_star
+      }
+    } else {
+      phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      spatial_effect <- phi_spatial
+      idx <- idx + spatial_info$n_units
+    }
   } else if (spatial_info$type == "bym2") {
+    bym2_param_ratio <- spatial_info$parameterization %||% "standard"
     # Riebler parameterization: log_sigma_total, logit_rho
     sigma_total <- exp(samples[, idx])
     idx <- idx + 1
@@ -2969,16 +3037,27 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
     sigma_s <- sigma_total * sqrt(rho)
     sigma_u <- sigma_total * sqrt(1 - rho)
 
-    phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
-    theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
+    if (bym2_param_ratio == "collapsed") {
+      # Use phi* and theta* from inner Laplace optimization
+      if (!is.null(icar_phi_star) && !is.null(bym2_theta_star)) {
+        spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
+        for (s in seq_len(n_samples)) {
+          spatial_effect[s, ] <- sigma_s[s] * icar_phi_star[s, ] * spatial_info$bym2_scale +
+            sigma_u[s] * bym2_theta_star[s, ]
+        }
+      }
+    } else {
+      phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+      theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
 
-    # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
-    spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
-    for (s in seq_len(n_samples)) {
-      spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
-        sigma_u[s] * theta[s, ]
+      # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
+      spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
+      for (s in seq_len(n_samples)) {
+        spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
+          sigma_u[s] * theta[s, ]
+      }
     }
   } else if (spatial_info$type == "gp") {
     gp_param_ratio <- spatial_info$parameterization %||% "centered"
