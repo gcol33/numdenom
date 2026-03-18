@@ -96,6 +96,11 @@
 #'   `"diag"` diagonal mass matrix (faster per step but may require deeper trees);
 #'   `"block_diag"` block-diagonal mass matrix (separate blocks per parameter group).
 #'   Auto-falls back to diagonal when p > 2000.
+#' @param verbose Logical; if TRUE (default), print progress messages during
+#'   model fitting.
+#' @param max_treedepth Maximum tree depth for NUTS. `NULL` (default) uses 10.
+#'   Increase if you see many max-treedepth warnings. Higher values allow
+#'   deeper exploration but increase computation per iteration.
 #' @param re_param Random effects parameterization:
 #'   `"noncentered"` (default) stores z ~ N(0,1) and computes re = σ*z (or re = diag(σ)*L*z for correlated).
 #'     Better for weakly-informed random effects or small group sizes.
@@ -177,7 +182,7 @@ ratiod <- function(formula,
                   cores = getOption("mc.cores", chains),
                   seed = NULL,
                   mode = c("auto", "exact", "structured", "optimized",
-                           "hmc", "ess", "pg", "sghmc", "sgld", "laplace", "vi"),
+                           "hmc", "ess", "pg", "gibbs", "sghmc", "sgld", "laplace", "vi"),
                   vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
                   refresh = NULL,
                   verbose = TRUE,
@@ -194,6 +199,11 @@ ratiod <- function(formula,
   gradient_mode <- match.arg(gradient_mode)
   re_param <- match.arg(re_param)
   metric <- match.arg(metric)
+
+  # Suppress verbose output during testing to prevent output buffer overflow
+  if (isTRUE(getOption("numdenom.test_mode")) && missing(verbose)) {
+    verbose <- FALSE
+  }
 
   # Validate adapt_delta
   if (!is.null(adapt_delta)) {
@@ -312,7 +322,9 @@ ratiod <- function(formula,
     n_obs = nrow(data),
     has_spatial = !is.null(spatial),
     has_temporal = !is.null(temporal),
-    has_latent = !is.null(latent)
+    has_latent = !is.null(latent),
+    spatial_type = if (!is.null(spatial)) spatial$type else NULL,
+    temporal = temporal
   )
 
   # Extract selected backend
@@ -404,6 +416,36 @@ ratiod <- function(formula,
     backend = selected_backend,
     reason = mode_selection$reason
   )
+
+  # -------------------------------------------------------------------------
+  # Dispatch to Gibbs backend (Tier 1: Exact)
+  # -------------------------------------------------------------------------
+  if (selected_backend == "gibbs") {
+    if (verbose) {
+      message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
+    }
+
+    result <- fit_gibbs(
+      formula = formula_spec,
+      data = data,
+      family = family,
+      spatial = spatial,
+      temporal = temporal,
+      iter = iter,
+      warmup = warmup,
+      thin = thin,
+      seed = seed,
+      verbose = verbose
+    )
+
+    # Add mode information
+    result$inference_mode <- selected_mode
+    result$inference_tier <- selected_tier
+    result$inference_tier_name <- selected_tier_name
+    result$mode_info <- mode_info
+
+    return(result)
+  }
 
   # -------------------------------------------------------------------------
   # Dispatch to PG backend (Tier 1: Exact)

@@ -66,7 +66,7 @@ INFERENCE_TIERS <- list(
     name = "Exact",
     description = "Asymptotically correct posterior inference",
     guarantee = "Credible intervals interpretable as posterior uncertainty",
-    backends = c("hmc", "ess", "pg", "sghmc", "sgld"),
+    backends = c("hmc", "ess", "pg", "gibbs", "sghmc", "sgld"),
     note = "Reference standard"
   ),
   structured = list(
@@ -166,12 +166,14 @@ select_inference_mode <- function(mode,
                                   n_obs,
                                   has_spatial = FALSE,
                                   has_temporal = FALSE,
-                                  has_latent = FALSE) {
+                                  has_latent = FALSE,
+                                  spatial_type = NULL,
+                                  temporal = NULL) {
 
   mode <- tolower(mode)
 
   # Check if mode is actually a backend name
-  all_backends <- c("hmc", "ess", "pg", "sghmc", "sgld", "laplace", "vi")
+  all_backends <- c("hmc", "ess", "pg", "gibbs", "sghmc", "sgld", "laplace", "vi")
   if (mode %in% all_backends) {
     # User specified a backend directly
     backend <- mode
@@ -200,7 +202,8 @@ select_inference_mode <- function(mode,
 
   # Auto-selection logic
   if (mode == "auto") {
-    return(auto_select_mode(family, n_obs, has_spatial, has_temporal, has_latent))
+    return(auto_select_mode(family, n_obs, has_spatial, has_temporal, has_latent, temporal,
+                             spatial_type))
   }
 
   # Explicit tier mode: select best backend within that tier
@@ -226,7 +229,8 @@ select_inference_mode <- function(mode,
 #' **Critical rule**: Auto never selects Tier 3 (Optimized).
 #'
 #' @keywords internal
-auto_select_mode <- function(family, n_obs, has_spatial, has_temporal, has_latent) {
+auto_select_mode <- function(family, n_obs, has_spatial, has_temporal, has_latent, temporal = NULL,
+                             spatial_type = NULL) {
 
   # Thresholds
   VERY_LARGE <- 50000
@@ -257,6 +261,33 @@ auto_select_mode <- function(family, n_obs, has_spatial, has_temporal, has_laten
       tier_name = "Structured",
       reason = paste(reason_parts, collapse = "; ")
     ))
+  }
+
+  # Gibbs for ICAR spatial-only models (no temporal, no latent)
+  # Gibbs is ~18x faster than HMC for ICAR because it updates phi
+  # component-wise, avoiding HMC's curse of dimensionality
+  is_gibbs_spatial <- has_spatial && !is.null(spatial_type) &&
+                      spatial_type %in% c("icar", "car", "bym2")
+  # Gibbs supports: no temporal, or TVC temporal only
+  has_tvc_only <- !is.null(temporal) && inherits(temporal, "ratiod_tvc")
+  gibbs_temporal_ok <- !has_temporal || has_tvc_only
+  if (is_gibbs_spatial && gibbs_temporal_ok && !has_latent) {
+    # Check family is supported by Gibbs
+    gibbs_families <- c("poisson_gamma", "negbin_negbin", "binomial",
+                        "negbin_gamma", "poisson", "neg_binomial_2",
+                        "negative_binomial", "negbin")
+    fam_name <- family$name %||% ""
+    fam_dist <- family$numerator$distribution %||% ""
+    if (fam_name %in% gibbs_families || fam_dist %in% gibbs_families ||
+        fam_dist == "binomial") {
+      return(list(
+        mode = "exact",
+        backend = "gibbs",
+        tier = 1L,
+        tier_name = "Exact",
+        reason = sprintf("ICAR/BYM2 spatial model (Gibbs %s)", spatial_type)
+      ))
+    }
   }
 
   # Default: Tier 1 (Exact) with HMC
