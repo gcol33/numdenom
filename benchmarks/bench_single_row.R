@@ -254,7 +254,48 @@ ROW_CONFIGS <- list(
   make_row(134, "nbg", temp="tvc"),
   make_row(135, "nbg", sp="icar", temp="rw1", st="I"),
   make_row(136, "nbg", sp="icar", temp="rw1", st="IV"),
-  make_row(137, "nbg", latent=TRUE)
+  make_row(137, "nbg", latent=TRUE),
+  # Section 6: Collapsed parameterizations (rows 138-149)
+  make_row(138, "pg", re="none", sp="cicar"),
+  make_row(139, "pg", re="none", sp="cbym2"),
+  make_row(140, "nb", re="none", sp="cicar"),
+  make_row(141, "nb", re="none", sp="cbym2"),
+  make_row(142, "bin", re="none", sp="cicar"),
+  make_row(143, "bin", re="none", sp="cbym2"),
+  make_row(144, "nbg", re="none", sp="cicar"),
+  make_row(145, "nbg", re="none", sp="cbym2"),
+  make_row(146, "pg", re="int", sp="cicar"),
+  make_row(147, "pg", re="int", sp="cbym2"),
+  make_row(148, "nb", re="int", sp="cicar"),
+  make_row(149, "nb", re="int", sp="cbym2"),
+  # Section 8: Exotic multi-feature combos (rows 150-170)
+  # These lack H-mode gradients — fall back to N (via verify_gradient_runtime) or A_r
+  # HSGP + exotic temporal/features (branch 2 catches HSGP, missing other feature)
+  make_row(150, "pg", sp="hsgp", temp="gp_t"),
+  make_row(151, "pg", sp="hsgp", temp="ms_t"),
+  make_row(152, "pg", sp="hsgp", temp="tvc"),
+  make_row(153, "pg", sp="hsgp", temp="rw1", st="IV"),
+  make_row(154, "pg", sp="hsgp", latent=TRUE),
+  make_row(155, "pg", re="slopes", sp="hsgp"),
+  # SVC + temporal (branch 10/11 catches SVC, missing temporal)
+  make_row(156, "pg", sp="svc", temp="rw1"),
+  make_row(157, "pg", sp="svc", temp="ar1"),
+  make_row(158, "pg", sp="svc", temp="gp_t"),
+  make_row(159, "pg", sp="svc", temp="tvc"),
+  # TVC + spatial (branch 12 catches TVC, missing spatial)
+  make_row(160, "pg", sp="icar", temp="tvc"),
+  make_row(161, "pg", sp="bym2", temp="tvc"),
+  # Latent + spatial/temporal (branch 16 catches latent, missing spatial/temporal)
+  make_row(163, "pg", sp="icar", latent=TRUE),
+  make_row(164, "pg", temp="rw1", latent=TRUE),
+  make_row(165, "pg", sp="icar", temp="rw1", latent=TRUE),
+  # Temporal GP + spatial (branch 14 catches GP_t, missing spatial)
+  make_row(166, "pg", sp="icar", temp="gp_t"),
+  make_row(167, "pg", sp="bym2", temp="gp_t"),
+  # MS_t + spatial (branch 15 catches MS_t, missing spatial)
+  make_row(168, "pg", sp="icar", temp="ms_t"),
+  # Crossed RE + slopes (no branch catches)
+  make_row(170, "pg", re="crossed_slopes")
 )
 
 config_by_row <- list()
@@ -302,6 +343,9 @@ rhs <- if (re == "none") {
 } else if (re == "crossed") {
   df$site2 <- factor(sample(1:5, nrow(df), replace = TRUE))
   "x + (1 | site) + (1 | site2)"
+} else if (re == "crossed_slopes") {
+  df$site2 <- factor(sample(1:5, nrow(df), replace = TRUE))
+  "x + (1 + z | site) + (1 | site2)"
 }
 form <- as.formula(paste(lhs, "~", rhs))
 
@@ -329,7 +373,13 @@ if (sp == "icar") {
 } else if (sp == "msgp") {
   nd_spatial <- spatial_multiscale(coords = ~ lon_obs + lat_obs)
 } else if (sp == "svc") {
-  nd_spatial <- spatial_svc(coords = ~ lon_obs + lat_obs, terms = 1, nn = 15)
+  nd_spatial <- spatial_svc(coords = ~ lon_obs + lat_obs, terms = 1, approx = "hsgp")
+} else if (sp == "cicar") {
+  nd_spatial <- spatial_car(adj_mat, level = "group", group_var = "spatial_site",
+                            parameterization = "collapsed")
+} else if (sp == "cbym2") {
+  nd_spatial <- spatial_bym2(adj_mat, level = "group", group_var = "spatial_site",
+                             parameterization = "collapsed")
 }
 
 nd_temporal <- NULL
@@ -376,6 +426,10 @@ nd_latent <- NULL
 if (cfg$latent) nd_latent <- latent_factor(n_factors = 2)
 
 # --- Run benchmark ---
+# Force HMC for collapsed spatial (auto mode routes ICAR/BYM2 to Gibbs)
+nd_mode <- NULL
+if (sp %in% c("cicar", "cbym2")) nd_mode <- "hmc"
+
 ratiod_args <- list(
   formula          = form,
   data             = df,
@@ -391,6 +445,7 @@ ratiod_args <- list(
   verbose          = FALSE,
   gradient_mode    = GRAD_MODE
 )
+if (!is.null(nd_mode)) ratiod_args$mode <- nd_mode
 
 tryCatch({
   setTimeLimit(cpu = TIMEOUT_SEC, elapsed = TIMEOUT_SEC, transient = TRUE)

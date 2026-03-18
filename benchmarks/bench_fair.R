@@ -86,7 +86,7 @@ if (row_mode) {
   expand_rows <- function(specs) {
     rows <- integer(0)
     for (s in specs) {
-      if (s == "all") return(1:137)
+      if (s == "all") return(c(1:137, 138:149, 150:170))
       if (grepl("-", s)) {
         parts <- as.integer(strsplit(s, "-")[[1]])
         rows <- c(rows, seq(parts[1], parts[2]))

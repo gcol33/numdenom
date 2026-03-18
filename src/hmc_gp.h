@@ -1073,6 +1073,7 @@ struct NNGPNCWorkspace {
     std::vector<int> B_n_nb;        // Number of actual neighbors per obs (N)
     std::vector<int> nb_idx_flat;   // Neighbor indices per obs (N * nn), 0-based in w
     std::vector<double> adj;        // Adjoint accumulator (N)
+    std::vector<double> L_flat;     // Cached Cholesky factors (N * nn * nn) for backward phi grad
 
     void init(int N_, int nn_) {
         if (N == N_ && nn == nn_) return;
@@ -1083,6 +1084,7 @@ struct NNGPNCWorkspace {
         B_n_nb.resize(N, 0);
         nb_idx_flat.assign(N * nn, -1);
         adj.resize(N, 0.0);
+        L_flat.assign(N * nn * nn, 0.0);
     }
 };
 
@@ -1186,6 +1188,13 @@ inline void nngp_nc_forward(
             double s = 0.0;
             for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
             alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
+        }
+
+        // Cache Cholesky factor L for backward phi gradient
+        for (int j1 = 0; j1 < n_nb; j1++) {
+            for (int j2 = 0; j2 <= j1; j2++) {
+                ws.L_flat[i * nn * nn + j1 * nn + j2] = L[j1 * n_nb + j2];
+            }
         }
 
         // Store B and compute conditional variance d_i
@@ -1295,48 +1304,19 @@ inline void nngp_nc_backward(
         int n_nb = ws.B_n_nb[i];
         if (n_nb == 0 || obs_loc < 0 || obs_loc >= N) continue;
 
-        // Rebuild c_vec, dc_vec, C_mat for phi derivatives
+        // Rebuild c_vec, dc_vec for phi derivatives (but NOT C_mat or Cholesky)
         for (int j = 0; j < n_nb; j++) {
             double d = gp_data.nn_dist[i * nn + j];
             c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
             dc_vec[j] = dcov_dphi(d, phi, c_vec[j], gp_data.cov_type);
         }
 
+        // Restore cached Cholesky factor L and alpha from forward pass
         for (int j1 = 0; j1 < n_nb; j1++) {
-            for (int j2 = 0; j2 < n_nb; j2++) {
-                if (j1 == j2) {
-                    C_mat[j1 * n_nb + j2] = sigma2;
-                } else {
-                    double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
-                    C_mat[j1 * n_nb + j2] = compute_cov(d12, sigma2, phi, gp_data.cov_type);
-                }
+            for (int j2 = 0; j2 <= j1; j2++) {
+                L[j1 * n_nb + j2] = ws.L_flat[i * nn * nn + j1 * nn + j2];
             }
-        }
-
-        // Cholesky of C
-        std::fill(L.begin(), L.begin() + n_nb * n_nb, 0.0);
-        for (int j = 0; j < n_nb; j++) {
-            double s = 0.0;
-            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * L[j * n_nb + k];
-            double diag = C_mat[j * n_nb + j] - s;
-            L[j * n_nb + j] = (diag > 0) ? std::sqrt(diag) : 1e-5;
-            for (int k = j + 1; k < n_nb; k++) {
-                double t = 0.0;
-                for (int m = 0; m < j; m++) t += L[k * n_nb + m] * L[j * n_nb + m];
-                L[k * n_nb + j] = (C_mat[k * n_nb + j] - t) / L[j * n_nb + j];
-            }
-        }
-
-        // alpha = C^{-1} c
-        for (int j = 0; j < n_nb; j++) {
-            double s = 0.0;
-            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
-            y_vec[j] = (c_vec[j] - s) / L[j * n_nb + j];
-        }
-        for (int j = n_nb - 1; j >= 0; j--) {
-            double s = 0.0;
-            for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
-            alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
+            alpha[j1] = ws.B_flat[i * nn + j1];  // B = C^{-1}c = alpha
         }
 
         // dC/dphi * alpha

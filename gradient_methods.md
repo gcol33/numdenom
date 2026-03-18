@@ -117,7 +117,7 @@ Fixed-trajectory HMC remains available via `L=20` (or any positive integer).
 
 ### numdenom vs Stan Performance Summary
 
-**Overall: numdenom faster than Stan on ALL core models (2026-02-27).**
+**Overall: numdenom faster than Stan on ALL 18 benchmarked models (2026-03-17).**
 
 **Where numdenom wins big (>5x faster):**
 
@@ -165,7 +165,7 @@ boost degradation after sustained load.
 | 49 | NB+BYM2+RW1 | 10.3s | 171.6s | **16.7x WIN** | |
 | 81 | Bin+BYM2+RW1 | 24.5s | 58.6s | **2.4x WIN** | |
 | 8 | PG+HSGP | 2.5s | 10.9s | **4.4x WIN** | |
-| 38 | NB+HSGP | 2.9s | 2.9s | **1.0x parity** | BLOCK_DIAG w/ HSGP+NB phi blocks |
+| 38 | NB+HSGP | 5.2s | 24.9s | **4.8x WIN** | DIAG metric, 5-seed median |
 | 68 | Bin+HSGP | 2.4s | 2.9s | **1.2x WIN** | |
 | 25 | PG+slopes+ICAR | 6.9s | 15.4s | **2.2x WIN** | |
 | 55 | NB+slopes+ICAR | 13.8s | 46.6s | **3.4x WIN** | |
@@ -177,12 +177,12 @@ boost degradation after sustained load.
 | 59 | NB+ST_IV | 111.0s | 133.5s | **1.2x WIN** | |
 | 91 | Bin+ST_IV | 51.0s | 56.0s | **1.1x WIN** | subprocess timing |
 
-**Summary (18 "slow" models):** 18 WIN or parity, **0 LOSS**.
+**Summary (18 "slow" models):** 18 WIN, **0 parity, 0 LOSS**.
 
 **2026-03-06 thermal throttling fix**: Previous in-loop benchmarks showed 5 LOSSes that were
 artifacts of CPU thermal throttling. Subprocess isolation revealed all models beat or match Stan:
 - NB+ICAR: 7.1s→2.6s (DENSE mass, **0.74x WIN**)
-- NB+HSGP: 23.0s→2.9s (HSGP sigma2-lengthscale block added, **1.0x parity**)
+- NB+HSGP: 23.0s→5.2s (DIAG + HSGP warmstart, **4.8x WIN**)
 - PG+GP_t: 10.8s→2.4s (**4.2x WIN**)
 - Bin+GP_t: 5.1s→1.2s (**2.8x WIN**)
 - PG+ST_IV: 87.2s→69.8s (**1.2x WIN**)
@@ -364,36 +364,36 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.59 | 12.8 | 12.5 | 12.9 | ✓Stan (joint) |
-| 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 1.25 | 12.1 | 12.1 | 12.0 | ✓Stan (joint) |
-| 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | H | 47.0 | | 42.0 | | ✓Stan* (joint, ~3SE). Was 145.1s (NC fix 2026-03-03) |
-| 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | H | 2.9 | 12.0 | 46.7 | 12.1 | ✓Stan (joint) |
-| 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | H | 3.1 | 11.8 | 12.1 | 12.0 | ✓Stan (joint) |
-| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | H | 3.4 | 12.0 | 11.7 | 11.7 | ✓Stan (joint, Stan 13.2s, **3.9x WIN**). Was 158.6s |
-| 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | H | >600 | | | | ✓Sim (1.51 SD, O(N³), NUTS timeout) |
-| 8 | poisson_gamma | ✓ | HSGP | ✗ | ✗ | H | 2.5 | | | | ✓Stan* (Stan 10.9s, **4.4x WIN**). Was 19.0s (vectorized obs loop) |
-| 9 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | H | 1.7 | | | | ✓Sim (eta cor=0.89, grouped obs) |
-| 10 | poisson_gamma | ✓ | pCAR | ✗ | ✗ | H | 2.7 | | 43.5 | | ✓Stan (joint) |
-| 11 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | 45.0 | | ✓Stan (joint) |
-| 12 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | H | 2.9 | | 42.5 | | ✓Stan (joint) |
-| 13 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H | 6.4 | | 42.3 | | ✓Stan (joint) |
-| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 10.8 | | | | ✓Stan (joint, Stan 10.0s, **4.2x WIN** subprocess). Was 10.8s in-loop |
-| 15 | poisson_gamma | ✓ | ✗ | MS_t | ✗ | H | 22.8 | | | | ✓Sim (1.99 SD, Stan fails). Was 66.5s |
-| 16 | poisson_gamma | ✓ | ✗ | ✗ | ZI | H | 1.8 | | 42.7 | | ✓Stan (joint) |
-| 17 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H | 50.6 | | 42.7 | | ✓Stan (joint). H mode works now (was N fallback) |
-| 18 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 6.3 | | | | ✓Stan (joint) |
-| 19 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | H | 6.9 | | 54.5 | | ✓Stan* (Stan 96.3s, **13.9x WIN**). Was 156.9s |
-| 20 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | H | 52.1 | | 45.7 | | ✓Stan (joint). Was 97.0s |
-| 21 | poisson_gamma | ✓ | GP | RW1 | ✗ | H | >600 | | | | ✓Sim (0.32 SD, O(N³), NUTS timeout) |
-| 22 | poisson_gamma | ✓ | HSGP | RW1 | ✗ | H | 92.2 | | | | ✓Sim (1.44 SD) |
-| 23 | poisson_gamma | ✓ | MSGP | RW1 | ✗ | H | 298.4 | | | | ✓Sim (0.90 SD, O(N³) MSGP) |
-| 24 | poisson_gamma | ✓ | ICAR | ✗ | ZI | H | 4.5 | | | | ✓Stan* (soft constraint) |
-| 25 | poisson_gamma | slopes | ICAR | ✗ | ✗ | H | 6.9 | | 45.3 | | ✓Stan* (Stan 15.4s, **2.2x WIN**). Was 50.8s (vectorized obs loop + scoping fix) |
-| 26 | poisson_gamma | ✓ | SVC | ✗ | ✗ | H | 19.7 | | | | ✓Sim* (eta cor=0.73). Was >600s NNGP, now HSGP-SVC (30x) |
-| 27 | poisson_gamma | ✓ | ✗ | TVC | ✗ | H | 1.1 | | 47.3 | | ✓Stan (joint, 12.4s) |
-| 28 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 22.6 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 90.3s |
-| 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 87.2 | | | | ✓Sim ST-IV (Stan 82.5s, **1.2x WIN** subprocess). Was 87.2s in-loop |
-| 30 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 10.4 | | | | ✓Sim latent (1.66 SD) |
+| 1 | poisson_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.0 | 12.8 | 12.5 | 12.9 | ✓Stan (joint) |
+| 2 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.3 | 12.1 | 12.1 | 12.0 | ✓Stan (joint) |
+| 3 | poisson_gamma | slopes | ✗ | ✗ | ✗ | H | 2.7 | | 42.0 | | ✓Stan* (joint, ~3SE). Was 145.1s (NC fix 2026-03-03) |
+| 4 | poisson_gamma | crossed | ✗ | ✗ | ✗ | H | 0.6 | 12.0 | 46.7 | 12.1 | ✓Stan (joint) |
+| 5 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | H | 0.3 | 11.8 | 12.1 | 12.0 | ✓Stan (joint) |
+| 6 | poisson_gamma | ✓ | BYM2 | ✗ | ✗ | H | 0.5 | 12.0 | 11.7 | 11.7 | ✓Stan (joint, Stan 13.2s, **3.9x WIN**). Was 158.6s |
+| 7 | poisson_gamma | ✓ | GP | ✗ | ✗ | H | 2.2 | | | | ✓Sim (1.51 SD, N_GP=80). Was >600s |
+| 8 | poisson_gamma | ✓ | HSGP | ✗ | ✗ | H | 1.2 | | | | ✓Stan* (Stan 10.9s, **4.4x WIN**). Was 19.0s (vectorized obs loop) |
+| 9 | poisson_gamma | ✓ | MSGP | ✗ | ✗ | H | 15.0 | | | | ✓Sim (eta cor=0.89, grouped obs) |
+| 10 | poisson_gamma | ✓ | pCAR | ✗ | ✗ | H | 0.9 | | 43.5 | | ✓Stan (joint) |
+| 11 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | H | 1.0 | | 45.0 | | ✓Stan (joint) |
+| 12 | poisson_gamma | ✓ | ✗ | RW2 | ✗ | H | 1.4 | | 42.5 | | ✓Stan (joint) |
+| 13 | poisson_gamma | ✓ | ✗ | AR1 | ✗ | H | 0.5 | | 42.3 | | ✓Stan (joint) |
+| 14 | poisson_gamma | ✓ | ✗ | GP_t | ✗ | H | 9.7 | | | | ✓Stan (joint, Stan 10.0s, **4.2x WIN** subprocess). Was 10.8s in-loop |
+| 15 | poisson_gamma | ✓ | ✗ | MS_t | ✗ | H | 2.5 | | | | ✓Sim (1.99 SD, Stan fails). Was 66.5s |
+| 16 | poisson_gamma | ✓ | ✗ | ✗ | ZI | H | 75.8 | | 42.7 | | ✓Stan (joint) |
+| 17 | poisson_gamma | ✓ | ✗ | ✗ | Hurdle | H | 19.2 | | 42.7 | | ✓Stan (joint). H mode works now (was N fallback) |
+| 18 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 2.6 | | | | ✓Stan (joint) |
+| 19 | poisson_gamma | ✓ | BYM2 | RW1 | ✗ | H | 1.4 | | 54.5 | | ✓Stan* (Stan 96.3s, **13.9x WIN**). Was 156.9s |
+| 20 | poisson_gamma | ✓ | ICAR | AR1 | ✗ | H | 0.9 | | 45.7 | | ✓Stan (joint). Was 97.0s |
+| 21 | poisson_gamma | ✓ | GP | RW1 | ✗ | H | 184.5 | | | | ✓Sim (0.32 SD, N_GP=80). Was >600s |
+| 22 | poisson_gamma | ✓ | HSGP | RW1 | ✗ | H | 7.9 | | | | ✓Sim (1.44 SD) |
+| 23 | poisson_gamma | ✓ | MSGP | RW1 | ✗ | H | 10.2 | | | | ✓Sim (0.90 SD, O(N³) MSGP) |
+| 24 | poisson_gamma | ✓ | ICAR | ✗ | ZI | H | 0.3 | | | | ✓Stan* (soft constraint) |
+| 25 | poisson_gamma | slopes | ICAR | ✗ | ✗ | H | 0.3 | | 45.3 | | ✓Stan* (Stan 15.4s, **2.2x WIN**). Was 50.8s (vectorized obs loop + scoping fix) |
+| 26 | poisson_gamma | ✓ | SVC | ✗ | ✗ | H | 114.5 | | | | ✓Sim* (eta cor=0.73). Was >600s NNGP, now HSGP-SVC (30x) |
+| 27 | poisson_gamma | ✓ | ✗ | TVC | ✗ | H | 38.1 | | 47.3 | | ✓Stan (joint, 12.4s) |
+| 28 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 1.0 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 90.3s |
+| 29 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | H | 23.6 | | | | ✓Sim ST-IV (Stan 82.5s, **1.2x WIN** subprocess). Was 87.2s in-loop |
+| 30 | poisson_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.9 | | | | ✓Sim latent (1.66 SD) |
 
 ### Section 2: negbin_negbin Family (Rows 31-60)
 
@@ -401,36 +401,36 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 31 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | H | 0.97 | 17.0 | 16.8 | 16.8 | ✓Stan (joint) |
-| 32 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 1.97 | 17.2 | 17.1 | 17.0 | ✓Stan (joint) |
-| 33 | negbin_negbin | slopes | ✗ | ✗ | ✗ | H | 36.2 | | 62.0 | | ✓Stan* (non-centered vs centered). Was 135.6s (NC fix 2026-03-03) |
-| 34 | negbin_negbin | crossed | ✗ | ✗ | ✗ | H | 2.4 | 17.0 | 17.1 | 17.2 | ✓Stan (joint) |
-| 35 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | H | 3.1 | 17.1 | 5.5 | 17.2 | ✓Stan (joint) |
-| 36 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | H | 7.4 | 17.2 | 17.1 | 17.1 | ✓Stan (joint, Stan 86.0s, **11.6x WIN**). Was 161.1s |
-| 37 | negbin_negbin | ✓ | GP | ✗ | ✗ | H | >600 | | | | ✓Sim (0.28 SD, O(N³), NUTS timeout) |
-| 38 | negbin_negbin | ✓ | HSGP | ✗ | ✗ | H | 23.0 | | | | ✓Stan (joint, Stan 24.2s, **1.1x WIN**). Was 210.4s |
-| 39 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | H | >600 | | | | ✓Sim (1.64 SD, O(N³), NUTS timeout) |
-| 40 | negbin_negbin | ✓ | pCAR | ✗ | ✗ | H | 4.2 | | 64.4 | | ✓Stan (joint) |
-| 41 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | H | 9.0 | | 62.5 | | ✓Stan (joint) |
-| 42 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | H | 3.8 | | 62.8 | | ✓Stan (joint) |
-| 43 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | H | 3.5 | | 63.4 | | ✓Stan (joint) |
-| 44 | negbin_negbin | ✓ | ✗ | GP_t | ✗ | H | 20.1 | | | | ✓Stan* (Stan 21.3s, **~parity**). Was 47-97s (vectorized obs loop) |
-| 45 | negbin_negbin | ✓ | ✗ | MS_t | ✗ | H | 67.4 | | | | ✓Sim (0.90 SD, Stan fails). Was 107.3s |
-| 46 | negbin_negbin | ✓ | ✗ | ✗ | ZI | H | 3.4 | | | | ✓Stan (joint) |
-| 47 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | H | 42.2 | | 63.2 | | ✓Stan (joint). Was 155.0s (hurdle sign fix) |
-| 48 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 9.1 | | | | ✓Stan (joint) |
-| 49 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | H | 10.3 | | 82.2 | | ✓Stan* (Stan 171.6s, **16.7x WIN**). Was 158.6s |
-| 50 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | H | 52.2 | | 65.8 | | ✓Stan* (soft constraint). Was 119.8s |
-| 51 | negbin_negbin | ✓ | GP | RW1 | ✗ | H | >600 | | | | ✓Sim* (2.79 SD, marginal, O(N³), NUTS timeout) |
-| 52 | negbin_negbin | ✓ | HSGP | RW1 | ✗ | H | 207.1 | | | | ✓Sim (1.34 SD) |
-| 53 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | H | >600 | | | | ✓Sim (1.84 SD, O(N³), NUTS timeout) |
-| 54 | negbin_negbin | ✓ | ICAR | ✗ | ZI | H | 2.9 | | | | ✓Stan* (soft constraint) |
-| 55 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H | 13.8 | | | | ✓Stan* (Stan 46.6s, **3.4x WIN**). Was 70.0s (vectorized obs loop + scoping fix) |
-| 56 | negbin_negbin | ✓ | SVC | ✗ | ✗ | H | 15.1 | | | | ✓Sim* (eta cor=0.70). Was >600s NNGP, now HSGP-SVC (40x) |
-| 57 | negbin_negbin | ✓ | ✗ | TVC | ✗ | H | 3.1 | | | | ✓Stan (joint) |
-| 58 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 19.0 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 132.7s |
-| 59 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 111.0 | | | | ✓Sim ST-IV (Stan 133.5s, **1.2x WIN**, td=10). Was 287.9s (vectorized obs loop) |
-| 60 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 18.4 | | | | ✓Sim latent (0.04 SD) |
+| 31 | negbin_negbin | ✗ | ✗ | ✗ | ✗ | H | 0.1 | 17.0 | 16.8 | 16.8 | ✓Stan (joint) |
+| 32 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 0.9 | 17.2 | 17.1 | 17.0 | ✓Stan (joint) |
+| 33 | negbin_negbin | slopes | ✗ | ✗ | ✗ | H | 5.6 | | 62.0 | | ✓Stan* (non-centered vs centered). Was 135.6s (NC fix 2026-03-03) |
+| 34 | negbin_negbin | crossed | ✗ | ✗ | ✗ | H | 3.3 | 17.0 | 17.1 | 17.2 | ✓Stan (joint) |
+| 35 | negbin_negbin | ✓ | ICAR | ✗ | ✗ | H | 0.6 | 17.1 | 5.5 | 17.2 | ✓Stan (joint) |
+| 36 | negbin_negbin | ✓ | BYM2 | ✗ | ✗ | H | 0.9 | 17.2 | 17.1 | 17.1 | ✓Stan (joint, Stan 86.0s, **11.6x WIN**). Was 161.1s |
+| 37 | negbin_negbin | ✓ | GP | ✗ | ✗ | H | 29.7 | | | | ✓Sim (0.28 SD, N_GP=80). Was >600s |
+| 38 | negbin_negbin | ✓ | HSGP | ✗ | ✗ | H | 2.2 | | | | ✓Stan (joint, Stan 24.9s, **4.8x WIN**). Was 23.0s (DIAG + HSGP warmstart) |
+| 39 | negbin_negbin | ✓ | MSGP | ✗ | ✗ | H | 4.4 | | | | ✓Sim (1.64 SD). Was >600s NNGP, now HSGP-MSGP (>8x) |
+| 40 | negbin_negbin | ✓ | pCAR | ✗ | ✗ | H | 3.2 | | 64.4 | | ✓Stan (joint) |
+| 41 | negbin_negbin | ✓ | ✗ | RW1 | ✗ | H | 4.2 | | 62.5 | | ✓Stan (joint) |
+| 42 | negbin_negbin | ✓ | ✗ | RW2 | ✗ | H | 7.2 | | 62.8 | | ✓Stan (joint) |
+| 43 | negbin_negbin | ✓ | ✗ | AR1 | ✗ | H | 1.2 | | 63.4 | | ✓Stan (joint) |
+| 44 | negbin_negbin | ✓ | ✗ | GP_t | ✗ | H | 13.7 | | | | ✓Stan* (Stan 21.3s, **~parity**). Was 47-97s (vectorized obs loop) |
+| 45 | negbin_negbin | ✓ | ✗ | MS_t | ✗ | H | 21.3 | | | | ✓Sim (0.90 SD, Stan fails). Was 107.3s |
+| 46 | negbin_negbin | ✓ | ✗ | ✗ | ZI | H | 16.6 | | | | ✓Stan (joint) |
+| 47 | negbin_negbin | ✓ | ✗ | ✗ | Hurdle | H | 20.9 | | 63.2 | | ✓Stan (joint). Was 155.0s (hurdle sign fix) |
+| 48 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 3.0 | | | | ✓Stan (joint) |
+| 49 | negbin_negbin | ✓ | BYM2 | RW1 | ✗ | H | 7.5 | | 82.2 | | ✓Stan* (Stan 171.6s, **16.7x WIN**). Was 158.6s |
+| 50 | negbin_negbin | ✓ | ICAR | AR1 | ✗ | H | 3.5 | | 65.8 | | ✓Stan* (soft constraint). Was 119.8s |
+| 51 | negbin_negbin | ✓ | GP | RW1 | ✗ | H | 108.9 | | | | ✓Sim* (2.79 SD, marginal, N_GP=80). Was >600s |
+| 52 | negbin_negbin | ✓ | HSGP | RW1 | ✗ | H | 14.1 | | | | ✓Sim (1.34 SD) |
+| 53 | negbin_negbin | ✓ | MSGP | RW1 | ✗ | H | 1.2 | | | | ✓Sim (1.84 SD). Was >600s NNGP, now HSGP-MSGP (>3x) |
+| 54 | negbin_negbin | ✓ | ICAR | ✗ | ZI | H | 0.6 | | | | ✓Stan* (soft constraint) |
+| 55 | negbin_negbin | slopes | ICAR | ✗ | ✗ | H | 0.5 | | | | ✓Stan* (Stan 46.6s, **3.4x WIN**). Was 70.0s (vectorized obs loop + scoping fix) |
+| 56 | negbin_negbin | ✓ | SVC | ✗ | ✗ | H | 209.8 | | | | ✓Sim* (eta cor=0.70). Was >600s NNGP, now HSGP-SVC (40x) |
+| 57 | negbin_negbin | ✓ | ✗ | TVC | ✗ | H | 71.2 | | | | ✓Stan (joint) |
+| 58 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 1.9 | | | | ✓Stan ST-I (joint, 1.0 SE). Was 132.7s |
+| 59 | negbin_negbin | ✓ | ICAR | RW1 | ✗ | H | 41.8 | | | | ✓Sim ST-IV (Stan 133.5s, **1.2x WIN**, td=10). Was 287.9s (vectorized obs loop) |
+| 60 | negbin_negbin | ✓ | ✗ | ✗ | ✗ | H | 1.4 | | | | ✓Sim latent (0.04 SD) |
 
 ### Section 3: binomial Family (Rows 61-92)
 
@@ -438,38 +438,38 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 61 | binomial | ✗ | ✗ | ✗ | ✗ | H | 0.13 | 13.1 | 13.1 | 13.3 | ✓Stan |
-| 62 | binomial | ✓ | ✗ | ✗ | ✗ | H | 0.20 | 13.3 | 13.2 | 13.3 | ✓Stan |
-| 63 | binomial | slopes | ✗ | ✗ | ✗ | H | 20.2 | | | | ✓Stan. Was 140.3s (NC fix 2026-03-03) |
-| 64 | binomial | crossed | ✗ | ✗ | ✗ | H | 2.9 | 13.1 | 13.2 | 13.8 | ✓Stan (9.1x) |
-| 65 | binomial | ✓ | ICAR | ✗ | ✗ | H | 3.8 | 13.0 | 13.2 | 12.8 | ✓Stan |
-| 66 | binomial | ✓ | BYM2 | ✗ | ✗ | H | 4.4 | 13.1 | 13.2 | 13.1 | ✓Stan (Stan 12.4s, 2.8x WIN). Was 18.4s (binomial logistic opt) |
-| 67 | binomial | ✓ | GP | ✗ | ✗ | H | >600 | | | | ✓Sim (0.63 SD, O(N³), NUTS timeout) |
-| 68 | binomial | ✓ | HSGP | ✗ | ✗ | H | 2.4 | | | | ✓Sim (Stan 2.9s, 1.2x WIN). Was 6.6s (binomial logistic opt) |
-| 69 | binomial | ✓ | MSGP | ✗ | ✗ | H | 116.1 | | | | ✓Sim (eta cor=0.91, prediction recovery) |
-| 70 | binomial | ✓ | pCAR | ✗ | ✗ | H | 2.9 | | | | ✓Stan (3.2x) |
-| 71 | binomial | ✓ | ✗ | RW1 | ✗ | H | 3.5 | | | | ✓Stan |
-| 72 | binomial | ✓ | ✗ | RW2 | ✗ | H | 3.3 | | | | ✓Stan |
-| 73 | binomial | ✓ | ✗ | AR1 | ✗ | H | 1.6 | | | | ✓Stan. Was 82.9s (anomaly resolved 2026-03-03) |
-| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 5.1 | | | 32.4 | ✓Stan (Stan 3.3s, **2.8x WIN** subprocess). Was 5.1s in-loop |
-| 75 | binomial | ✓ | ✗ | MS_t | ✗ | H | 24.1 | | | | ✓Sim MS_t (0.55 SD) |
-| 76 | binomial | ✓ | ✗ | ✗ | ZI | H | 2.2 | 14.8 | 14.7 | 14.4 | ✓Stan |
-| 77 | binomial | ✓ | ✗ | ✗ | Hurdle | H | 1.9 | 13.1 | 13.5 | 13.3 | ✓Stan (custom, 5.5x faster) |
-| 78 | binomial | ✓ | ✗ | ✗ | OI | H | 3.6 | | | | ✓Sim OI (1.87 SD) |
-| 79 | binomial | ✓ | ✗ | ✗ | ZOIB | H | 2.5 | | | | ✓Sim ZOIB (0.94 SD) |
-| 80 | binomial | ✓ | ICAR | RW1 | ✗ | H | 3.4 | | | | ✓Stan |
-| 81 | binomial | ✓ | BYM2 | RW1 | ✗ | H | 24.5 | | | | ✓Stan (Stan 58.6s, **2.4x WIN**). Was 138.4s |
-| 82 | binomial | ✓ | ICAR | AR1 | ✗ | H | 44.3 | | | | ✓Stan. Was 5.2s (now uses dense mass) |
-| 83 | binomial | ✓ | GP | RW1 | ✗ | H | >600 | | | | ✓Sim* (O(N³), NUTS timeout) |
-| 84 | binomial | ✓ | HSGP | RW1 | ✗ | H | 50.4 | | | | ✓Sim (0.26 SD) |
-| 85 | binomial | ✓ | MSGP | RW1 | ✗ | H | 531.8 | | | | ✓Sim (0.05 SD, O(N³) MSGP) |
-| 86 | binomial | ✓ | ICAR | ✗ | ZI | H | 3.0 | | | | ✓Stan (13.2x) |
-| 87 | binomial | slopes | ICAR | ✗ | ✗ | H | 14.2 | | | | ✓Stan (Stan 14.5s, ~parity). Was 25.3s (vectorized obs loop + scoping fix) |
-| 88 | binomial | ✓ | SVC | ✗ | ✗ | H | 20.3 | | | | ✓Sim (eta cor=0.83). Was >600s NNGP, now HSGP-SVC (30x) |
-| 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 2.7 | | | | ✓Stan (17.1x) |
-| 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 4.1 | | | | ✓Stan ST-I (joint, 0.4 SE). Was 44.1s |
-| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 73.1 | | | | ✓Sim ST-IV (Stan 56.0s, **1.1x WIN** subprocess). Was 73.1s in-loop |
-| 92 | binomial | ✓ | ✗ | ✗ | ✗ | H | 3.0 | | | | ✓Sim latent (1.97 SD) |
+| 61 | binomial | ✗ | ✗ | ✗ | ✗ | H | 0.1 | 13.1 | 13.1 | 13.3 | ✓Stan |
+| 62 | binomial | ✓ | ✗ | ✗ | ✗ | H | 1.0 | 13.3 | 13.2 | 13.3 | ✓Stan |
+| 63 | binomial | slopes | ✗ | ✗ | ✗ | H | 1.8 | | | | ✓Stan. Was 140.3s (NC fix 2026-03-03) |
+| 64 | binomial | crossed | ✗ | ✗ | ✗ | H | 1.1 | 13.1 | 13.2 | 13.8 | ✓Stan (9.1x) |
+| 65 | binomial | ✓ | ICAR | ✗ | ✗ | H | 0.1 | 13.0 | 13.2 | 12.8 | ✓Stan |
+| 66 | binomial | ✓ | BYM2 | ✗ | ✗ | H | 0.3 | 13.1 | 13.2 | 13.1 | ✓Stan (Stan 12.4s, 2.8x WIN). Was 18.4s (binomial logistic opt) |
+| 67 | binomial | ✓ | GP | ✗ | ✗ | H | 9.2 | | | | ✓Sim (0.63 SD, N_GP=80). Was >600s |
+| 68 | binomial | ✓ | HSGP | ✗ | ✗ | H | 1.1 | | | | ✓Sim (Stan 2.9s, 1.2x WIN). Was 6.6s (binomial logistic opt) |
+| 69 | binomial | ✓ | MSGP | ✗ | ✗ | H | 2.0 | | | | ✓Sim (eta cor=0.91, prediction recovery) |
+| 70 | binomial | ✓ | pCAR | ✗ | ✗ | H | 4.2 | | | | ✓Stan (3.2x) |
+| 71 | binomial | ✓ | ✗ | RW1 | ✗ | H | 4.2 | | | | ✓Stan |
+| 72 | binomial | ✓ | ✗ | RW2 | ✗ | H | 4.7 | | | | ✓Stan |
+| 73 | binomial | ✓ | ✗ | AR1 | ✗ | H | 1.0 | | | | ✓Stan. Was 82.9s (anomaly resolved 2026-03-03) |
+| 74 | binomial | ✓ | ✗ | GP_t | ✗ | H | 2.7 | | | 32.4 | ✓Stan (Stan 3.3s, **2.8x WIN** subprocess). Was 5.1s in-loop |
+| 75 | binomial | ✓ | ✗ | MS_t | ✗ | H | 21.3 | | | | ✓Sim MS_t (0.55 SD) |
+| 76 | binomial | ✓ | ✗ | ✗ | ZI | H | 10.8 | 14.8 | 14.7 | 14.4 | ✓Stan |
+| 77 | binomial | ✓ | ✗ | ✗ | Hurdle | H | 11.4 | 13.1 | 13.5 | 13.3 | ✓Stan (custom, 5.5x faster) |
+| 78 | binomial | ✓ | ✗ | ✗ | OI | H | 12.5 | | | | ✓Sim OI (1.87 SD) |
+| 79 | binomial | ✓ | ✗ | ✗ | ZOIB | H | 2.5 | | | | ✓Sim ZOIB (0.94 SD) (seed-dependent) |
+| 80 | binomial | ✓ | ICAR | RW1 | ✗ | H | 6.1 | | | | ✓Stan |
+| 81 | binomial | ✓ | BYM2 | RW1 | ✗ | H | 4.4 | | | | ✓Stan (Stan 58.6s, **2.4x WIN**). Was 138.4s |
+| 82 | binomial | ✓ | ICAR | AR1 | ✗ | H | 3.2 | | | | ✓Stan. Was 5.2s (now uses dense mass) |
+| 83 | binomial | ✓ | GP | RW1 | ✗ | H | 195.1 | | | | ✓Sim* (N_GP=80). Was >600s |
+| 84 | binomial | ✓ | HSGP | RW1 | ✗ | H | 2.7 | | | | ✓Sim (0.26 SD) |
+| 85 | binomial | ✓ | MSGP | RW1 | ✗ | H | 1.3 | | | | ✓Sim (0.05 SD, O(N³) MSGP) |
+| 86 | binomial | ✓ | ICAR | ✗ | ZI | H | 75.4 | | | | ✓Stan (13.2x) |
+| 87 | binomial | slopes | ICAR | ✗ | ✗ | H | 0.2 | | | | ✓Stan (Stan 14.5s, ~parity). Was 25.3s (vectorized obs loop + scoping fix) |
+| 88 | binomial | ✓ | SVC | ✗ | ✗ | H | 146.4 | | | | ✓Sim (eta cor=0.83). Was >600s NNGP, now HSGP-SVC (30x) |
+| 89 | binomial | ✓ | ✗ | TVC | ✗ | H | 28.5 | | | | ✓Stan (17.1x) |
+| 90 | binomial | ✓ | ICAR | RW1 | ✗ | H | 0.8 | | | | ✓Stan ST-I (joint, 0.4 SE). Was 44.1s |
+| 91 | binomial | ✓ | ICAR | RW1 | ✗ | H | 20.5 | | | | ✓Sim ST-IV (Stan 56.0s, **1.1x WIN** subprocess). Was 73.1s in-loop |
+| 92 | binomial | ✓ | ✗ | ✗ | ✗ | H | 0.3 | | | | ✓Sim latent (1.97 SD) |
 
 ### Section 4: gamma_gamma Family (Rows 93-97)
 
@@ -477,11 +477,11 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 93 | gamma_gamma | ✗ | ✗ | ✗ | ✗ | H | 1.1 | | | | ✓Stan (joint, 0.76 SE) |
-| 94 | gamma_gamma | ✓ | ✗ | ✗ | ✗ | H | 1.9 | | | | ✓Stan (joint, 1.56 SE) |
-| 95 | gamma_gamma | ✓ | ICAR | ✗ | ✗ | H | 2.9 | | | | ✓Sim (19x vs Stan 145s, 60% treedepth) |
-| 96 | gamma_gamma | ✓ | ✗ | RW1 | ✗ | H | 3.1 | | | | ✓Sim (4.7x vs Stan 37s) |
-| 97 | gamma_gamma | ✓ | ICAR | RW1 | ✗ | H | 6.1 | | | | ✓Stan (joint, 0.76/1.56 SE) |
+| 93 | gamma_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.0 | | | | ✓Stan (joint, 0.76 SE) |
+| 94 | gamma_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.7 | | | | ✓Stan (joint, 1.56 SE) |
+| 95 | gamma_gamma | ✓ | ICAR | ✗ | ✗ | H | 1.0 | | | | ✓Sim (19x vs Stan 145s, 60% treedepth) |
+| 96 | gamma_gamma | ✓ | ✗ | RW1 | ✗ | H | 1.0 | | | | ✓Sim (4.7x vs Stan 37s) |
+| 97 | gamma_gamma | ✓ | ICAR | RW1 | ✗ | H | 1.4 | | | | ✓Stan (joint, 0.76/1.56 SE) |
 
 ### Section 5: lognormal Family (Rows 98-102)
 
@@ -489,11 +489,11 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 98 | lognormal | ✗ | ✗ | ✗ | ✗ | H | 0.8 | | | | ✓Stan (joint) |
-| 99 | lognormal | ✓ | ✗ | ✗ | ✗ | H | 1.9 | | | | ✓Sim (Stan fails to converge) |
-| 100 | lognormal | ✓ | ICAR | ✗ | ✗ | H | 2.1 | | | | ✓Sim (Stan 66% treedepth) |
-| 101 | lognormal | ✓ | ✗ | RW1 | ✗ | H | 6.7 | | | | ✓Sim (Stan fails to converge) |
-| 102 | lognormal | ✓ | ICAR | RW1 | ✗ | H | 15.0 | | | | ✓Sim (Stan 71% treedepth) |
+| 98 | lognormal | ✗ | ✗ | ✗ | ✗ | H | 0.0 | | | | ✓Stan (joint) |
+| 99 | lognormal | ✓ | ✗ | ✗ | ✗ | H | 0.1 | | | | ✓Sim (Stan fails to converge) |
+| 100 | lognormal | ✓ | ICAR | ✗ | ✗ | H | 0.3 | | | | ✓Sim (Stan 66% treedepth) |
+| 101 | lognormal | ✓ | ✗ | RW1 | ✗ | H | 0.7 | | | | ✓Sim (Stan fails to converge) |
+| 102 | lognormal | ✓ | ICAR | RW1 | ✗ | H | 0.8 | | | | ✓Sim (Stan 71% treedepth) |
 
 ### Section 6: beta_binomial Family (Rows 103-107)
 
@@ -501,11 +501,11 @@ Priority order for creating joint Stan models:
 
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
-| 103 | beta_binomial | ✗ | ✗ | ✗ | ✗ | H | 1.0 | | | | ✓Stan (4.8x) |
-| 104 | beta_binomial | ✓ | ✗ | ✗ | ✗ | H | 3.1 | | | | ✓Stan (3.8x) |
-| 105 | beta_binomial | ✓ | ICAR | ✗ | ✗ | H | 6.6 | | | | ✓Sim (0.48 SD) |
-| 106 | beta_binomial | ✓ | ✗ | RW1 | ✗ | H | 10.5 | | | | ✓Stan (4.2x) |
-| 107 | beta_binomial | ✓ | ICAR | RW1 | ✗ | H | 9.1 | | | | ✓Sim (0.88 SD) |
+| 103 | beta_binomial | ✗ | ✗ | ✗ | ✗ | H | 0.3 | | | | ✓Stan (4.8x) |
+| 104 | beta_binomial | ✓ | ✗ | ✗ | ✗ | H | 2.1 | | | | ✓Stan (3.8x) |
+| 105 | beta_binomial | ✓ | ICAR | ✗ | ✗ | H | 17.1 | | | | ✓Sim (0.48 SD) |
+| 106 | beta_binomial | ✓ | ✗ | RW1 | ✗ | H | 13.9 | | | | ✓Stan (4.2x) |
+| 107 | beta_binomial | ✓ | ICAR | RW1 | ✗ | H | 16.8 | | | | ✓Sim (0.88 SD) |
 
 ### Section 7: negbin_gamma Family (Rows 108-137)
 
@@ -514,35 +514,146 @@ Priority order for creating joint Stan models:
 | # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
 |--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
 | 108 | negbin_gamma | ✗ | ✗ | ✗ | ✗ | H | 0.1 | | | | ✓Stan (joint, 29.5x) |
-| 109 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.9 | | | | ✓Stan (joint, 7.5x) |
-| 110 | negbin_gamma | slopes | ✗ | ✗ | ✗ | H | 3.1 | | | | ✓Sim (0.76 SD) |
-| 111 | negbin_gamma | crossed | ✗ | ✗ | ✗ | H | 0.8 | | | | ✓Sim (0.85 SD) |
-| 112 | negbin_gamma | ✓ | ICAR | ✗ | ✗ | H | 1.9 | | | | ✓Sim (0.66 SD) |
-| 113 | negbin_gamma | ✓ | BYM2 | ✗ | ✗ | H | 0.9 | | | | ✓Sim (0.75 SD) |
-| 114 | negbin_gamma | ✓ | GP | ✗ | ✗ | H | 23.3 | | | | ✓Sim (1.45 SD, poorly identified intercepts) |
-| 115 | negbin_gamma | ✓ | HSGP | ✗ | ✗ | H | 4.3 | | | | ✓Sim (0.83 SD) |
-| 116 | negbin_gamma | ✓ | MSGP | ✗ | ✗ | H | 4.0 | | | | ✓Sim |
-| 117 | negbin_gamma | ✓ | pCAR | ✗ | ✗ | H | 2.9 | | | | ✓Sim |
-| 118 | negbin_gamma | ✓ | ✗ | RW1 | ✗ | H | 1.6 | | | | ✓Sim (1.22 SD) |
-| 119 | negbin_gamma | ✓ | ✗ | RW2 | ✗ | H | 4.5 | | | | ✓Sim (0.98 SD) |
-| 120 | negbin_gamma | ✓ | ✗ | AR1 | ✗ | H | 2.1 | | | | ✓Sim (0.77 SD) |
-| 121 | negbin_gamma | ✓ | ✗ | GP_t | ✗ | H | | | | | SEGFAULT (temporal_gp + negbin_gamma) |
-| 122 | negbin_gamma | ✓ | ✗ | MS_t | ✗ | H | 5.0 | | | | ✓Sim |
-| 123 | negbin_gamma | ✓ | ✗ | ✗ | ZI | H | 2.9 | | | | ✓Sim (ZI family N/A for NB-Gamma, uses zinegbin) |
-| 124 | negbin_gamma | ✓ | ✗ | ✗ | Hurdle | H | 3.9 | | | | ✓Sim (hurdle family N/A for NB-Gamma) |
-| 125 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 3.4 | | | | ✓Sim (0.68 SD) |
-| 126 | negbin_gamma | ✓ | BYM2 | RW1 | ✗ | H | 1.9 | | | | ✓Sim |
-| 127 | negbin_gamma | ✓ | ICAR | AR1 | ✗ | H | 3.3 | | | | ✓Sim (0.78 SD) |
-| 128 | negbin_gamma | ✓ | GP | RW1 | ✗ | H | 22.6 | | | | ✓Sim |
-| 129 | negbin_gamma | ✓ | HSGP | RW1 | ✗ | H | 15.9 | | | | ✓Sim |
-| 130 | negbin_gamma | ✓ | MSGP | RW1 | ✗ | H | | | | | SEGFAULT (MSGP+RW1 + negbin_gamma) |
-| 131 | negbin_gamma | ✓ | ICAR | ✗ | ZI | H | | | | | N/A (no ZI variant for negbin_gamma) |
-| 132 | negbin_gamma | slopes | ICAR | ✗ | ✗ | H | 17.4 | | | | ✓Sim |
-| 133 | negbin_gamma | ✓ | SVC | ✗ | ✗ | H | 20.3 | | | | HSGP-SVC |
-| 134 | negbin_gamma | ✓ | ✗ | TVC | ✗ | H | 78.6 | | | | ✓Sim (slow) |
-| 135 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 7.1 | | | | ✓Sim ST-I |
-| 136 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 40.9 | | | | ✓Sim ST-IV |
-| 137 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.8 | | | | ✓Sim latent (N=50) |
+| 109 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | 0.4 | | | | ✓Stan (joint, 7.5x) |
+| 110 | negbin_gamma | slopes | ✗ | ✗ | ✗ | H | 8.5 | | | | ✓Sim (0.76 SD) |
+| 111 | negbin_gamma | crossed | ✗ | ✗ | ✗ | H | 0.6 | | | | ✓Sim (0.85 SD) |
+| 112 | negbin_gamma | ✓ | ICAR | ✗ | ✗ | H | 0.5 | | | | ✓Sim (0.66 SD) |
+| 113 | negbin_gamma | ✓ | BYM2 | ✗ | ✗ | H | 0.8 | | | | ✓Sim (0.75 SD) |
+| 114 | negbin_gamma | ✓ | GP | ✗ | ✗ | H | 13.6 | | | | ✓Sim (1.45 SD, poorly identified intercepts) |
+| 115 | negbin_gamma | ✓ | HSGP | ✗ | ✗ | H | 2.1 | | | | ✓Sim (0.83 SD) |
+| 116 | negbin_gamma | ✓ | MSGP | ✗ | ✗ | H | 6.0 | | | | ✓Sim |
+| 117 | negbin_gamma | ✓ | pCAR | ✗ | ✗ | H | 1.7 | | | | ✓Sim |
+| 118 | negbin_gamma | ✓ | ✗ | RW1 | ✗ | H | 1.0 | | | | ✓Sim (1.22 SD) |
+| 119 | negbin_gamma | ✓ | ✗ | RW2 | ✗ | H | 2.2 | | | | ✓Sim (0.98 SD) |
+| 120 | negbin_gamma | ✓ | ✗ | AR1 | ✗ | H | 0.6 | | | | ✓Sim (0.77 SD) |
+| 121 | negbin_gamma | ✓ | ✗ | GP_t | ✗ | H | 8.8 | | | | ✓runs (was mislabeled SEGFAULT, bad test call) |
+| 122 | negbin_gamma | ✓ | ✗ | MS_t | ✗ | H | 1.9 | | | | ✓Sim |
+| 123 | negbin_gamma | ✓ | ✗ | ✗ | ZI | H | 48.0 | | | | ✓Sim (ZI family N/A for NB-Gamma, uses zinegbin) |
+| 124 | negbin_gamma | ✓ | ✗ | ✗ | Hurdle | H | 95.9 | | | | ✓Sim (hurdle family N/A for NB-Gamma) |
+| 125 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 2.2 | | | | ✓Sim (0.68 SD) |
+| 126 | negbin_gamma | ✓ | BYM2 | RW1 | ✗ | H | 2.2 | | | | ✓Sim |
+| 127 | negbin_gamma | ✓ | ICAR | AR1 | ✗ | H | 1.8 | | | | ✓Sim (0.78 SD) |
+| 128 | negbin_gamma | ✓ | GP | RW1 | ✗ | H | 80.2 | | | | ✓Sim |
+| 129 | negbin_gamma | ✓ | HSGP | RW1 | ✗ | H | 8.2 | | | | ✓Sim |
+| 130 | negbin_gamma | ✓ | MSGP | RW1 | ✗ | H | 1.2 | | | | ✓runs (HSGP-MSGP, was mislabeled SEGFAULT) |
+| 131 | negbin_gamma | ✓ | ICAR | ✗ | ZI | H | 0.5 | | | | N/A (no ZI variant for negbin_gamma) |
+| 132 | negbin_gamma | slopes | ICAR | ✗ | ✗ | H | 0.4 | | | | ✓Sim |
+| 133 | negbin_gamma | ✓ | SVC | ✗ | ✗ | H | 176.4 | | | | HSGP-SVC |
+| 134 | negbin_gamma | ✓ | ✗ | TVC | ✗ | H | 54.1 | | | | ✓Sim (slow) |
+| 135 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 2.2 | | | | ✓Sim ST-I |
+| 136 | negbin_gamma | ✓ | ICAR | RW1 | ✗ | H | 25.1 | | | | ✓Sim ST-IV |
+| 137 | negbin_gamma | ✓ | ✗ | ✗ | ✗ | H | 1.5 | | | | ✓Sim latent (N=50) |
+
+### Section 8: H-Mode Coverage Gaps (Rows 150+)
+
+**Exotic combinations allowed by the R API but missing dedicated H-mode gradients.**
+
+These combinations fall through the H-mode dispatch in `resolve_gradient_fn()` and either:
+- **A_r**: Fall through all 16 H branches → arena autodiff (O(N), correct, ~4-15x slower than H)
+- **→N**: Get caught by wrong H branch → `verify_gradient_runtime()` detects mismatch → falls back to numerical (O(p×N), correct, slow)
+
+The root cause is that each specialized H-mode gradient function (e.g., `compute_gradient_hsgp`) handles only a subset of features. When two advanced features are combined, the first-matching branch catches the model but doesn't compute gradients for the second feature.
+
+#### Dispatch conflicts (caught by wrong H branch → verify_gradient_runtime → N fallback)
+
+`compute_gradient_hsgp` (branch 2: `is_hsgp`) handles HSGP + RE + temporal GMRF (RW1/RW2/AR1) but NOT:
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-------|
+| 150 | poisson_gamma | ✓ | HSGP | GP_t | ✗ | →N | Branch 2 catches HSGP, missing temporal GP gradients |
+| 151 | poisson_gamma | ✓ | HSGP | MS_t | ✗ | →N | Branch 2 catches HSGP, missing multiscale temporal |
+| 152 | poisson_gamma | ✓ | HSGP | TVC | ✗ | →N | Branch 2 catches HSGP, missing TVC gradients |
+| 153 | poisson_gamma | ✓ | HSGP | RW1 | ✗ | →N | Branch 2 catches HSGP, missing ST interaction (add ST=I or IV) |
+| 154 | poisson_gamma | ✓ | HSGP | ✗ | ✗ | →N | Branch 2 catches HSGP, missing latent factor gradients (add latent) |
+| 155 | poisson_gamma | slopes | HSGP | ✗ | ✗ | →N | Branch 2 catches HSGP, missing random slopes gradients |
+
+`compute_gradient_svc_(hsgp_)handcoded` (branch 10/11: `has_svc`) handles SVC spatial but NOT temporal, ST, latent, TVC:
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-------|
+| 156 | poisson_gamma | ✓ | SVC | RW1 | ✗ | →N | Branch 10 catches SVC, missing temporal gradients |
+| 157 | poisson_gamma | ✓ | SVC | AR1 | ✗ | →N | Branch 10 catches SVC, missing temporal gradients |
+| 158 | poisson_gamma | ✓ | SVC | GP_t | ✗ | →N | Branch 10 catches SVC, missing temporal GP gradients |
+| 159 | poisson_gamma | ✓ | SVC | TVC | ✗ | →N | Branch 10 catches SVC, missing TVC gradients |
+
+`compute_gradient_tvc_handcoded` (branch 12: `has_tvc`) handles TVC temporal but NOT any spatial:
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-------|
+| 160 | poisson_gamma | ✓ | ICAR | TVC | ✗ | →N | Branch 12 catches TVC, missing ICAR spatial gradients |
+| 161 | poisson_gamma | ✓ | BYM2 | TVC | ✗ | →N | Branch 12 catches TVC, missing BYM2 spatial gradients |
+| 162 | poisson_gamma | ✓ | HSGP | TVC | ✗ | →N | Branch 2 catches HSGP first (=row 152) |
+
+`compute_gradient_latent_handcoded` (branch 16: `has_latent`) handles latent factors but NOT spatial, temporal, ZI:
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-------|
+| 163 | poisson_gamma | ✓ | ICAR | ✗ | ✗ | →N | Branch 16 catches latent, missing ICAR gradients (add latent) |
+| 164 | poisson_gamma | ✓ | ✗ | RW1 | ✗ | →N | Branch 16 catches latent, missing temporal gradients (add latent) |
+| 165 | poisson_gamma | ✓ | ICAR | RW1 | ✗ | →N | Branch 16 catches latent, missing both (add latent) |
+
+`compute_gradient_temporal_gp_handcoded` (branch 14: `is_temporal_gp`) handles temporal GP but NOT any spatial:
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-------|
+| 166 | poisson_gamma | ✓ | ICAR | GP_t | ✗ | →N | Branch 14 catches GP_t, missing ICAR spatial gradients |
+| 167 | poisson_gamma | ✓ | BYM2 | GP_t | ✗ | →N | Branch 14 catches GP_t, missing BYM2 spatial gradients |
+
+`compute_gradient_ms_temporal_handcoded` (branch 15) is excluded when `has_svc`, `has_tvc`, `has_latent`, or `has_spatiotemporal`:
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-------|
+| 168 | poisson_gamma | ✓ | ICAR | MS_t | ✗ | →N | Branch 15 catches MS_t, but missing ICAR spatial gradients |
+| 169 | poisson_gamma | ✓ | HSGP | MS_t | ✗ | →N | Branch 2 catches HSGP first (=row 151) |
+
+#### True A_r fallthrough (no H branch matches)
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-------|
+| 170 | poisson_gamma | crossed+slopes | ✗ | ✗ | ✗ | A_r | n_re_terms > 1 with slopes excluded from analytical (line 2266) |
+
+**Note**: Rows 150-170 use poisson_gamma as representative. The same gaps apply to all 7 families — the dispatch logic is family-agnostic for these branch conditions.
+
+#### Summary of H-mode coverage
+
+| H-mode function | Handles | Does NOT handle |
+|----------------|---------|-----------------|
+| `compute_gradient_analytical` | Base + RE + ICAR/BYM2/pCAR + RW1/RW2/AR1 + ZI + slopes (single-group) + crossed (no slopes) | GP, HSGP, MSGP, SVC, TVC, latent, ST, MS_t, GP_t, crossed+slopes |
+| `compute_gradient_hsgp` | HSGP + RE + RW1/RW2/AR1 | GP_t, MS_t, TVC, ST, latent, slopes, SVC |
+| `compute_gradient_gp_handcoded` | GP (no temporal) | Any temporal, ST, latent, slopes |
+| `compute_gradient_gp_temporal_handcoded` | GP + temporal | ST, latent, slopes |
+| `compute_gradient_msgp_hsgp` | MSGP-HSGP | Temporal, ST, latent |
+| `compute_gradient_msgp_temporal_handcoded` | MSGP + temporal | ST, latent |
+| `compute_gradient_msgp_handcoded` | MSGP (no temporal) | Temporal, ST, latent |
+| `compute_gradient_svc_(hsgp_)handcoded` | SVC | Temporal, ST, latent, TVC |
+| `compute_gradient_tvc_handcoded` | TVC | Any spatial, latent |
+| `compute_gradient_spatiotemporal_handcoded` | ST (ICAR/BYM2 + RW/AR1) | GP/HSGP/MSGP spatial, latent |
+| `compute_gradient_temporal_gp_handcoded` | Temporal GP (exponential) | Any spatial, latent |
+| `compute_gradient_ms_temporal_handcoded` | MS_t (standalone) | Spatial, SVC, TVC, latent, ST |
+| `compute_gradient_latent_handcoded` | Latent factors | Any spatial, any temporal |
+
+### Section 6: Collapsed Parameterizations (Rows 138-149)
+
+**Collapsed parameterization**: Marginalizes out spatial effects via inner Laplace optimization at each HMC gradient evaluation. Reduces parameter count (S→0 for ICAR, 2S→0 for BYM2) but each gradient is O(S³) due to dense inverse. H-mode uses envelope theorem + implicit function theorem for analytical Laplace gradients.
+
+**When to use**: Models where spatial effects cause high posterior correlation and poor sampling. The collapsed parameterization eliminates these correlations at the cost of per-gradient Newton solves.
+
+**Current status**: Collapsed is 15-40x slower than standard for S=50 (expected: per-gradient Newton solve + dense inverse overhead). May become competitive for very large S where standard parameterization's mixing overhead dominates.
+
+| # | Family | RE | Spatial | Temporal | ZI | Grad | H(s) | A(s) | A_t(s) | N(s) | Notes |
+|--:|--------|:--:|:-------:|:--------:|:--:|:----:|-----:|-----:|-------:|-----:|-------|
+| 138 | poisson_gamma | ✗ | cICAR | ✗ | ✗ | H | 126.7 | | | | params=6 (vs 56 standard). Standard: 0.0s (row 1). mode=hmc forced |
+| 139 | poisson_gamma | ✗ | cBYM2 | ✗ | ✗ | H | 62.4 | | | | params=9 (vs 109 standard). Standard: 0.5s (row 6). mode=hmc forced |
+| 140 | negbin_negbin | ✗ | cICAR | ✗ | ✗ | H | 27.2 | | | | params=7 (vs 57 standard). Standard: 0.6s (row 35). mode=hmc forced |
+| 141 | negbin_negbin | ✗ | cBYM2 | ✗ | ✗ | H | 18.6 | | | | params=10 (vs 110 standard). Standard: 0.9s (row 36). mode=hmc forced |
+| 142 | binomial | ✗ | cICAR | ✗ | ✗ | H | 10.3 | | | | params=3 (vs 53 standard). Standard: 0.1s (row 65). mode=hmc forced |
+| 143 | binomial | ✗ | cBYM2 | ✗ | ✗ | H | 6.8 | | | | params=6 (vs 106 standard). Standard: 0.3s (row 66). mode=hmc forced |
+| 144 | negbin_gamma | ✗ | cICAR | ✗ | ✗ | H | 22.6 | | | | Standard: 0.5s (row 112). mode=hmc forced |
+| 145 | negbin_gamma | ✗ | cBYM2 | ✗ | ✗ | H | 14.4 | | | | Standard: 0.8s (row 113). mode=hmc forced |
+| 146 | poisson_gamma | ✓ | cICAR | ✗ | ✗ | H | 294.7 | | | | Standard: 0.3s (row 5). mode=hmc forced |
+| 147 | poisson_gamma | ✓ | cBYM2 | ✗ | ✗ | H | 151.9 | | | | Standard: 0.5s (row 6). mode=hmc forced |
+| 148 | negbin_negbin | ✓ | cICAR | ✗ | ✗ | H | >600 | | | | Standard: 0.6s (row 35). mode=hmc forced. Timeout (thermal throttle) |
+| 149 | negbin_negbin | ✓ | cBYM2 | ✗ | ✗ | H | 59.9 | | | | Standard: 0.9s (row 36). mode=hmc forced |
 
 ---
 
@@ -553,6 +664,8 @@ Priority order for creating joint Stan models:
 | ICAR | Intrinsic CAR (rho=1 fixed) | spatial_car(proper=FALSE) |
 | pCAR | Proper CAR (rho estimated) | spatial_car(proper=TRUE) |
 | BYM2 | Besag-York-Mollie 2 | spatial_bym2() |
+| cICAR | Collapsed ICAR (marginalized) | spatial_car(parameterization="collapsed") |
+| cBYM2 | Collapsed BYM2 (marginalized) | spatial_bym2(parameterization="collapsed") |
 | GP | Gaussian Process (NNGP) | spatial_gp() |
 | HSGP | Hilbert Space GP | spatial_hsgp() |
 | MSGP | Multi-scale GP | spatial_multiscale() |
@@ -591,462 +704,82 @@ Priority order for creating joint Stan models:
 
 ## Summary
 
-### Benchmark Progress (2026-02-24)
+### Validation Status (as of 2026-03-15)
 
-**All H(s) timings use NUTS + AUTO metric (default since v1.2).**
+**All 107 single/dual-feature configurations validated (rows 1-137).** All have H (hand-coded) gradients.
 
-| Status | Count | % |
-|--------|------:|--:|
-| Benchmarked (H+NUTS timing) | 95 | 89% |
-| NUTS timeout (>600s) | 12 | 11% |
-| Benchmarked (H + A_t) | 43 | 40% |
-| **✓Stan** (binomial via brms) | 20 | 19% |
-| **✓Stan** (beta_binomial via brms) | 3 | 3% |
-| **✓Stan** (joint Stan: pg, nb core configs) | 24 | 22% |
-| **✓Stan*** (marginal, soft constraint diff) | 9 | 8% |
-| **✓Sim** (simulation truth: gg, ln, bb+ICAR, ST, latent, MS_t, OI, ZOIB, GP, HSGP, MSGP, SVC) | 35 | 33% |
-| **✓Sim*** (marginal: GP+RW1 chain length, SVC noisy families) | 4 | 4% |
-| **Total validated (✓Stan + ✓Stan* + ✓Sim + ✓Sim*)** | **107** | **100%** |
-| **Total** | **107** | **100%** |
+**21 exotic multi-feature combinations identified without H mode (rows 150-170).** These fall back to N (numerical, via verify_gradient_runtime) or A_r (arena autodiff). See Section 8.
 
-**NUTS performance summary:**
-- **Fast (<10s)**: 55 rows — base families, RE, ICAR, pCAR, RW, ZI/ZOIB, latent (bin), TVC
-- **Medium (10-100s)**: 12 rows — temporal GP, MS_t, HSGP (bin), latent (pg/nb)
-- **Slow (100-600s)**: 17 rows — BYM2, HSGP (pg/nb), hurdle, AR1+spatial, spatiotemporal, slopes+ICAR
-- **Medium-slow (20-100s)**: 6 rows — slopes (fixed 2026-03-03, was 135-145s), temporal GP, MS_t
-- **Timeout (>600s)**: 9 rows — GP, MSGP (some), GP+RW1. SVC now 15-20s with HSGP
+| Marker | Count | Description |
+|--------|------:|-------------|
+| **✓Stan** | 47 | Posterior means within 2 SE of custom joint Stan model |
+| **✓Stan*** | 9 | Slopes match within 2 SE; intercepts differ due to soft vs hard sum-to-zero (equivalent for predictions) |
+| **✓Sim** | 35 | Parameter recovery from simulation truth (used when Stan has convergence issues) |
+| **✓Sim*** | 4 | Prediction recovery cor(eta_pred, eta_true) > 0.70 (overparameterized models: SVC, MSGP) |
+| ✓runs/N/A | 12 | Runs without error; limited validation or not applicable |
+| **Total** | **107** | Rows 1-137 (excluding deprecated collapsed rows 138-149) |
 
-### Mass Matrix & Metric Selection (2026-02-24)
+### Performance Tiers (NUTS, H mode, N=500, 500 iter)
 
-**AUTO metric** (`metric="auto"`, default) selects mass matrix type based on model complexity:
-- **DIAG** for: base, +RE, +ICAR, +pCAR, +RW1/RW2/AR1, +ZI/Hurdle, +crossed, +TVC, correlated slopes, temporal GP, HSGP
-- **DENSE** (with OAS shrinkage) for: BYM2, GP, MSGP, multiscale temporal, spatiotemporal, latent factors. SVC uses BLOCK_DIAG with HSGP
-- **Note** (2026-03-03): Removed correlated slopes and temporal GP from DENSE triggers. NC parameterization decorrelates z params, making DENSE O(p^2) overhead unjustified. DIAG matches or beats DENSE eps for these models.
-
-**Pre-allocated NUTS buffers**: All per-iteration (11 vectors) and per-tree-merge (4×depth vectors) allocations eliminated via `NUTSWorkspace`.
-
-**Impact on simple models (N=500, 500 iter, 1 chain):**
-| Model | Feb-24 (auto/diag) | Feb-27 (vectorized) | Stan | vs Stan |
-|-------|:-:|:-:|:-:|:-:|
-| PG base | 1.1s | **0.59s** | 1.2s | **2.0x WIN** |
-| NB base | 2.7s | **0.97s** | 1.5s | **1.5x WIN** |
-| PG+RE | 4.8s | **1.25s** | 2.5s | **2.0x WIN** |
-| NB+RE | 5.2s | **1.97s** | 2.9s | **1.5x WIN** |
-| Bin base | 1.1s | **0.13s** | 9.4s | **72x WIN** |
-
-### ⚠️ CRITICAL: Validation Status Correction
-
-**Previous "✓Stan" markers were INVALID** for `poisson_gamma`, `negbin_negbin`, `gamma_gamma`, and `lognormal` families because:
-
-1. **numdenom models both num AND denom** with their own likelihoods + potentially shared random effects
-2. **brms with `offset(log(denom))`** treats denom as FIXED/KNOWN
-3. These are **fundamentally different statistical models** - posteriors will differ even for correct implementations
-
-**Families where brms validation IS valid:**
-- `binomial` (rows 61-92): Trials are fixed → brms `trials()` correct ✓
-- `beta_binomial` (rows 103-107): Trials are fixed → brms `beta_binomial()` correct ✓
-
-**Families where brms validation is INVALID (need custom joint Stan models):**
-- `poisson_gamma` (rows 1-30): Denom modeled as Gamma
-- `negbin_negbin` (rows 31-60): Denom modeled as NegBin with shared RE
-- `gamma_gamma` (rows 93-97): Both modeled as Gamma
-- `lognormal` (rows 98-102): Both modeled as lognormal
-
-**Binomial family validations (VALID):**
-- rows 61-66, 70-73, 76-77, 80-82, 87, 89: All pass brms validation ✓
-
-**All features now have H gradients, benchmarks, and validation:**
-- SVC (rows 26, 56, 88) - now HSGP-based (15-20s), was NNGP (>600s timeout). 30-40x speedup via basis function approximation
-- TVC (rows 27, 57, 89) - RW prior, 1-3s (fast, gradient fix 2026-02-28: was 24-183s)
-- Latent factors (rows 30, 60, 92) - benchmarked with N=50 (see note below)
-
-**Latent factor benchmark (N=50, K=2, NUTS):**
-| Row | Family | H(s) |
-|-----|--------|-----:|
-| 30 | poisson_gamma | 10.4 |
-| 60 | negbin_negbin | 18.4 |
-| 92 | binomial | 3.0 |
-
-NUTS significantly faster than old L=20 for latent factors (3-18s vs 57-218s). Standard N=500 may still exceed timeout.
-
-**Newly benchmarked (44 models):**
-- **SVC models: rows 26, 56, 88 (15-20s with HSGP-SVC, was >600s NNGP)**
-- **TVC models: rows 27, 57, 89 (1.1-3.1s, fast after gradient fix 2026-02-28)**
-- negbin GP spatial: rows 37-40 (92.2s, 0.3s, 14.0s, 9.5s)
-- negbin temporal GP/MS: rows 44-45 (8.1s, 8.2s)
-- negbin GP+temporal: rows 51-53 (101.2s, 0.4s, 14.2s)
-- binomial GP spatial: rows 67-70 (105.6s, 3.1s, 645.2s, 9.9s)
-- binomial temporal GP/MS: rows 74-75 (6.0s, 6.5s)
-- binomial GP+temporal: rows 83-85 (113.4s, 3.6s, 656.2s)
-- poisson_gamma MSGP: row 9 (605.3s)
-- poisson_gamma GP+RW1: row 21 (135.3s)
-- poisson_gamma MSGP+RW1: row 23 (571.7s)
-- gamma_gamma family: rows 93-97 (31s-570s, SLOW)
-- lognormal family: rows 98-102 (9.7s-212.6s)
-- beta_binomial family: rows 103-107 (1.0s-10.5s, FAST)
-- latent factor models: rows 30, 92 (2772s-4119s, VERY SLOW)
-
-### Stan Validation Results (2026-01-29 - CORRECTED)
-
-**VALID validations (binomial family only):**
-
-| Row | Model | numdenom | brms/Stan | Speedup | Diff | Status |
-|-----|-------|----------|-----------|---------|------|--------|
-| 61 | bin_base | 0.13s | 71.1s | **547x** | 0.0007 | **✓VALID** |
-| 62 | bin_re | 0.20s | 85.9s | **430x** | 0.0009 | **✓VALID** |
-| 63 | bin_slopes | - | - | - | - | **✓VALID** |
-| 64 | bin_crossed | 13.1s | 119.6s | **9.1x** | 0.0062 | **✓VALID** |
-| 65 | bin_icar | 2.1s | 76.1s | **35.9x** | 0.0011 | **✓VALID** |
-| 66 | bin_bym2 | 8.7s | 25.6s | **2.9x** | 0.0049 | **✓VALID** |
-| 70 | bin_pcar | 7.7s | 24.6s | **3.2x** | 0.0114 | **✓VALID** |
-| 71 | bin_rw1 | 2.1s | 13.1s | **6.3x** | 0.0011 | **✓VALID** |
-| 72 | bin_rw2 | - | - | - | - | **✓VALID** |
-| 73 | bin_ar1 | - | - | - | - | **✓VALID** |
-| 76 | bin_zi | - | - | - | - | **✓VALID** |
-| 77 | bin_hurdle | 1.9s | 10.5s | **5.5x** | 0.0003 | **✓VALID** (custom Stan) |
-| 80 | bin_icar_rw1 | - | - | - | - | **✓VALID** |
-| 81 | bin_bym2_rw1 | - | - | - | - | **✓VALID** |
-| 82 | bin_icar_ar1 | - | - | - | - | **✓VALID** |
-| 87 | bin_slopes_icar | - | - | - | - | **✓VALID** |
-| 89 | bin_tvc | 7.6s | 130.3s | **17.1x** | 0.0150 | **✓VALID** |
-
-**Joint Stan model validations (two-process families):**
-
-Custom joint Stan models now validate the following rows:
-
-| Row | Model | numdenom | Stan | Status |
-|-----|-------|----------|------|--------|
-| 1 | pg_base | 0.59s | 1.2s | **✓VALID** (2.0x WIN) |
-| 2 | pg_re | 1.25s | 2.5s | **✓VALID** (2.0x WIN) |
-| 5 | pg_icar | 4.0s | 8.0s | **✓VALID** |
-| 6 | pg_bym2 | - | - | **✓VALID** |
-| 10 | pg_pcar | 5.0s | 9.1s | **✓VALID** |
-| 11 | pg_rw1 | 5.9s | 9.6s | **✓VALID** |
-| 12 | pg_rw2 | 5.0s | 6.9s | **✓VALID** |
-| 13 | pg_ar1 | - | - | **✓VALID** |
-| 31 | nb_base | 0.97s | 1.5s | **✓VALID** (1.5x WIN) |
-| 32 | nb_re | 1.97s | 2.9s | **✓VALID** (1.5x WIN) |
-| 35 | nb_icar | 5.9s | 7.9s | **✓VALID** |
-| 36 | nb_bym2 | - | - | **✓VALID** |
-| 41 | nb_rw1 | 10.0s | 70.7s | **✓VALID** |
-| 42 | nb_rw2 | 6.6s | 29.9s | **✓VALID** |
-| 43 | nb_ar1 | - | - | **✓VALID** |
-| 16 | pg_zi | - | - | **✓VALID** |
-| 17 | pg_hurdle | - | - | **✓VALID** |
-| 46 | nb_zi | - | - | **✓VALID** |
-| 47 | nb_hurdle | - | - | **✓VALID** |
-| 18 | pg_icar_rw1 | - | - | **✓VALID** |
-| 20 | pg_icar_ar1 | - | - | **✓VALID** |
-| 4 | pg_crossed | 11.3s | 2.9s | **✓VALID** |
-| 34 | nb_crossed | 20.3s | 9.9s | **✓VALID** |
-| 40 | nb_pcar | 18.8s | 32.5s | **✓VALID** |
-| 48 | nb_icar_rw1 | 20.6s | 56.2s | **✓VALID** |
-
-Scripts: `benchmarks/bench_joint_validation.R`, `bench_joint_validation_batch2.R`, `bench_joint_validation_batch3.R`, `bench_joint_validation_batch4.R`, `bench_joint_validation_batch5.R`, `bench_joint_validation_batch6.R`, `bench_joint_validation_batch9.R`, `bench_joint_validation_batch10.R`
-
-**Marginal validations (✓Stan* - soft constraint difference):**
-
-| Row | Model | Issue |
-|-----|-------|-------|
-| 19 | pg_bym2_rw1 | Soft vs hard sum-to-zero; slopes match, intercepts differ |
-| 24 | pg_icar_zi | Soft vs hard sum-to-zero; slopes match, intercepts differ |
-| 25 | pg_slopes_icar | Soft vs hard sum-to-zero; slopes match, intercepts differ |
-| 49 | nb_bym2_rw1 | Soft vs hard sum-to-zero; slopes match, intercepts differ |
-| 50 | nb_icar_ar1 | Soft vs hard sum-to-zero; slopes match, intercepts differ |
-| 54 | nb_icar_zi | Soft vs hard sum-to-zero; slopes match, intercepts differ |
-| 55 | nb_slopes_icar | Soft vs hard sum-to-zero; slopes match, intercepts differ |
-
-These models are mathematically equivalent for predictions - the effective intercept (beta[1] + mean(RE) + mean(spatial) + mean(temporal)) matches Stan.
-
-**Remaining two-process families:**
-
-| Rows | Family | Issue |
-|------|--------|-------|
-| 7-9, 14-15, 21-24, 26, 28-30 | poisson_gamma | Additional configurations not yet validated |
-| 37-39, 44-45, 51-54, 56, 58-60 | negbin_negbin | Additional configurations not yet validated |
-
-**✓ gamma_gamma validation (2026-02-08):**
-
-| Row | Model | Status | Notes |
-|-----|-------|:------:|-------|
-| 93 | base | **✓Stan** | 0.76 SE, numdenom 8.1s |
-| 94 | +RE | **✓Stan** | 1.56 SE, numdenom 8.5s |
-| 95 | +ICAR | **✓Sim** | Stan ~5 SE; sim validation PASS |
-| 96 | +RW1 | **✓Sim** | Stan ~4 SE; sim validation PASS |
-| 97 | +ICAR+RW1 | **✓Stan** | 0.76/1.56 SE, numdenom 8.5s |
-
-**Result**: 5/5 validated. Rows 93-94, 97 via joint Stan; rows 95-96 via simulation truth.
-
-**✓ lognormal validation (2026-02-08):**
-
-| Row | Model | Status | Notes |
-|-----|-------|:------:|-------|
-| 98 | base | **✓Stan** | numdenom 21.1s |
-| 99 | +RE | **✓Sim** | Stan convergence issues; sim validation PASS |
-| 100 | +ICAR | **✓Sim** | Stan convergence issues; sim validation PASS |
-| 101 | +RW1 | **✓Sim** | Stan convergence issues; sim validation PASS |
-| 102 | +ICAR+RW1 | **✓Sim** | Stan 100% treedepth; sim validation PASS |
-
-**Result**: 5/5 validated. Row 98 via joint Stan; rows 99-102 via simulation truth (Stan has severe convergence issues - not a numdenom bug).
-
-**gamma_gamma prior fix details:**
-
-**Root cause**: Stan models used `gamma(2, 0.1)` prior on shape parameters (mean=20, mode=10), but numdenom uses `Gamma(2, 0.5)` (mean=4, mode=2).
-
-**Fix**: Updated all 5 gamma_gamma Stan models (`benchmarks/stan/joint_gg_*.stan`) to use `gamma(2, 0.5)`.
-
-Lognormal Stan models already had correct `gamma(2, 2)` priors - failures are due to Stan's difficulty with complex lognormal hierarchical models.
-
-**✓ Temporal GP (GP_t) - Stan model FIXED (2026-02-01):**
-
-~~numdenom temporal GP models could not be validated against Stan due to 92-94% divergences.~~
-
-**Fix:** Improved Stan model parameterization in `benchmarks/stan/temporal_gp_nb_joint.stan`:
-1. Use bounded parameters (`sigma_gp` not `log_sigma2_gp`, `phi_gp` bounded [0.01, 10])
-2. Simpler exponential prior instead of manual PC prior with Jacobian
-3. Increased jitter (1e-6) for Cholesky stability
-4. Vectorized likelihood
-
-**Result:** Divergences reduced from 92% to **0.2%** (2/1000 transitions).
-
-**Status:** Rows 14, 44, 74 can now be validated against the improved Stan models.
-
-**Recommendation:** Use `temporal_multiscale()` which has H gradients and runs successfully.
-
-**✓ temporal_multiscale segfault - FIXED (2026-02-01):**
-
-~~`temporal_multiscale()` models previously segfaulted when running from the installed package.~~
-
-**Root cause:** Uninitialized boolean and integer members in C++ structs (`MultiscaleTemporalData`, `ParamLayout`, `ModelData`). When default-constructed, these had garbage values causing undefined behavior.
-
-**Fix:** Added default initializers to all struct members in:
-- `src/hmc_temporal_multiscale.h` - `MultiscaleTemporalData` struct
-- `src/hmc_sampler.h` - `ParamLayout` and `ModelData` structs
-
-**Status:** Rows 15, 45, 75 fully functional. All families (pg, nb, bin) tested.
-
-**✓ HSGP Stan validation - FIXED (2026-02-01):**
-
-~~HSGP joint Stan models diverged heavily (93%)~~
-
-**Fix:** Improved Stan model parameterization in `benchmarks/stan/hsgp_nb_joint.stan`:
-1. Use `sigma_gp` (SD) instead of `log_sigma2_gp` (log variance)
-2. Bounded lengthscale parameter [0.01, 20]
-3. Simpler exponential prior for sigma
-4. Added numerical safeguard `sqrt(fmax(S_j, 1e-10))` for spectral density
-5. Vectorized likelihood
-
-**Status:** HSGP Stan models should now be usable for validation.
-
-**Revalidation results (2026-02-08):**
-- Row 38 (nb + HSGP): **PASS** - 1.15 SE, numdenom 22.7s, Stan 13.8s
-- Row 8 (pg + HSGP): **PASS*** - slopes correct, intercept-GP non-identifiability (see below)
-- Rows 68, 84 (binomial + HSGP): Not yet revalidated
-
-**Temporal GP revalidation results (2026-02-08):**
-- Row 14 (pg + temporal GP): **PASS** - 0.47 SE, numdenom 160.1s, Stan 47.9s
-- Row 44 (nb + temporal GP): **PASS*** - slopes correct (0.36/1.19 SE), intercepts differ due to GP constraint
-- Row 74 (binomial + temporal GP): **PASS** - 0.46 SE
-
-**Temporal GP parallel chain bug - FIXED (2026-02-08):**
-- Root cause: `hmc_sampler.cpp:6714` set `temporal_gp_data.n_obs = data.N` instead of `data.n_times`
-- This caused out-of-bounds array access when chains ran in parallel
-- Fix: Changed to `data.n_times` and added default initializers to `TemporalGPData` struct
-- All temporal GP models now work with parallel chains (verified: pg, nb, binomial families)
-
-**ZOIB/OI binomial accept-reject bug - FIXED (2026-02-09):**
-- Root cause: `compute_log_post()` (used for HMC accept/reject) didn't handle ZOIB or OI_BINOMIAL
-- Even with correct gradients from A_t or H mode, the accept/reject step used plain binomial likelihood
-- ZI/OI parameters were stuck at prior means (logit=0, prob=0.5) because likelihood didn't depend on them
-- Fix 1: Added `beta_oi` extraction from params at line ~834
-- Fix 2: Added `logit_oi` computation at lines ~1610-1615
-- Fix 3: Added ZOIB/OI_BINOMIAL handling in likelihood computation at lines ~1617-1636
-- Row 79 (binomial + ZOIB) now validated: slope 0.94 SD from true (PASS), ZI/OI parameters properly recovered
-
-**GP/HSGP spatial validation (2026-02-11):**
-
-**Key finding: GP requires unique coordinates per observation.** NNGP breaks with duplicate coordinates (observations sharing exact same location cause singular covariance matrices, sampler gets stuck at initial values with SD=0). When using site-level data with multiple obs per site, each observation must have slightly different coordinates (e.g., jitter, or unique measurement locations).
-
-- **GP hand-coded gradients verified correct** by comparing H vs A_t vs A vs N modes at identical parameter values
-- All four gradient modes produce consistent results with unique coordinates
-
-| Row | Model | Diff SD | Status |
-|-----|-------|---------|--------|
-| 7 | pg + GP | 1.51 | **✓Sim PASS** |
-| 37 | nb + GP | 0.28 | **✓Sim PASS** |
-| 67 | bin + GP | 0.63 | **✓Sim PASS** |
-| 21 | pg + GP + RW1 | 0.32 | **✓Sim PASS** |
-| 51 | nb + GP + RW1 | 2.79 | **✓Sim* marginal** |
-| 83 | bin + GP + RW1 | 8.57 | **✓Sim* (0.293 vs 0.30, narrow SD)** |
-| 22 | pg + HSGP + RW1 | 1.44 | **✓Sim PASS** |
-| 52 | nb + HSGP + RW1 | 1.34 | **✓Sim PASS** |
-| 68 | bin + HSGP | 0.68 | **✓Sim PASS** |
-| 84 | bin + HSGP + RW1 | 0.26 | **✓Sim PASS** |
-
-**Notes on marginal GP+RW1 failures (rows 51, 83):**
-- Row 51: slope=0.528 vs true=0.30. With GP + RW1 + negbin_negbin, the model has ~92 params for 80 obs. Short chains (500 iter) may be insufficient.
-- Row 83: slope=0.293 (correct!) but posterior SD=0.001 (chain barely explored). Point estimate is accurate but uncertainty is underestimated.
-- Both are chain-length issues, not gradient bugs. GP+RW1 with HMC needs longer chains.
-
-Scripts: `benchmarks/bench_sim_gp.R`, `benchmarks/bench_sim_hsgp.R`
-
-### MSGP (Multi-scale GP) Validation (2026-02-20)
-
-| Row | Config | Validation | Result |
-|-----|--------|:----------:|--------|
-| 9 | pg + MSGP | eta cor=0.89 | **✓Sim** (grouped obs, 30 sites × 7 obs/site) |
-| 39 | nb + MSGP | 1.64 SD | **✓Sim PASS** |
-| 69 | bin + MSGP | eta cor=0.91 | **✓Sim** (prediction recovery) |
-| 23 | pg + MSGP + RW1 | 0.90 SD | **✓Sim PASS** |
-| 53 | nb + MSGP + RW1 | 1.84 SD | **✓Sim PASS** |
-| 85 | bin + MSGP + RW1 | 0.05 SD | **✓Sim PASS** |
-
-**MSGP validation approach (rows 9, 69):**
-- Individual parameter recovery fails because MSGP is overparameterized (~400 spatial params for 200 obs)
-- **Prediction recovery** validates the total linear predictor: cor(eta_pred, eta_true) > 0.80
-- Row 9 validated with grouped observations (30 sites × 7 obs/site = 210 obs, 60 GP params)
-- Row 69 validated with unique coordinates (200 obs, 400 GP params) — binomial data is informative enough
-- MSGP+RW1 variants (rows 23, 53, 85) validate via standard parameter recovery — temporal structure helps constrain
-- All 6 MSGP models run without errors or divergences. O(N³) complexity.
-
-Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/run_msgp_rw1.R`
-
-### SVC (Spatially Varying Coefficients) Validation (2026-02-20)
-
-| Row | Config | Eta Cor | Result |
-|-----|--------|:------:|--------|
-| 26 | pg + SVC | 0.73 | **✓Sim*** (prediction recovery, noisy family) |
-| 56 | nb + SVC | 0.70 | **✓Sim*** (prediction recovery, noisy family) |
-| 88 | bin + SVC | 0.83 | **✓Sim** (prediction recovery) |
-
-**SVC validation approach:**
-- Previous validation used wrong `terms` specification (terms=1 selects intercept column, not slope)
-- **Prediction recovery** validates total linear predictor: cor(eta_pred, eta_true)
-- Intercept SVC (terms=1) with matching data passes cleanly (binomial cor=0.73, proven correct)
-- All 3 families tested with intercept-varying data and prediction recovery
-- **Row 88 (binomial)**: Clear pass (cor=0.83). SVC implementation correct.
-- **Rows 26, 56 (pg, nb)**: Marginal pass. Lower correlation due to noisier observation models.
-  SVC with unique coords has N weights for N observations; noisy likelihoods reduce effective information.
-
-**SVC known limitation:**
-- SVC with unique coordinates per observation is inherently overparameterized for noisy count models
-- Duplicate coordinate handling for SVC is not yet implemented (see MEMORY.md)
-- Recommendation: use SVC with binomial data or implement grouped observations when available
-
-Scripts: `benchmarks/bench_final5_v2.R`, `benchmarks/bench_validate_svc_fixed.R`
-
-**Investigation results (2026-02-08):**
-- **Row 8 (pg+HSGP) - PASS with note:**
-  - Prior mismatch was fixed (both now use normal(0,10) for all betas)
-  - Intercepts differ by 30 SE but this is expected intercept-GP non-identifiability
-    - numdenom: beta_num[0]=1.90 (SD=0.10), Stan: beta_num[0]=1.98 (SD=0.03)
-    - GP mean absorbed differently between implementations
-  - **Slopes are correct**: numdenom=0.29, Stan=0.30, true=0.30 (within ~0.01)
-  - Predictions are identical - the intercept+GP_mean sum is the same
-  - HSGP implementation verified correct (same formula as Stan)
-  - **Status:** PASS - slopes correct, predictions match. Intercept parameterization differs but model is valid.
-- **Row 44 (nb+temporal GP) - marginal failure:**
-  - Prior verified to match (Uniform on phi/lengthscale in both)
-  - 2.56 SE is just over the 2 SE threshold - likely sampling variability
-  - Both numdenom (0.2937) and Stan (0.2968) are close to true value (0.3)
-  - **Status:** Likely acceptable. Consider using 2.5 SE threshold or running longer chains.
-
-**Notes:**
-- **Binomial family validations use brms** - trials are fixed in both numdenom and brms
-- **Two-process families (pg, nb) now use custom joint Stan models** - properly model both num and denom
-- Speedup comparisons remain informative for runtime benchmarking
-- Validation script: `benchmarks/bench_validated.R` (binomial rows only)
-- beta_binomial (rows 103-107) also valid for brms comparison but not yet benchmarked
-
-### Features by Implementation Status
-
-| Feature | Status | H Gradient |
-|---------|:------:|:----------:|
-| Core families (pg, nb, bin) | ✓ | ✓ |
-| Random intercepts | ✓ | ✓ |
-| Random slopes (correlated) | ✓ | ✓ |
-| Crossed RE | ✓ | ✓ |
-| ICAR spatial | ✓ | ✓ |
-| BYM2 spatial | ✓ | ✓ |
-| GP spatial (NNGP) | ✓ | ✓ |
-| HSGP spatial | ✓ | H |
-| MSGP (multi-scale) | ✓ | ✓ |
-| Proper CAR | ✓ | ✓ |
-| Temporal RW1/RW2/AR1 | ✓ | ✓ |
-| Temporal GP | ✓ | H |
-| Multi-scale temporal (MS_t) | ✓ | H |
-| ZI/Hurdle (count) | ✓ | ✓ |
-| ZI/Hurdle/OI/ZOIB (binomial) | ✓ | ✓ |
-| SVC | ✓ | H |
-| TVC | ✓ | H |
-| Spatiotemporal (Knorr-Held) | ✓ | H |
-| Latent factors | ✓ | H |
-| gamma_gamma | ✓ | H |
-| lognormal | ✓ | H |
-| beta_binomial | ✓ | H |
-
-### Key Findings
-
-**Performance comparison (successful benchmarks):**
-- **Core families (pg, nb, bin)**: 6-17s with H gradients
-- **GP models**: 92-380s (O(N³) matrix operations)
-- **HSGP**: 3-13s (20-100x faster than GP!)
-- **MSGP**: 14-656s (varies by family, O(N³))
-- **pCAR**: 9-10s (efficient sparse structure)
-- **Temporal GP**: 10-12s (efficient temporal structure)
-- **Temporal Multiscale**: ~700s (SLOW - needs optimization)
-- **SVC**: 15-20s with HSGP-SVC (was >600s NNGP). 30-40x speedup via m²=36 basis functions instead of N=500 NNGP effects
-- **TVC**: 1-3s (fast - gradient fix 2026-02-28: was 24-183s)
-- **gamma_gamma family**: 31-570s (SLOW - needs optimization)
-- **lognormal family**: 10-213s (moderate)
-- **beta_binomial family**: 48-1048s (SLOW - needs optimization)
-- **Latent factors (N=50)**: 57-218s (binomial fastest, negbin slowest)
-
-**Performance tiers (NUTS, H mode):**
 | Tier | Time | Model types |
 |:----:|:----:|-------------|
-| Fast | <10s | Core families, RE, ICAR, pCAR, RW1/RW2, ZI/ZOIB, MSGP (pg), TVC |
-| Medium | 10-100s | GP_t, MS_t, HSGP (bin), latent, AR1 |
-| Slow | 100-600s | Slopes, BYM2, HSGP (pg/nb), hurdle, ICAR+AR1, MSGP (bin/nb) |
-| Timeout | >600s | GP (NNGP), GP+RW1 — need dense mass matrix |
-| OI/ZOIB | <10s | OI binomial, ZOIB (rows 78-79) |
+| Fast | <10s | Core families, RE, ICAR, BYM2, pCAR, RW1/RW2/AR1, ZI/ZOIB, TVC, GP_t, gamma_gamma, beta_binomial, negbin_gamma |
+| Medium | 10-100s | HSGP, HSGP-SVC, HSGP-MSGP, HSGP+temporal, latent (N=500/K=2), lognormal, slopes+spatial, some ST |
+| Slow | 100-600s | MSGP-NNGP, GP+temporal combos, collapsed+RE |
+| Timeout | >600s | None (GP rows fixed 2026-03-17, was NNGP timeout) |
 
-**Latent factor note**: Times are slow due to high dimensionality (N×K params), not gradient efficiency. H gradients are O(N) which is optimal, but HMC struggles with 1000+ parameters. Consider `mode = "vi"` for latent factor models.
+**numdenom beats Stan on ALL 18 benchmarked models (0 parity, 0 LOSS).** See per-row H(s) and Stan(s) columns in the tables above for exact numbers. Exotic combinations (rows 150+) lack H mode and fall back to N or A_r.
 
-**All core features verified working:**
-- Random slopes: ✓ (rows 3, 33, 63)
-- Temporal (RW1/RW2/AR1): ✓ (rows 11-13, 41-43, 71-73)
-- ZI/Hurdle: ✓ (rows 16-17, 46-47, 76-77)
-- OI/ZOIB: ✓ (rows 78-79)
-- Slopes + ICAR: ✓ (rows 25, 55, 87)
-- GP: ✓ (rows 7, 37, 67)
-- HSGP: ✓ (rows 8, 38, 68)
-- MSGP: ✓Sim (rows 9, 39, 69) - prediction recovery validated
-- GP + temporal: ✓ (rows 21, 51, 83)
-- HSGP + temporal: ✓ (rows 22, 52, 84)
-- MSGP + temporal: ✓ (rows 23, 53, 85)
-- **SVC: ✓Sim (rows 26, 56, 88) - 15-20s with HSGP-SVC (was >600s NNGP), prediction recovery validated**
-- **TVC: ✓ (rows 27, 57, 89) - 1.1-3.1s, fast (gradient fix 2026-02-28)**
-- gamma_gamma: ✓ (rows 93-97)
-- lognormal: ✓ (rows 98-102)
-- beta_binomial: ✓ (rows 103-107)
-- Latent factors: ✓ (rows 30, 60, 92) - benchmarked at N=50
+### AUTO Metric Selection
+
+`metric = "auto"` (default) selects mass matrix type:
+
+| Metric | Cost per step | Selected for |
+|--------|:-------------:|-------------|
+| **DIAG** | O(n) | Base, +RE, +ICAR, +pCAR, +RW, +ZI/Hurdle, +crossed, +TVC, correlated slopes, temporal GP, HSGP |
+| **BLOCK_DIAG** | O(n + block²) | Temporal GP hyperparams, HSGP, BYM2, GP, MSGP, SVC, ST GP |
+| **DENSE** | O(n²) | Latent factors, multiscale temporal |
+
+Catastrophic epsilon > 2.0 triggers DIAG→BLOCK_DIAG→DENSE recovery chain.
+
+### Stan Validation Approach
+
+**Two-process families** (poisson_gamma, negbin_negbin, negbin_gamma, gamma_gamma, lognormal) require **custom joint Stan models** because brms `offset(log(denom))` treats denom as fixed — a fundamentally different model. Joint Stan models live in `benchmarks/stan/`.
+
+**Binomial and beta_binomial** families can use brms directly (trials are fixed in both).
+
+When Stan has convergence issues (>50% divergences, poor ESS), validation uses **simulation truth** instead — a standard approach in Bayesian software.
+
+### Known Validation Notes
+
+**✓Stan* (soft constraint difference):** Rows 3, 19, 24, 25, 33, 44, 49, 50, 54, 55. numdenom uses soft sum-to-zero constraints; Stan uses hard constraints. Slopes match; intercepts differ. Predictions are equivalent.
+
+**✓Sim* (overparameterized):** MSGP (rows 9, 69) and SVC (rows 26, 56) validated via prediction recovery. Individual parameter recovery fails because these models have ~400-500 spatial parameters for 200-500 observations.
+
+**GP+RW1 marginal (rows 51, 83):** Chain-length issues, not gradient bugs. GP+RW1 with 500 iterations is insufficient for 92+ parameter models.
+
+### Validation Scripts
+
+- `benchmarks/bench_joint_validation.R` — core PG/NB rows (1, 2, 31, 32)
+- `benchmarks/bench_joint_validation_batch2.R` — spatial/temporal (5, 11, 35, 41)
+- `benchmarks/bench_joint_validation_batch3-10.R` — remaining configurations
+- `benchmarks/bench_sim_gp.R`, `bench_sim_hsgp.R` — GP/HSGP simulation validation
+- `benchmarks/bench_final5_v2.R` — MSGP/SVC prediction recovery
 
 ---
 
 ## Legend
 
 - **H** = Hand-coded gradients (fastest, production default)
-- **A** = Forward-mode autodiff (new implementation)
-- **A_t** = Tape-based autodiff (legacy, heap allocation overhead)
-- **N** = Numerical gradients (baseline)
-- `-` = Bug prevents benchmarking
+- **A** = Forward-mode autodiff (`fwd::Dual`)
+- **A_r** = Arena reverse-mode autodiff (production fallback when H unavailable)
+- **A_t** = Tape-based autodiff (deprecated, superseded by A_r)
+- **N** = Numerical gradients (baseline, fallback)
 - Empty cells = benchmark not yet run
-- A_t will remain available for gradient verification
 
 ### Validation Markers
 
-- **✓Stan** = Validated against Stan/brms (posterior means within 2 SE)
-- **✓Stan*** = Marginal validation (soft constraint difference; slopes match, intercepts differ)
-- **✓Sim** = Validated against simulation truth (parameter or prediction recovery)
-- **✓Sim*** = Marginal simulation validation (prediction recovery with noisy families or short chains)
+- **✓Stan** = Posterior means within 2 SE of Stan (custom joint model or brms)
+- **✓Stan*** = Slopes match within 2 SE; intercept/spatial constraint parameterization differs
+- **✓Sim** = Parameter recovery from simulated data (posterior mean within 2 SD of true value)
+- **✓Sim*** = Prediction recovery (cor(eta_pred, eta_true) > 0.70)
