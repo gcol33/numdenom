@@ -117,20 +117,56 @@ fit_hmc <- function(formula,
   }
 
   # Prepare spatial structure
-  # Check if GP-based spatial or multiscale temporal (both require GP sampler)
-  # temporal_multiscale is only fully supported in the GP sampler path
-  use_gp_sampler <- is_gp_spatial(spatial) || is_multiscale_temporal(temporal)
+  # Check if GP-based spatial (requires GP sampler) or multiscale temporal
+  # without areal spatial (ICAR/BYM2/pCAR can pair with MS_t via regular sampler)
+  has_areal_spatial <- !is.null(spatial) && !is.null(spatial$type) &&
+    spatial$type %in% c("car", "car_proper", "bym2")
+  use_gp_sampler <- is_gp_spatial(spatial) ||
+    (is_multiscale_temporal(temporal) && !has_areal_spatial)
 
   if (use_gp_sampler) {
     # GP spatial uses dedicated sampler
     gp_info <- prepare_gp_for_hmc(spatial, data, hmc_data$N)
     gp_n_units <- if (gp_info$n_unique > 0L) gp_info$n_unique else hmc_data$N
     gp_group <- if (length(gp_info$gp_obs_to_loc) > 0) gp_info$gp_obs_to_loc else seq_len(hmc_data$N)
+    # Precompute HSGP basis matrix for HSGP-MSGP ratio reconstruction
+    msgp_hsgp_Phi <- NULL
+    msgp_hsgp_eigenvalues <- NULL
+    if (isTRUE(gp_info$msgp_approx == "hsgp")) {
+      hsgp_m <- as.integer(gp_info$hsgp_m %||% 6L)
+      c_bnd <- gp_info$hsgp_c %||% 1.5
+      coords_mat <- as.matrix(data[, spatial$coord_vars, drop = FALSE])
+      if (isTRUE(spatial$scale_coords)) coords_mat <- scale(coords_mat)
+      N_obs <- nrow(coords_mat)
+      x_range <- diff(range(coords_mat[, 1]))
+      y_range <- diff(range(coords_mat[, 2]))
+      x_center <- mean(range(coords_mat[, 1]))
+      y_center <- mean(range(coords_mat[, 2]))
+      L1 <- max(c_bnd * x_range / 2, 0.1)
+      L2 <- max(c_bnd * y_range / 2, 0.1)
+      m_total <- hsgp_m * hsgp_m
+      msgp_hsgp_eigenvalues <- numeric(m_total)
+      msgp_hsgp_Phi <- matrix(0, N_obs, m_total)
+      for (j1 in seq_len(hsgp_m)) {
+        for (j2 in seq_len(hsgp_m)) {
+          j_idx <- (j1 - 1) * hsgp_m + j2
+          msgp_hsgp_eigenvalues[j_idx] <- (pi * j1 / (2 * L1))^2 + (pi * j2 / (2 * L2))^2
+          msgp_hsgp_Phi[, j_idx] <- sin(pi * j1 * (coords_mat[, 1] - x_center + L1) / (2 * L1)) / sqrt(L1) *
+            sin(pi * j2 * (coords_mat[, 2] - y_center + L2) / (2 * L2)) / sqrt(L2)
+        }
+      }
+    }
+
     spatial_info <- list(type = gp_info$gp_type, n_units = gp_n_units,
                          group = gp_group, adj_row_ptr = integer(1),
                          adj_col_idx = integer(0), n_neighbors = integer(0),
                          bym2_scale = 1.0,
                          hsgp_m = gp_info$hsgp_m,  # HSGP: basis functions per dim
+                         hsgp_c = gp_info$hsgp_c,
+                         msgp_approx = gp_info$msgp_approx,
+                         msgp_hsgp_Phi = msgp_hsgp_Phi,
+                         msgp_hsgp_eigenvalues = msgp_hsgp_eigenvalues,
+                         coord_vars = if (!is.null(spatial)) spatial$coord_vars else NULL,
                          parameterization = gp_info$parameterization,
                          # Range bounds for proper initialization (from prepare_gp_for_hmc)
                          range_local_lower = gp_info$range_local_lower,
@@ -380,7 +416,9 @@ fit_hmc <- function(formula,
       gp_obs_to_loc = as.integer(gp_info$gp_obs_to_loc),
       n_unique = as.integer(gp_info$n_unique),
       # GP parameterization
-      parameterization = gp_info$parameterization %||% "centered"
+      parameterization = gp_info$parameterization %||% "centered",
+      # HSGP-MSGP flag
+      msgp_approx = gp_info$msgp_approx %||% "nngp"
     )
 
     # Bundle multiscale GP parameters
@@ -434,6 +472,21 @@ fit_hmc <- function(formula,
       n = as.integer(rsr_info$rsr_n)
     )
 
+    # Bundle regular temporal parameters for GP interface
+    # (previously missing — temporal was silently dropped for GP/HSGP models)
+    temporal_params_gp <- list(
+      type = temporal_info$type,
+      time_idx = as.integer(temporal_info$time_index),
+      group_idx = as.integer(temporal_info$group_index),
+      n_times = as.integer(temporal_info$n_times),
+      n_groups = as.integer(temporal_info$n_groups),
+      n_params = as.integer(temporal_info$n_temporal_params),
+      cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
+      shared = temporal_info$shared %||% TRUE,
+      tau_shape = tau_temporal_shape,
+      tau_rate = tau_temporal_rate
+    )
+
     # Use O2-safe interface with single List parameter
     # This minimizes Rcpp template instantiation at ABI boundary
     fit_raw <- cpp_hmc_fit_gp_v2(list(
@@ -451,6 +504,7 @@ fit_hmc <- function(formula,
       ms_gp_params = ms_gp_params,
       ms_temporal_params = ms_temporal_params,
       rsr_params = rsr_params,
+      temporal_params = temporal_params_gp,
       # Priors
       sigma_beta = sigma_beta,
       sigma_re_scale = sigma_re_scale,
@@ -523,7 +577,15 @@ fit_hmc <- function(formula,
       gp_sigma2_prior_alpha = priors$temporal_gp_sigma2_prior_alpha %||% 0.01,
       gp_phi_prior_lower = priors$temporal_gp_phi_prior_lower %||% 0.01,
       gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0,
-      gp_parameterization = temporal_info$parameterization %||% "noncentered"
+      gp_parameterization = temporal_info$parameterization %||% "noncentered",
+      # Multiscale temporal fields (only used when type = "multiscale")
+      trend_type = temporal_info$trend %||% "rw1",
+      short_term_type = temporal_info$short_term %||% "ar1",
+      seasonal_period = as.integer(temporal_info$precision_structure$seasonal_period %||% 0L),
+      sigma2_trend_prior_U = priors$ms_sigma2_trend_prior_U %||% 1.0,
+      sigma2_trend_prior_alpha = priors$ms_sigma2_trend_prior_alpha %||% 0.01,
+      sigma2_short_prior_U = priors$ms_sigma2_short_prior_U %||% 1.0,
+      sigma2_short_prior_alpha = priors$ms_sigma2_short_prior_alpha %||% 0.01
     )
 
     prior_params <- list(
@@ -1251,6 +1313,125 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
 }
 
 
+#' Extract spatial draws from HMC samples into draws_list
+#'
+#' Shared helper for build_draws_list_spatial and build_draws_list_full.
+#' Handles ICAR, BYM2, GP, multiscale GP, and HSGP spatial types,
+#' including collapsed parameterization (where phi/theta/w are marginalized out).
+#'
+#' @param samples Matrix of HMC samples
+#' @param idx Current column index into samples
+#' @param spatial_info Spatial configuration list
+#' @return List with `draws` (named list of draws) and `idx` (updated column index)
+#' @keywords internal
+extract_spatial_draws <- function(samples, idx, spatial_info) {
+  draws <- list()
+
+  if (spatial_info$type == "icar") {
+    param <- spatial_info$parameterization %||% "standard"
+    draws[["tau_spatial"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    if (param != "collapsed") {
+      for (s in seq_len(spatial_info$n_units)) {
+        draws[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+    }
+  } else if (spatial_info$type == "bym2") {
+    param <- spatial_info$parameterization %||% "standard"
+    sigma_total <- exp(samples[, idx])
+    idx <- idx + 1
+    rho <- 1 / (1 + exp(-samples[, idx]))
+    idx <- idx + 1
+
+    sigma_s <- sigma_total * sqrt(rho)
+    sigma_u <- sigma_total * sqrt(1 - rho)
+
+    draws[["sigma_spatial"]] <- sigma_total
+    draws[["rho_spatial"]] <- rho
+    draws[["sigma_s_spatial"]] <- sigma_s
+    draws[["sigma_u_spatial"]] <- sigma_u
+
+    if (param != "collapsed") {
+      for (s in seq_len(spatial_info$n_units)) {
+        draws[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+      for (s in seq_len(spatial_info$n_units)) {
+        draws[[paste0("theta[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+    }
+  } else if (spatial_info$type == "gp") {
+    draws[["sigma2_gp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws[["phi_gp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    param <- spatial_info$parameterization %||% "centered"
+    if (param != "collapsed") {
+      for (s in seq_len(spatial_info$n_units)) {
+        draws[[paste0("gp_w[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+    }
+  } else if (spatial_info$type == "multiscale_gp") {
+    msgp_approx <- spatial_info$msgp_approx %||% "nngp"
+    if (msgp_approx == "hsgp") {
+      # HSGP-MSGP: hyperparams + basis coefficients per scale
+      hsgp_m <- spatial_info$hsgp_m %||% 6L
+      m_total <- hsgp_m * hsgp_m
+
+      draws[["sigma2_hsgp_local"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      draws[["lengthscale_hsgp_local"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      for (s in seq_len(m_total)) {
+        draws[[paste0("hsgp_beta_local[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+      draws[["sigma2_hsgp_regional"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      draws[["lengthscale_hsgp_regional"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      for (s in seq_len(m_total)) {
+        draws[[paste0("hsgp_beta_regional[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+    } else {
+      # NNGP-MSGP: spatial effects per location
+      draws[["sigma2_gp_local"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      draws[["phi_gp_local"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      for (s in seq_len(spatial_info$n_units)) {
+        draws[[paste0("gp_local_w[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+      draws[["sigma2_gp_regional"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      draws[["phi_gp_regional"]] <- exp(samples[, idx])
+      idx <- idx + 1
+      for (s in seq_len(spatial_info$n_units)) {
+        draws[[paste0("gp_regional_w[", s, "]")]] <- samples[, idx]
+        idx <- idx + 1
+      }
+    }
+  } else if (spatial_info$type == "hsgp") {
+    draws[["sigma2_hsgp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    draws[["lengthscale_hsgp"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    hsgp_m <- spatial_info$hsgp_m %||% 8L
+    for (s in seq_len(hsgp_m * hsgp_m)) {
+      draws[[paste0("hsgp_beta[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
+    }
+  }
+
+  list(draws = draws, idx = idx)
+}
+
+
 #' Build draws list with spatial parameters
 #' @keywords internal
 build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type,
@@ -1300,84 +1481,9 @@ build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type
   }
 
   # Spatial
-  if (spatial_info$type == "icar") {
-    icar_param_draw <- spatial_info$parameterization %||% "standard"
-    draws_list[["tau_spatial"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    if (icar_param_draw != "collapsed") {
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "bym2") {
-    bym2_param_draw <- spatial_info$parameterization %||% "standard"
-    # Riebler parameterization: log_sigma_total, logit_rho
-    sigma_total <- exp(samples[, idx])
-    idx <- idx + 1
-    rho <- 1 / (1 + exp(-samples[, idx]))
-    idx <- idx + 1
-
-    sigma_s <- sigma_total * sqrt(rho)
-    sigma_u <- sigma_total * sqrt(1 - rho)
-
-    draws_list[["sigma_spatial"]] <- sigma_total
-    draws_list[["rho_spatial"]] <- rho
-    draws_list[["sigma_s_spatial"]] <- sigma_s
-    draws_list[["sigma_u_spatial"]] <- sigma_u
-
-    if (bym2_param_draw != "collapsed") {
-      # phi_scaled
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-      # theta
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "gp") {
-    draws_list[["sigma2_gp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_gp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    gp_param_draw <- spatial_info$parameterization %||% "centered"
-    if (gp_param_draw != "collapsed") {
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "multiscale_gp") {
-    draws_list[["sigma2_gp_local"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_gp_local"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("gp_local_w[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-    draws_list[["sigma2_gp_regional"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_gp_regional"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("gp_regional_w[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  } else if (spatial_info$type == "hsgp") {
-    draws_list[["sigma2_hsgp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["lengthscale_hsgp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    hsgp_m <- spatial_info$hsgp_m %||% 8L
-    for (s in seq_len(hsgp_m * hsgp_m)) {
-      draws_list[[paste0("hsgp_beta[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  }
+  sp_result <- extract_spatial_draws(samples, idx, spatial_info)
+  draws_list <- c(draws_list, sp_result$draws)
+  idx <- sp_result$idx
 
   draws_list
 }
@@ -1462,13 +1568,21 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
       idx <- idx + spatial_info$n_units
     }
   } else if (spatial_info$type == "multiscale_gp") {
-    idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
-    gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
-    idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
-    gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
-    spatial_effect <- gp_local_w + gp_regional_w
+    msgp_approx <- spatial_info$msgp_approx %||% "nngp"
+    if (msgp_approx == "hsgp") {
+      # HSGP-MSGP: skip all params (handled in full ratio computation)
+      hsgp_m <- spatial_info$hsgp_m %||% 6L
+      m_total <- hsgp_m * hsgp_m
+      idx <- idx + 2 + m_total + 2 + m_total  # 2 hyperparams + m^2 beta per scale
+    } else {
+      idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
+      gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+      idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
+      gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+      spatial_effect <- gp_local_w + gp_regional_w
+    }
   }
 
   # Compute ratios
@@ -2014,17 +2128,28 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
       q_init <- c(q_init, rep(0.0, 2 + spatial_info$n_units))
     }
   } else if (spatial_info$type == "multiscale_gp") {
-    # Initialize phi to geometric mean of range bounds (on log scale)
+    # Initialize phi/lengthscale to geometric mean of range bounds (on log scale)
     range_local_lower <- spatial_info$range_local_lower %||% 0.01
     range_local_upper <- spatial_info$range_local_upper %||% 1.0
     range_regional_lower <- spatial_info$range_regional_lower %||% 1.0
     range_regional_upper <- spatial_info$range_regional_upper %||% 10.0
     log_phi_local_init <- log(sqrt(range_local_lower * range_local_upper))
     log_phi_regional_init <- log(sqrt(range_regional_lower * range_regional_upper))
-    # Layout: log_sigma2_local, log_phi_local, w_local[n_units], log_sigma2_regional, log_phi_regional, w_regional[n_units]
+
+    msgp_approx <- spatial_info$msgp_approx %||% "nngp"
+    if (msgp_approx == "hsgp") {
+      # HSGP-MSGP: m^2 basis coefficients per scale
+      hsgp_m <- spatial_info$hsgp_m %||% 6L
+      n_per_scale <- hsgp_m * hsgp_m
+    } else {
+      # NNGP-MSGP: N spatial effects per scale
+      n_per_scale <- spatial_info$n_units
+    }
+
+    # Layout: log_sigma2_local, log_ls_local, beta_local[n], log_sigma2_regional, log_ls_regional, beta_regional[n]
     q_init <- c(q_init,
-                0.0, log_phi_local_init, rep(0.0, spatial_info$n_units),
-                0.0, log_phi_regional_init, rep(0.0, spatial_info$n_units))
+                0.0, log_phi_local_init, rep(0.0, n_per_scale),
+                0.0, log_phi_regional_init, rep(0.0, n_per_scale))
   } else if (spatial_info$type == "hsgp") {
     hsgp_m <- spatial_info$hsgp_m %||% 8L
     q_init <- c(q_init, rep(0.0, 2 + hsgp_m * hsgp_m))
@@ -2548,85 +2673,10 @@ build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info
     }
   }
 
-  # Spatial (ICAR, BYM2)
-  if (spatial_info$type == "icar") {
-    icar_param_draw <- spatial_info$parameterization %||% "standard"
-    draws_list[["tau_spatial"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    if (icar_param_draw != "collapsed") {
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "bym2") {
-    bym2_param_draw <- spatial_info$parameterization %||% "standard"
-    # Riebler parameterization: log_sigma_total, logit_rho
-    sigma_total <- exp(samples[, idx])
-    idx <- idx + 1
-    rho <- 1 / (1 + exp(-samples[, idx]))
-    idx <- idx + 1
-
-    sigma_s <- sigma_total * sqrt(rho)
-    sigma_u <- sigma_total * sqrt(1 - rho)
-
-    draws_list[["sigma_spatial"]] <- sigma_total
-    draws_list[["rho_spatial"]] <- rho
-    draws_list[["sigma_s_spatial"]] <- sigma_s
-    draws_list[["sigma_u_spatial"]] <- sigma_u
-
-    if (bym2_param_draw != "collapsed") {
-      # phi_scaled
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-      # theta
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("theta[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "gp") {
-    draws_list[["sigma2_gp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_gp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    gp_param_draw <- spatial_info$parameterization %||% "centered"
-    if (gp_param_draw != "collapsed") {
-      for (s in seq_len(spatial_info$n_units)) {
-        draws_list[[paste0("gp_w[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "multiscale_gp") {
-    draws_list[["sigma2_gp_local"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_gp_local"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("gp_local_w[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-    draws_list[["sigma2_gp_regional"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_gp_regional"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws_list[[paste0("gp_regional_w[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  } else if (spatial_info$type == "hsgp") {
-    draws_list[["sigma2_hsgp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["lengthscale_hsgp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    hsgp_m <- spatial_info$hsgp_m %||% 8L
-    for (s in seq_len(hsgp_m * hsgp_m)) {
-      draws_list[[paste0("hsgp_beta[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  }
+  # Spatial (ICAR, BYM2, GP, multiscale GP, HSGP)
+  sp_result <- extract_spatial_draws(samples, idx, spatial_info)
+  draws_list <- c(draws_list, sp_result$draws)
+  idx <- sp_result$idx
 
   # Temporal
   if (temporal_info$type != "none" && temporal_info$type != "tvc") {
@@ -3072,13 +3122,47 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
       idx <- idx + spatial_info$n_units
     }
   } else if (spatial_info$type == "multiscale_gp") {
-    idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
-    gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
-    idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
-    gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
-    spatial_effect <- gp_local_w + gp_regional_w
+    msgp_approx <- spatial_info$msgp_approx %||% "nngp"
+    if (msgp_approx == "hsgp") {
+      # HSGP-MSGP: reconstruct spatial field from basis coefficients
+      hsgp_m <- spatial_info$hsgp_m %||% 6L
+      m_total <- hsgp_m * hsgp_m
+      Phi <- spatial_info$msgp_hsgp_Phi
+      eigenvalues <- spatial_info$msgp_hsgp_eigenvalues
+      N <- nrow(Phi)
+
+      sigma2_local <- exp(samples[, idx])
+      idx <- idx + 1
+      ls_local <- exp(samples[, idx])
+      idx <- idx + 1
+      beta_local <- samples[, idx:(idx + m_total - 1), drop = FALSE]
+      idx <- idx + m_total
+
+      sigma2_regional <- exp(samples[, idx])
+      idx <- idx + 1
+      ls_regional <- exp(samples[, idx])
+      idx <- idx + 1
+      beta_regional <- samples[, idx:(idx + m_total - 1), drop = FALSE]
+      idx <- idx + m_total
+
+      spatial_effect <- matrix(0, n_samples, N)
+      for (s in seq_len(n_samples)) {
+        S_local <- sigma2_local[s] * sqrt(2 * pi) * ls_local[s] *
+          exp(-0.5 * ls_local[s]^2 * eigenvalues)
+        S_regional <- sigma2_regional[s] * sqrt(2 * pi) * ls_regional[s] *
+          exp(-0.5 * ls_regional[s]^2 * eigenvalues)
+        spatial_effect[s, ] <- Phi %*% (sqrt(S_local) * beta_local[s, ]) +
+          Phi %*% (sqrt(S_regional) * beta_regional[s, ])
+      }
+    } else {
+      idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
+      gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+      idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
+      gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+      idx <- idx + spatial_info$n_units
+      spatial_effect <- gp_local_w + gp_regional_w
+    }
   }
 
   # Temporal effects
@@ -3381,8 +3465,46 @@ prepare_gp_for_hmc <- function(gp, data, N) {
   coords_mat <- validated$unique_coords
   coords_flat <- as.vector(t(coords_mat))  # Row-major flatten
 
-  if (inherits(gp, "ratiod_multiscale")) {
-    # Multi-scale GP
+  if (inherits(gp, "ratiod_multiscale") && isTRUE(gp$approx == "hsgp")) {
+    # HSGP-MSGP: two HSGP evaluations with shared basis (no NNGP needed)
+    validated_hsgp <- validate_hsgp_multiscale(gp, data)
+    coords_flat_hsgp <- as.vector(t(validated_hsgp$coords_matrix))
+
+    list(
+      gp_type = "multiscale_gp",
+      msgp_approx = "hsgp",
+      hsgp_m = as.integer(gp$m),
+      hsgp_c = gp$c_boundary,
+      coords = coords_flat_hsgp,
+      # Range constraints (used for lengthscale prior means)
+      range_local_lower = gp$range_local[1],
+      range_local_upper = gp$range_local[2],
+      range_regional_lower = gp$range_regional[1],
+      range_regional_upper = gp$range_regional[2],
+      # Common params
+      cov_type = gp$cov %||% "exponential",
+      nu = gp$nu %||% 1.5,
+      shared = gp$shared,
+      sampler = gp$sampler %||% "noncentered",
+      parameterization = "noncentered",  # HSGP always NC
+      solver = "cholesky",
+      cg_tol = 1e-6,
+      cg_maxiter = 100L,
+      # Empty NNGP placeholders
+      nn_idx = integer(0), nn_dist = numeric(0),
+      nn_order = integer(0), nn_order_inv = integer(0),
+      nn_neighbor_dist = numeric(0), nn = 0L,
+      nn_idx_local = integer(0), nn_dist_local = numeric(0),
+      nn_order_local = integer(0), nn_order_inv_local = integer(0),
+      nn_local = 0L, nn_neighbor_dist_local = numeric(0),
+      nn_idx_regional = integer(0), nn_dist_regional = numeric(0),
+      nn_order_regional = integer(0), nn_order_inv_regional = integer(0),
+      nn_regional = 0L, nn_neighbor_dist_regional = numeric(0),
+      gp_obs_to_loc = integer(0),
+      n_unique = 0L
+    )
+  } else if (inherits(gp, "ratiod_multiscale")) {
+    # NNGP-MSGP: standard neighbor-based multi-scale GP
     local_info <- validated$neighbor_info_local
     regional_info <- validated$neighbor_info_regional
 

@@ -13622,6 +13622,48 @@ Rcpp::List cpp_hmc_fit(
         gp_param_str = Rcpp::as<std::string>(temporal_params["gp_parameterization"]);
     }
     data.temporal_gp_parameterization = (gp_param_str == "centered") ? 0 : 1;
+  } else if (temporal_type_str == "multiscale") {
+    data.temporal_type = TemporalType::NONE;  // MS_t uses its own data path
+    data.has_temporal_gp = false;
+    data.has_multiscale_temporal = true;
+
+    // Extract MS_t data from temporal_params
+    data.multiscale_temporal_data.n_times = n_times;
+    data.multiscale_temporal_data.n_groups = n_temporal_groups;
+    data.multiscale_temporal_data.n_obs = data.N;
+    data.multiscale_temporal_data.time_index = temporal_time_idx;
+    data.multiscale_temporal_data.group_index = temporal_group_idx;
+    data.multiscale_temporal_data.shared = temporal_shared;
+
+    int ms_seasonal_period = 0;
+    if (temporal_params.containsElementNamed("seasonal_period"))
+      ms_seasonal_period = Rcpp::as<int>(temporal_params["seasonal_period"]);
+    data.multiscale_temporal_data.seasonal_period = ms_seasonal_period;
+
+    std::string ms_trend_type = "rw1";
+    if (temporal_params.containsElementNamed("trend_type"))
+      ms_trend_type = Rcpp::as<std::string>(temporal_params["trend_type"]);
+    std::string ms_short_type = "ar1";
+    if (temporal_params.containsElementNamed("short_term_type"))
+      ms_short_type = Rcpp::as<std::string>(temporal_params["short_term_type"]);
+    data.multiscale_temporal_data.trend_type = ratiod_temporal::parse_temporal_type(ms_trend_type);
+    data.multiscale_temporal_data.short_term_type = ratiod_temporal::parse_temporal_type(ms_short_type);
+
+    // MS_t priors
+    data.ms_sigma2_trend_prior_U = 1.0;
+    data.ms_sigma2_trend_prior_alpha = 0.01;
+    data.ms_sigma2_seasonal_prior_U = 1.0;
+    data.ms_sigma2_seasonal_prior_alpha = 0.01;
+    data.ms_sigma2_short_prior_U = 1.0;
+    data.ms_sigma2_short_prior_alpha = 0.01;
+    if (temporal_params.containsElementNamed("sigma2_trend_prior_U"))
+      data.ms_sigma2_trend_prior_U = Rcpp::as<double>(temporal_params["sigma2_trend_prior_U"]);
+    if (temporal_params.containsElementNamed("sigma2_trend_prior_alpha"))
+      data.ms_sigma2_trend_prior_alpha = Rcpp::as<double>(temporal_params["sigma2_trend_prior_alpha"]);
+    if (temporal_params.containsElementNamed("sigma2_short_prior_U"))
+      data.ms_sigma2_short_prior_U = Rcpp::as<double>(temporal_params["sigma2_short_prior_U"]);
+    if (temporal_params.containsElementNamed("sigma2_short_prior_alpha"))
+      data.ms_sigma2_short_prior_alpha = Rcpp::as<double>(temporal_params["sigma2_short_prior_alpha"]);
   } else {
     data.temporal_type = TemporalType::NONE;
     data.has_temporal_gp = false;
