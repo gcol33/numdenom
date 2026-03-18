@@ -165,8 +165,6 @@ struct ModelData {
   std::vector<int> adj_col_idx;      // CSR format: column indices
   std::vector<int> n_neighbors;      // Number of neighbors per unit
   double bym2_scale_factor;          // For BYM2 scaling
-  bool icar_collapsed = false;       // Collapsed ICAR (marginalize phi via inner Laplace)
-  bool bym2_collapsed = false;       // Collapsed BYM2 (marginalize phi+theta via inner Laplace)
   // Precision mass matrix data (precomputed from Q)
   std::vector<double> spatial_Q_inv;    // (Q + lambda*I)^{-1}, column-major [S×S]
   std::vector<double> spatial_L_Q;      // Cholesky L of (Q + lambda*I), column-major [S×S]
@@ -213,15 +211,27 @@ struct ModelData {
   double gp_phi_prior_lower = 0.01;     // Uniform prior bounds for range
   double gp_phi_prior_upper = 10.0;
   int gp_parameterization = 1;          // 0=centered, 1=non-centered (default NC)
-  bool gp_collapsed = false;            // 2=collapsed (marginalize w via inner Laplace)
+
+  // Collapsed parameterization flags (marginalize inner spatial effects via Laplace)
+  // All collapsed logic lives in hmc_icar_collapsed.h and hmc_gp_collapsed.h
+  bool icar_collapsed = false;       // Collapsed ICAR (marginalize phi)
+  bool bym2_collapsed = false;       // Collapsed BYM2 (marginalize phi+theta)
+  bool gp_collapsed = false;         // Collapsed GP (marginalize w)
 
   // Multi-scale GP spatial structure
   MultiscaleGPData multiscale_gp_data;
   bool has_multiscale_gp = false;
+  bool msgp_is_hsgp = false;                    // HSGP approximation for MSGP
+  ratiod_hsgp::HSGPData msgp_hsgp_data;         // Shared HSGP basis for both scales
   double ms_sigma2_local_prior_U = 1.0;
   double ms_sigma2_local_prior_alpha = 0.01;
   double ms_sigma2_regional_prior_U = 1.0;
   double ms_sigma2_regional_prior_alpha = 0.01;
+  // Lengthscale prior means for HSGP-MSGP (log-scale, for LogNormal prior)
+  double ms_log_ls_local_mean = -1.0;            // log(~0.37) — short range
+  double ms_log_ls_local_sd = 0.5;
+  double ms_log_ls_regional_mean = 1.0;          // log(~2.7) — long range
+  double ms_log_ls_regional_sd = 0.5;
 
   // Multi-scale temporal structure
   MultiscaleTemporalData multiscale_temporal_data;
@@ -263,7 +273,9 @@ struct ModelData {
 
   // Spatiotemporal interaction
   bool has_spatiotemporal = false;
+  bool st_is_hsgp = false;                // HSGP-ST: spectral basis interaction
   SpatiotemporalData spatiotemporal_data;
+  ratiod_hsgp::HSGPData st_hsgp_data;    // HSGP basis for ST interaction (separate from main HSGP)
   int st_parameterization = 0;            // 0=centered, 1=non-centered (NC requires spectral decomposition)
   double st_sigma2_prior_U = 1.0;       // PC prior for interaction variance
   double st_sigma2_prior_alpha = 0.01;
@@ -403,7 +415,11 @@ struct ParamLayout {
   int logit_rho_st_idx;                              // AR1 autocorrelation if ST temporal is AR1
   int log_phi_st_space_idx;                          // Log spatial range (GP-based)
   int log_phi_st_time_idx;                           // Log temporal range (GP-based)
-  int st_delta_start, st_delta_end;                  // ST interaction effects (S * T)
+  int st_delta_start, st_delta_end;                  // ST interaction effects (S * T or m^2 * T)
+  // HSGP-ST: separate hyperparameters for spectral basis interaction
+  int log_sigma2_st_hsgp_idx;                        // Log variance for ST HSGP kernel
+  int log_lengthscale_st_hsgp_idx;                   // Log lengthscale for ST HSGP kernel
+  bool is_st_hsgp;                                   // True if ST uses HSGP basis
 
   // TVC (Temporally-Varying Coefficients) parameters
   int log_tau_tvc_start, log_tau_tvc_end;            // Log precision per TVC term
@@ -418,9 +434,10 @@ struct ParamLayout {
   bool has_spatial = false;
   bool is_bym2 = false;
   bool is_gp = false;
-  bool is_gp_collapsed = false;
+  // Collapsed parameterization flags (mirror of ModelData collapsed flags)
   bool is_icar_collapsed = false;
   bool is_bym2_collapsed = false;
+  bool is_gp_collapsed = false;
   bool is_multiscale_gp = false;
   bool is_hsgp = false;
   bool has_temporal = false;
@@ -1735,14 +1752,12 @@ struct HMCResultCpp {
   int n_max_treedepth = 0;       // Count of iterations hitting max treedepth
   std::string sampler;           // Sampler name (e.g., "NUTS", "HMC", "NUTS->HMC(L=10)")
 
-  // Collapsed GP: w* draws (n_sample x n_gp, row-major)
-  std::vector<double> gp_w_star_flat;
-  int n_gp_collapsed = 0;
-
-  // Collapsed ICAR/BYM2: phi* and theta* draws (n_sample x S, row-major)
-  std::vector<double> icar_phi_star_flat;
-  std::vector<double> bym2_theta_star_flat;
-  int n_icar_collapsed = 0;  // S (spatial units), 0 if not collapsed
+  // Collapsed mode draws (populated only when collapsed parameterization active)
+  int n_gp_collapsed = 0;                         // N_gp if collapsed GP, 0 otherwise
+  int n_icar_collapsed = 0;                        // S if collapsed ICAR/BYM2, 0 otherwise
+  std::vector<double> gp_w_star_flat;              // w* draws (n_sample x N_gp, row-major)
+  std::vector<double> icar_phi_star_flat;          // phi* draws (n_sample x S, row-major)
+  std::vector<double> bym2_theta_star_flat;        // theta* draws (n_sample x S, row-major)
 
   // Row access for flat storage
   double* sample_row(int i) { return &samples_flat[i * n_params_stored]; }
@@ -1763,14 +1778,12 @@ struct HMCResult {
   int chain_id;
   std::string sampler;
 
-  // Collapsed GP: w* draws (n_sample x n_gp)
-  Rcpp::NumericMatrix gp_w_star;
+  // Collapsed mode draws (populated only when collapsed parameterization active)
   int n_gp_collapsed = 0;
-
-  // Collapsed ICAR/BYM2: phi* and theta* draws
+  int n_icar_collapsed = 0;
+  Rcpp::NumericMatrix gp_w_star;
   Rcpp::NumericMatrix icar_phi_star;
   Rcpp::NumericMatrix bym2_theta_star;
-  int n_icar_collapsed = 0;
 };
 
 // Convert C++ result to R result (call outside parallel region)

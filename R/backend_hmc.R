@@ -617,6 +617,7 @@ fit_hmc <- function(formula,
       sigma_prior_rate = latent_info$sigma_prior_rate
     )
 
+    st_is_hsgp <- isTRUE(spatiotemporal_info$spatial_is_hsgp)
     st_params <- list(
       has_spatiotemporal = spatiotemporal_info$has_spatiotemporal %||% FALSE,
       type = spatiotemporal_info$type %||% "none",
@@ -637,7 +638,13 @@ fit_hmc <- function(formula,
       Qs_inv = spatiotemporal_info$spatial_Q$Q_inv,
       Ls = spatiotemporal_info$spatial_Q$L_Q,
       Qt_inv = spatiotemporal_info$temporal_Q$Q_time_inv,
-      Lt = spatiotemporal_info$temporal_Q$L_time
+      Lt = spatiotemporal_info$temporal_Q$L_time,
+      # HSGP-ST fields (only used when spatial_is_hsgp = TRUE)
+      st_is_hsgp = st_is_hsgp,
+      hsgp_m = as.integer(spatiotemporal_info$hsgp_m %||% 0L),
+      hsgp_c = spatiotemporal_info$hsgp_c %||% 1.5,
+      hsgp_coords = if (st_is_hsgp) as.numeric(t(spatiotemporal_info$hsgp_coords)) else numeric(0),
+      hsgp_scale_coords = spatiotemporal_info$hsgp_scale_coords %||% TRUE
     )
 
     # TVC (Temporally-Varying Coefficients) parameters

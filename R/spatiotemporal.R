@@ -283,7 +283,16 @@ validate_spatiotemporal <- function(st, data) {
   if (is.null(st)) return(NULL)
 
   # Validate spatial component
-  if (inherits(st$spatial, "ratiod_gp")) {
+  if (inherits(st$spatial, "ratiod_hsgp")) {
+    # HSGP spatial: validate coords, set n_spatial = m^2 (basis functions)
+    st$spatial_is_hsgp <- TRUE
+    coord_vars <- st$spatial$coord_vars
+    coords <- as.matrix(data[, coord_vars, drop = FALSE])
+    st$spatial$coords_matrix <- coords
+    st$spatial$n_obs <- nrow(coords)
+    m <- st$spatial$m %||% 6L
+    st$n_spatial <- as.integer(m)^2  # m^2 basis functions replace S spatial units
+  } else if (inherits(st$spatial, "ratiod_gp")) {
     st$spatial <- validate_gp(st$spatial, data)
     st$n_spatial <- st$spatial$n_spatial
   } else if (inherits(st$spatial, "ratiod_multiscale")) {
@@ -338,7 +347,10 @@ build_st_index <- function(st, data) {
   T <- st$n_times
 
   # Get spatial index for each observation
-  if (!is.null(st$spatial$group_var)) {
+  if (isTRUE(st$spatial_is_hsgp)) {
+    # HSGP-ST: no spatial grouping, spatial mapping via Phi basis matrix
+    s_idx <- rep(1L, N)  # placeholder — C++ uses Phi instead
+  } else if (!is.null(st$spatial$group_var)) {
     spatial_var <- st$spatial$group_var
     if (!(spatial_var %in% names(data))) {
       stop(sprintf("Spatial group variable '%s' not found in data", spatial_var),
@@ -411,7 +423,7 @@ prepare_spatiotemporal_for_hmc <- function(st, data) {
   # Prepare temporal precision structure
   temporal_Q_info <- prepare_temporal_precision(st$temporal)
 
-  list(
+  result <- list(
     has_spatiotemporal = TRUE,
     type = st$type,
     shared = st$shared,
@@ -433,6 +445,17 @@ prepare_spatiotemporal_for_hmc <- function(st, data) {
     temporal_Q = temporal_Q_info,
     temporal_cyclic = isTRUE(st$temporal$cyclic)
   )
+
+  # HSGP-ST fields
+  if (isTRUE(st$spatial_is_hsgp)) {
+    result$spatial_is_hsgp <- TRUE
+    result$hsgp_m <- st$spatial$m %||% 6L
+    result$hsgp_c <- st$spatial$c %||% 1.5
+    result$hsgp_coords <- st$spatial$coords_matrix
+    result$hsgp_scale_coords <- st$spatial$scale_coords %||% TRUE
+  }
+
+  result
 }
 
 
@@ -444,6 +467,16 @@ prepare_spatiotemporal_for_hmc <- function(st, data) {
 #' @keywords internal
 prepare_spatial_precision <- function(spatial) {
   if (is.null(spatial)) return(NULL)
+
+  if (inherits(spatial, "ratiod_hsgp")) {
+    # HSGP: no adjacency or neighbor structure needed — spatial precision is spectral
+    return(list(
+      type = "hsgp",
+      n = spatial$m^2,
+      adj_row_ptr = integer(0),
+      adj_col_idx = integer(0)
+    ))
+  }
 
   if (inherits(spatial, c("ratiod_gp", "ratiod_multiscale"))) {
     # GP: return neighbor info for NNGP

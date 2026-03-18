@@ -89,6 +89,10 @@ struct SpatiotemporalData {
   double phi_space_prior_upper;
   double phi_time_prior_lower;     // Uniform bounds for temporal range
   double phi_time_prior_upper;
+
+  // HSGP-ST: spectral basis spatiotemporal interaction
+  bool is_hsgp = false;            // If true, spatial precision is spectral (diagonal)
+  int hsgp_m_total = 0;            // m^2 basis functions
 };
 
 // =====================================================================
