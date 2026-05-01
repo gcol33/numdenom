@@ -1743,6 +1743,29 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_tulpa_pg_binomial_gibbs
+Rcpp::List cpp_tulpa_pg_binomial_gibbs(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::IntegerVector group, int n_groups, int n_iter, int n_warmup, int thin, double prior_beta_sd, double prior_sigma_scale, bool store_eta, bool verbose, int n_threads);
+RcppExport SEXP _tulpaRatio_cpp_tulpa_pg_binomial_gibbs(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP groupSEXP, SEXP n_groupsSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP thinSEXP, SEXP prior_beta_sdSEXP, SEXP prior_sigma_scaleSEXP, SEXP store_etaSEXP, SEXP verboseSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type n(nSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X(XSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type group(groupSEXP);
+    Rcpp::traits::input_parameter< int >::type n_groups(n_groupsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
+    Rcpp::traits::input_parameter< int >::type n_warmup(n_warmupSEXP);
+    Rcpp::traits::input_parameter< int >::type thin(thinSEXP);
+    Rcpp::traits::input_parameter< double >::type prior_beta_sd(prior_beta_sdSEXP);
+    Rcpp::traits::input_parameter< double >::type prior_sigma_scale(prior_sigma_scaleSEXP);
+    Rcpp::traits::input_parameter< bool >::type store_eta(store_etaSEXP);
+    Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_tulpa_pg_binomial_gibbs(y, n, X, group, n_groups, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_scale, store_eta, verbose, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_vi_fit
 Rcpp::List cpp_vi_fit(Rcpp::NumericVector q_init, Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, std::string model_type_str, Rcpp::List re_params, Rcpp::List spatial_params, Rcpp::List temporal_params, Rcpp::List prior_params, Rcpp::List zi_params, Rcpp::List latent_params, Rcpp::List st_params, Rcpp::List vi_options, bool verbose);
 RcppExport SEXP _tulpaRatio_cpp_vi_fit(SEXP q_initSEXP, SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP model_type_strSEXP, SEXP re_paramsSEXP, SEXP spatial_paramsSEXP, SEXP temporal_paramsSEXP, SEXP prior_paramsSEXP, SEXP zi_paramsSEXP, SEXP latent_paramsSEXP, SEXP st_paramsSEXP, SEXP vi_optionsSEXP, SEXP verboseSEXP) {
@@ -1896,6 +1919,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_test_parallel_likelihood", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_likelihood, 3},
     {"_tulpaRatio_cpp_test_parallel_independent", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_independent, 2},
     {"_tulpaRatio_cpp_tulpa_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_abi_version, 0},
+    {"_tulpaRatio_cpp_tulpa_pg_binomial_gibbs", (DL_FUNC) &_tulpaRatio_cpp_tulpa_pg_binomial_gibbs, 13},
     {"_tulpaRatio_cpp_vi_fit", (DL_FUNC) &_tulpaRatio_cpp_vi_fit, 16},
     {"_tulpaRatio_cpp_vi_get_n_params", (DL_FUNC) &_tulpaRatio_cpp_vi_get_n_params, 7},
     {NULL, NULL, 0}

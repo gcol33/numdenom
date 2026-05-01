@@ -235,7 +235,7 @@ fit_pg_binomial <- function(formula,
 
     } else if (re_info$n_groups > 0) {
       # Fit with random effects only
-      chain_results[[chain]] <- cpp_pg_binomial_gibbs(
+      chain_results[[chain]] <- cpp_tulpa_pg_binomial_gibbs(
         y = as.integer(y),
         n = as.integer(trials),
         X = X,
@@ -253,7 +253,7 @@ fit_pg_binomial <- function(formula,
 
     } else {
       # No random effects - add dummy group
-      chain_results[[chain]] <- cpp_pg_binomial_gibbs(
+      chain_results[[chain]] <- cpp_tulpa_pg_binomial_gibbs(
         y = as.integer(y),
         n = as.integer(trials),
         X = X,
