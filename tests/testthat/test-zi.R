@@ -91,7 +91,7 @@ test_that("validate_zi checks formula variables exist", {
 
 
 test_that("prepare_zi_for_hmc returns none for NULL zi", {
-  zi_info <- numdenom:::prepare_zi_for_hmc(NULL, data.frame(), 10)
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(NULL, data.frame(), 10)
 
   expect_equal(zi_info$type, "none")
   expect_equal(nrow(zi_info$X_zi), 10)
@@ -103,7 +103,7 @@ test_that("prepare_zi_for_hmc creates design matrix for intercept-only", {
   zi <- zi_poisson()
   df <- data.frame(x = 1:10, y = 10:1)
 
-  zi_info <- numdenom:::prepare_zi_for_hmc(zi, df, 10)
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(zi, df, 10)
 
   expect_equal(zi_info$type, "zi_poisson")
   expect_equal(nrow(zi_info$X_zi), 10)
@@ -116,7 +116,7 @@ test_that("prepare_zi_for_hmc creates design matrix with predictors", {
   zi <- zi_poisson(~ x)
   df <- data.frame(x = 1:10, y = 10:1)
 
-  zi_info <- numdenom:::prepare_zi_for_hmc(zi, df, 10)
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(zi, df, 10)
 
   expect_equal(zi_info$type, "zi_poisson")
   expect_equal(nrow(zi_info$X_zi), 10)
@@ -144,16 +144,16 @@ test_that("ratiod_hurdle_negbin creates hurdle family", {
 
 
 test_that("is_zi_family correctly identifies ZI families", {
-  expect_true(numdenom:::is_zi_family(ratiod_zinegbin()))
-  expect_true(numdenom:::is_zi_family(ratiod_zipois()))
-  expect_false(numdenom:::is_zi_family(ratiod_negbin_negbin()))
+  expect_true(tulpaRatio:::is_zi_family(ratiod_zinegbin()))
+  expect_true(tulpaRatio:::is_zi_family(ratiod_zipois()))
+  expect_false(tulpaRatio:::is_zi_family(ratiod_negbin_negbin()))
 })
 
 
 test_that("is_hurdle_family correctly identifies hurdle families", {
-  expect_true(numdenom:::is_hurdle_family(ratiod_hurdle_negbin()))
-  expect_true(numdenom:::is_hurdle_family(ratiod_hurdle_pois()))
-  expect_false(numdenom:::is_hurdle_family(ratiod_zinegbin()))
+  expect_true(tulpaRatio:::is_hurdle_family(ratiod_hurdle_negbin()))
+  expect_true(tulpaRatio:::is_hurdle_family(ratiod_hurdle_pois()))
+  expect_false(tulpaRatio:::is_hurdle_family(ratiod_zinegbin()))
 })
 
 
@@ -217,17 +217,17 @@ test_that("ratiod_hurdle_binomial creates correct structure", {
 
 
 test_that("is_oi_family identifies one-inflated families", {
-  expect_true(numdenom:::is_oi_family(ratiod_oibinomial()))
-  expect_true(numdenom:::is_oi_family(ratiod_zoibinomial()))
-  expect_false(numdenom:::is_oi_family(ratiod_zinegbin()))
-  expect_false(numdenom:::is_oi_family(ratiod_zibinomial()))
+  expect_true(tulpaRatio:::is_oi_family(ratiod_oibinomial()))
+  expect_true(tulpaRatio:::is_oi_family(ratiod_zoibinomial()))
+  expect_false(tulpaRatio:::is_oi_family(ratiod_zinegbin()))
+  expect_false(tulpaRatio:::is_oi_family(ratiod_zibinomial()))
 })
 
 
 test_that("is_zoib_family identifies ZOIB families", {
-  expect_true(numdenom:::is_zoib_family(ratiod_zoibinomial()))
-  expect_false(numdenom:::is_zoib_family(ratiod_oibinomial()))
-  expect_false(numdenom:::is_zoib_family(ratiod_zibinomial()))
+  expect_true(tulpaRatio:::is_zoib_family(ratiod_zoibinomial()))
+  expect_false(tulpaRatio:::is_zoib_family(ratiod_oibinomial()))
+  expect_false(tulpaRatio:::is_zoib_family(ratiod_zibinomial()))
 })
 
 

@@ -14,7 +14,7 @@ test_that("formula parsing detects correlated vs uncorrelated slopes", {
   )
 
   # Test correlated slope parsing (single bar)
-  re1 <- numdenom:::extract_random_effects("(1 + x | site)", df)
+  re1 <- tulpaRatio:::extract_random_effects("(1 + x | site)", df)
   expect_length(re1, 1)
   expect_equal(re1[[1]]$group_var, "site")
   expect_true(re1[[1]]$has_intercept)
@@ -22,7 +22,7 @@ test_that("formula parsing detects correlated vs uncorrelated slopes", {
   expect_true(isTRUE(re1[[1]]$correlated))
 
   # Test uncorrelated slope parsing (double bar)
-  re2 <- numdenom:::extract_random_effects("(1 + x || site)", df)
+  re2 <- tulpaRatio:::extract_random_effects("(1 + x || site)", df)
   expect_length(re2, 1)
   expect_equal(re2[[1]]$group_var, "site")
   expect_true(re2[[1]]$has_intercept)
@@ -30,13 +30,13 @@ test_that("formula parsing detects correlated vs uncorrelated slopes", {
   expect_false(isTRUE(re2[[1]]$correlated))
 
   # Test multiple slopes
-  re3 <- numdenom:::extract_random_effects("(1 + x + z | site)", df)
+  re3 <- tulpaRatio:::extract_random_effects("(1 + x + z | site)", df)
   expect_length(re3, 1)
   expect_equal(re3[[1]]$slope_vars, c("x", "z"))
   expect_true(isTRUE(re3[[1]]$correlated))
 
   # Test intercept only (should have correlated = TRUE by default, but no slopes)
-  re4 <- numdenom:::extract_random_effects("(1 | site)", df)
+  re4 <- tulpaRatio:::extract_random_effects("(1 | site)", df)
   expect_length(re4, 1)
   expect_true(re4[[1]]$has_intercept)
   expect_null(re4[[1]]$slope_vars)
@@ -55,7 +55,7 @@ test_that("formula expansion handles interactions (x*z)", {
   )
 
   # x*z should expand to x + z + x:z (3 slopes)
-  re <- numdenom:::extract_random_effects("(1 + x*z | site)", df)
+  re <- tulpaRatio:::extract_random_effects("(1 + x*z | site)", df)
   expect_length(re, 1)
   expect_true(re[[1]]$has_intercept)
 
@@ -86,7 +86,7 @@ test_that("formula expansion handles polynomials I(x^2)", {
   )
 
   # I(x^2) should create a single squared term
-  re <- numdenom:::extract_random_effects("(1 + I(x^2) | site)", df)
+  re <- tulpaRatio:::extract_random_effects("(1 + I(x^2) | site)", df)
   expect_length(re, 1)
   expect_true(re[[1]]$has_intercept)
 
@@ -115,7 +115,7 @@ test_that("formula expansion handles x + I(x^2)", {
   )
 
   # x + I(x^2) creates both linear and squared terms
-  re <- numdenom:::extract_random_effects("(1 + x + I(x^2) | site)", df)
+  re <- tulpaRatio:::extract_random_effects("(1 + x + I(x^2) | site)", df)
   expect_length(re, 1)
   expect_equal(length(re[[1]]$slope_vars), 2)
 
@@ -139,7 +139,7 @@ test_that("formula expansion handles poly(x, 2)", {
   )
 
   # poly(x, 2) creates orthogonal polynomial terms
-  re <- numdenom:::extract_random_effects("(1 + poly(x, 2) | site)", df)
+  re <- tulpaRatio:::extract_random_effects("(1 + poly(x, 2) | site)", df)
   expect_length(re, 1)
 
   # poly(x, 2) should expand to 2 columns
@@ -162,23 +162,23 @@ test_that("expand_re_slopes handles edge cases", {
   )
 
   # Empty slopes
-  result <- numdenom:::expand_re_slopes(NULL, df)
+  result <- tulpaRatio:::expand_re_slopes(NULL, df)
   expect_equal(length(result$slope_vars), 0)
   expect_equal(ncol(result$slope_matrix), 0)
 
   # Single variable
-  result <- numdenom:::expand_re_slopes("x", df)
+  result <- tulpaRatio:::expand_re_slopes("x", df)
   expect_equal(result$slope_vars, "x")
   expect_equal(ncol(result$slope_matrix), 1)
 
   # Factor variable (creates dummy variables)
-  result <- numdenom:::expand_re_slopes("f", df)
+  result <- tulpaRatio:::expand_re_slopes("f", df)
   expect_true(length(result$slope_vars) >= 2)  # At least 2 dummy columns for 3-level factor
 })
 
 
 test_that("clean_slope_names produces expected output", {
-  clean <- numdenom:::clean_slope_names
+  clean <- tulpaRatio:::clean_slope_names
 
   # Interactions
   expect_equal(clean("x:z"), "x_z")
@@ -202,7 +202,7 @@ test_that("clean_slope_names produces expected output", {
 
 test_that("random slopes model compiles and runs without error", {
   skip_on_cran()
-  skip_if_not_installed("numdenom")
+  skip_if_not_installed("tulpaRatio")
 
   set.seed(42)
   n_sites <- 5
@@ -260,7 +260,7 @@ test_that("random slopes model compiles and runs without error", {
 
 test_that("correlated random slopes model runs without error", {
   skip_on_cran()
-  skip_if_not_installed("numdenom")
+  skip_if_not_installed("tulpaRatio")
   skip_if_not_installed("MASS")
 
   set.seed(42)

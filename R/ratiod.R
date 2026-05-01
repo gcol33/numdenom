@@ -201,7 +201,7 @@ ratiod <- function(formula,
   metric <- match.arg(metric)
 
   # Suppress verbose output during testing to prevent output buffer overflow
-  if (isTRUE(getOption("numdenom.test_mode")) && missing(verbose)) {
+  if (isTRUE(getOption("tulpaRatio.test_mode")) && missing(verbose)) {
     verbose <- FALSE
   }
 

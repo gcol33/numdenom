@@ -32,6 +32,6 @@ List cpp_gpu_info() {
     Named("devices") = devices
   );
 
-  result.attr("class") = "numdenom_gpu_info";
+  result.attr("class") = "tulpaRatio_gpu_info";
   return result;
 }

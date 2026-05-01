@@ -1,5 +1,5 @@
 // vi_sampler.cpp
-// Variational Inference backend for numdenom
+// Variational Inference backend for tulpaRatio
 // Main entry point with variant selection and Rcpp exports
 
 #include "hmc_sampler.h"

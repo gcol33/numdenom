@@ -98,7 +98,7 @@ test_that("plot_with_base produces trace plots", {
   # Should not error
   expect_silent(
     suppressWarnings(
-      numdenom:::plot_with_base(draws_array, type = "trace", n_chains = 1)
+      tulpaRatio:::plot_with_base(draws_array, type = "trace", n_chains = 1)
     )
   )
 })
@@ -120,7 +120,7 @@ test_that("plot_with_base produces density plots", {
   # Should not error
   expect_silent(
     suppressWarnings(
-      numdenom:::plot_with_base(draws_array, type = "dens", n_chains = 1)
+      tulpaRatio:::plot_with_base(draws_array, type = "dens", n_chains = 1)
     )
   )
 })
@@ -142,7 +142,7 @@ test_that("plot_with_base produces combined plots", {
   # Should not error
   expect_silent(
     suppressWarnings(
-      numdenom:::plot_with_base(draws_array, type = "both", n_chains = 1)
+      tulpaRatio:::plot_with_base(draws_array, type = "both", n_chains = 1)
     )
   )
 })
@@ -164,7 +164,7 @@ test_that("plot_with_base handles multi-chain", {
   # Should not error
   expect_silent(
     suppressWarnings(
-      numdenom:::plot_with_base(draws_array, type = "dens", n_chains = 2)
+      tulpaRatio:::plot_with_base(draws_array, type = "dens", n_chains = 2)
     )
   )
 })
@@ -217,7 +217,7 @@ test_that("compute_fitted_values dispatches correctly", {
     chains = 1
   )
 
-  result <- numdenom:::compute_fitted_values(fit)
+  result <- tulpaRatio:::compute_fitted_values(fit)
 
   expect_true(is.list(result))
   expect_true("numerator" %in% names(result))
@@ -246,7 +246,7 @@ test_that("compute_fitted_hmc works", {
     chains = 1
   )
 
-  result <- numdenom:::compute_fitted_hmc(fit)
+  result <- tulpaRatio:::compute_fitted_hmc(fit)
 
   expect_true(is.matrix(result$numerator))
   expect_true(is.matrix(result$denominator))
@@ -391,7 +391,7 @@ test_that("build_prediction_data works", {
 
   newdata <- data.frame(x = c(-1, 0, 1))
 
-  pred_data <- numdenom:::build_prediction_data(
+  pred_data <- tulpaRatio:::build_prediction_data(
     fit, newdata, re_formula = NA, allow_new_levels = FALSE
   )
 
@@ -425,11 +425,11 @@ test_that("compute_predictions_hmc works", {
 
   newdata <- data.frame(x = c(-1, 0, 1))
 
-  pred_data <- numdenom:::build_prediction_data(
+  pred_data <- tulpaRatio:::build_prediction_data(
     fit, newdata, re_formula = NA, allow_new_levels = FALSE
   )
 
-  result <- numdenom:::compute_predictions_hmc(fit, pred_data, type = "response")
+  result <- tulpaRatio:::compute_predictions_hmc(fit, pred_data, type = "response")
 
   expect_true(is.list(result))
   expect_true("numerator" %in% names(result))
@@ -461,11 +461,11 @@ test_that("compute_predictions_hmc works with link scale", {
 
   newdata <- data.frame(x = c(-1, 0, 1))
 
-  pred_data <- numdenom:::build_prediction_data(
+  pred_data <- tulpaRatio:::build_prediction_data(
     fit, newdata, re_formula = NA, allow_new_levels = FALSE
   )
 
-  result <- numdenom:::compute_predictions_hmc(fit, pred_data, type = "link")
+  result <- tulpaRatio:::compute_predictions_hmc(fit, pred_data, type = "link")
 
   expect_true(is.list(result))
   # Link scale ratio should be log(num) - log(denom)

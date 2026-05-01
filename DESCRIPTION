@@ -1,6 +1,6 @@
-Package: numdenom
-URL: https://github.com/gcol33/numdenom, https://gillescolling.com/numdenom
-BugReports: https://github.com/gcol33/numdenom/issues
+Package: tulpaRatio
+URL: https://github.com/gcol33/tulpaRatio, https://gillescolling.com/tulpaRatio
+BugReports: https://github.com/gcol33/tulpaRatio/issues
 Title: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
 Version: 1.3.0
 Authors@R:
@@ -27,10 +27,12 @@ Imports:
     posterior,
     loo,
     stats,
+    tulpa,
     Rcpp (>= 1.0.0)
 LinkingTo:
     Rcpp,
-    RcppEigen
+    RcppEigen,
+    tulpa
 Suggests:
     bayesplot,
     patchwork,

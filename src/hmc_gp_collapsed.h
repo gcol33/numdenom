@@ -16,8 +16,8 @@
 // at the mode w*, dL/dw = 0, so dw*/dtheta terms vanish and
 // dL/dtheta = partial_L/partial_theta |_{w=w*}
 
-#ifndef RATIOD_HMC_GP_COLLAPSED_H
-#define RATIOD_HMC_GP_COLLAPSED_H
+#ifndef ratiod_hmc_GP_COLLAPSED_H
+#define ratiod_hmc_GP_COLLAPSED_H
 
 #include <vector>
 #include <cmath>
@@ -43,11 +43,10 @@ struct CollapsedGPWorkspace {
     std::vector<int> n_nb;          // Number of neighbors per location
     std::vector<int> nb_idx_flat;   // Neighbor indices (flattened, 0-based)
     std::vector<double> d_cond;     // Conditional variances
-    int nn;                         // Max neighbors
-    int N_gp;                       // Number of unique locations
+    int nn = 0;                     // Max neighbors
+    int N_gp = 0;                   // Number of unique locations
 
     // Transpose neighbor structure (for Q^T v efficiently)
-    // For each location i, which locations j have i as their neighbor?
     std::vector<int> rev_ptr;       // CSR-style: rev_ptr[i] .. rev_ptr[i+1] are locations j
     std::vector<int> rev_col;       // The j values
     std::vector<int> rev_nb_pos;    // Position of i in j's neighbor list (for B lookup)
@@ -68,10 +67,21 @@ struct CollapsedGPWorkspace {
     bool structure_built = false;
     bool mode_found = false;
 
+    // Fix 2: NNGP structure cache — avoid rebuild when (sigma2, phi) unchanged
+    double cached_sigma2 = -1.0;
+    double cached_phi = -1.0;
+
+    // Loc→obs mapping (avoids O(N) scan per location in compute_loc_lik)
+    std::vector<int> loc_obs_ptr;    // CSR: loc_obs_ptr[loc]..loc_obs_ptr[loc+1]
+    std::vector<int> loc_obs_idx;    // Observation indices for each location
+    bool loc_map_built = false;
+
     void init(int n_gp, int max_nn) {
-        // If N_gp changed (different model or different data), reset mode
         if (n_gp != N_gp) {
             mode_found = false;
+            loc_map_built = false;
+            cached_sigma2 = -1.0;
+            cached_phi = -1.0;
         }
         N_gp = n_gp;
         nn = max_nn;
@@ -89,6 +99,32 @@ struct CollapsedGPWorkspace {
         H_inv_diag.assign(n_gp, 0.0);
     }
 };
+
+// Build loc→obs CSR mapping for O(1) per-location observation lookup
+inline void build_loc_obs_map(CollapsedGPWorkspace& ws, const ModelData& data) {
+    if (ws.loc_map_built) return;
+    int N_gp = ws.N_gp;
+    int N = data.N;
+    std::vector<int> counts(N_gp, 0);
+    for (int i = 0; i < N; i++) {
+        int loc = data.gp_data.obs_to_loc[i];
+        if (loc >= 0 && loc < N_gp) counts[loc]++;
+    }
+    ws.loc_obs_ptr.resize(N_gp + 1);
+    ws.loc_obs_ptr[0] = 0;
+    for (int loc = 0; loc < N_gp; loc++)
+        ws.loc_obs_ptr[loc + 1] = ws.loc_obs_ptr[loc] + counts[loc];
+    ws.loc_obs_idx.resize(ws.loc_obs_ptr[N_gp]);
+    std::fill(counts.begin(), counts.end(), 0);
+    for (int i = 0; i < N; i++) {
+        int loc = data.gp_data.obs_to_loc[i];
+        if (loc >= 0 && loc < N_gp) {
+            ws.loc_obs_idx[ws.loc_obs_ptr[loc] + counts[loc]] = i;
+            counts[loc]++;
+        }
+    }
+    ws.loc_map_built = true;
+}
 
 // Build the NNGP coefficients B and conditional variances D for given (sigma2, phi)
 // B[i,j] = c_i^T C_i^{-1} e_j  (regression of w_i on neighbors)
@@ -423,20 +459,48 @@ inline double compute_laplace_log_det(CollapsedGPWorkspace& ws) {
     // Z values stored at same positions as L's nonzeros
     std::vector<double> Z_vals(nnz_L, 0.0);
 
-    // Helper: find value in column col at row 'row'
-    auto find_Z = [&](int row, int col) -> double* {
-        for (int idx = outerPtr[col]; idx < outerPtr[col + 1]; idx++) {
-            if (innerIdx[idx] == row) return &Z_vals[idx];
+    // Fix 3: Binary search helpers (Eigen CSC columns have sorted inner indices)
+    auto bsearch_idx = [&](int col, int row) -> int {
+        int lo = outerPtr[col], hi = outerPtr[col + 1];
+        while (lo < hi) {
+            int mid = (lo + hi) >> 1;
+            if (innerIdx[mid] < row) lo = mid + 1;
+            else if (innerIdx[mid] > row) hi = mid;
+            else return mid;
         }
-        return nullptr;
+        return -1;
+    };
+
+    auto find_Z = [&](int row, int col) -> double* {
+        int idx = bsearch_idx(col, row);
+        return (idx >= 0) ? &Z_vals[idx] : nullptr;
     };
 
     auto get_L_val = [&](int row, int col) -> double {
-        for (int idx = outerPtr[col]; idx < outerPtr[col + 1]; idx++) {
-            if (innerIdx[idx] == row) return vals_L[idx];
-        }
-        return 0.0;
+        int idx = bsearch_idx(col, row);
+        return (idx >= 0) ? vals_L[idx] : 0.0;
     };
+
+    // Pre-build column-level children lists to avoid repeated scanning
+    // children[j] = list of (row k, L_kj) for k > j in column j
+    struct Child { int k; double L_kj; int idx; };
+    std::vector<std::vector<Child>> col_children(N);
+    for (int j = 0; j < N; j++) {
+        for (int idx = outerPtr[j]; idx < outerPtr[j + 1]; idx++) {
+            if (innerIdx[idx] > j) {
+                col_children[j].push_back({innerIdx[idx], vals_L[idx], idx});
+            }
+        }
+    }
+
+    // Pre-build parent list: for each column i, which columns j > i have L(j,i) != 0?
+    std::vector<std::vector<int>> col_parents(N);
+    for (int i = 0; i < N; i++) {
+        for (int idx = outerPtr[i]; idx < outerPtr[i + 1]; idx++) {
+            int row = innerIdx[idx];
+            if (row > i) col_parents[i].push_back(row);
+        }
+    }
 
     // Process columns from right to left
     for (int j = N - 1; j >= 0; j--) {
@@ -444,12 +508,7 @@ inline double compute_laplace_log_det(CollapsedGPWorkspace& ws) {
         if (std::abs(L_jj) < 1e-15) L_jj = 1e-10;
         double inv_Ljj = 1.0 / L_jj;
 
-        // Children: rows k > j in column j
-        struct Child { int k; double L_kj; };
-        std::vector<Child> children;
-        for (int idx = outerPtr[j]; idx < outerPtr[j + 1]; idx++) {
-            if (innerIdx[idx] > j) children.push_back({innerIdx[idx], vals_L[idx]});
-        }
+        const auto& children = col_children[j];
 
         // Z_jj = 1/L_jj^2 - (1/L_jj) * sum_k L_kj * Z_kj
         double sum_diag = 0.0;
@@ -461,14 +520,12 @@ inline double compute_laplace_log_det(CollapsedGPWorkspace& ws) {
         double* Z_jj_ptr = find_Z(j, j);
         if (Z_jj_ptr) *Z_jj_ptr = Z_jj;
 
-        // Off-diagonal Z entries needed for future columns
-        // For each column i < j that has L(j,i) != 0:
+        // Off-diagonal: only columns i < j that have L(j,i) != 0
+        // Use pre-built parent list for column j's parents (actually iterate col j's structure)
         for (int i = 0; i < j; i++) {
-            bool has_L_ji = false;
-            for (int idx = outerPtr[i]; idx < outerPtr[i + 1]; idx++) {
-                if (innerIdx[idx] == j) { has_L_ji = true; break; }
-            }
-            if (!has_L_ji) continue;
+            // Binary search for L(j,i) in column i
+            int ji_idx = bsearch_idx(i, j);
+            if (ji_idx < 0) continue;
 
             // Z_ji = -(1/L_jj) * sum_k L_kj * Z_ik
             double sum_off = 0.0;
@@ -521,16 +578,19 @@ inline LocLikResult compute_loc_lik(
     const double* beta_num, const double* beta_denom,
     double phi_num, double phi_denom,
     const ModelData& data,
-    bool is_binomial
+    bool is_binomial,
+    const int* obs_list = nullptr,  // pre-filtered obs at this location
+    int n_obs = -1                  // number of obs (-1 = scan all)
 ) {
     LocLikResult res = {0.0, 0.0, 0.0};
-    int N = data.N;
+    int N_iter = (n_obs >= 0) ? n_obs : data.N;
 
     // DEBUG: per-obs NaN tracking
     static thread_local int loc_lik_debug = 0;
 
-    for (int i = 0; i < N; i++) {
-        if (data.gp_data.obs_to_loc[i] != loc) continue;
+    for (int idx = 0; idx < N_iter; idx++) {
+        int i = (obs_list != nullptr) ? obs_list[idx] : idx;
+        if (obs_list == nullptr && data.gp_data.obs_to_loc[i] != loc) continue;
 
         // Compute eta
         double eta_num_i = 0.0, eta_denom_i = 0.0;
@@ -552,7 +612,7 @@ inline LocLikResult compute_loc_lik(
         int y_num = data.y_num[i];
 
         // DEBUG: print first obs details if NaN
-        if (loc_lik_debug < 3 && N >= 100) {
+        if (loc_lik_debug < 3 && data.N >= 100) {
             double y_dc = (data.y_denom_cont.size() > (size_t)i) ? data.y_denom_cont[i] : -999.0;
             int y_d = (data.y_denom.size() > (size_t)i) ? data.y_denom[i] : -999;
             Rprintf("[LOC_LIK] i=%d loc=%d eta_num=%.4f eta_den=%.4f mu_num=%.4f y_num=%d "
@@ -685,6 +745,9 @@ inline double laplace_log_det_full(
         build_nngp_B_D(sigma2, phi, data.gp_data, temp_ws);
     }
 
+    // Build loc→obs mapping for fast per-location iteration
+    build_loc_obs_map(temp_ws, data);
+
     // Warm-start from provided w
     temp_ws.w_star = warm_w;
     temp_ws.mode_found = true;
@@ -752,8 +815,15 @@ inline double collapsed_gp_find_mode(
     bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
                         data.model_type == ModelType::BETA_BINOMIAL);
 
-    // Build NNGP structure for current (sigma2, phi)
-    build_nngp_B_D(sigma2, phi, data.gp_data, ws);
+    // Fix 2: Only rebuild NNGP structure if (sigma2, phi) changed
+    if (sigma2 != ws.cached_sigma2 || phi != ws.cached_phi || !ws.structure_built) {
+        build_nngp_B_D(sigma2, phi, data.gp_data, ws);
+        ws.cached_sigma2 = sigma2;
+        ws.cached_phi = phi;
+    }
+
+    // Build loc→obs mapping (cached, O(N) first time only)
+    build_loc_obs_map(ws, data);
 
     // Initialize w to previous mode or zero
     if (!ws.mode_found) {
@@ -787,22 +857,21 @@ inline double collapsed_gp_find_mode(
         double data_ll = 0.0;
         int obs_count = 0;
         for (int loc = 0; loc < N_gp; loc++) {
+            int n_obs_loc = ws.loc_obs_ptr[loc + 1] - ws.loc_obs_ptr[loc];
+            const int* obs_loc = &ws.loc_obs_idx[ws.loc_obs_ptr[loc]];
             LocLikResult lr = compute_loc_lik(loc, ws.w_star.data(),
                                                beta_num, beta_denom,
                                                phi_num, phi_denom,
-                                               data, is_binomial);
+                                               data, is_binomial,
+                                               obs_loc, n_obs_loc);
             ws.grad_w[loc] = lr.grad;
             ws.hess_diag[loc] = std::max(lr.neg_hess, 1e-8);  // Ensure positive
             data_ll += lr.ll;
-            // Count obs matching this location
             if (newton_debug && newton_iter == 0) {
-                int cnt = 0;
-                for (int i = 0; i < data.N; i++)
-                    if (data.gp_data.obs_to_loc[i] == loc) cnt++;
-                obs_count += cnt;
-                if (std::isnan(lr.ll) || std::isnan(lr.grad) || cnt == 0) {
+                obs_count += n_obs_loc;
+                if (std::isnan(lr.ll) || std::isnan(lr.grad) || n_obs_loc == 0) {
                     Rprintf("  [NEWTON] loc=%d cnt=%d ll=%.4f grad=%.4f hess=%.8f\n",
-                            loc, cnt, lr.ll, lr.grad, lr.neg_hess);
+                            loc, n_obs_loc, lr.ll, lr.grad, lr.neg_hess);
                 }
             }
         }
@@ -870,10 +939,13 @@ inline double collapsed_gp_find_mode(
     // Compute log-posterior at w*
     double data_ll = 0.0;
     for (int loc = 0; loc < N_gp; loc++) {
+        int n_obs_loc = ws.loc_obs_ptr[loc + 1] - ws.loc_obs_ptr[loc];
+        const int* obs_loc = &ws.loc_obs_idx[ws.loc_obs_ptr[loc]];
         LocLikResult lr = compute_loc_lik(loc, ws.w_star.data(),
                                            beta_num, beta_denom,
                                            phi_num, phi_denom,
-                                           data, is_binomial);
+                                           data, is_binomial,
+                                           obs_loc, n_obs_loc);
         data_ll += lr.ll;
     }
 
@@ -1201,4 +1273,62 @@ inline void compute_laplace_grad_gp_hypers(
 
 // end collapsed GP functions
 
-#endif // RATIOD_HMC_GP_COLLAPSED_H
+// =========================================================================
+// High-level wrappers for compute_log_post integration
+// These encapsulate all collapsed GP logic so the main log_post
+// function only needs a single call instead of 60+ lines of inline code.
+// =========================================================================
+
+struct CollapsedGPLogPostResult {
+    double log_post_contribution = 0.0;  // NNGP prior + Laplace correction
+    // After calling, ws.w_star contains the mode values.
+    // Caller should copy ws.w_star to gp_w buffer for observation loop.
+};
+
+// Compute collapsed GP contribution to log_post:
+//   1. Find w* via Newton
+//   2. Evaluate NNGP prior at w*: -0.5*w*^T Q w* + 0.5*log|Q|
+//   3. Add Laplace correction: -0.5*log|W+Q|
+//   4. ws.w_star is populated for use in observation loop
+inline CollapsedGPLogPostResult collapsed_gp_log_post_contribution(
+    const double* beta_num, const double* beta_denom,
+    double sigma2_gp, double phi_gp,
+    double phi_num, double phi_denom,
+    const ModelData& data,
+    CollapsedGPWorkspace& ws) {
+
+    CollapsedGPLogPostResult res;
+    int N_gp = data.gp_data.n_obs;
+
+    // Find mode w*
+    collapsed_gp_find_mode(beta_num, beta_denom, sigma2_gp, phi_gp,
+                           phi_num, phi_denom, data, ws);
+
+    // NNGP prior at w*: -0.5 * w*^T Q w* + 0.5 * log|Q|
+    std::vector<double> Qw(N_gp);
+    nngp_precision_matvec(ws.w_star.data(), Qw.data(), ws);
+    double wQw = 0.0;
+    for (int i = 0; i < N_gp; i++) wQw += ws.w_star[i] * Qw[i];
+
+    double log_det_Q = 0.0;
+    for (int i = 0; i < N_gp; i++) log_det_Q -= std::log(ws.d_cond[i]);
+
+    res.log_post_contribution = -0.5 * wQw + 0.5 * log_det_Q;
+
+    // Laplace correction
+    res.log_post_contribution += ws.laplace_log_det;
+
+    return res;
+}
+
+// Store collapsed GP mode values (w*) into result buffer
+inline void collapsed_gp_store_sample(
+    int sample_idx,
+    const CollapsedGPWorkspace& ws,
+    std::vector<double>& gp_w_star_flat,
+    int N_gp) {
+    std::memcpy(&gp_w_star_flat[sample_idx * N_gp],
+                ws.w_star.data(), N_gp * sizeof(double));
+}
+
+#endif // ratiod_hmc_GP_COLLAPSED_H

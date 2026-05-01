@@ -5,6 +5,6 @@
 # Learn more about testing at https://r-pkgs.org/testing-basics.html
 
 library(testthat)
-library(numdenom)
+library(tulpaRatio)
 
-test_check("numdenom")
+test_check("tulpaRatio")

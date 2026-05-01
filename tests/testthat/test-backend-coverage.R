@@ -7,17 +7,17 @@
 
 test_that("can_use_pg_backend returns TRUE for binomial family", {
   fam <- ratiod_binomial()
-  expect_true(numdenom:::can_use_pg_backend(fam))
+  expect_true(tulpaRatio:::can_use_pg_backend(fam))
 })
 
 test_that("can_use_pg_backend returns TRUE for negbin family (PG+CRT)", {
   fam <- ratiod_negbin_negbin()
-  expect_true(numdenom:::can_use_pg_backend(fam))
+  expect_true(tulpaRatio:::can_use_pg_backend(fam))
 })
 
 test_that("can_use_pg_backend returns FALSE for poisson_gamma family", {
   fam <- ratiod_poisson_gamma()
-  expect_false(numdenom:::can_use_pg_backend(fam))
+  expect_false(tulpaRatio:::can_use_pg_backend(fam))
 })
 
 test_that("extract_re_from_data handles no RE", {
@@ -29,7 +29,7 @@ test_that("extract_re_from_data handles no RE", {
   )
   data <- data.frame(y = 1:10)
 
-  result <- numdenom:::extract_re_from_data(mock_formula, data)
+  result <- tulpaRatio:::extract_re_from_data(mock_formula, data)
 
   expect_equal(result$n_groups, 0L)
   expect_equal(result$n_re_terms, 0L)
@@ -52,7 +52,7 @@ test_that("extract_re_from_data handles single RE", {
   )
   data <- data.frame(y = 1:6)
 
-  result <- numdenom:::extract_re_from_data(mock_formula, data)
+  result <- tulpaRatio:::extract_re_from_data(mock_formula, data)
 
   expect_equal(result$n_groups, 3L)
   expect_equal(result$n_re_terms, 1L)
@@ -81,7 +81,7 @@ test_that("extract_re_from_data handles multiple RE terms", {
   )
   data <- data.frame(y = 1:4)
 
-  result <- numdenom:::extract_re_from_data(mock_formula, data)
+  result <- tulpaRatio:::extract_re_from_data(mock_formula, data)
 
   expect_equal(result$n_re_terms, 2L)
   expect_equal(result$total_groups, 4L)
@@ -105,7 +105,7 @@ test_that("extract_re_from_data warns about slopes", {
   data <- data.frame(y = 1:4)
 
   expect_warning(
-    result <- numdenom:::extract_re_from_data(mock_formula, data),
+    result <- tulpaRatio:::extract_re_from_data(mock_formula, data),
     "Random slopes not yet fully supported"
   )
   expect_true(result$has_slopes)
@@ -116,29 +116,29 @@ test_that("extract_re_from_data warns about slopes", {
 # -----------------------------------------------------------------------------
 
 test_that("can_use_laplace_backend always returns TRUE", {
-  expect_true(numdenom:::can_use_laplace_backend(ratiod_binomial()))
-  expect_true(numdenom:::can_use_laplace_backend(ratiod_negbin_negbin()))
-  expect_true(numdenom:::can_use_laplace_backend(ratiod_poisson_gamma()))
+  expect_true(tulpaRatio:::can_use_laplace_backend(ratiod_binomial()))
+  expect_true(tulpaRatio:::can_use_laplace_backend(ratiod_negbin_negbin()))
+  expect_true(tulpaRatio:::can_use_laplace_backend(ratiod_poisson_gamma()))
 })
 
 test_that("get_laplace_family correctly maps families", {
-  expect_equal(numdenom:::get_laplace_family(ratiod_binomial()), "binomial")
+  expect_equal(tulpaRatio:::get_laplace_family(ratiod_binomial()), "binomial")
 
   # Test negbin variants
   fam <- list(numerator = list(distribution = "negbin"))
-  expect_equal(numdenom:::get_laplace_family(fam), "negbin")
+  expect_equal(tulpaRatio:::get_laplace_family(fam), "negbin")
 
   fam <- list(numerator = list(distribution = "negative_binomial"))
-  expect_equal(numdenom:::get_laplace_family(fam), "negbin")
+  expect_equal(tulpaRatio:::get_laplace_family(fam), "negbin")
 
   fam <- list(numerator = list(distribution = "poisson"))
-  expect_equal(numdenom:::get_laplace_family(fam), "poisson")
+  expect_equal(tulpaRatio:::get_laplace_family(fam), "poisson")
 })
 
 test_that("get_laplace_family errors for unsupported family", {
   fam <- list(numerator = list(distribution = "unknown"))
   expect_error(
-    numdenom:::get_laplace_family(fam),
+    tulpaRatio:::get_laplace_family(fam),
     "Unsupported family"
   )
 })
@@ -151,7 +151,7 @@ test_that("extract_re_for_laplace handles no RE", {
     )
   )
 
-  result <- numdenom:::extract_re_for_laplace(mock_formula)
+  result <- tulpaRatio:::extract_re_for_laplace(mock_formula)
 
   expect_equal(result$n_groups, 0L)
   expect_equal(result$n_re_terms, 0L)
@@ -173,7 +173,7 @@ test_that("extract_re_for_laplace handles single RE", {
     )
   )
 
-  result <- numdenom:::extract_re_for_laplace(mock_formula)
+  result <- tulpaRatio:::extract_re_for_laplace(mock_formula)
 
   expect_equal(result$n_groups, 3L)
   expect_equal(result$n_re_terms, 1L)
@@ -202,7 +202,7 @@ test_that("extract_re_for_laplace handles multiple RE with warning for slopes", 
   )
 
   expect_warning(
-    result <- numdenom:::extract_re_for_laplace(mock_formula),
+    result <- tulpaRatio:::extract_re_for_laplace(mock_formula),
     "Random slopes not yet fully supported"
   )
   expect_equal(result$n_re_terms, 2)
@@ -215,7 +215,7 @@ test_that("prepare_spatial_for_laplace errors without group_var", {
   formula <- list()
 
   expect_error(
-    numdenom:::prepare_spatial_for_laplace(spatial, data, formula),
+    tulpaRatio:::prepare_spatial_for_laplace(spatial, data, formula),
     "group_var"
   )
 })
@@ -226,7 +226,7 @@ test_that("prepare_spatial_for_laplace errors when group_var not in data", {
   formula <- list()
 
   expect_error(
-    numdenom:::prepare_spatial_for_laplace(spatial, data, formula),
+    tulpaRatio:::prepare_spatial_for_laplace(spatial, data, formula),
     "not found in data"
   )
 })
@@ -237,7 +237,7 @@ test_that("prepare_spatial_for_laplace errors without adjacency", {
   formula <- list()
 
   expect_error(
-    numdenom:::prepare_spatial_for_laplace(spatial, data, formula),
+    tulpaRatio:::prepare_spatial_for_laplace(spatial, data, formula),
     "adj_matrix"
   )
 })
@@ -254,7 +254,7 @@ test_that("prepare_spatial_for_laplace works correctly", {
   data <- data.frame(site = factor(rep(1:3, each = 2)))
   formula <- list()
 
-  result <- numdenom:::prepare_spatial_for_laplace(spatial, data, formula)
+  result <- tulpaRatio:::prepare_spatial_for_laplace(spatial, data, formula)
 
   expect_equal(result$n_units, 3L)
   expect_equal(length(result$group_idx), 6)
@@ -324,7 +324,7 @@ test_that("fit_pg_binomial errors without trials", {
   )
 
   expect_error(
-    numdenom:::fit_pg_binomial(
+    tulpaRatio:::fit_pg_binomial(
       formula = mock_formula,
       data = data.frame(x = 1:5),
       family = ratiod_binomial(),
@@ -338,7 +338,7 @@ test_that("prepare_spatial_for_pg errors without group_var for group level", {
   spatial <- list(level = "group", group_var = NULL, adjacency = diag(3))
 
   expect_error(
-    numdenom:::prepare_spatial_for_pg(spatial, data.frame(x = 1:3), list()),
+    tulpaRatio:::prepare_spatial_for_pg(spatial, data.frame(x = 1:3), list()),
     "group_var"
   )
 })

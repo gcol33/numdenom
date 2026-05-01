@@ -201,7 +201,7 @@ test_that("negbin_negbin with RW2 temporal runs correctly (row 42)", {
   # Parameters: 2 beta_num + 2 beta_denom + 2 log_phi + 1 log_tau + 8 temporal = 15
   n_params <- 2 + 2 + 2 + 1 + n_times
 
-  result <- numdenom:::cpp_hmc_fit(
+  result <- tulpaRatio:::cpp_hmc_fit(
     q_init = rep(0, n_params),
     y_num = as.integer(y_num),
     y_denom = as.integer(y_denom),
@@ -271,7 +271,7 @@ test_that("binomial with RW2 temporal runs correctly (row 43)", {
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 10 temporal = 14
   n_params <- 2 + 1 + 1 + n_times
 
-  result <- numdenom:::cpp_hmc_fit(
+  result <- tulpaRatio:::cpp_hmc_fit(
     q_init = rep(0, n_params),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),

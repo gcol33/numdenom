@@ -6,12 +6,12 @@ test_that("PG sampler produces valid PG(1, z) samples", {
   set.seed(123)
 
   # Test PG(1, 0) - should have mean ~0.25
-  x <- numdenom:::cpp_rpg1(rep(0, 5000))
+  x <- tulpaRatio:::cpp_rpg1(rep(0, 5000))
   expect_true(all(x > 0))
   expect_equal(mean(x), 0.25, tolerance = 0.02)
 
   # Test PG(1, 2) - should have mean ~0.19
-  x <- numdenom:::cpp_rpg1(rep(2, 5000))
+  x <- tulpaRatio:::cpp_rpg1(rep(2, 5000))
   mean_theory <- tanh(1) / 4  # tanh(z/2) / (2z)
 
   expect_equal(mean(x), mean_theory, tolerance = 0.02)
@@ -25,7 +25,7 @@ test_that("PG sampler works for PG(b, z)", {
   # PG(5, 1) should be sum of 5 PG(1, 1)
   b <- rep(5L, 1000)
   z <- rep(1, 1000)
-  x <- numdenom:::cpp_rpg(b, z)
+  x <- tulpaRatio:::cpp_rpg(b, z)
 
   expect_true(all(x > 0))
   # Mean should be approximately 5 * PG(1, 1) mean
@@ -56,7 +56,7 @@ test_that("PG Gibbs sampler recovers parameters", {
   y <- rbinom(N, trials, plogis(eta))
 
   # Fit
-  fit <- numdenom:::cpp_pg_binomial_gibbs(
+  fit <- tulpaRatio:::cpp_pg_binomial_gibbs(
     y = as.integer(y),
     n = trials,
     X = X,
@@ -94,7 +94,7 @@ test_that("Laplace backend finds correct mode", {
   y <- rbinom(N, trials, plogis(eta))
 
   # Fit with Laplace (no RE)
-  result <- numdenom:::cpp_laplace_fit(
+  result <- tulpaRatio:::cpp_laplace_fit(
     y = as.integer(y),
     n = as.integer(trials),
     X = X,
@@ -133,7 +133,7 @@ test_that("Laplace backend works with random effects", {
   y <- rbinom(N, trials, plogis(eta))
 
   # Fit
-  result <- numdenom:::cpp_laplace_fit(
+  result <- tulpaRatio:::cpp_laplace_fit(
     y = as.integer(y),
     n = as.integer(trials),
     X = X,
@@ -156,15 +156,15 @@ test_that("Laplace backend works with random effects", {
 })
 
 test_that("can_use_pg_backend correctly identifies supported families", {
-  expect_true(numdenom:::can_use_pg_backend(ratiod_binomial()))
-  expect_true(numdenom:::can_use_pg_backend(ratiod_negbin_negbin()))  # PG supports negbin via CRT augmentation
-  expect_false(numdenom:::can_use_pg_backend(ratiod_poisson_gamma()))
+  expect_true(tulpaRatio:::can_use_pg_backend(ratiod_binomial()))
+  expect_true(tulpaRatio:::can_use_pg_backend(ratiod_negbin_negbin()))  # PG supports negbin via CRT augmentation
+  expect_false(tulpaRatio:::can_use_pg_backend(ratiod_poisson_gamma()))
 })
 
 test_that("can_use_laplace_backend accepts all families", {
-  expect_true(numdenom:::can_use_laplace_backend(ratiod_binomial()))
-  expect_true(numdenom:::can_use_laplace_backend(ratiod_negbin_negbin()))
-  expect_true(numdenom:::can_use_laplace_backend(ratiod_poisson_gamma()))
+  expect_true(tulpaRatio:::can_use_laplace_backend(ratiod_binomial()))
+  expect_true(tulpaRatio:::can_use_laplace_backend(ratiod_negbin_negbin()))
+  expect_true(tulpaRatio:::can_use_laplace_backend(ratiod_poisson_gamma()))
 })
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ test_that("extract_re_from_data handles no random effects", {
   )
   df <- data.frame(y = 1:10, x = rnorm(10))
 
-  result <- numdenom:::extract_re_from_data(formula_obj, df)
+  result <- tulpaRatio:::extract_re_from_data(formula_obj, df)
 
   expect_equal(result$n_groups, 0L)
   expect_equal(result$n_re_terms, 0L)
@@ -215,7 +215,7 @@ test_that("extract_re_from_data handles single random intercept", {
     site = factor(rep(1:n_groups, each = n_per_group))
   )
 
-  result <- numdenom:::extract_re_from_data(formula_obj, df)
+  result <- tulpaRatio:::extract_re_from_data(formula_obj, df)
 
   expect_equal(result$n_groups, n_groups)
   expect_equal(result$n_re_terms, 1L)
@@ -254,7 +254,7 @@ test_that("extract_re_from_data handles multiple random effects", {
     year = factor(rep(1:5, 4))
   )
 
-  result <- numdenom:::extract_re_from_data(formula_obj, df)
+  result <- tulpaRatio:::extract_re_from_data(formula_obj, df)
 
   expect_equal(result$n_re_terms, 2L)
   expect_equal(result$total_groups, 9L)  # 4 + 5
@@ -287,7 +287,7 @@ test_that("extract_re_from_data warns about unsupported random slopes in PG", {
   )
 
   expect_warning(
-    result <- numdenom:::extract_re_from_data(formula_obj, df),
+    result <- tulpaRatio:::extract_re_from_data(formula_obj, df),
     "Random slopes not yet fully supported"
   )
 
@@ -323,7 +323,7 @@ test_that("prepare_spatial_for_pg handles group-level spatial", {
     )
   )
 
-  result <- numdenom:::prepare_spatial_for_pg(spatial, df, formula_obj)
+  result <- tulpaRatio:::prepare_spatial_for_pg(spatial, df, formula_obj)
 
   expect_equal(result$n_units, n_sites)
   expect_equal(length(result$group_idx), N)
@@ -349,7 +349,7 @@ test_that("prepare_spatial_for_pg handles observation-level spatial", {
   df <- data.frame(y = 1:4)
   formula_obj <- list(numerator = list(random_effects = list()))
 
-  result <- numdenom:::prepare_spatial_for_pg(spatial, df, formula_obj)
+  result <- tulpaRatio:::prepare_spatial_for_pg(spatial, df, formula_obj)
 
   expect_equal(result$n_units, 4)
   expect_equal(result$group_idx, 1:4)
@@ -370,7 +370,7 @@ test_that("prepare_spatial_for_pg errors without group_var for group level", {
   formula_obj <- list(numerator = list(random_effects = list()))
 
   expect_error(
-    numdenom:::prepare_spatial_for_pg(spatial, df, formula_obj),
+    tulpaRatio:::prepare_spatial_for_pg(spatial, df, formula_obj),
     "group_var"
   )
 })
@@ -416,7 +416,7 @@ test_that("convert_pg_to_ratiod_fit creates valid ratiod_fit object", {
   df <- data.frame(y = 1:N, x = rnorm(N), site = factor(rep(1:n_re, length.out = N)))
   family <- ratiod_binomial()
 
-  fit <- numdenom:::convert_pg_to_ratiod_fit(
+  fit <- tulpaRatio:::convert_pg_to_ratiod_fit(
     fit_raw = list(chain_result),  # Single chain
     formula = formula_obj,
     data = df,

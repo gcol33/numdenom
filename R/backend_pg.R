@@ -1574,7 +1574,7 @@ fit_pg_negbin_negbin <- function(formula,
   # Random effects
   re_info <- extract_re_from_data(formula, data)
 
-  # Check for shared structure (default in numdenom)
+  # Check for shared structure (default in tulpaRatio)
   shared <- is.null(formula$shared) || !isFALSE(formula$shared)
 
   n_iter <- as.integer(iter)

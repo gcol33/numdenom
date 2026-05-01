@@ -1,7 +1,7 @@
 #' Inference Mode System
 #'
 #' @description
-#' numdenom uses an explicit tier system for inference that encodes
+#' tulpaRatio uses an explicit tier system for inference that encodes
 #' **epistemic guarantees**, not just runtime characteristics.
 #'
 #' This design makes the difference between inference methods **first-class
@@ -140,7 +140,7 @@ get_mode_backends <- function(mode) {
 #' Select inference mode and backend
 #'
 #' @description
-#' Implements the mode selection logic for numdenom. Accepts either tier names
+#' Implements the mode selection logic for tulpaRatio. Accepts either tier names
 #' (auto, exact, structured, optimized) or backend names (hmc, ess, pg, laplace, vi).
 #'
 #' When mode is "auto", selects between Tier 1 (Exact) and Tier 2 (Structured)
@@ -385,12 +385,12 @@ validate_mode <- function(fit, expected_mode, error = TRUE) {
 #' Print inference mode information
 #'
 #' @description
-#' Displays information about the inference modes available in numdenom,
+#' Displays information about the inference modes available in tulpaRatio,
 #' including their tiers, guarantees, and appropriate use cases.
 #'
 #' @export
 inference_mode_info <- function() {
-  cat("numdenom Inference Modes\n")
+  cat("tulpaRatio Inference Modes\n")
   cat("========================\n\n")
 
   cat("Modes encode EPISTEMIC GUARANTEES, not just runtime characteristics.\n\n")

@@ -269,7 +269,7 @@ test_that("HMC with temporal RW1 runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau_temporal + 8 temporal = 12
-  result <- numdenom:::cpp_hmc_fit(
+  result <- tulpaRatio:::cpp_hmc_fit(
     q_init = rep(0, 12),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -337,7 +337,7 @@ test_that("HMC with temporal AR1 runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 1 logit_rho + 10 temporal = 15
-  result <- numdenom:::cpp_hmc_fit(
+  result <- tulpaRatio:::cpp_hmc_fit(
     q_init = rep(0, 15),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -396,7 +396,7 @@ test_that("HMC with cyclic RW1 (seasonal) runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 12 temporal = 16
-  result <- numdenom:::cpp_hmc_fit(
+  result <- tulpaRatio:::cpp_hmc_fit(
     q_init = rep(0, 16),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -460,7 +460,7 @@ test_that("HMC with panel temporal (group-specific) runs", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 15 temporal (5*3) = 19
-  result <- numdenom:::cpp_hmc_fit(
+  result <- tulpaRatio:::cpp_hmc_fit(
     q_init = rep(0, 19),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
@@ -513,7 +513,7 @@ test_that("HMC with temporal runs multiple chains in parallel", {
   X <- cbind(1, x)
 
   # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau_temporal + 6 temporal = 10
-  result <- numdenom:::cpp_hmc_fit(
+  result <- tulpaRatio:::cpp_hmc_fit(
     q_init = rep(0, 10),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),

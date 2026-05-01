@@ -426,35 +426,35 @@ test_that("select_backend returns appropriate backends", {
 
   # Default: HMC
   expect_equal(
-    numdenom:::select_backend(family_pg, n_obs = 100),
+    tulpaRatio:::select_backend(family_pg, n_obs = 100),
     "hmc"
   )
 
   # Large data: Laplace
   expect_equal(
-    numdenom:::select_backend(family_pg, n_obs = 60000),
+    tulpaRatio:::select_backend(family_pg, n_obs = 60000),
     "laplace"
   )
 
   # Spatial: HMC
   expect_equal(
-    numdenom:::select_backend(family_pg, n_obs = 100, has_spatial = TRUE),
+    tulpaRatio:::select_backend(family_pg, n_obs = 100, has_spatial = TRUE),
     "hmc"
   )
 
   # Temporal: HMC
   expect_equal(
-    numdenom:::select_backend(family_pg, n_obs = 100, has_temporal = TRUE),
+    tulpaRatio:::select_backend(family_pg, n_obs = 100, has_temporal = TRUE),
     "hmc"
   )
 })
 
 test_that("cli_rule formats correctly", {
-  rule <- numdenom:::cli_rule()
+  rule <- tulpaRatio:::cli_rule()
   expect_true(nchar(rule) > 0)
   expect_true(all(strsplit(rule, "")[[1]] == "-"))
 
-  rule_titled <- numdenom:::cli_rule("Test")
+  rule_titled <- tulpaRatio:::cli_rule("Test")
   expect_true(grepl("Test", rule_titled))
   expect_true(grepl("-", rule_titled))
 })
@@ -465,7 +465,7 @@ test_that("compute_param_summary works", {
   colnames(draws) <- c("a", "b", "c")
 
   probs <- c(0.025, 0.5, 0.975)
-  summ <- numdenom:::compute_param_summary(draws, probs)
+  summ <- tulpaRatio:::compute_param_summary(draws, probs)
 
   expect_equal(nrow(summ), 3)
   expect_true("parameter" %in% names(summ))
@@ -484,7 +484,7 @@ test_that("select_main_params filters correctly", {
     "phi_spatial[1]", "theta[1]"
   )
 
-  main <- numdenom:::select_main_params(all_pars)
+  main <- tulpaRatio:::select_main_params(all_pars)
 
   # Should include beta, sigma, phi
   expect_true("beta_num[1]" %in% main)
@@ -501,15 +501,15 @@ test_that("grep_params selects correctly", {
   all_pars <- c("beta_num[1]", "beta_num[2]", "beta_denom[1]", "sigma_re")
 
   # Exact match
-  result <- numdenom:::grep_params("sigma_re", all_pars)
+  result <- tulpaRatio:::grep_params("sigma_re", all_pars)
   expect_equal(result, "sigma_re")
 
   # Regex match
-  result <- numdenom:::grep_params("beta_num", all_pars)
+  result <- tulpaRatio:::grep_params("beta_num", all_pars)
   expect_equal(result, c("beta_num[1]", "beta_num[2]"))
 
   # Multiple patterns
-  result <- numdenom:::grep_params(c("sigma_re", "beta_denom"), all_pars)
+  result <- tulpaRatio:::grep_params(c("sigma_re", "beta_denom"), all_pars)
   expect_true("sigma_re" %in% result)
   expect_true("beta_denom[1]" %in% result)
 })
@@ -535,7 +535,7 @@ test_that("get_draws_array returns correct structure", {
     chains = 1
   )
 
-  draws_info <- numdenom:::get_draws_array(fit)
+  draws_info <- tulpaRatio:::get_draws_array(fit)
 
   expect_true(is.array(draws_info$draws))
   expect_equal(length(dim(draws_info$draws)), 3)
@@ -546,19 +546,19 @@ test_that("compute_split_rhat returns reasonable values", {
   set.seed(3333)
   # Well-mixed chain should have Rhat near 1
   good_chain <- matrix(rnorm(200), ncol = 1)
-  rhat_good <- numdenom:::compute_split_rhat(good_chain)
+  rhat_good <- tulpaRatio:::compute_split_rhat(good_chain)
   expect_true(rhat_good > 0.9 && rhat_good < 1.2)
 
   # Poorly mixed chain (trending) should have higher Rhat
   poor_chain <- matrix(1:200 + rnorm(200, sd = 1), ncol = 1)
-  rhat_poor <- numdenom:::compute_split_rhat(poor_chain)
+  rhat_poor <- tulpaRatio:::compute_split_rhat(poor_chain)
   expect_true(rhat_poor > 1.0)
 })
 
 test_that("compute_ess_basic returns positive values", {
   set.seed(4444)
   x <- rnorm(200)
-  ess <- numdenom:::compute_ess_basic(x)
+  ess <- tulpaRatio:::compute_ess_basic(x)
 
   expect_true(ess > 0)
   expect_true(ess <= length(x))
@@ -576,7 +576,7 @@ test_that("compute_diagnostics_basic works", {
     )
   )
 
-  diag <- numdenom:::compute_diagnostics_basic(draws_array)
+  diag <- tulpaRatio:::compute_diagnostics_basic(draws_array)
 
   expect_equal(nrow(diag), 2)
   expect_true("parameter" %in% names(diag))

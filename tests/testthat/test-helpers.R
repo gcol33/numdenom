@@ -12,7 +12,7 @@ test_that("select_main_params excludes high-dimensional parameters", {
     "theta[1]", "theta[2]"
   )
 
-  result <- numdenom:::select_main_params(all_pars)
+  result <- tulpaRatio:::select_main_params(all_pars)
 
   # Should include main params
   expect_true("beta_num[1]" %in% result)
@@ -27,27 +27,27 @@ test_that("select_main_params excludes high-dimensional parameters", {
 
 test_that("select_main_params limits to 12 parameters", {
   all_pars <- paste0("param", 1:20)
-  result <- numdenom:::select_main_params(all_pars)
+  result <- tulpaRatio:::select_main_params(all_pars)
 
   expect_true(length(result) <= 12)
 })
 
 test_that("select_main_params handles empty input", {
-  result <- numdenom:::select_main_params(character(0))
+  result <- tulpaRatio:::select_main_params(character(0))
   expect_equal(length(result), 0)
 })
 
 # Test grep_params
 test_that("grep_params selects exact matches", {
   all_pars <- c("beta_num[1]", "beta_num[2]", "beta_denom[1]", "sigma_re")
-  result <- numdenom:::grep_params("sigma_re", all_pars)
+  result <- tulpaRatio:::grep_params("sigma_re", all_pars)
 
   expect_equal(result, "sigma_re")
 })
 
 test_that("grep_params selects regex matches", {
   all_pars <- c("beta_num[1]", "beta_num[2]", "beta_denom[1]", "sigma_re")
-  result <- numdenom:::grep_params("beta_num", all_pars)
+  result <- tulpaRatio:::grep_params("beta_num", all_pars)
 
   expect_true("beta_num[1]" %in% result)
   expect_true("beta_num[2]" %in% result)
@@ -56,7 +56,7 @@ test_that("grep_params selects regex matches", {
 
 test_that("grep_params handles multiple patterns", {
   all_pars <- c("beta_num[1]", "beta_denom[1]", "sigma_re", "phi")
-  result <- numdenom:::grep_params(c("beta", "sigma"), all_pars)
+  result <- tulpaRatio:::grep_params(c("beta", "sigma"), all_pars)
 
   expect_true("beta_num[1]" %in% result)
   expect_true("beta_denom[1]" %in% result)
@@ -66,7 +66,7 @@ test_that("grep_params handles multiple patterns", {
 
 test_that("grep_params returns unique values", {
   all_pars <- c("beta_num[1]", "beta_num[2]")
-  result <- numdenom:::grep_params(c("beta_num[1]", "beta_num"), all_pars)
+  result <- tulpaRatio:::grep_params(c("beta_num[1]", "beta_num"), all_pars)
 
   expect_equal(length(result), 2)
   expect_equal(length(unique(result)), 2)
@@ -296,7 +296,7 @@ test_that("aggregate_by_group computes geometric mean", {
   )
   data <- data.frame(obs = 1:2, group = c("A", "A"))
 
-  result <- numdenom:::aggregate_by_group(draws, data, "group")
+  result <- tulpaRatio:::aggregate_by_group(draws, data, "group")
 
   # Geometric mean of 2 and 8 = sqrt(16) = 4
   expect_equal(ncol(result), 1)
@@ -311,7 +311,7 @@ test_that("aggregate_by_group handles multiple groups", {
   )
   data <- data.frame(obs = 1:3, group = c("A", "A", "B"))
 
-  result <- numdenom:::aggregate_by_group(draws, data, "group")
+  result <- tulpaRatio:::aggregate_by_group(draws, data, "group")
 
   expect_equal(ncol(result), 2)  # 2 groups
 
@@ -329,7 +329,7 @@ test_that("aggregate_by_group errors on missing variable", {
   data <- data.frame(obs = 1:2, x = c("a", "b"))
 
   expect_error(
-    numdenom:::aggregate_by_group(draws, data, "nonexistent"),
+    tulpaRatio:::aggregate_by_group(draws, data, "nonexistent"),
     "not found"
   )
 })
@@ -338,7 +338,7 @@ test_that("aggregate_by_group handles single observation per group", {
   draws <- matrix(c(rep(5, 10), rep(10, 10)), nrow = 10, ncol = 2)
   data <- data.frame(obs = 1:2, group = c("A", "B"))
 
-  result <- numdenom:::aggregate_by_group(draws, data, "group")
+  result <- tulpaRatio:::aggregate_by_group(draws, data, "group")
 
   expect_equal(ncol(result), 2)
   # Single observation means no averaging
@@ -350,15 +350,15 @@ test_that("aggregate_by_group handles single observation per group", {
 test_that("validate_response accepts valid count data", {
   valid_counts <- c(0L, 1L, 5L, 10L, 100L)
 
-  expect_silent(numdenom:::validate_response(valid_counts, "poisson", "test"))
-  expect_silent(numdenom:::validate_response(valid_counts, "neg_binomial_2", "test"))
+  expect_silent(tulpaRatio:::validate_response(valid_counts, "poisson", "test"))
+  expect_silent(tulpaRatio:::validate_response(valid_counts, "neg_binomial_2", "test"))
 })
 
 test_that("validate_response rejects negative counts", {
   invalid_counts <- c(-1, 0, 5, 10)
 
   expect_error(
-    numdenom:::validate_response(invalid_counts, "poisson", "numerator"),
+    tulpaRatio:::validate_response(invalid_counts, "poisson", "numerator"),
     "non-negative"
   )
 })
@@ -366,14 +366,14 @@ test_that("validate_response rejects negative counts", {
 test_that("validate_response accepts valid gamma data", {
   valid_gamma <- c(0.1, 1.5, 2.3, 10.0)
 
-  expect_silent(numdenom:::validate_response(valid_gamma, "gamma", "denominator"))
+  expect_silent(tulpaRatio:::validate_response(valid_gamma, "gamma", "denominator"))
 })
 
 test_that("validate_response rejects non-positive gamma data", {
   invalid_gamma <- c(0, 1.5, 2.3)
 
   expect_error(
-    numdenom:::validate_response(invalid_gamma, "gamma", "denominator"),
+    tulpaRatio:::validate_response(invalid_gamma, "gamma", "denominator"),
     "positive"
   )
 })

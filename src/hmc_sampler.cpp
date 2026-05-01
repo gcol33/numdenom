@@ -4225,7 +4225,7 @@ bool verify_gradient_runtime(
 
   if (max_diff > tol) {
     // Use REprintf for immediate output, then Rcpp::warning for R-level notice
-    REprintf("[numdenom] WARNING: gradient mismatch detected at param %d!\n"
+    REprintf("[tulpaRatio] WARNING: gradient mismatch detected at param %d!\n"
              "  max |active - numerical| / scale = %.6e (tol = %.1e)\n"
              "  active[%d] = %.8e, numerical[%d] = %.8e\n"
              "  This indicates a bug in the specialized gradient function.\n"
@@ -13275,7 +13275,7 @@ HMCResult run_hmc_chain(
         "Gradient mismatch detected: active gradient function disagrees with "
         "numerical gradients (max rel diff > 1e-4). Falling back to numerical "
         "gradients (mode='N'). This is slower but correct. Please report this "
-        "as a bug at https://github.com/gcol33/numdenom/issues"
+        "as a bug at https://github.com/gcol33/tulpaRatio/issues"
       );
     }
   }
@@ -13329,7 +13329,7 @@ std::vector<HMCResult> run_hmc_parallel_chains(
     bool grad_ok = verify_gradient_runtime(q_init, data, layout, 1e-4);
     if (!grad_ok) {
       g_gradient_mode = GradientMode::NUMERICAL;
-      REprintf("[numdenom] Falling back to numerical gradients for all chains.\n");
+      REprintf("[tulpaRatio] Falling back to numerical gradients for all chains.\n");
     }
   }
 

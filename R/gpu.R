@@ -9,14 +9,14 @@ NULL
 #' Check if GPU support is available
 #'
 #' @description
-#' Checks whether numdenom was compiled with GPU support (CUDA or OpenCL)
+#' Checks whether tulpaRatio was compiled with GPU support (CUDA or OpenCL)
 #' and whether compatible GPU hardware is detected.
 #'
 #' @return Logical; TRUE if GPU acceleration is available, FALSE otherwise.
 #'
 #' @details
 #' GPU support requires:
-#' 1. numdenom compiled with GPU support (`-DUSE_CUDA` or `-DUSE_OPENCL`)
+#' 1. tulpaRatio compiled with GPU support (`-DUSE_CUDA` or `-DUSE_OPENCL`)
 #' 2. Compatible GPU hardware (NVIDIA for CUDA, any GPU for OpenCL)
 #' 3. Appropriate drivers installed
 #'
@@ -93,8 +93,8 @@ gpu_info <- function() {
 #' @param x GPU info object from [gpu_info()]
 #' @param ... Ignored
 #' @export
-print.numdenom_gpu_info <- function(x, ...) {
-  cat("numdenom GPU Support\n")
+print.tulpaRatio_gpu_info <- function(x, ...) {
+  cat("tulpaRatio GPU Support\n")
   cat("====================\n\n")
 
   if (!x$available) {

@@ -511,7 +511,7 @@ is_connected <- function(adjacency) {
 #'   - `"pcg"`: Preconditioned CG with diagonal preconditioner.
 #'     Faster convergence than CG for ill-conditioned systems.
 #'   - `"gpu"`: GPU-accelerated batched Cholesky using CUDA (if available).
-#'     Requires numdenom to be compiled with GPU support. Falls back to PCG
+#'     Requires tulpaRatio to be compiled with GPU support. Falls back to PCG
 #'     if GPU is unavailable. Best for large datasets (N > 5000) with
 #'     CUDA-capable GPU. Use [gpu_available()] to check support.
 #' @param cg_tol Convergence tolerance for CG/PCG solvers. Default 1e-6.
@@ -622,7 +622,7 @@ spatial_gp <- function(coords,
 if (solver == "gpu" && !gpu_available()) {
     warning("GPU solver requested but GPU support is not available. ",
             "Falling back to PCG solver. ",
-            "To enable GPU support, reinstall numdenom with CUDA.",
+            "To enable GPU support, reinstall tulpaRatio with CUDA.",
             call. = FALSE)
     solver <- "pcg"
   }

@@ -1,4 +1,5 @@
 .onLoad <- function(libname, pkgname) {
-  # Package initialization
-  # ratiod uses native HMC/NUTS backend - no external dependencies required
+  # Load tulpa so its R_RegisterCCallable engine symbols are available before
+  # any compiled backend resolves them with R_GetCCallable.
+  requireNamespace("tulpa")
 }
