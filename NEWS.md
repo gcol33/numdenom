@@ -14,6 +14,19 @@
   beta_binomial) for the simplest non-ZI / no-spatial / no-RE / single-chain
   configuration. Autodiff only — H-kernel port is deferred to B2.
 
+* B1c: zero-inflation, hurdle, and one-inflation variants now route through
+  the `LikelihoodSpec` path. Each family's templated likelihood dispatches on
+  `data.zi_type` and calls a shared mixture helper in
+  `src/lik_specs/lik_helpers.h`; per-family allowlist lives in
+  `src/lik_dispatch.cpp` and `R/backend_hmc.R::SPEC_ZI_COMPAT`. Posterior
+  parity with the legacy backend matches within Monte Carlo noise for every
+  binomial × {ZI, hurdle, OI, ZOIB} combination; for count families
+  (poisson_gamma, negbin_*) the legacy A_r path was already silently
+  ignoring ZI, so the spec path here gives the mathematically correct
+  posterior — recorded as a behaviour change, not a parity mismatch (see
+  `dev_notes/B1c_zi_surface.md`). Autodiff only; ZI variants for the
+  hand-coded H-kernel remain deferred.
+
 # numdenom 1.3.0
 
 ## New Inference Backends

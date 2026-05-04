@@ -1,0 +1,10 @@
+variant            | cross_diff   | within_diff  | ratio  
+------------------------------------------------------------ 
+zi_binomial        | 0.0091       | 0.0029       | 3.09   
+hurdle_binomial    | 0.0097       | 0.0083       | 1.17   
+oi_binomial        | 0.0148       | 0.0065       | 2.26   
+zoib               | 0.0258       | 0.0149       | 1.73   
+zi_poisson         | 0.6883       | 0.2600       | 2.65   
+hurdle_poisson     | 0.5045       | 0.0225       | 22.42  
+zi_negbin          | 8.6099       | 1.7766       | 4.85   
+hurdle_negbin      | 17.3484      | 0.6479       | 26.78  
