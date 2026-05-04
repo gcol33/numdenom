@@ -739,19 +739,23 @@ fit_hmc <- function(formula,
       denom_link <- "log"
       cfg <- list(family = model_type, zi = "none",
                   num_link = num_link, denom_link = denom_link)
-      # X_denom is empty (0-col) for single-process families; the bridge
-      # ignores it when spec.n_processes < 2. For two-process families pass
-      # the actual denominator design matrix.
-      X_denom_call <- if (is.null(hmc_data$X_denom))
-        matrix(numeric(0), nrow = nrow(hmc_data$X_num), ncol = 0)
-      else hmc_data$X_denom
+      # X_list carries one design matrix per process. Single-process families
+      # (binomial / beta_binomial) pass length-1; two-process families append
+      # X_denom. Adding a 3-process family is a list element, not a new arg.
+      # NOTE: this set must mirror the n_processes value each builder returns
+      # in lik_dispatch.cpp. The bridge cross-checks and errors on mismatch.
+      ONE_PROCESS_FAMILIES <- c("binomial", "beta_binomial")
+      X_list <- if (model_type %in% ONE_PROCESS_FAMILIES) {
+        list(hmc_data$X_num)
+      } else {
+        list(hmc_data$X_num, hmc_data$X_denom)
+      }
       fit_raw <- cpp_tulpaRatio_run_nuts_specs(
         y_num             = as.integer(hmc_data$y_num),
         y_denom           = as.integer(hmc_data$y_denom),
         y_num_cont        = as.numeric(hmc_data$y_num_cont),
         y_denom_cont      = as.numeric(hmc_data$y_denom_cont),
-        X_num             = hmc_data$X_num,
-        X_denom           = X_denom_call,
+        X_list            = X_list,
         cfg_list          = cfg,
         init              = as.numeric(q_init),
         n_iter            = as.integer(iter),

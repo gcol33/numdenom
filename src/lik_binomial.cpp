@@ -36,6 +36,7 @@
 
 #include "lik_specs/ratio_config.h"
 #include "lik_specs/lik_helpers.h"
+#include "lik_specs/lik_grad_h_kernel.h"
 
 namespace tulpaRatio {
 
@@ -87,8 +88,12 @@ tulpa::LikelihoodSpec build_binomial_spec(const RatioConfig& cfg) {
     spec.ll_arena  = binomial_log_likelihood<tulpa::arena::Var>;
     spec.ll_fwd    = binomial_log_likelihood<::fwd::Dual>;
 
-    // No FullGradFn, ResidualFn, EtaWeightsFn, extend_layout, or extra_prior.
-    // Autodiff path only — A_r / A / N all work.
+    // Hand-coded H-mode gradient (B2). The dispatcher prefers gradient_fn
+    // over autodiff when set, so this is the path actually taken at H-mode.
+    spec.gradient_fn = &grad_h_binomial;
+
+    // No ResidualFn, EtaWeightsFn, extend_layout, or extra_prior — the
+    // gradient_fn carries the analytical derivative end-to-end.
     return spec;
 }
 

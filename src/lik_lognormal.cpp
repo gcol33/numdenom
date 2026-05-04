@@ -40,6 +40,7 @@
 
 #include "lik_specs/ratio_config.h"
 #include "lik_specs/lik_helpers.h"
+#include "lik_specs/lik_grad_h_kernel.h"
 
 namespace tulpaRatio {
 
@@ -102,6 +103,7 @@ tulpa::LikelihoodSpec build_lognormal_spec(const RatioConfig& cfg) {
     spec.ll_double = lognormal_log_likelihood<double>;
     spec.ll_arena  = lognormal_log_likelihood<tulpa::arena::Var>;
     spec.ll_fwd    = lognormal_log_likelihood<::fwd::Dual>;
+    spec.gradient_fn = &grad_h_lognormal;
     return spec;
 }
 

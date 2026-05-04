@@ -238,10 +238,10 @@ Rcpp::List cpp_tulpa_pg_binomial_gibbs(
 // ============================================================================
 // LikelihoodSpec-driven NUTS entry point (B1b: 7 ratio families).
 //
-// Builds a 1- or 2-process ModelData populated only with X_num (and X_denom
-// when the family has two processes), attaches a per-family response payload,
-// asks the family dispatcher for a LikelihoodSpec, then routes through
-// tulpa::get_nuts_fn().
+// Takes a list of design matrices (one per process) so adding a 3+-process
+// family is a dispatcher branch + one extra X in X_list, with no signature
+// change here. Attaches a per-family response payload, asks the family
+// dispatcher for a LikelihoodSpec, then routes through tulpa::get_nuts_fn().
 //
 // Returns a list shaped like the legacy `cpp_hmc_fit` output (samples,
 // log_prob, accept_prob, n_leapfrog, treedepth, divergent, epsilon, sampler)
@@ -253,8 +253,7 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     Rcpp::IntegerVector y_denom,
     Rcpp::NumericVector y_num_cont,
     Rcpp::NumericVector y_denom_cont,
-    Rcpp::NumericMatrix X_num,
-    Rcpp::NumericMatrix X_denom,
+    Rcpp::List X_list,
     Rcpp::List cfg_list,
     Rcpp::NumericVector init,
     int n_iter,
@@ -269,9 +268,13 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     double phi_prior_rate  = 0.01,
     double sigma_prior_scale = 1.0
 ) {
-  const int N      = X_num.nrow();
-  const int p_num   = X_num.ncol();
-  const int p_denom = X_denom.ncol();
+  const int n_proc_input = X_list.size();
+  if (n_proc_input < 1) {
+    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: X_list must contain at least one "
+               "design matrix.");
+  }
+  Rcpp::NumericMatrix X0 = X_list[0];
+  const int N = X0.nrow();
 
   // ---- Build RatioConfig from R-side list (with hyperprior overrides) -----
   tulpaRatio::RatioConfig cfg;
@@ -295,7 +298,13 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   ResponsePayload response = build_response_payload(
       cfg.family, y_num, y_denom, y_num_cont, y_denom_cont, N);
 
-  // ---- ModelData (1 or 2 processes, no spatial/temporal/RE/ZI) ----------
+  if (n_proc_input != spec.n_processes) {
+    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: X_list has %d matrices but "
+               "family='%s' expects %d processes.",
+               n_proc_input, cfg.family.c_str(), spec.n_processes);
+  }
+
+  // ---- ModelData (n_processes from spec; no spatial/temporal/RE/ZI) -----
   tulpa::ModelData data;
   data.N = N;
   data.n_processes = spec.n_processes;
@@ -303,16 +312,26 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   data.model_response_data = response.ptr;
   data.likelihood_spec     = &spec;
 
+  // Hyperprior knobs read by the hand-coded H-kernel (B2). The AD path
+  // doesn't read these — it gets the same values from the per-family
+  // static cfg set inside each build_*_spec — but the H kernel uses
+  // ModelData fields so the entire ratio_config is present in one place.
+  data.phi_prior_shape = phi_prior_shape;
+  data.phi_prior_rate  = phi_prior_rate;
+  data.sigma_re_scale  = sigma_prior_scale;
+
   data.processes.resize(spec.n_processes);
-  data.processes[0].p      = p_num;
-  data.processes[0].X_flat = rmajor_from_rmatrix(X_num);
-  if (spec.n_processes >= 2) {
-    if (X_denom.nrow() != N) {
-      Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: X_denom must have N rows for "
-                 "a 2-process family ('%s').", cfg.family.c_str());
+  int total_p_design = 0;
+  for (int k = 0; k < spec.n_processes; ++k) {
+    Rcpp::NumericMatrix Xk = X_list[k];
+    if (Xk.nrow() != N) {
+      Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: X_list[[%d]] has %d rows, "
+                 "expected %d (rows of X_list[[1]]).",
+                 k + 1, Xk.nrow(), N);
     }
-    data.processes[1].p      = p_denom;
-    data.processes[1].X_flat = rmajor_from_rmatrix(X_denom);
+    data.processes[k].p      = Xk.ncol();
+    data.processes[k].X_flat = rmajor_from_rmatrix(Xk);
+    total_p_design += Xk.ncol();
   }
   data.sharing.init(spec.n_processes);
 
@@ -326,13 +345,13 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   // ---- Param layout (engine derives from data + spec) -------------------
   tulpa::ParamLayout layout = tulpa::compute_layout(data);
 
-  int expected_total = p_num + (spec.n_processes >= 2 ? p_denom : 0) + spec.n_extra_params;
+  int expected_total = total_p_design + spec.n_extra_params;
   if (layout.total_params != expected_total) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: layout.total_params (%d) != "
-               "expected (%d) for family='%s' [p_num=%d, p_denom=%d, n_extra=%d]. "
+               "expected (%d) for family='%s' [sum(p_k)=%d, n_extra=%d]. "
                "B1b expects no extra latent structure.",
                layout.total_params, expected_total, cfg.family.c_str(),
-               p_num, (spec.n_processes >= 2 ? p_denom : 0), spec.n_extra_params);
+               total_p_design, spec.n_extra_params);
   }
   if (init.size() != expected_total) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: init length (%d) != expected (%d) "

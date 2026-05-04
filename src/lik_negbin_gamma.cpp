@@ -47,6 +47,7 @@
 
 #include "lik_specs/ratio_config.h"
 #include "lik_specs/lik_helpers.h"
+#include "lik_specs/lik_grad_h_kernel.h"
 
 namespace tulpaRatio {
 
@@ -116,6 +117,7 @@ tulpa::LikelihoodSpec build_negbin_gamma_spec(const RatioConfig& cfg) {
     spec.ll_double = negbin_gamma_log_likelihood<double>;
     spec.ll_arena  = negbin_gamma_log_likelihood<tulpa::arena::Var>;
     spec.ll_fwd    = negbin_gamma_log_likelihood<::fwd::Dual>;
+    spec.gradient_fn = &grad_h_negbin_gamma;
     return spec;
 }
 
