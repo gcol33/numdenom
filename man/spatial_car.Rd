@@ -9,7 +9,8 @@ spatial_car(
   level = c("group", "obs"),
   group_var = NULL,
   proper = FALSE,
-  shared = TRUE
+  shared = TRUE,
+  parameterization = c("standard", "collapsed")
 )
 }
 \arguments{

@@ -711,13 +711,17 @@ fit_hmc <- function(formula,
       }
     }
 
-    # B1a feature flag: route plain binomial through the LikelihoodSpec
-    # PoC. Off by default; enabled only for the narrowest scope so the legacy
-    # backend stays the default until parity is locked in for every family.
+    # B1b feature flag: route the 7 ratio families through the LikelihoodSpec
+    # path (autodiff only — no spatial / temporal / RE / ZI / latent factors,
+    # single chain, L = 0). Off by default; enabled only for the narrowest
+    # scope so the legacy backend stays the default for every other config.
+    SUPPORTED_SPEC_FAMILIES <- c("binomial", "poisson_gamma", "negbin_gamma",
+                                 "negbin_negbin", "gamma_gamma", "lognormal",
+                                 "beta_binomial")
     use_specs_path <- isTRUE(getOption("tulpaRatio.use_specs", FALSE)) ||
       identical(Sys.getenv("TULPARATIO_USE_SPECS"), "1")
     specs_eligible <- use_specs_path &&
-      identical(model_type, "binomial") &&
+      (model_type %in% SUPPORTED_SPEC_FAMILIES) &&
       identical(zi_info$type, "none") &&
       identical(spatial_info$type, "none") &&
       identical(temporal_info$type, "none") &&
@@ -731,22 +735,36 @@ fit_hmc <- function(formula,
       as.integer(chains) == 1L
 
     if (specs_eligible) {
-      cfg <- list(family = "binomial", zi = "none",
-                  num_link = "logit", denom_link = "log")
+      num_link   <- if (model_type %in% c("binomial", "beta_binomial")) "logit" else "log"
+      denom_link <- "log"
+      cfg <- list(family = model_type, zi = "none",
+                  num_link = num_link, denom_link = denom_link)
+      # X_denom is empty (0-col) for single-process families; the bridge
+      # ignores it when spec.n_processes < 2. For two-process families pass
+      # the actual denominator design matrix.
+      X_denom_call <- if (is.null(hmc_data$X_denom))
+        matrix(numeric(0), nrow = nrow(hmc_data$X_num), ncol = 0)
+      else hmc_data$X_denom
       fit_raw <- cpp_tulpaRatio_run_nuts_specs(
-        y_num         = as.integer(hmc_data$y_num),
-        y_denom       = as.integer(hmc_data$y_denom),
-        X_num         = hmc_data$X_num,
-        cfg_list      = cfg,
-        init          = as.numeric(q_init),
-        n_iter        = as.integer(iter),
-        n_warmup      = as.integer(warmup),
-        max_treedepth = as.integer(max_treedepth %||% 10L),
-        adapt_delta   = if (adapt_delta_value < 0) 0.8 else adapt_delta_value,
-        seed          = as.integer(seed),
-        verbose       = isTRUE(verbose),
-        gradient_mode = if (identical(gradient_mode, "auto")) "A_r" else gradient_mode,
-        sigma_beta    = sigma_beta
+        y_num             = as.integer(hmc_data$y_num),
+        y_denom           = as.integer(hmc_data$y_denom),
+        y_num_cont        = as.numeric(hmc_data$y_num_cont),
+        y_denom_cont      = as.numeric(hmc_data$y_denom_cont),
+        X_num             = hmc_data$X_num,
+        X_denom           = X_denom_call,
+        cfg_list          = cfg,
+        init              = as.numeric(q_init),
+        n_iter            = as.integer(iter),
+        n_warmup          = as.integer(warmup),
+        max_treedepth     = as.integer(max_treedepth %||% 10L),
+        adapt_delta       = if (adapt_delta_value < 0) 0.8 else adapt_delta_value,
+        seed              = as.integer(seed),
+        verbose           = isTRUE(verbose),
+        gradient_mode     = if (identical(gradient_mode, "auto")) "A_r" else gradient_mode,
+        sigma_beta        = sigma_beta,
+        phi_prior_shape   = phi_shape,
+        phi_prior_rate    = phi_rate,
+        sigma_prior_scale = sigma_re_scale
       )
     } else {
       fit_raw <- cpp_hmc_fit(

@@ -13,7 +13,8 @@ spatial_gp(
   cg_tol = 1e-06,
   cg_maxiter = 100,
   shared = TRUE,
-  scale_coords = TRUE
+  scale_coords = TRUE,
+  parameterization = c("centered", "noncentered", "collapsed")
 )
 }
 \arguments{
@@ -46,7 +47,7 @@ Better for large N (> 2000) with good preconditioning.
 \item \code{"pcg"}: Preconditioned CG with diagonal preconditioner.
 Faster convergence than CG for ill-conditioned systems.
 \item \code{"gpu"}: GPU-accelerated batched Cholesky using CUDA (if available).
-Requires numdenom to be compiled with GPU support. Falls back to PCG
+Requires tulpaRatio to be compiled with GPU support. Falls back to PCG
 if GPU is unavailable. Best for large datasets (N > 5000) with
 CUDA-capable GPU. Use \code{\link[=gpu_available]{gpu_available()}} to check support.
 }}

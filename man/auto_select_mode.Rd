@@ -4,7 +4,15 @@
 \alias{auto_select_mode}
 \title{Auto-select mode (Tier 1 or Tier 2 only)}
 \usage{
-auto_select_mode(family, n_obs, has_spatial, has_temporal, has_latent)
+auto_select_mode(
+  family,
+  n_obs,
+  has_spatial,
+  has_temporal,
+  has_latent,
+  temporal = NULL,
+  spatial_type = NULL
+)
 }
 \description{
 Implements the "auto" mode selection. Chooses the most reliable method

@@ -11,7 +11,10 @@ compute_ratio_draws_hmc_full(
   temporal_info,
   zi_info,
   model_type,
-  re_param = "noncentered"
+  re_param = "noncentered",
+  gp_w_star = NULL,
+  icar_phi_star = NULL,
+  bym2_theta_star = NULL
 )
 }
 \description{

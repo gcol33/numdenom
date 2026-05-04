@@ -1,4 +1,6 @@
 #include <Rcpp.h>
+#include <functional>
+#include <memory>
 #include <vector>
 #include <string>
 #include <tulpa/nuts_api.h>
@@ -50,6 +52,118 @@ Rcpp::IntegerVector buffer_int_vector(const T* values, int n) {
     out[i] = static_cast<int>(values[i]);
   }
   return out;
+}
+
+// Copy a column-major Rcpp NumericMatrix into a row-major flat double vector
+// with shape [N x p], matching tulpa::ProcessData::X_flat layout.
+std::vector<double> rmajor_from_rmatrix(const Rcpp::NumericMatrix& X) {
+  const int N = X.nrow();
+  const int p = X.ncol();
+  std::vector<double> out(static_cast<size_t>(N) * p, 0.0);
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < p; ++j) {
+      out[i * p + j] = X(i, j);
+    }
+  }
+  return out;
+}
+
+// ----- Per-family payload builder ------------------------------------------
+// Each family has its own POD struct. We build the right one based on
+// cfg.family, returning a `void*` plus a `unique_ptr<void, ...>` for cleanup.
+// Centralising the construction here keeps the family files pure (no Rcpp
+// in lik_*.cpp) and the bridge a single switch — no per-family allocation
+// boilerplate sprinkled around.
+struct ResponsePayload {
+  void* ptr = nullptr;
+  std::function<void(void*)> deleter;
+  ~ResponsePayload() { if (ptr) deleter(ptr); }
+  ResponsePayload() = default;
+  ResponsePayload(const ResponsePayload&) = delete;
+  ResponsePayload& operator=(const ResponsePayload&) = delete;
+  ResponsePayload(ResponsePayload&& o) noexcept
+      : ptr(o.ptr), deleter(std::move(o.deleter)) { o.ptr = nullptr; }
+};
+
+template <typename Payload>
+ResponsePayload make_payload(Payload* obj) {
+  ResponsePayload r;
+  r.ptr = obj;
+  r.deleter = [](void* p) { delete static_cast<Payload*>(p); };
+  return r;
+}
+
+ResponsePayload build_response_payload(
+    const std::string& family,
+    const Rcpp::IntegerVector& y_num_int,
+    const Rcpp::IntegerVector& y_denom_int,
+    const Rcpp::NumericVector& y_num_cont,
+    const Rcpp::NumericVector& y_denom_cont,
+    int N
+) {
+  using namespace tulpaRatio::lik;
+
+  if (family == "binomial") {
+    auto* p = new BinomialResponseData;
+    p->y.assign(N, 0); p->n.assign(N, 0);
+    for (int i = 0; i < N; ++i) { p->y[i] = y_num_int[i]; p->n[i] = y_denom_int[i]; }
+    return make_payload(p);
+  }
+  if (family == "beta_binomial") {
+    auto* p = new BetaBinomialResponseData;
+    p->y.assign(N, 0); p->n.assign(N, 0);
+    for (int i = 0; i < N; ++i) { p->y[i] = y_num_int[i]; p->n[i] = y_denom_int[i]; }
+    return make_payload(p);
+  }
+  if (family == "poisson_gamma") {
+    auto* p = new PoissonGammaResponseData;
+    p->y_num.assign(N, 0);
+    p->y_denom_cont.assign(N, 0.0);
+    for (int i = 0; i < N; ++i) {
+      p->y_num[i]        = y_num_int[i];
+      p->y_denom_cont[i] = y_denom_cont[i];
+    }
+    return make_payload(p);
+  }
+  if (family == "negbin_gamma") {
+    auto* p = new NegbinGammaResponseData;
+    p->y_num.assign(N, 0);
+    p->y_denom_cont.assign(N, 0.0);
+    for (int i = 0; i < N; ++i) {
+      p->y_num[i]        = y_num_int[i];
+      p->y_denom_cont[i] = y_denom_cont[i];
+    }
+    return make_payload(p);
+  }
+  if (family == "negbin_negbin") {
+    auto* p = new NegbinNegbinResponseData;
+    p->y_num.assign(N, 0); p->y_denom.assign(N, 0);
+    for (int i = 0; i < N; ++i) { p->y_num[i] = y_num_int[i]; p->y_denom[i] = y_denom_int[i]; }
+    return make_payload(p);
+  }
+  if (family == "gamma_gamma") {
+    auto* p = new GammaGammaResponseData;
+    p->y_num_cont.assign(N, 0.0);
+    p->y_denom_cont.assign(N, 0.0);
+    for (int i = 0; i < N; ++i) {
+      p->y_num_cont[i]   = y_num_cont[i];
+      p->y_denom_cont[i] = y_denom_cont[i];
+    }
+    return make_payload(p);
+  }
+  if (family == "lognormal") {
+    auto* p = new LognormalResponseData;
+    p->y_num_cont.assign(N, 0.0);
+    p->y_denom_cont.assign(N, 0.0);
+    for (int i = 0; i < N; ++i) {
+      p->y_num_cont[i]   = y_num_cont[i];
+      p->y_denom_cont[i] = y_denom_cont[i];
+    }
+    return make_payload(p);
+  }
+
+  Rcpp::stop("build_response_payload: unknown family '%s'", family.c_str());
+  return ResponsePayload();  // unreachable
 }
 
 } // namespace
@@ -122,11 +236,12 @@ Rcpp::List cpp_tulpa_pg_binomial_gibbs(
 }
 
 // ============================================================================
-// LikelihoodSpec-driven NUTS entry point (B1a binomial PoC).
+// LikelihoodSpec-driven NUTS entry point (B1b: 7 ratio families).
 //
-// Builds a single-process ModelData populated only with X_num, attaches a
-// BinomialResponseData payload, asks the family dispatcher for a
-// LikelihoodSpec, then routes through tulpa::get_nuts_fn().
+// Builds a 1- or 2-process ModelData populated only with X_num (and X_denom
+// when the family has two processes), attaches a per-family response payload,
+// asks the family dispatcher for a LikelihoodSpec, then routes through
+// tulpa::get_nuts_fn().
 //
 // Returns a list shaped like the legacy `cpp_hmc_fit` output (samples,
 // log_prob, accept_prob, n_leapfrog, treedepth, divergent, epsilon, sampler)
@@ -136,7 +251,10 @@ Rcpp::List cpp_tulpa_pg_binomial_gibbs(
 Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     Rcpp::IntegerVector y_num,
     Rcpp::IntegerVector y_denom,
+    Rcpp::NumericVector y_num_cont,
+    Rcpp::NumericVector y_denom_cont,
     Rcpp::NumericMatrix X_num,
+    Rcpp::NumericMatrix X_denom,
     Rcpp::List cfg_list,
     Rcpp::NumericVector init,
     int n_iter,
@@ -146,82 +264,90 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     int seed = 1,
     bool verbose = false,
     std::string gradient_mode = "A_r",
-    double sigma_beta = 2.5
+    double sigma_beta = 2.5,
+    double phi_prior_shape = 1.0,
+    double phi_prior_rate  = 0.01,
+    double sigma_prior_scale = 1.0
 ) {
-  const int N = X_num.nrow();
-  const int p = X_num.ncol();
+  const int N      = X_num.nrow();
+  const int p_num   = X_num.ncol();
+  const int p_denom = X_denom.ncol();
 
-  if (y_num.size() != N || y_denom.size() != N) {
-    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: y_num/y_denom length must equal nrow(X_num).");
-  }
-  if (init.size() != p) {
-    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: init length (%d) must equal ncol(X_num) (%d) "
-               "for B1a binomial scope.", (int)init.size(), p);
-  }
-
-  // ---- Build RatioConfig from R-side list ------------------------------------
+  // ---- Build RatioConfig from R-side list (with hyperprior overrides) -----
   tulpaRatio::RatioConfig cfg;
   cfg.family    = Rcpp::as<std::string>(cfg_list["family"]);
   if (cfg_list.containsElementNamed("zi"))         cfg.zi         = Rcpp::as<std::string>(cfg_list["zi"]);
   if (cfg_list.containsElementNamed("num_link"))   cfg.num_link   = Rcpp::as<std::string>(cfg_list["num_link"]);
   if (cfg_list.containsElementNamed("denom_link")) cfg.denom_link = Rcpp::as<std::string>(cfg_list["denom_link"]);
+  cfg.phi_prior_shape   = phi_prior_shape;
+  cfg.phi_prior_rate    = phi_prior_rate;
+  cfg.sigma_prior_scale = sigma_prior_scale;
 
-  // ---- Response payload (binomial) -------------------------------------------
-  tulpaRatio::lik::BinomialResponseData resp;
-  resp.y.assign(N, 0);
-  resp.n.assign(N, 0);
-  for (int i = 0; i < N; ++i) {
-    resp.y[i] = y_num[i];
-    resp.n[i] = y_denom[i];
+  // ---- Validate response shape vs. family expectations -------------------
+  const bool has_y_int  = (y_num.size()  == N) && (y_denom.size()  == N);
+  const bool has_y_cont = (y_num_cont.size() == N) || (y_denom_cont.size() == N);
+  if (!has_y_int && !has_y_cont) {
+    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: response vectors all empty.");
   }
 
-  // ---- Build LikelihoodSpec via dispatcher -----------------------------------
+  // ---- Build LikelihoodSpec & response payload via dispatcher ------------
   tulpa::LikelihoodSpec spec = tulpaRatio::build_ratio_likelihood_spec(cfg);
+  ResponsePayload response = build_response_payload(
+      cfg.family, y_num, y_denom, y_num_cont, y_denom_cont, N);
 
-  // ---- ModelData (single process, no spatial/temporal/RE/ZI) -----------------
+  // ---- ModelData (1 or 2 processes, no spatial/temporal/RE/ZI) ----------
   tulpa::ModelData data;
   data.N = N;
   data.n_processes = spec.n_processes;
-  data.sigma_beta = sigma_beta;
-  data.model_response_data = &resp;
-  data.likelihood_spec = &spec;
+  data.sigma_beta  = sigma_beta;
+  data.model_response_data = response.ptr;
+  data.likelihood_spec     = &spec;
 
   data.processes.resize(spec.n_processes);
-  // X_num is column-major in Rcpp, but ProcessData expects row-major X_flat[N*p].
-  data.processes[0].p = p;
-  data.processes[0].X_flat.assign(N * p, 0.0);
-  for (int i = 0; i < N; ++i) {
-    for (int j = 0; j < p; ++j) {
-      data.processes[0].X_flat[i * p + j] = X_num(i, j);
+  data.processes[0].p      = p_num;
+  data.processes[0].X_flat = rmajor_from_rmatrix(X_num);
+  if (spec.n_processes >= 2) {
+    if (X_denom.nrow() != N) {
+      Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: X_denom must have N rows for "
+                 "a 2-process family ('%s').", cfg.family.c_str());
     }
+    data.processes[1].p      = p_denom;
+    data.processes[1].X_flat = rmajor_from_rmatrix(X_denom);
   }
-  // No offset.
   data.sharing.init(spec.n_processes);
 
-  // No ZI/OI in B1a.
-  data.zi_type   = tulpa::ZIType::NONE;
-  data.p_zi      = 0;
-  data.p_oi      = 0;
+  // No ZI/OI in B1b.
+  data.zi_type     = tulpa::ZIType::NONE;
+  data.p_zi        = 0;
+  data.p_oi        = 0;
   data.zi_prior_sd = 1.0;
   data.oi_prior_sd = 1.0;
 
-  // ---- Param layout (engine derives from data + spec) ------------------------
+  // ---- Param layout (engine derives from data + spec) -------------------
   tulpa::ParamLayout layout = tulpa::compute_layout(data);
-  if (layout.total_params != p) {
-    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: layout.total_params (%d) != p (%d). "
-               "B1a expects a binomial intercept-only-or-fixed-only model with "
-               "no extra latent structure.",
-               layout.total_params, p);
+
+  int expected_total = p_num + (spec.n_processes >= 2 ? p_denom : 0) + spec.n_extra_params;
+  if (layout.total_params != expected_total) {
+    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: layout.total_params (%d) != "
+               "expected (%d) for family='%s' [p_num=%d, p_denom=%d, n_extra=%d]. "
+               "B1b expects no extra latent structure.",
+               layout.total_params, expected_total, cfg.family.c_str(),
+               p_num, (spec.n_processes >= 2 ? p_denom : 0), spec.n_extra_params);
+  }
+  if (init.size() != expected_total) {
+    Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: init length (%d) != expected (%d) "
+               "for family='%s'.",
+               (int)init.size(), expected_total, cfg.family.c_str());
   }
 
-  // ---- Pin gradient mode -----------------------------------------------------
+  // ---- Pin gradient mode -------------------------------------------------
   int grad_rc = tulpa::set_gradient_mode_str(gradient_mode.c_str());
   if (grad_rc != 0) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: unrecognised gradient_mode '%s'.",
                gradient_mode.c_str());
   }
 
-  // ---- Run NUTS via the registered tulpa entry point ------------------------
+  // ---- Run NUTS via the registered tulpa entry point ---------------------
   std::vector<double> init_vec(init.begin(), init.end());
   tulpa::NUTSResult result{};
   tulpa::get_nuts_fn()(
@@ -246,9 +372,6 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   Rcpp::NumericVector accept_prob = buffer_vector(result.accept_prob, n_save);
   Rcpp::IntegerVector divergent   = buffer_int_vector(result.divergent, n_save);
   Rcpp::IntegerVector treedepth   = buffer_int_vector(result.treedepth, n_save);
-  // The legacy converter also reads `n_leapfrog`. NUTSResult doesn't expose it
-  // separately; report `2^treedepth - 1` as a faithful proxy (the treedepth is
-  // the per-iteration step count exponent in the doubling scheme).
   Rcpp::IntegerVector n_leapfrog(n_save);
   for (int s = 0; s < n_save; ++s) {
     int td = treedepth[s];

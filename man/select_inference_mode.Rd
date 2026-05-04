@@ -10,7 +10,9 @@ select_inference_mode(
   n_obs,
   has_spatial = FALSE,
   has_temporal = FALSE,
-  has_latent = FALSE
+  has_latent = FALSE,
+  spatial_type = NULL,
+  temporal = NULL
 )
 }
 \arguments{
@@ -37,7 +39,7 @@ List with:
 }
 }
 \description{
-Implements the mode selection logic for numdenom. Accepts either tier names
+Implements the mode selection logic for tulpaRatio. Accepts either tier names
 (auto, exact, structured, optimized) or backend names (hmc, ess, pg, laplace, vi).
 
 When mode is "auto", selects between Tier 1 (Exact) and Tier 2 (Structured)

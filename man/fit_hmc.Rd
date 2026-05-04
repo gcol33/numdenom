@@ -20,7 +20,7 @@ fit_hmc(
   cores = NULL,
   L = 0,
   adapt_delta = NULL,
-  max_treedepth = 10,
+  max_treedepth = NULL,
   seed = NULL,
   verbose = TRUE,
   gradient_mode = "auto",

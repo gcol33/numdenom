@@ -23,15 +23,15 @@ ratiod(
   thin = 1,
   cores = getOption("mc.cores", chains),
   seed = NULL,
-  mode = c("auto", "exact", "structured", "optimized", "hmc", "ess", "pg", "sghmc",
-    "sgld", "laplace", "vi"),
+  mode = c("auto", "exact", "structured", "optimized", "hmc", "ess", "pg", "gibbs",
+    "sghmc", "sgld", "laplace", "vi"),
   vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
   refresh = NULL,
   verbose = TRUE,
   gradient_mode = c("auto", "N", "A", "A_r", "A_t", "H"),
   re_param = c("noncentered", "centered"),
   adapt_delta = NULL,
-  max_treedepth = 10,
+  max_treedepth = NULL,
   metric = c("auto", "dense", "diag", "block_diag"),
   riemannian = NULL,
   ...
@@ -126,6 +126,9 @@ See \code{\link[=inference_mode_info]{inference_mode_info()}} for details on the
 
 \item{refresh}{Progress update frequency (default: iter/10).}
 
+\item{verbose}{Logical; if TRUE (default), print progress messages during
+model fitting.}
+
 \item{gradient_mode}{Gradient computation method for HMC backend:
 \code{"auto"} (default) selects fastest available;
 \code{"H"} hand-coded analytical gradients (fastest);
@@ -145,6 +148,10 @@ adaptation. Higher values produce smaller step sizes, reducing divergences
 but slowing sampling. \code{NULL} (default) selects automatically based on model
 complexity: 0.80 for simple models, 0.85 for ICAR, 0.90 for BYM2 and
 correlated random slopes. Manual range: 0.80--0.99.}
+
+\item{max_treedepth}{Maximum tree depth for NUTS. \code{NULL} (default) uses 10.
+Increase if you see many max-treedepth warnings. Higher values allow
+deeper exploration but increase computation per iteration.}
 
 \item{metric}{Mass matrix type for NUTS:
 \code{"auto"} (default) selects automatically based on model complexity;

@@ -7,6 +7,6 @@
 inference_mode_info()
 }
 \description{
-Displays information about the inference modes available in numdenom,
+Displays information about the inference modes available in tulpaRatio,
 including their tiers, guarantees, and appropriate use cases.
 }

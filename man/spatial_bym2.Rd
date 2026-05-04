@@ -9,7 +9,8 @@ spatial_bym2(
   level = c("group", "obs"),
   group_var = NULL,
   shared = TRUE,
-  scale_factor = NULL
+  scale_factor = NULL,
+  parameterization = c("standard", "collapsed")
 )
 }
 \arguments{

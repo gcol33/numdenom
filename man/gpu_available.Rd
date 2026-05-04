@@ -10,13 +10,13 @@ gpu_available()
 Logical; TRUE if GPU acceleration is available, FALSE otherwise.
 }
 \description{
-Checks whether numdenom was compiled with GPU support (CUDA or OpenCL)
+Checks whether tulpaRatio was compiled with GPU support (CUDA or OpenCL)
 and whether compatible GPU hardware is detected.
 }
 \details{
 GPU support requires:
 \enumerate{
-\item numdenom compiled with GPU support (\code{-DUSE_CUDA} or \code{-DUSE_OPENCL})
+\item tulpaRatio compiled with GPU support (\code{-DUSE_CUDA} or \code{-DUSE_OPENCL})
 \item Compatible GPU hardware (NVIDIA for CUDA, any GPU for OpenCL)
 \item Appropriate drivers installed
 }

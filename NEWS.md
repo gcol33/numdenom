@@ -9,6 +9,11 @@
   parity ships in B5. Posterior means agree with the legacy backend within
   Monte Carlo noise.
 
+* B1b: the same feature flag now covers all 7 ratio families (binomial,
+  poisson_gamma, negbin_gamma, negbin_negbin, gamma_gamma, lognormal,
+  beta_binomial) for the simplest non-ZI / no-spatial / no-RE / single-chain
+  configuration. Autodiff only — H-kernel port is deferred to B2.
+
 # numdenom 1.3.0
 
 ## New Inference Backends

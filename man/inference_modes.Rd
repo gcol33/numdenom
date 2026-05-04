@@ -4,7 +4,7 @@
 \alias{inference_modes}
 \title{Inference Mode System}
 \description{
-numdenom uses an explicit tier system for inference that encodes
+tulpaRatio uses an explicit tier system for inference that encodes
 \strong{epistemic guarantees}, not just runtime characteristics.
 
 This design makes the difference between inference methods \strong{first-class

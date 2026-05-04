@@ -1767,14 +1767,17 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_tulpaRatio_run_nuts_specs
-Rcpp::List cpp_tulpaRatio_run_nuts_specs(Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericMatrix X_num, Rcpp::List cfg_list, Rcpp::NumericVector init, int n_iter, int n_warmup, int max_treedepth, double adapt_delta, int seed, bool verbose, std::string gradient_mode, double sigma_beta);
-RcppExport SEXP _tulpaRatio_cpp_tulpaRatio_run_nuts_specs(SEXP y_numSEXP, SEXP y_denomSEXP, SEXP X_numSEXP, SEXP cfg_listSEXP, SEXP initSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP max_treedepthSEXP, SEXP adapt_deltaSEXP, SEXP seedSEXP, SEXP verboseSEXP, SEXP gradient_modeSEXP, SEXP sigma_betaSEXP) {
+Rcpp::List cpp_tulpaRatio_run_nuts_specs(Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_num_cont, Rcpp::NumericVector y_denom_cont, Rcpp::NumericMatrix X_num, Rcpp::NumericMatrix X_denom, Rcpp::List cfg_list, Rcpp::NumericVector init, int n_iter, int n_warmup, int max_treedepth, double adapt_delta, int seed, bool verbose, std::string gradient_mode, double sigma_beta, double phi_prior_shape, double phi_prior_rate, double sigma_prior_scale);
+RcppExport SEXP _tulpaRatio_cpp_tulpaRatio_run_nuts_specs(SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_num_contSEXP, SEXP y_denom_contSEXP, SEXP X_numSEXP, SEXP X_denomSEXP, SEXP cfg_listSEXP, SEXP initSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP max_treedepthSEXP, SEXP adapt_deltaSEXP, SEXP seedSEXP, SEXP verboseSEXP, SEXP gradient_modeSEXP, SEXP sigma_betaSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP sigma_prior_scaleSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y_num(y_numSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y_denom(y_denomSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type y_num_cont(y_num_contSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type y_denom_cont(y_denom_contSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type X_denom(X_denomSEXP);
     Rcpp::traits::input_parameter< Rcpp::List >::type cfg_list(cfg_listSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type init(initSEXP);
     Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
@@ -1785,7 +1788,10 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
     Rcpp::traits::input_parameter< std::string >::type gradient_mode(gradient_modeSEXP);
     Rcpp::traits::input_parameter< double >::type sigma_beta(sigma_betaSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_tulpaRatio_run_nuts_specs(y_num, y_denom, X_num, cfg_list, init, n_iter, n_warmup, max_treedepth, adapt_delta, seed, verbose, gradient_mode, sigma_beta));
+    Rcpp::traits::input_parameter< double >::type phi_prior_shape(phi_prior_shapeSEXP);
+    Rcpp::traits::input_parameter< double >::type phi_prior_rate(phi_prior_rateSEXP);
+    Rcpp::traits::input_parameter< double >::type sigma_prior_scale(sigma_prior_scaleSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_tulpaRatio_run_nuts_specs(y_num, y_denom, y_num_cont, y_denom_cont, X_num, X_denom, cfg_list, init, n_iter, n_warmup, max_treedepth, adapt_delta, seed, verbose, gradient_mode, sigma_beta, phi_prior_shape, phi_prior_rate, sigma_prior_scale));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1943,7 +1949,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_test_parallel_independent", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_independent, 2},
     {"_tulpaRatio_cpp_tulpa_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_abi_version, 0},
     {"_tulpaRatio_cpp_tulpa_pg_binomial_gibbs", (DL_FUNC) &_tulpaRatio_cpp_tulpa_pg_binomial_gibbs, 13},
-    {"_tulpaRatio_cpp_tulpaRatio_run_nuts_specs", (DL_FUNC) &_tulpaRatio_cpp_tulpaRatio_run_nuts_specs, 13},
+    {"_tulpaRatio_cpp_tulpaRatio_run_nuts_specs", (DL_FUNC) &_tulpaRatio_cpp_tulpaRatio_run_nuts_specs, 19},
     {"_tulpaRatio_cpp_vi_fit", (DL_FUNC) &_tulpaRatio_cpp_vi_fit, 16},
     {"_tulpaRatio_cpp_vi_get_n_params", (DL_FUNC) &_tulpaRatio_cpp_vi_get_n_params, 7},
     {NULL, NULL, 0}
