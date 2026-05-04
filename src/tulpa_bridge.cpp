@@ -266,7 +266,10 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     double sigma_beta = 2.5,
     double phi_prior_shape = 1.0,
     double phi_prior_rate  = 0.01,
-    double sigma_prior_scale = 1.0
+    double sigma_prior_scale = 1.0,
+    Rcpp::List re_params = Rcpp::List::create(),
+    Rcpp::List spatial_params = Rcpp::List::create(),
+    Rcpp::List temporal_params = Rcpp::List::create()
 ) {
   const int n_proc_input = X_list.size();
   if (n_proc_input < 1) {
@@ -403,17 +406,264 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     p_oi_block     = X_oi.ncol();
   }
 
+  // ---- Random effects (B1d-1: single grouping factor, intercepts + slopes) ----
+  // R passes the same re_params list shape used by legacy cpp_hmc_fit. The
+  // spec path supports the single-grouping-factor case in B1d-1: random
+  // intercepts (n_coefs == 1) and uncorrelated random slopes (n_coefs > 1,
+  // correlated == FALSE). Multi-term (crossed/nested) and correlated slopes
+  // (LKJ-Cholesky) still fall back to legacy.
+  //
+  // The engine's tulpa::compute_re_prior reads these fields:
+  //   * intercept-only path:  n_re_terms == 0, n_re_groups, re_group
+  //   * slopes path:          n_re_terms == 1, has_re_slopes,
+  //                           re_n_coefs, re_n_groups_multi,
+  //                           re_slope_matrices, re_group_multi_flat
+  // tulpa::compute_param_layout matches tulpaRatio's legacy
+  // compute_param_layout slot-for-slot, so q_init / sample columns agree
+  // without any reordering of the RE block.
+  int p_re_block = 0;
+  if (re_params.containsElementNamed("n_groups")) {
+    const int n_re_groups = Rcpp::as<int>(re_params["n_groups"]);
+    const int n_re_terms  = Rcpp::as<int>(re_params["n_terms"]);
+    const bool has_slopes = Rcpp::as<bool>(re_params["has_slopes"]);
+    const bool has_correlated_slopes =
+        re_params.containsElementNamed("has_correlated_slopes")
+          ? Rcpp::as<bool>(re_params["has_correlated_slopes"])
+          : false;
+
+    if (n_re_groups > 0) {
+      if (n_re_terms > 1) {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: multi-term RE is not yet "
+                   "supported on the spec path. Use the legacy backend.");
+      }
+      if (has_correlated_slopes) {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: correlated random slopes "
+                   "are not yet supported on the spec path. "
+                   "Use the legacy backend.");
+      }
+
+      data.re_group = Rcpp::as<std::vector<int>>(re_params["group"]);
+      data.n_re_groups = n_re_groups;
+      data.re_parameterization =
+          Rcpp::as<int>(re_params["parameterization"]);  // 0=centered, 1=NC
+      if ((int)data.re_group.size() != N) {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: re_params$group length (%d) "
+                   "must equal N (%d).", (int)data.re_group.size(), N);
+      }
+
+      if (has_slopes) {
+        // Single-term slopes path. Engine reads:
+        //   re_n_coefs[0], re_n_groups_multi[0], re_correlated[0],
+        //   re_n_chol[0], re_slope_matrices[0], re_group_multi_flat
+        //   (length N — same content as re_group when n_terms == 1).
+        const int n_coefs = Rcpp::as<int>(re_params["n_coefs"]);
+        if (n_coefs < 2) {
+          Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: has_slopes=TRUE but "
+                     "n_coefs (%d) < 2.", n_coefs);
+        }
+        const int n_slopes = n_coefs - 1;
+        Rcpp::NumericMatrix Xs = Rcpp::as<Rcpp::NumericMatrix>(
+            re_params["slope_matrix"]);
+        if (Xs.nrow() != N || Xs.ncol() != n_slopes) {
+          Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: slope_matrix shape "
+                     "(%d x %d) does not match N x (n_coefs - 1) = %d x %d.",
+                     Xs.nrow(), Xs.ncol(), N, n_slopes);
+        }
+
+        data.n_re_terms = 1;
+        data.re_n_groups_multi.assign(1, n_re_groups);
+        data.re_offsets.assign(1, 0);
+        data.re_group_multi_flat.assign(N, 0);
+        for (int i = 0; i < N; ++i) {
+          data.re_group_multi_flat[i] = data.re_group[i];
+        }
+
+        data.has_re_slopes = true;
+        data.has_re_correlated_slopes = false;
+        data.re_n_coefs.assign(1, n_coefs);
+        data.re_n_slopes.assign(1, n_slopes);
+        data.re_correlated.assign(1, false);
+        data.re_n_chol.assign(1, 0);
+        data.re_slope_matrices.assign(1, std::vector<double>(
+            static_cast<size_t>(N) * n_slopes, 0.0));
+        for (int i = 0; i < N; ++i) {
+          for (int s = 0; s < n_slopes; ++s) {
+            data.re_slope_matrices[0][i * n_slopes + s] = Xs(i, s);
+          }
+        }
+
+        data.total_re_groups   = n_re_groups;
+        data.total_re_params   = n_re_groups * n_coefs;
+        data.total_sigma_params = n_coefs;
+        data.total_chol_params = 0;
+
+        // Layout: n_coefs sigmas + n_groups * n_coefs RE effects.
+        p_re_block = n_coefs + n_re_groups * n_coefs;
+      } else {
+        // Single-term intercept-only path. Mirrors the engine's legacy slot
+        // selection: n_re_terms == 0 routes through compute_param_layout's
+        // single-term branch and through generic_re_effect's re_group fallback.
+        data.n_re_terms = 0;
+        data.has_re_slopes = false;
+        data.has_re_correlated_slopes = false;
+        data.total_re_groups = n_re_groups;
+        data.total_re_params = n_re_groups;
+        data.total_sigma_params = 1;
+        data.total_chol_params = 0;
+        // 1 (log_sigma) + n_re_groups (z or re).
+        p_re_block = 1 + n_re_groups;
+      }
+
+      // Disable the hand-coded H gradient when RE is present: the H-kernel
+      // asserts no latent structure. The autodiff path picks up RE via
+      // tulpa::compute_log_post_generic, which includes the RE prior and
+      // adds the per-obs RE effect to eta. Lifting this requires extending
+      // lik_grad_h_kernel.cpp with the RE prior gradient + Z^T residual
+      // accumulation; deferred to a follow-up.
+      spec.gradient_fn = nullptr;
+    }
+  }
+
+  // ---- Spatial (B1d Step 2: ICAR / BYM2, non-collapsed) -----------------
+  // R passes the same spatial_params list shape used by legacy cpp_hmc_fit.
+  // The spec path supports:
+  //   - "icar": log_tau + n_units phi values  (1 + n_units params)
+  //   - "bym2": log_sigma + logit_rho + 2*n_units (phi_scaled, theta)
+  //                                     (2 + 2*n_units params)
+  // Collapsed parameterisations and CAR_PROPER / GP / HSGP / multiscale GP
+  // are deferred. The engine's compute_layout + compute_log_post_generic
+  // wires the prior and adds the per-obs spatial effect to eta when these
+  // fields are set.
+  int p_spatial_block = 0;
+  if (spatial_params.containsElementNamed("type")) {
+    const std::string spatial_type =
+        Rcpp::as<std::string>(spatial_params["type"]);
+    if (spatial_type != "none" && !spatial_type.empty()) {
+      const std::string param =
+          spatial_params.containsElementNamed("parameterization")
+            ? Rcpp::as<std::string>(spatial_params["parameterization"])
+            : std::string("standard");
+      if (param == "collapsed") {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: collapsed spatial "
+                   "parameterisations are not yet supported on the spec path. "
+                   "Use the legacy backend.");
+      }
+      if (spatial_type == "icar") {
+        data.spatial_type = tulpa::SpatialType::ICAR;
+      } else if (spatial_type == "bym2") {
+        data.spatial_type = tulpa::SpatialType::BYM2;
+      } else {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: spatial type '%s' is not "
+                   "yet supported on the spec path. Supported: 'icar', 'bym2'.",
+                   spatial_type.c_str());
+      }
+
+      data.spatial_group   =
+          Rcpp::as<std::vector<int>>(spatial_params["group"]);
+      data.n_spatial_units = Rcpp::as<int>(spatial_params["n_units"]);
+      data.adj_row_ptr     =
+          Rcpp::as<std::vector<int>>(spatial_params["adj_row_ptr"]);
+      data.adj_col_idx     =
+          Rcpp::as<std::vector<int>>(spatial_params["adj_col_idx"]);
+      data.n_neighbors     =
+          Rcpp::as<std::vector<int>>(spatial_params["n_neighbors"]);
+      if (spatial_params.containsElementNamed("bym2_scale")) {
+        data.bym2_scale_factor = Rcpp::as<double>(spatial_params["bym2_scale"]);
+      }
+      if (spatial_params.containsElementNamed("Q_inv") &&
+          spatial_params.containsElementNamed("L_Q")) {
+        SEXP qi = spatial_params["Q_inv"];
+        SEXP lq = spatial_params["L_Q"];
+        if (!Rf_isNull(qi) && !Rf_isNull(lq)) {
+          data.spatial_Q_inv = Rcpp::as<std::vector<double>>(qi);
+          data.spatial_L_Q   = Rcpp::as<std::vector<double>>(lq);
+        }
+      }
+      if ((int)data.spatial_group.size() != N) {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: spatial_params$group length "
+                   "(%d) must equal N (%d).",
+                   (int)data.spatial_group.size(), N);
+      }
+
+      p_spatial_block = (data.spatial_type == tulpa::SpatialType::BYM2)
+          ? (2 + 2 * data.n_spatial_units)
+          : (1 +     data.n_spatial_units);
+
+      // Same rationale as RE: the H-kernel rejects spatial structure.
+      spec.gradient_fn = nullptr;
+    }
+  }
+
+  // ---- Temporal (B1d Step 3: RW1 / RW2 / AR1) ---------------------------
+  // Layout sizes follow compute_param_layout exactly:
+  //   - RW1/RW2:  log_tau + n_temporal_params           = 1 + n_temporal_params
+  //   - AR1   :  log_tau + logit_rho + n_temporal_params = 2 + n_temporal_params
+  //   - GP    : deferred (separate hyperprior surface)
+  // n_temporal_params = n_times * n_temporal_groups (R-side already computed).
+  int p_temporal_block = 0;
+  if (temporal_params.containsElementNamed("type")) {
+    const std::string temporal_type =
+        Rcpp::as<std::string>(temporal_params["type"]);
+    if (temporal_type != "none" && !temporal_type.empty()) {
+      if (temporal_type == "rw1") {
+        data.temporal_type = tulpa::TemporalType::RW1;
+      } else if (temporal_type == "rw2") {
+        data.temporal_type = tulpa::TemporalType::RW2;
+      } else if (temporal_type == "ar1") {
+        data.temporal_type = tulpa::TemporalType::AR1;
+      } else {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: temporal type '%s' is not "
+                   "yet supported on the spec path. Supported: 'rw1', 'rw2', "
+                   "'ar1'.", temporal_type.c_str());
+      }
+
+      data.temporal_time_idx =
+          Rcpp::as<std::vector<int>>(temporal_params["time_idx"]);
+      data.temporal_group_idx =
+          Rcpp::as<std::vector<int>>(temporal_params["group_idx"]);
+      data.n_times             = Rcpp::as<int>(temporal_params["n_times"]);
+      data.n_temporal_groups   = Rcpp::as<int>(temporal_params["n_groups"]);
+      data.n_temporal_params   = Rcpp::as<int>(temporal_params["n_params"]);
+      data.temporal_cyclic     = Rcpp::as<bool>(temporal_params["cyclic"]);
+      data.temporal_shared     = Rcpp::as<bool>(temporal_params["shared"]);
+      if (temporal_params.containsElementNamed("tau_shape")) {
+        data.tau_temporal_shape =
+            Rcpp::as<double>(temporal_params["tau_shape"]);
+      }
+      if (temporal_params.containsElementNamed("tau_rate")) {
+        data.tau_temporal_rate =
+            Rcpp::as<double>(temporal_params["tau_rate"]);
+      }
+
+      if ((int)data.temporal_time_idx.size() != N) {
+        Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: temporal_params$time_idx "
+                   "length (%d) must equal N (%d).",
+                   (int)data.temporal_time_idx.size(), N);
+      }
+
+      const int hyper = (data.temporal_type == tulpa::TemporalType::AR1) ? 2
+                                                                          : 1;
+      p_temporal_block = hyper + data.n_temporal_params;
+
+      // H-kernel rejects temporal structure too.
+      spec.gradient_fn = nullptr;
+    }
+  }
+
   // ---- Param layout (engine derives from data + spec) -------------------
   tulpa::ParamLayout layout = tulpa::compute_layout(data);
 
-  int expected_total = total_p_design + p_zi_block + p_oi_block
+  int expected_total = total_p_design + p_re_block + p_spatial_block
+                     + p_temporal_block + p_zi_block + p_oi_block
                      + spec.n_extra_params;
   if (layout.total_params != expected_total) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: layout.total_params (%d) != "
-               "expected (%d) for family='%s' [sum(p_k)=%d, p_zi=%d, p_oi=%d, "
-               "n_extra=%d]. Spec path expects no other latent structure.",
+               "expected (%d) for family='%s' [sum(p_k)=%d, p_re=%d, "
+               "p_spatial=%d, p_temporal=%d, p_zi=%d, p_oi=%d, n_extra=%d]. "
+               "Spec path expects no other latent structure.",
                layout.total_params, expected_total, cfg.family.c_str(),
-               total_p_design, p_zi_block, p_oi_block, spec.n_extra_params);
+               total_p_design, p_re_block, p_spatial_block, p_temporal_block,
+               p_zi_block, p_oi_block, spec.n_extra_params);
   }
   if (init.size() != expected_total) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: init length (%d) != expected (%d) "

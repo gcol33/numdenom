@@ -735,16 +735,39 @@ fit_hmc <- function(formula,
     zi_type_str <- zi_info$type %||% "none"
     zi_supported <- (model_type %in% SUPPORTED_SPEC_FAMILIES) &&
       (zi_type_str %in% (SPEC_ZI_COMPAT[[model_type]] %||% "none"))
+    # B1d-1: allow single-grouping-factor RE on the spec path — random
+    # intercepts AND uncorrelated random slopes (n_coefs >= 1, correlated
+    # off). Multi-term (crossed/nested) and correlated slopes (LKJ) still
+    # fall back to legacy until B1d-2 wires them up.
+    n_re_groups_v <- hmc_data$n_re_groups %||% 0L
+    n_re_terms_v  <- hmc_data$n_re_terms %||% 0L
+    re_supported <- (n_re_groups_v == 0L && n_re_terms_v == 0L) ||
+      (n_re_groups_v > 0L && n_re_terms_v <= 1L &&
+       isFALSE(has_re_correlated_slopes))
+    # B1d Step 2: allow ICAR / BYM2 (non-collapsed) on the spec path. Collapsed
+    # parameterisations, CAR_PROPER, GP / HSGP / multiscale GP, and RSR still
+    # fall back to legacy.
+    spatial_type_v <- spatial_info$type %||% "none"
+    spatial_param_v <- spatial_info$parameterization %||% "standard"
+    spatial_supported <- identical(spatial_type_v, "none") ||
+      (spatial_type_v %in% c("icar", "bym2") &&
+       !identical(spatial_param_v, "collapsed") &&
+       !isTRUE(spatial_info$has_rsr))
+    # B1d Step 3: allow RW1 / RW2 / AR1 temporal. Temporal GP / multiscale /
+    # cyclic still fall back to legacy.
+    temporal_type_v <- temporal_info$type %||% "none"
+    temporal_supported <- identical(temporal_type_v, "none") ||
+      (temporal_type_v %in% c("rw1", "rw2", "ar1") &&
+       !isTRUE(temporal_info$precision_structure$cyclic))
     specs_eligible <- use_specs_path &&
       zi_supported &&
-      identical(spatial_info$type, "none") &&
-      identical(temporal_info$type, "none") &&
+      re_supported &&
+      spatial_supported &&
+      temporal_supported &&
       identical(latent_info$type, "none") &&
       isFALSE(svc_params$has_svc) &&
       isFALSE(tvc_params$has_tvc) &&
       isFALSE(st_params$has_spatiotemporal) &&
-      (hmc_data$n_re_groups %||% 0L) == 0L &&
-      (hmc_data$n_re_terms %||% 0L) == 0L &&
       as.integer(L) == 0L &&
       as.integer(chains) == 1L
 
@@ -772,27 +795,75 @@ fit_hmc <- function(formula,
         list(hmc_data$X_num, hmc_data$X_denom)
       }
 
-      # Reorder q_init from the legacy layout to tulpa's generic layout when
-      # ZI/OI is active. Legacy: [betas | extras | zi | oi]. Generic spec
-      # layout: [betas | zi | oi | extras]. With no spatial / temporal / RE on
-      # the spec path, slicing by known block sizes reconstructs the right
-      # ordering without parsing the layout struct.
-      q_init_spec <- as.numeric(q_init)
-      if (has_zi_block || has_oi_block) {
-        n_extra_per_family <- switch(model_type,
-          binomial = 0L, beta_binomial = 1L, poisson_gamma = 1L,
-          negbin_gamma = 2L, negbin_negbin = 2L, gamma_gamma = 2L,
-          lognormal = 2L, 0L
-        )
-        p_total_design <- (hmc_data$p_num %||% 0L) +
-          (if (model_type %in% ONE_PROCESS_FAMILIES) 0L else (hmc_data$p_denom %||% 0L))
-        p_zi_n <- if (has_zi_block) ncol(zi_info$X_zi) else 0L
-        p_oi_n <- if (has_oi_block) ncol(zi_info$X_oi) else 0L
+      # Reorder q_init from the legacy layout to tulpa's generic layout. With
+      # only ZI/OI present (B1c) the difference reduces to extras position;
+      # B1d Step 1 also adds an RE block (1 + n_re_groups) between betas and
+      # extras in BOTH layouts. The reorder rule generalises:
+      #   Legacy: [betas | re | extras | zi | oi]
+      #   Spec  : [betas | re | zi | oi | extras]
+      # i.e. every middle block keeps its position; only `extras` moves to the
+      # tail. Slicing by known block sizes reconstructs the right ordering
+      # without parsing the engine's ParamLayout struct.
+      n_extra_per_family <- switch(model_type,
+        binomial = 0L, beta_binomial = 1L, poisson_gamma = 1L,
+        negbin_gamma = 2L, negbin_negbin = 2L, gamma_gamma = 2L,
+        lognormal = 2L, 0L
+      )
+      p_total_design <- (hmc_data$p_num %||% 0L) +
+        (if (model_type %in% ONE_PROCESS_FAMILIES) 0L else (hmc_data$p_denom %||% 0L))
+      # RE block size on the engine's layout. With slopes, each group carries
+      # n_coefs values (intercept + slope coefficients) and there is one
+      # log_sigma per coefficient; without slopes the legacy single-term
+      # branch is `1 + n_re_groups`.
+      n_coefs_re_v <- if (has_re_slopes && n_re_terms_v > 0L) {
+        as.integer(hmc_data$re_terms[[1]]$n_coefs)
+      } else {
+        1L
+      }
+      p_re_n <- if (n_re_groups_v > 0L) {
+        if (has_re_slopes) {
+          n_coefs_re_v + n_re_groups_v * n_coefs_re_v
+        } else {
+          1L + n_re_groups_v
+        }
+      } else {
+        0L
+      }
+      p_spatial_n <- switch(spatial_type_v,
+        icar = 1L + (spatial_info$n_units %||% 0L),
+        bym2 = 2L + 2L * (spatial_info$n_units %||% 0L),
+        0L
+      )
+      p_temporal_n <- if (temporal_type_v %in% c("rw1", "rw2", "ar1")) {
+        hyper <- if (temporal_type_v == "ar1") 2L else 1L
+        hyper + (temporal_info$n_temporal_params %||% 0L)
+      } else 0L
+      p_zi_n <- if (has_zi_block) ncol(zi_info$X_zi) else 0L
+      p_oi_n <- if (has_oi_block) ncol(zi_info$X_oi) else 0L
 
+      q_init_spec <- as.numeric(q_init)
+      # Reorder rule (legacy q produced by initialize_hmc_params_full):
+      #   Legacy: [betas | re | extras | spatial | temporal | zi | oi]
+      #   Spec  : [betas | re | spatial | temporal | zi | oi | extras]
+      # `extras` (phi/shape/sigma) sits BEFORE spatial in legacy and AT THE END
+      # in the generic spec layout. Every other middle block keeps its slot.
+      need_reorder <- (n_extra_per_family > 0L) &&
+        (p_re_n > 0L || p_spatial_n > 0L || p_temporal_n > 0L ||
+         has_zi_block || has_oi_block)
+      if (need_reorder) {
         s <- 1L
         beta_seg <- q_init_spec[s:(s + p_total_design - 1L)]; s <- s + p_total_design
+        re_seg <- if (p_re_n > 0L) {
+          v <- q_init_spec[s:(s + p_re_n - 1L)]; s <- s + p_re_n; v
+        } else numeric(0)
         extras_seg <- if (n_extra_per_family > 0L) {
           v <- q_init_spec[s:(s + n_extra_per_family - 1L)]; s <- s + n_extra_per_family; v
+        } else numeric(0)
+        spatial_seg <- if (p_spatial_n > 0L) {
+          v <- q_init_spec[s:(s + p_spatial_n - 1L)]; s <- s + p_spatial_n; v
+        } else numeric(0)
+        temporal_seg <- if (p_temporal_n > 0L) {
+          v <- q_init_spec[s:(s + p_temporal_n - 1L)]; s <- s + p_temporal_n; v
         } else numeric(0)
         zi_seg <- if (p_zi_n > 0L) {
           v <- q_init_spec[s:(s + p_zi_n - 1L)]; s <- s + p_zi_n; v
@@ -800,8 +871,65 @@ fit_hmc <- function(formula,
         oi_seg <- if (p_oi_n > 0L) {
           v <- q_init_spec[s:(s + p_oi_n - 1L)]; s <- s + p_oi_n; v
         } else numeric(0)
-        q_init_spec <- c(beta_seg, zi_seg, oi_seg, extras_seg)
+        q_init_spec <- c(beta_seg, re_seg, spatial_seg, temporal_seg,
+                         zi_seg, oi_seg, extras_seg)
       }
+
+      # Bridge accepts a re_params list shaped like the legacy backend's;
+      # for B1d-1 we pass enough for both intercept-only and intercept+slopes
+      # single-grouping-factor RE. When RE is absent we pass an empty list so
+      # the bridge skips the RE block.
+      re_params_spec <- if (p_re_n > 0L) {
+        out <- list(
+          group           = as.integer(hmc_data$re_group),
+          n_groups        = as.integer(n_re_groups_v),
+          n_terms         = as.integer(n_re_terms_v),
+          has_slopes      = isTRUE(has_re_slopes),
+          has_correlated_slopes = FALSE,  # B1d-1 gates correlated out
+          parameterization = as.integer(if (re_param == "centered") 0L else 1L)
+        )
+        if (isTRUE(has_re_slopes)) {
+          slope_mat <- hmc_data$slope_matrices[[1]]
+          out$n_coefs       <- as.integer(n_coefs_re_v)
+          out$slope_matrix  <- as.matrix(slope_mat)
+        }
+        out
+      } else list()
+
+      # Bridge accepts a spatial_params list mirroring the legacy backend.
+      # ICAR / BYM2 (non-collapsed) only — both require adjacency + Q_inv/L_Q
+      # (precomputed in R). Empty list means "no spatial".
+      spatial_params_spec <- if (p_spatial_n > 0L) {
+        list(
+          type             = spatial_type_v,
+          group            = as.integer(spatial_info$group),
+          n_units          = as.integer(spatial_info$n_units),
+          adj_row_ptr      = as.integer(spatial_info$adj_row_ptr),
+          adj_col_idx      = as.integer(spatial_info$adj_col_idx),
+          n_neighbors      = as.integer(spatial_info$n_neighbors),
+          bym2_scale       = spatial_info$bym2_scale %||% 1.0,
+          Q_inv            = spatial_info$Q_inv,
+          L_Q              = spatial_info$L_Q,
+          parameterization = spatial_param_v
+        )
+      } else list()
+
+      # Bridge accepts a temporal_params list. RW1/RW2/AR1 only on the spec
+      # path; GP / multiscale / cyclic still fall back to legacy (gated above).
+      temporal_params_spec <- if (p_temporal_n > 0L) {
+        list(
+          type      = temporal_type_v,
+          time_idx  = as.integer(temporal_info$time_index),
+          group_idx = as.integer(temporal_info$group_index),
+          n_times   = as.integer(temporal_info$n_times),
+          n_groups  = as.integer(temporal_info$n_groups),
+          n_params  = as.integer(temporal_info$n_temporal_params),
+          cyclic    = isTRUE(temporal_info$precision_structure$cyclic),
+          shared    = isTRUE(temporal_info$shared %||% TRUE),
+          tau_shape = tau_temporal_shape,
+          tau_rate  = tau_temporal_rate
+        )
+      } else list()
 
       fit_raw <- cpp_tulpaRatio_run_nuts_specs(
         y_num             = as.integer(hmc_data$y_num),
@@ -821,21 +949,29 @@ fit_hmc <- function(formula,
         sigma_beta        = sigma_beta,
         phi_prior_shape   = phi_shape,
         phi_prior_rate    = phi_rate,
-        sigma_prior_scale = sigma_re_scale
+        sigma_prior_scale = sigma_re_scale,
+        re_params         = re_params_spec,
+        spatial_params    = spatial_params_spec,
+        temporal_params   = temporal_params_spec
       )
 
       # Reorder samples columns from tulpa's generic layout
-      # ([betas | zi | oi | extras]) back to legacy ordering
-      # ([betas | extras | zi | oi]) so build_draws_list_full reads each
-      # block from the slot it expects.
-      if (has_zi_block || has_oi_block) {
+      # ([betas | re | spatial | temporal | zi | oi | extras]) back to legacy
+      # ordering ([betas | re | extras | spatial | temporal | zi | oi]) so
+      # build_draws_list_full reads each block from the slot it expects.
+      if (need_reorder) {
         S <- fit_raw$samples
         n_total <- ncol(S)
-        idxs <- seq_len(p_total_design)
-        zi_cols <- if (p_zi_n > 0L) (p_total_design + 1L):(p_total_design + p_zi_n) else integer(0)
-        oi_cols <- if (p_oi_n > 0L) (p_total_design + p_zi_n + 1L):(p_total_design + p_zi_n + p_oi_n) else integer(0)
-        ex_cols <- if (n_extra_per_family > 0L) (p_total_design + p_zi_n + p_oi_n + 1L):n_total else integer(0)
-        new_order <- c(idxs, ex_cols, zi_cols, oi_cols)
+        off <- 0L
+        beta_cols <- if (p_total_design > 0L) (off + 1L):(off + p_total_design) else integer(0); off <- off + p_total_design
+        re_cols   <- if (p_re_n > 0L)         (off + 1L):(off + p_re_n)         else integer(0); off <- off + p_re_n
+        sp_cols   <- if (p_spatial_n > 0L)    (off + 1L):(off + p_spatial_n)    else integer(0); off <- off + p_spatial_n
+        t_cols    <- if (p_temporal_n > 0L)   (off + 1L):(off + p_temporal_n)   else integer(0); off <- off + p_temporal_n
+        zi_cols   <- if (p_zi_n > 0L)         (off + 1L):(off + p_zi_n)         else integer(0); off <- off + p_zi_n
+        oi_cols   <- if (p_oi_n > 0L)         (off + 1L):(off + p_oi_n)         else integer(0); off <- off + p_oi_n
+        ex_cols   <- if (n_extra_per_family > 0L) (off + 1L):n_total            else integer(0)
+        new_order <- c(beta_cols, re_cols, ex_cols,
+                       sp_cols, t_cols, zi_cols, oi_cols)
         fit_raw$samples <- S[, new_order, drop = FALSE]
       }
     } else {

@@ -1767,8 +1767,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_tulpaRatio_run_nuts_specs
-Rcpp::List cpp_tulpaRatio_run_nuts_specs(Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_num_cont, Rcpp::NumericVector y_denom_cont, Rcpp::List X_list, Rcpp::List cfg_list, Rcpp::NumericVector init, int n_iter, int n_warmup, int max_treedepth, double adapt_delta, int seed, bool verbose, std::string gradient_mode, double sigma_beta, double phi_prior_shape, double phi_prior_rate, double sigma_prior_scale);
-RcppExport SEXP _tulpaRatio_cpp_tulpaRatio_run_nuts_specs(SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_num_contSEXP, SEXP y_denom_contSEXP, SEXP X_listSEXP, SEXP cfg_listSEXP, SEXP initSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP max_treedepthSEXP, SEXP adapt_deltaSEXP, SEXP seedSEXP, SEXP verboseSEXP, SEXP gradient_modeSEXP, SEXP sigma_betaSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP sigma_prior_scaleSEXP) {
+Rcpp::List cpp_tulpaRatio_run_nuts_specs(Rcpp::IntegerVector y_num, Rcpp::IntegerVector y_denom, Rcpp::NumericVector y_num_cont, Rcpp::NumericVector y_denom_cont, Rcpp::List X_list, Rcpp::List cfg_list, Rcpp::NumericVector init, int n_iter, int n_warmup, int max_treedepth, double adapt_delta, int seed, bool verbose, std::string gradient_mode, double sigma_beta, double phi_prior_shape, double phi_prior_rate, double sigma_prior_scale, Rcpp::List re_params, Rcpp::List spatial_params, Rcpp::List temporal_params);
+RcppExport SEXP _tulpaRatio_cpp_tulpaRatio_run_nuts_specs(SEXP y_numSEXP, SEXP y_denomSEXP, SEXP y_num_contSEXP, SEXP y_denom_contSEXP, SEXP X_listSEXP, SEXP cfg_listSEXP, SEXP initSEXP, SEXP n_iterSEXP, SEXP n_warmupSEXP, SEXP max_treedepthSEXP, SEXP adapt_deltaSEXP, SEXP seedSEXP, SEXP verboseSEXP, SEXP gradient_modeSEXP, SEXP sigma_betaSEXP, SEXP phi_prior_shapeSEXP, SEXP phi_prior_rateSEXP, SEXP sigma_prior_scaleSEXP, SEXP re_paramsSEXP, SEXP spatial_paramsSEXP, SEXP temporal_paramsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1790,7 +1790,10 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type phi_prior_shape(phi_prior_shapeSEXP);
     Rcpp::traits::input_parameter< double >::type phi_prior_rate(phi_prior_rateSEXP);
     Rcpp::traits::input_parameter< double >::type sigma_prior_scale(sigma_prior_scaleSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_tulpaRatio_run_nuts_specs(y_num, y_denom, y_num_cont, y_denom_cont, X_list, cfg_list, init, n_iter, n_warmup, max_treedepth, adapt_delta, seed, verbose, gradient_mode, sigma_beta, phi_prior_shape, phi_prior_rate, sigma_prior_scale));
+    Rcpp::traits::input_parameter< Rcpp::List >::type re_params(re_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type spatial_params(spatial_paramsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type temporal_params(temporal_paramsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_tulpaRatio_run_nuts_specs(y_num, y_denom, y_num_cont, y_denom_cont, X_list, cfg_list, init, n_iter, n_warmup, max_treedepth, adapt_delta, seed, verbose, gradient_mode, sigma_beta, phi_prior_shape, phi_prior_rate, sigma_prior_scale, re_params, spatial_params, temporal_params));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1948,7 +1951,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_test_parallel_independent", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_independent, 2},
     {"_tulpaRatio_cpp_tulpa_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_abi_version, 0},
     {"_tulpaRatio_cpp_tulpa_pg_binomial_gibbs", (DL_FUNC) &_tulpaRatio_cpp_tulpa_pg_binomial_gibbs, 13},
-    {"_tulpaRatio_cpp_tulpaRatio_run_nuts_specs", (DL_FUNC) &_tulpaRatio_cpp_tulpaRatio_run_nuts_specs, 18},
+    {"_tulpaRatio_cpp_tulpaRatio_run_nuts_specs", (DL_FUNC) &_tulpaRatio_cpp_tulpaRatio_run_nuts_specs, 21},
     {"_tulpaRatio_cpp_vi_fit", (DL_FUNC) &_tulpaRatio_cpp_vi_fit, 16},
     {"_tulpaRatio_cpp_vi_get_n_params", (DL_FUNC) &_tulpaRatio_cpp_vi_get_n_params, 7},
     {NULL, NULL, 0}

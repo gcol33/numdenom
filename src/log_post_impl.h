@@ -549,15 +549,26 @@ T compute_log_post_impl(
                 // Uniform(0,1) prior on rho with logit Jacobian: log(rho) + log(1-rho)
                 log_post = log_post + safe_log(rho_ar1) + safe_log(T(1.0) - rho_ar1);
 
-                for (int g = 0; g < data.n_temporal_groups; g++) {
-                    // First time point: phi[0] ~ N(0, 1/(tau*(1-rho^2)))
-                    T var_stationary = T(1.0) / (tau_temporal * (T(1.0) - rho_ar1 * rho_ar1));
-                    log_post = log_post - T(0.5) * phi_temporal[g * T_times] * phi_temporal[g * T_times] / var_stationary;
+                // Include the full normal log-density normalization on both the
+                // stationary first observation and the conditional residuals so
+                // the posterior on tau is correct (the gaussian normalizers carry
+                // a +0.5*T*log(tau) term that gradient-based samplers need).
+                T sigma2_ar1 = T(1.0) / tau_temporal;
+                T one_minus_rho2 = T(1.0) - rho_ar1 * rho_ar1;
+                T var_stationary = sigma2_ar1 / one_minus_rho2;
+                T log_norm_stat = T(-0.5) * safe_log(T(2.0 * M_PI) * var_stationary);
+                T log_norm_cond = T(-0.5) * safe_log(T(2.0 * M_PI) * sigma2_ar1);
 
-                    // Subsequent: phi[t] | phi[t-1]
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    // First time point: phi[0] ~ N(0, sigma^2 / (1 - rho^2))
+                    log_post = log_post - T(0.5) * phi_temporal[g * T_times] * phi_temporal[g * T_times] / var_stationary;
+                    log_post = log_post + log_norm_stat;
+
+                    // Subsequent: phi[t] | phi[t-1] ~ N(rho * phi[t-1], sigma^2)
                     for (int t = 1; t < T_times; t++) {
                         T resid = phi_temporal[g * T_times + t] - rho_ar1 * phi_temporal[g * T_times + t - 1];
                         log_post = log_post - T(0.5) * tau_temporal * resid * resid;
+                        log_post = log_post + log_norm_cond;
                     }
                 }
             }

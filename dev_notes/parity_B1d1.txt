@@ -1,0 +1,50 @@
+    ERROR: Numerator variable 'successes' not found in data 
+[ 3/16] poisson_gamma | intercept_only | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[ 4/16] negbin_gamma | intercept_only | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[ 5/16] negbin_negbin | intercept_only | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[ 6/16] gamma_gamma | intercept_only | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[ 7/16] lognormal | intercept_only | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[ 8/16] binomial | intercept_slope | A_r
+    ERROR: Numerator variable 'successes' not found in data 
+[ 9/16] beta_binomial | intercept_slope | A_r
+    ERROR: Numerator variable 'successes' not found in data 
+[10/16] poisson_gamma | intercept_slope | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[11/16] negbin_gamma | intercept_slope | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[12/16] negbin_negbin | intercept_slope | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[13/16] gamma_gamma | intercept_slope | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[14/16] lognormal | intercept_slope | A_r
+    ERROR: argument "temporal_params" is missing, with no default 
+[15/16] binomial | intercept_only | H
+    ERROR: Numerator variable 'successes' not found in data 
+[16/16] binomial | intercept_slope | H
+    ERROR: Numerator variable 'successes' not found in data 
+
+==============================================================================
+B1d-1 parity summary
+==============================================================================
+family          re_kind            grad  status d_cross   d_within  ratio   n_par
+binomial        intercept_only     A_r   ERROR  Numerator variable 'successes' not found in data
+beta_binomial   intercept_only     A_r   ERROR  Numerator variable 'successes' not found in data
+poisson_gamma   intercept_only     A_r   ERROR  argument "temporal_params" is missing, with no default
+negbin_gamma    intercept_only     A_r   ERROR  argument "temporal_params" is missing, with no default
+negbin_negbin   intercept_only     A_r   ERROR  argument "temporal_params" is missing, with no default
+gamma_gamma     intercept_only     A_r   ERROR  argument "temporal_params" is missing, with no default
+lognormal       intercept_only     A_r   ERROR  argument "temporal_params" is missing, with no default
+binomial        intercept_slope    A_r   ERROR  Numerator variable 'successes' not found in data
+beta_binomial   intercept_slope    A_r   ERROR  Numerator variable 'successes' not found in data
+poisson_gamma   intercept_slope    A_r   ERROR  argument "temporal_params" is missing, with no default
+negbin_gamma    intercept_slope    A_r   ERROR  argument "temporal_params" is missing, with no default
+negbin_negbin   intercept_slope    A_r   ERROR  argument "temporal_params" is missing, with no default
+gamma_gamma     intercept_slope    A_r   ERROR  argument "temporal_params" is missing, with no default
+lognormal       intercept_slope    A_r   ERROR  argument "temporal_params" is missing, with no default
+binomial        intercept_only     H     ERROR  Numerator variable 'successes' not found in data
+binomial        intercept_slope    H     ERROR  Numerator variable 'successes' not found in data

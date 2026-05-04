@@ -1,0 +1,67 @@
+
+--- binomial ---
+ cross_BE      = 0.004665
+ within_legacy = 0.003989
+ within_specs  = 0.003317
+ parity (cross_BE < 4*max_within) = PASS
+ grad-ID (specs/H == specs/A_r)   = PASS  (max diff 0.00e+00)
+ wallclock specs/legacy = 1.03s / 0.19s  (ratio 5.49)
+
+--- poisson_gamma ---
+ cross_BE      = 0.002519
+ within_legacy = 0.001944
+ within_specs  = 0.01238
+ parity (cross_BE < 4*max_within) = PASS
+ grad-ID (specs/H == specs/A_r)   = PASS  (max diff 0.00e+00)
+ wallclock specs/legacy = 1.35s / 0.90s  (ratio 1.50)
+
+--- negbin_gamma ---
+ cross_BE      = 0.06183
+ within_legacy = 0.01785
+ within_specs  = 0.003383
+ parity (cross_BE < 4*max_within) = PASS
+ grad-ID (specs/H == specs/A_r)   = PASS  (max diff 0.00e+00)
+ wallclock specs/legacy = 2.14s / 1.28s  (ratio 1.67)
+
+--- negbin_negbin ---
+ cross_BE      = 0.09603
+ within_legacy = 0.1886
+ within_specs  = 0.1049
+ parity (cross_BE < 4*max_within) = PASS
+ grad-ID (specs/H == specs/A_r)   = PASS  (max diff 0.00e+00)
+ wallclock specs/legacy = 2.55s / 1.87s  (ratio 1.36)
+
+--- gamma_gamma ---
+ cross_BE      = 0.03123
+ within_legacy = 0.03922
+ within_specs  = 0.01101
+ parity (cross_BE < 4*max_within) = PASS
+ grad-ID (specs/H == specs/A_r)   = PASS  (max diff 0.00e+00)
+ wallclock specs/legacy = 1.56s / 0.90s  (ratio 1.73)
+
+--- lognormal ---
+ cross_BE      = 0.00195
+ within_legacy = 0.003015
+ within_specs  = 0.001945
+ parity (cross_BE < 4*max_within) = PASS
+ grad-ID (specs/H == specs/A_r)   = PASS  (max diff 0.00e+00)
+ wallclock specs/legacy = 0.66s / 0.23s  (ratio 2.81)
+
+--- beta_binomial ---
+ cross_BE      = 0.226
+ within_legacy = 0.05605
+ within_specs  = 0.0261
+ parity (cross_BE < 4*max_within) = FAIL
+ grad-ID (specs/H == specs/A_r)   = PASS  (max diff 0.00e+00)
+ wallclock specs/legacy = 1.83s / 1.39s  (ratio 1.31)
+
+=== Summary ===
+binomial        cross=0.004665 within(L/S)=0.003989/0.003317 parity=PASS grad-ID=0.0e+00 ratio=5.49
+poisson_gamma   cross=0.002519 within(L/S)=0.001944/0.01238 parity=PASS grad-ID=0.0e+00 ratio=1.50
+negbin_gamma    cross=0.06183 within(L/S)=0.01785/0.003383 parity=PASS grad-ID=0.0e+00 ratio=1.67
+negbin_negbin   cross=0.09603 within(L/S)=0.1886/0.1049 parity=PASS grad-ID=0.0e+00 ratio=1.36
+gamma_gamma     cross=0.03123 within(L/S)=0.03922/0.01101 parity=PASS grad-ID=0.0e+00 ratio=1.73
+lognormal       cross=0.00195 within(L/S)=0.003015/0.001945 parity=PASS grad-ID=0.0e+00 ratio=2.81
+beta_binomial   cross=0.226 within(L/S)=0.05605/0.0261 parity=FAIL grad-ID=0.0e+00 ratio=1.31
+
+Overall (parity + grad-ID): FAIL
