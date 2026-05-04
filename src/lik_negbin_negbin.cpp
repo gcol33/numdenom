@@ -57,10 +57,10 @@ template <typename T>
 static T negbin_negbin_log_likelihood(
     int i,
     const T* eta,
-    const T& /*logit_zi*/,
+    const T& logit_zi,
     const T& /*logit_oi*/,
     const std::vector<T>& params,
-    const tulpa::ModelData& /*data*/,
+    const tulpa::ModelData& data,
     const tulpa::ParamLayout& layout,
     const void* model_data
 ) {
@@ -82,7 +82,19 @@ static T negbin_negbin_log_likelihood(
     const T phi_num       = exp(log_phi_num);
     const T phi_denom     = exp(log_phi_denom);
 
-    T ll = lik::negbin_log_pmf(y_n, mu_num,   phi_num);
+    T ll;
+    switch (data.zi_type) {
+        case tulpa::ZIType::ZI_NEGBIN:
+            ll = lik::zi_negbin_log_pmf(y_n, mu_num, phi_num, logit_zi);
+            break;
+        case tulpa::ZIType::HURDLE_NEGBIN:
+            ll = lik::hurdle_negbin_log_pmf(y_n, mu_num, phi_num, logit_zi);
+            break;
+        case tulpa::ZIType::NONE:
+        default:
+            ll = lik::negbin_log_pmf(y_n, mu_num, phi_num);
+            break;
+    }
     ll = ll + lik::negbin_log_pmf(y_d, mu_denom, phi_denom);
 
     if (i == 0) {
@@ -108,7 +120,9 @@ tulpa::LikelihoodSpec build_negbin_negbin_spec(const RatioConfig& cfg) {
     spec.ll_double = negbin_negbin_log_likelihood<double>;
     spec.ll_arena  = negbin_negbin_log_likelihood<tulpa::arena::Var>;
     spec.ll_fwd    = negbin_negbin_log_likelihood<::fwd::Dual>;
-    spec.gradient_fn = &grad_h_negbin_negbin;
+    if (cfg.zi == "none") {
+        spec.gradient_fn = &grad_h_negbin_negbin;
+    }
     return spec;
 }
 

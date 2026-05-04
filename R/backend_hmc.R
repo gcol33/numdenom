@@ -712,17 +712,31 @@ fit_hmc <- function(formula,
     }
 
     # B1b feature flag: route the 7 ratio families through the LikelihoodSpec
-    # path (autodiff only — no spatial / temporal / RE / ZI / latent factors,
-    # single chain, L = 0). Off by default; enabled only for the narrowest
-    # scope so the legacy backend stays the default for every other config.
+    # path (autodiff only — no spatial / temporal / RE / latent factors,
+    # single chain, L = 0). B1c relaxed the ZI gate so the 8 ZI/hurdle/OI/ZOIB
+    # variants flow through the same path when the family supports them. Off
+    # by default; enabled only for the narrowest scope so the legacy backend
+    # stays the default for every other config.
     SUPPORTED_SPEC_FAMILIES <- c("binomial", "poisson_gamma", "negbin_gamma",
                                  "negbin_negbin", "gamma_gamma", "lognormal",
                                  "beta_binomial")
+    SPEC_ZI_COMPAT <- list(
+      binomial      = c("none", "zi_binomial", "hurdle_binomial",
+                        "oi_binomial", "zoib"),
+      poisson_gamma = c("none", "zi_poisson", "hurdle_poisson"),
+      negbin_gamma  = c("none", "zi_negbin", "hurdle_negbin"),
+      negbin_negbin = c("none", "zi_negbin", "hurdle_negbin"),
+      gamma_gamma   = "none",
+      lognormal     = "none",
+      beta_binomial = "none"
+    )
     use_specs_path <- isTRUE(getOption("tulpaRatio.use_specs", FALSE)) ||
       identical(Sys.getenv("TULPARATIO_USE_SPECS"), "1")
+    zi_type_str <- zi_info$type %||% "none"
+    zi_supported <- (model_type %in% SUPPORTED_SPEC_FAMILIES) &&
+      (zi_type_str %in% (SPEC_ZI_COMPAT[[model_type]] %||% "none"))
     specs_eligible <- use_specs_path &&
-      (model_type %in% SUPPORTED_SPEC_FAMILIES) &&
-      identical(zi_info$type, "none") &&
+      zi_supported &&
       identical(spatial_info$type, "none") &&
       identical(temporal_info$type, "none") &&
       identical(latent_info$type, "none") &&
@@ -737,8 +751,15 @@ fit_hmc <- function(formula,
     if (specs_eligible) {
       num_link   <- if (model_type %in% c("binomial", "beta_binomial")) "logit" else "log"
       denom_link <- "log"
-      cfg <- list(family = model_type, zi = "none",
+      cfg <- list(family = model_type, zi = zi_type_str,
                   num_link = num_link, denom_link = denom_link)
+      # OI uses X_oi only (no ZI block); ZOIB uses both; all other inflation
+      # types use X_zi only. Mirrors zi_info shape from prepare_zi_for_hmc /
+      # the family-built-in ZI path.
+      has_zi_block <- !(zi_type_str %in% c("none", "oi_binomial"))
+      has_oi_block <- zi_type_str %in% c("oi_binomial", "zoib")
+      if (has_zi_block) cfg$X_zi <- zi_info$X_zi
+      if (has_oi_block) cfg$X_oi <- zi_info$X_oi
       # X_list carries one design matrix per process. Single-process families
       # (binomial / beta_binomial) pass length-1; two-process families append
       # X_denom. Adding a 3-process family is a list element, not a new arg.
@@ -750,6 +771,38 @@ fit_hmc <- function(formula,
       } else {
         list(hmc_data$X_num, hmc_data$X_denom)
       }
+
+      # Reorder q_init from the legacy layout to tulpa's generic layout when
+      # ZI/OI is active. Legacy: [betas | extras | zi | oi]. Generic spec
+      # layout: [betas | zi | oi | extras]. With no spatial / temporal / RE on
+      # the spec path, slicing by known block sizes reconstructs the right
+      # ordering without parsing the layout struct.
+      q_init_spec <- as.numeric(q_init)
+      if (has_zi_block || has_oi_block) {
+        n_extra_per_family <- switch(model_type,
+          binomial = 0L, beta_binomial = 1L, poisson_gamma = 1L,
+          negbin_gamma = 2L, negbin_negbin = 2L, gamma_gamma = 2L,
+          lognormal = 2L, 0L
+        )
+        p_total_design <- (hmc_data$p_num %||% 0L) +
+          (if (model_type %in% ONE_PROCESS_FAMILIES) 0L else (hmc_data$p_denom %||% 0L))
+        p_zi_n <- if (has_zi_block) ncol(zi_info$X_zi) else 0L
+        p_oi_n <- if (has_oi_block) ncol(zi_info$X_oi) else 0L
+
+        s <- 1L
+        beta_seg <- q_init_spec[s:(s + p_total_design - 1L)]; s <- s + p_total_design
+        extras_seg <- if (n_extra_per_family > 0L) {
+          v <- q_init_spec[s:(s + n_extra_per_family - 1L)]; s <- s + n_extra_per_family; v
+        } else numeric(0)
+        zi_seg <- if (p_zi_n > 0L) {
+          v <- q_init_spec[s:(s + p_zi_n - 1L)]; s <- s + p_zi_n; v
+        } else numeric(0)
+        oi_seg <- if (p_oi_n > 0L) {
+          v <- q_init_spec[s:(s + p_oi_n - 1L)]; s <- s + p_oi_n; v
+        } else numeric(0)
+        q_init_spec <- c(beta_seg, zi_seg, oi_seg, extras_seg)
+      }
+
       fit_raw <- cpp_tulpaRatio_run_nuts_specs(
         y_num             = as.integer(hmc_data$y_num),
         y_denom           = as.integer(hmc_data$y_denom),
@@ -757,7 +810,7 @@ fit_hmc <- function(formula,
         y_denom_cont      = as.numeric(hmc_data$y_denom_cont),
         X_list            = X_list,
         cfg_list          = cfg,
-        init              = as.numeric(q_init),
+        init              = q_init_spec,
         n_iter            = as.integer(iter),
         n_warmup          = as.integer(warmup),
         max_treedepth     = as.integer(max_treedepth %||% 10L),
@@ -770,6 +823,21 @@ fit_hmc <- function(formula,
         phi_prior_rate    = phi_rate,
         sigma_prior_scale = sigma_re_scale
       )
+
+      # Reorder samples columns from tulpa's generic layout
+      # ([betas | zi | oi | extras]) back to legacy ordering
+      # ([betas | extras | zi | oi]) so build_draws_list_full reads each
+      # block from the slot it expects.
+      if (has_zi_block || has_oi_block) {
+        S <- fit_raw$samples
+        n_total <- ncol(S)
+        idxs <- seq_len(p_total_design)
+        zi_cols <- if (p_zi_n > 0L) (p_total_design + 1L):(p_total_design + p_zi_n) else integer(0)
+        oi_cols <- if (p_oi_n > 0L) (p_total_design + p_zi_n + 1L):(p_total_design + p_zi_n + p_oi_n) else integer(0)
+        ex_cols <- if (n_extra_per_family > 0L) (p_total_design + p_zi_n + p_oi_n + 1L):n_total else integer(0)
+        new_order <- c(idxs, ex_cols, zi_cols, oi_cols)
+        fit_raw$samples <- S[, new_order, drop = FALSE]
+      }
     } else {
       fit_raw <- cpp_hmc_fit(
         q_init = q_init,

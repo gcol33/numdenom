@@ -68,10 +68,10 @@ template <typename T>
 static T poisson_gamma_log_likelihood(
     int i,
     const T* eta,
-    const T& /*logit_zi*/,
+    const T& logit_zi,
     const T& /*logit_oi*/,
     const std::vector<T>& params,
-    const tulpa::ModelData& /*data*/,
+    const tulpa::ModelData& data,
     const tulpa::ParamLayout& layout,
     const void* model_data
 ) {
@@ -90,8 +90,22 @@ static T poisson_gamma_log_likelihood(
     const T mu_num    = exp(eta_num);
     const T mu_denom  = exp(eta_denom);
 
-    // Numerator: Poisson(y_num | mu_num).  Inline form to share `mu_num`.
-    T ll = T(double(y_n)) * eta_num - mu_num - T(std::lgamma(double(y_n) + 1.0));
+    // Numerator: Poisson(y_num | mu_num) with optional ZI / hurdle.
+    T ll;
+    switch (data.zi_type) {
+        case tulpa::ZIType::ZI_POISSON:
+            ll = lik::zi_poisson_log_pmf(y_n, mu_num, logit_zi);
+            break;
+        case tulpa::ZIType::HURDLE_POISSON:
+            ll = lik::hurdle_poisson_log_pmf(y_n, mu_num, logit_zi);
+            break;
+        case tulpa::ZIType::NONE:
+        default:
+            // Inline plain Poisson form to share `mu_num` with the denominator.
+            ll = T(double(y_n)) * eta_num - mu_num
+               - T(std::lgamma(double(y_n) + 1.0));
+            break;
+    }
 
     // Denominator: Gamma(y_denom | shape, rate=shape/mu_denom).
     const T log_shape = params[layout.extra_offset];
@@ -124,7 +138,12 @@ tulpa::LikelihoodSpec build_poisson_gamma_spec(const RatioConfig& cfg) {
     spec.ll_double = poisson_gamma_log_likelihood<double>;
     spec.ll_arena  = poisson_gamma_log_likelihood<tulpa::arena::Var>;
     spec.ll_fwd    = poisson_gamma_log_likelihood<::fwd::Dual>;
-    spec.gradient_fn = &grad_h_poisson_gamma;
+
+    // H-mode handcoded gradient covers only plain Poisson-Gamma. ZI variants
+    // route through the templated AD path.
+    if (cfg.zi == "none") {
+        spec.gradient_fn = &grad_h_poisson_gamma;
+    }
     return spec;
 }
 

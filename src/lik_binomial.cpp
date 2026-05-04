@@ -23,8 +23,14 @@
 // Closed-form per-obs gradient (recorded for B2; AD provides it in B1a):
 //   d log L_i / d eta_i = y_i - n_i * p_i
 //
-// ZI / OI: ignored in B1a. Plain binomial registers only `ll_double`,
-// `ll_arena`, `ll_fwd`. No `FullGradFn`, no `ResidualFn`, no `EtaWeightsFn`.
+// ZI / hurdle / OI / ZOIB (B1c)
+// -----------------------------
+// When cfg.zi != "none", this file routes to the corresponding mixture-form
+// log-pmf in lik_helpers.h (zi_binom_log_pmf, hurdle_binom_log_pmf,
+// oi_binom_log_pmf, zoib_log_pmf). The hand-coded H-mode gradient does NOT
+// support ZI yet, so the spec builder leaves spec.gradient_fn = nullptr in
+// the ZI case — autodiff (A_r/A/N) handles the inflation parameters via
+// logit_zi / logit_oi which tulpa pre-computes from data.X_zi/X_oi.
 // =====================================================================
 
 #include <type_traits>
@@ -41,17 +47,19 @@
 namespace tulpaRatio {
 
 // ============================================================================
-// Templated per-observation log-likelihood for plain (non-ZI) binomial.
+// Templated per-observation log-likelihood for binomial (and ZI/hurdle/OI/
+// ZOIB variants). Branches on data.zi_type so the same callback covers every
+// inflation flavour without per-variant function pointers.
 // Signature matches tulpa::LikelihoodFn<T>.
 // ============================================================================
 template <typename T>
 static T binomial_log_likelihood(
     int i,
     const T* eta,
-    const T& /*logit_zi*/,
-    const T& /*logit_oi*/,
+    const T& logit_zi,
+    const T& logit_oi,
     const std::vector<T>& /*params*/,
-    const tulpa::ModelData& /*data*/,
+    const tulpa::ModelData& data,
     const tulpa::ParamLayout& /*layout*/,
     const void* model_data
 ) {
@@ -65,7 +73,19 @@ static T binomial_log_likelihood(
     const int y_i = resp->y[i];
     const int n_i = resp->n[i];
 
-    return lik::binom_logit_log_pmf(y_i, n_i, eta[0]);
+    switch (data.zi_type) {
+        case tulpa::ZIType::ZI_BINOMIAL:
+            return lik::zi_binom_log_pmf(y_i, n_i, eta[0], logit_zi);
+        case tulpa::ZIType::HURDLE_BINOMIAL:
+            return lik::hurdle_binom_log_pmf(y_i, n_i, eta[0], logit_zi);
+        case tulpa::ZIType::OI_BINOMIAL:
+            return lik::oi_binom_log_pmf(y_i, n_i, eta[0], logit_oi);
+        case tulpa::ZIType::ZOIB:
+            return lik::zoib_log_pmf(y_i, n_i, eta[0], logit_zi, logit_oi);
+        case tulpa::ZIType::NONE:
+        default:
+            return lik::binom_logit_log_pmf(y_i, n_i, eta[0]);
+    }
 }
 
 // ============================================================================
@@ -88,9 +108,12 @@ tulpa::LikelihoodSpec build_binomial_spec(const RatioConfig& cfg) {
     spec.ll_arena  = binomial_log_likelihood<tulpa::arena::Var>;
     spec.ll_fwd    = binomial_log_likelihood<::fwd::Dual>;
 
-    // Hand-coded H-mode gradient (B2). The dispatcher prefers gradient_fn
-    // over autodiff when set, so this is the path actually taken at H-mode.
-    spec.gradient_fn = &grad_h_binomial;
+    // Hand-coded H-mode gradient (B2) covers only the plain Binomial. ZI/OI
+    // variants flow through autodiff (A_r/A) — leave gradient_fn unset so the
+    // dispatcher falls back to the templated AD path.
+    if (cfg.zi == "none") {
+        spec.gradient_fn = &grad_h_binomial;
+    }
 
     // No ResidualFn, EtaWeightsFn, extend_layout, or extra_prior — the
     // gradient_fn carries the analytical derivative end-to-end.

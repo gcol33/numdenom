@@ -286,6 +286,31 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   cfg.phi_prior_rate    = phi_prior_rate;
   cfg.sigma_prior_scale = sigma_prior_scale;
 
+  // Map cfg.zi (string) to tulpa::ZIType. The legacy distribution-specific
+  // values match what the engine uses to build the X_zi / X_oi blocks in the
+  // layout. The templated LikelihoodFn dispatches on data.zi_type to pick the
+  // right mixture-form log-pmf.
+  auto parse_zi = [](const std::string& s) -> tulpa::ZIType {
+    if (s == "none" || s.empty())       return tulpa::ZIType::NONE;
+    if (s == "zi_poisson")              return tulpa::ZIType::ZI_POISSON;
+    if (s == "zi_negbin")               return tulpa::ZIType::ZI_NEGBIN;
+    if (s == "hurdle_poisson")          return tulpa::ZIType::HURDLE_POISSON;
+    if (s == "hurdle_negbin")           return tulpa::ZIType::HURDLE_NEGBIN;
+    if (s == "zi_binomial")             return tulpa::ZIType::ZI_BINOMIAL;
+    if (s == "hurdle_binomial")         return tulpa::ZIType::HURDLE_BINOMIAL;
+    if (s == "oi_binomial")             return tulpa::ZIType::OI_BINOMIAL;
+    if (s == "zoib")                    return tulpa::ZIType::ZOIB;
+    Rcpp::stop("tulpaRatio bridge: unknown zi='%s'.", s.c_str());
+    return tulpa::ZIType::NONE;
+  };
+  const tulpa::ZIType zi_type = parse_zi(cfg.zi);
+  const bool has_oi_block = (zi_type == tulpa::ZIType::OI_BINOMIAL) ||
+                            (zi_type == tulpa::ZIType::ZOIB);
+  // ZI block is present whenever zi_type != NONE EXCEPT pure OI (OI alone uses
+  // X_oi only, no X_zi). ZOIB needs both. The other inflation types use X_zi.
+  const bool has_zi_block = (zi_type != tulpa::ZIType::NONE) &&
+                            (zi_type != tulpa::ZIType::OI_BINOMIAL);
+
   // ---- Validate response shape vs. family expectations -------------------
   const bool has_y_int  = (y_num.size()  == N) && (y_denom.size()  == N);
   const bool has_y_cont = (y_num_cont.size() == N) || (y_denom_cont.size() == N);
@@ -335,23 +360,60 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   }
   data.sharing.init(spec.n_processes);
 
-  // No ZI/OI in B1b.
-  data.zi_type     = tulpa::ZIType::NONE;
+  // ---- ZI / OI blocks (B1c) ---------------------------------------------
+  // R-side passes X_zi (always for ZI/hurdle/ZOIB; mandatory) and X_oi (for
+  // OI/ZOIB). The engine extends the layout with beta_zi / beta_oi blocks
+  // based on these dimensions and pre-computes logit_zi[i] / logit_oi[i] for
+  // each obs before calling the LikelihoodFn — the family kernels never have
+  // to multiply X_zi * beta_zi themselves.
+  data.zi_type     = zi_type;
   data.p_zi        = 0;
   data.p_oi        = 0;
-  data.zi_prior_sd = 1.0;
-  data.oi_prior_sd = 1.0;
+  data.zi_prior_sd = 2.5;
+  data.oi_prior_sd = 2.5;
+
+  int p_zi_block = 0;
+  int p_oi_block = 0;
+  if (has_zi_block) {
+    if (!cfg_list.containsElementNamed("X_zi")) {
+      Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: zi='%s' requires cfg_list$X_zi.",
+                 cfg.zi.c_str());
+    }
+    Rcpp::NumericMatrix X_zi = cfg_list["X_zi"];
+    if (X_zi.nrow() != N) {
+      Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: X_zi has %d rows, expected %d.",
+                 X_zi.nrow(), N);
+    }
+    data.X_zi_flat = rmajor_from_rmatrix(X_zi);
+    data.p_zi      = X_zi.ncol();
+    p_zi_block     = X_zi.ncol();
+  }
+  if (has_oi_block) {
+    if (!cfg_list.containsElementNamed("X_oi")) {
+      Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: zi='%s' requires cfg_list$X_oi.",
+                 cfg.zi.c_str());
+    }
+    Rcpp::NumericMatrix X_oi = cfg_list["X_oi"];
+    if (X_oi.nrow() != N) {
+      Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: X_oi has %d rows, expected %d.",
+                 X_oi.nrow(), N);
+    }
+    data.X_oi_flat = rmajor_from_rmatrix(X_oi);
+    data.p_oi      = X_oi.ncol();
+    p_oi_block     = X_oi.ncol();
+  }
 
   // ---- Param layout (engine derives from data + spec) -------------------
   tulpa::ParamLayout layout = tulpa::compute_layout(data);
 
-  int expected_total = total_p_design + spec.n_extra_params;
+  int expected_total = total_p_design + p_zi_block + p_oi_block
+                     + spec.n_extra_params;
   if (layout.total_params != expected_total) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: layout.total_params (%d) != "
-               "expected (%d) for family='%s' [sum(p_k)=%d, n_extra=%d]. "
-               "B1b expects no extra latent structure.",
+               "expected (%d) for family='%s' [sum(p_k)=%d, p_zi=%d, p_oi=%d, "
+               "n_extra=%d]. Spec path expects no other latent structure.",
                layout.total_params, expected_total, cfg.family.c_str(),
-               total_p_design, spec.n_extra_params);
+               total_p_design, p_zi_block, p_oi_block, spec.n_extra_params);
   }
   if (init.size() != expected_total) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: init length (%d) != expected (%d) "
