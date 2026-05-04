@@ -711,37 +711,76 @@ fit_hmc <- function(formula,
       }
     }
 
-    fit_raw <- cpp_hmc_fit(
-      q_init = q_init,
-      y_num = as.integer(hmc_data$y_num),
-      y_denom = as.integer(hmc_data$y_denom),
-      y_num_cont = hmc_data$y_num_cont,
-      y_denom_cont = hmc_data$y_denom_cont,
-      X_num = hmc_data$X_num,
-      X_denom = hmc_data$X_denom,
-      model_type_str = model_type,
-      re_params = re_params,
-      spatial_params = spatial_params,
-      temporal_params = temporal_params,
-      prior_params = prior_params,
-      zi_params = zi_params,
-      latent_params = latent_params,
-      st_params = st_params,
-      tvc_params = tvc_params,
-      svc_params = svc_params,
-      n_iter = as.integer(iter),
-      n_warmup = as.integer(warmup),
-      L = as.integer(L),
-      n_chains = as.integer(chains),
-      seed = as.integer(seed),
-      n_threads = n_threads_within,
-      verbose = verbose,
-      gradient_mode_str = gradient_mode,
-      max_treedepth = as.integer(max_treedepth),
-      metric_str = metric,
-      adapt_delta = adapt_delta_value,
-      riemannian = riemannian_value
-    )
+    # B1a feature flag: route plain binomial through the LikelihoodSpec
+    # PoC. Off by default; enabled only for the narrowest scope so the legacy
+    # backend stays the default until parity is locked in for every family.
+    use_specs_path <- isTRUE(getOption("tulpaRatio.use_specs", FALSE)) ||
+      identical(Sys.getenv("TULPARATIO_USE_SPECS"), "1")
+    specs_eligible <- use_specs_path &&
+      identical(model_type, "binomial") &&
+      identical(zi_info$type, "none") &&
+      identical(spatial_info$type, "none") &&
+      identical(temporal_info$type, "none") &&
+      identical(latent_info$type, "none") &&
+      isFALSE(svc_params$has_svc) &&
+      isFALSE(tvc_params$has_tvc) &&
+      isFALSE(st_params$has_spatiotemporal) &&
+      (hmc_data$n_re_groups %||% 0L) == 0L &&
+      (hmc_data$n_re_terms %||% 0L) == 0L &&
+      as.integer(L) == 0L &&
+      as.integer(chains) == 1L
+
+    if (specs_eligible) {
+      cfg <- list(family = "binomial", zi = "none",
+                  num_link = "logit", denom_link = "log")
+      fit_raw <- cpp_tulpaRatio_run_nuts_specs(
+        y_num         = as.integer(hmc_data$y_num),
+        y_denom       = as.integer(hmc_data$y_denom),
+        X_num         = hmc_data$X_num,
+        cfg_list      = cfg,
+        init          = as.numeric(q_init),
+        n_iter        = as.integer(iter),
+        n_warmup      = as.integer(warmup),
+        max_treedepth = as.integer(max_treedepth %||% 10L),
+        adapt_delta   = if (adapt_delta_value < 0) 0.8 else adapt_delta_value,
+        seed          = as.integer(seed),
+        verbose       = isTRUE(verbose),
+        gradient_mode = if (identical(gradient_mode, "auto")) "A_r" else gradient_mode,
+        sigma_beta    = sigma_beta
+      )
+    } else {
+      fit_raw <- cpp_hmc_fit(
+        q_init = q_init,
+        y_num = as.integer(hmc_data$y_num),
+        y_denom = as.integer(hmc_data$y_denom),
+        y_num_cont = hmc_data$y_num_cont,
+        y_denom_cont = hmc_data$y_denom_cont,
+        X_num = hmc_data$X_num,
+        X_denom = hmc_data$X_denom,
+        model_type_str = model_type,
+        re_params = re_params,
+        spatial_params = spatial_params,
+        temporal_params = temporal_params,
+        prior_params = prior_params,
+        zi_params = zi_params,
+        latent_params = latent_params,
+        st_params = st_params,
+        tvc_params = tvc_params,
+        svc_params = svc_params,
+        n_iter = as.integer(iter),
+        n_warmup = as.integer(warmup),
+        L = as.integer(L),
+        n_chains = as.integer(chains),
+        seed = as.integer(seed),
+        n_threads = n_threads_within,
+        verbose = verbose,
+        gradient_mode_str = gradient_mode,
+        max_treedepth = as.integer(max_treedepth),
+        metric_str = metric,
+        adapt_delta = adapt_delta_value,
+        riemannian = riemannian_value
+      )
+    }
   }
 
   # Post-fit warnings

@@ -1,3 +1,14 @@
+# tulpaRatio (development)
+
+## Internal
+
+* B1a PoC: plain binomial fits can route through tulpa's `LikelihoodSpec`
+  path (`tulpa::get_nuts_fn()`) behind a feature flag
+  (`options(tulpaRatio.use_specs = TRUE)` or `TULPARATIO_USE_SPECS=1`).
+  Off by default; legacy backend remains the production path until full
+  parity ships in B5. Posterior means agree with the legacy backend within
+  Monte Carlo noise.
+
 # numdenom 1.3.0
 
 ## New Inference Backends

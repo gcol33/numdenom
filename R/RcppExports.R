@@ -437,6 +437,10 @@ cpp_tulpa_pg_binomial_gibbs <- function(y, n, X, group, n_groups, n_iter = 2000L
     .Call(`_tulpaRatio_cpp_tulpa_pg_binomial_gibbs`, y, n, X, group, n_groups, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_scale, store_eta, verbose, n_threads)
 }
 
+cpp_tulpaRatio_run_nuts_specs <- function(y_num, y_denom, X_num, cfg_list, init, n_iter, n_warmup, max_treedepth = 10L, adapt_delta = 0.8, seed = 1L, verbose = FALSE, gradient_mode = "A_r", sigma_beta = 2.5) {
+    .Call(`_tulpaRatio_cpp_tulpaRatio_run_nuts_specs`, y_num, y_denom, X_num, cfg_list, init, n_iter, n_warmup, max_treedepth, adapt_delta, seed, verbose, gradient_mode, sigma_beta)
+}
+
 cpp_vi_fit <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, model_type_str, re_params, spatial_params, temporal_params, prior_params, zi_params, latent_params, st_params, vi_options, verbose = TRUE) {
     .Call(`_tulpaRatio_cpp_vi_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, model_type_str, re_params, spatial_params, temporal_params, prior_params, zi_params, latent_params, st_params, vi_options, verbose)
 }
