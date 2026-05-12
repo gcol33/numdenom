@@ -692,6 +692,7 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     adapt_delta,
     static_cast<unsigned int>(seed),
     verbose ? 1 : 0,
+    nullptr,            // inv_metric_diag (v11) — default mass-adaptation
     &result
   );
 
