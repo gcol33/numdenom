@@ -3,7 +3,7 @@
 ## Pattern
 
 **Per-family POD struct, threaded through `ModelData::model_response_data` as
-`void*`.**  Pattern 2 from the plan, matching `tulpaOcc/src/occu_fit.cpp`
+`void*`.**  Pattern 2 from the plan, matching `tulpaObs/src/occu_fit.cpp`
 (`OccResponseData`, `DynOccResponseData`, ...).
 
 The bridge (`tulpa_bridge.cpp`) constructs the right struct based on

@@ -36,7 +36,7 @@ namespace lik {
 // Numerically stable scalar helpers
 // ============================================================================
 
-// log(1 + exp(x)) without overflow. Mirrors tulpaOcc::safe_log1pexp.
+// log(1 + exp(x)) without overflow. Mirrors tulpaObs::safe_log1pexp.
 template <typename T>
 static inline T safe_log1pexp(const T& x) {
     using std::exp;

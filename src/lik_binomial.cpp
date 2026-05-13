@@ -64,7 +64,7 @@ static T binomial_log_likelihood(
     const void* model_data
 ) {
     // Anchor the arena so any temporaries created below allocate against the
-    // arena that produced eta[0]. Mirrors the convention used in tulpaOcc.
+    // arena that produced eta[0]. Mirrors the convention used in tulpaObs.
     if constexpr (std::is_same_v<T, tulpa::arena::Var>) {
         tulpa::arena::current_arena() = eta[0].arena_;
     }
