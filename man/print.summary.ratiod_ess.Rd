@@ -6,6 +6,16 @@
 \usage{
 \method{print}{summary.ratiod_ess}(x, digits = 3, ...)
 }
+\arguments{
+\item{x}{A \code{summary.ratiod_ess} object.}
+
+\item{digits}{Number of significant digits to print (default 3).}
+
+\item{...}{Unused, for S3 consistency.}
+}
+\value{
+The input \code{x}, invisibly.
+}
 \description{
 Print method for summary.ratiod_ess
 }

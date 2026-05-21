@@ -1506,7 +1506,8 @@ convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
                                               formula, data, family,
                                               model_type, iter, warmup, chains,
                                               temporal_info = NULL,
-                                              spatiotemporal_info = NULL) {
+                                              spatiotemporal_info = NULL,
+                                              re_param = "noncentered") {
   # Handle multi-chain case
   if (chains > 1) {
     # Combine chains

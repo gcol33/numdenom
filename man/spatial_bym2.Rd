@@ -32,6 +32,10 @@ numerator and denominator linear predictors identically.}
 
 \item{scale_factor}{Scaling factor for the ICAR component. If NULL
 (default), computed from the adjacency matrix following Riebler et al.}
+
+\item{parameterization}{Parameterization of the spatial random effect.
+Either \code{"standard"} (default) or \code{"collapsed"} to marginalize the spatial
+variance for improved mixing in sparse-graph regimes.}
 }
 \value{
 A \code{ratiod_spatial} object

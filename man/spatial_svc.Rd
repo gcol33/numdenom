@@ -39,6 +39,17 @@ numerator and denominator. Set to FALSE for process-specific SVCs
 
 \item{scale_coords}{Logical; if TRUE (default), coordinates are scaled to
 unit variance before computing distances.}
+
+\item{approx}{Spatial GP approximation. One of \code{"nngp"} (default,
+Nearest Neighbor GP) or \code{"hsgp"} (Hilbert Space GP, basis-function
+approximation suitable for moderate N with strong smoothness).}
+
+\item{m}{Number of basis functions per coordinate for HSGP (used only
+when \code{approx = "hsgp"}). Default 6.}
+
+\item{c_boundary}{Boundary scaling factor for HSGP. The HSGP domain is
+extended to \code{c_boundary} times the half-range of scaled coordinates.
+Default 1.5.}
 }
 \value{
 A \code{ratiod_svc} object

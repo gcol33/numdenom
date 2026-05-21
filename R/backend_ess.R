@@ -302,6 +302,11 @@ print.ratiod_ess <- function(x, digits = 3, ...) {
 
 
 #' Summary method for ratiod_ess objects
+#'
+#' @param object A `ratiod_ess` fit object.
+#' @param prob Probability mass for credible intervals (default 0.95).
+#' @param ... Unused, for S3 consistency.
+#' @return An object of class `summary.ratiod_ess`.
 #' @export
 summary.ratiod_ess <- function(object, prob = 0.95, ...) {
   alpha <- (1 - prob) / 2
@@ -331,6 +336,11 @@ summary.ratiod_ess <- function(object, prob = 0.95, ...) {
 
 
 #' Print method for summary.ratiod_ess
+#'
+#' @param x A `summary.ratiod_ess` object.
+#' @param digits Number of significant digits to print (default 3).
+#' @param ... Unused, for S3 consistency.
+#' @return The input `x`, invisibly.
 #' @export
 print.summary.ratiod_ess <- function(x, digits = 3, ...) {
   cat("Elliptical Slice Sampling Summary\n")

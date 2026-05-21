@@ -32,6 +32,10 @@ Requires \code{group_var} to be specified.
 
 \item{shared}{Logical; if TRUE (default), spatial effect enters both
 numerator and denominator linear predictors identically.}
+
+\item{parameterization}{Parameterization of the spatial random effect.
+Either \code{"standard"} (default) or \code{"collapsed"} to marginalize the spatial
+variance for improved mixing in sparse-graph regimes.}
 }
 \value{
 A \code{ratiod_spatial} object

@@ -45,6 +45,11 @@ numerator and denominator.}
 
 \item{scale_coords}{Logical; if TRUE (default), coordinates are scaled to
 unit variance before computing distances.}
+
+\item{sampler}{HMC sampler / parameterization strategy. One of \code{"auto"}
+(default), \code{"noncentered"}, \code{"centered"}, \code{"interweaved"}, \code{"adaptive"},
+\code{"riemannian"}, or \code{"lbfgs"}. \code{"auto"} selects based on identifiability
+diagnostics.}
 }
 \value{
 A \code{ratiod_multiscale} object

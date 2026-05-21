@@ -16,7 +16,8 @@ convert_hmc_to_ratiod_fit_spatial(
   warmup,
   chains,
   temporal_info = NULL,
-  spatiotemporal_info = NULL
+  spatiotemporal_info = NULL,
+  re_param = "noncentered"
 )
 }
 \description{

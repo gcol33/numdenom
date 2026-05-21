@@ -28,3 +28,14 @@
 ^\.RData$
 ^\.\.Rcheck$
 ^.*\.tar\.gz$
+^\.code-review-graph$
+^dev_notes$
+^findings\.md$
+^implementation_pg\.md$
+^speedup\.md$
+^speedup_benchmarks\.md$
+^plan\.md$
+^predict_plan\.md$
+^test_spatial_temporal\.R$
+^test_zi\.R$
+^debug_gp_crash\.md$

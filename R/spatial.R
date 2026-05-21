@@ -27,6 +27,9 @@ NULL
 #'   ρ = 1 fixed. If TRUE, uses proper CAR with ρ estimated. See Details.
 #' @param shared Logical; if TRUE (default), spatial effect enters both
 #'   numerator and denominator linear predictors identically.
+#' @param parameterization Parameterization of the spatial random effect.
+#'   Either `"standard"` (default) or `"collapsed"` to marginalize the spatial
+#'   variance for improved mixing in sparse-graph regimes.
 #'
 #' @return A `ratiod_spatial` object
 #'
@@ -522,6 +525,10 @@ is_connected <- function(adjacency) {
 #'   effects (triggers warning about potential confounding).
 #' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing distances.
+#' @param parameterization Parameterization of the latent field. One of
+#'   `"centered"` (default), `"noncentered"` (Matt trick, better for diffuse
+#'   prior regimes), or `"collapsed"` (marginalize spatial variance for
+#'   improved mixing). Centered is robust for informative priors.
 #'
 #' @return A `ratiod_gp` object
 #'
@@ -944,6 +951,28 @@ validate_hsgp <- function(spatial, data) {
 }
 
 
+#' Validate a multiscale HSGP specification
+#'
+#' Reserved for the HSGP-MSGP path. Multi-scale HSGP is not yet supported;
+#' this function exists so the dispatch branch in `backend_hmc.R` resolves at
+#' load time. Reachable only when a `ratiod_multiscale` object carries an
+#' explicit `approx = "hsgp"` field, which the public constructor does not
+#' set.
+#'
+#' @param spatial A `ratiod_multiscale` spec.
+#' @param data The data frame.
+#' @keywords internal
+#' @noRd
+validate_hsgp_multiscale <- function(spatial, data) {
+  stop(
+    "Multi-scale HSGP (`approx = \"hsgp\"` on `spatial_multiscale()`) is not ",
+    "implemented. Use the default NNGP backend, or `spatial_hsgp()` for ",
+    "single-scale HSGP.",
+    call. = FALSE
+  )
+}
+
+
 #' Multi-Scale Gaussian Process spatial structure
 #'
 #' @description
@@ -970,6 +999,10 @@ validate_hsgp <- function(spatial, data) {
 #'   numerator and denominator.
 #' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing distances.
+#' @param sampler HMC sampler / parameterization strategy. One of `"auto"`
+#'   (default), `"noncentered"`, `"centered"`, `"interweaved"`, `"adaptive"`,
+#'   `"riemannian"`, or `"lbfgs"`. `"auto"` selects based on identifiability
+#'   diagnostics.
 #'
 #' @return A `ratiod_multiscale` object
 #'
@@ -1266,6 +1299,14 @@ validate_gp <- function(gp, data) {
 #'   (triggers warning about potential confounding).
 #' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing distances.
+#' @param approx Spatial GP approximation. One of `"nngp"` (default,
+#'   Nearest Neighbor GP) or `"hsgp"` (Hilbert Space GP, basis-function
+#'   approximation suitable for moderate N with strong smoothness).
+#' @param m Number of basis functions per coordinate for HSGP (used only
+#'   when `approx = "hsgp"`). Default 6.
+#' @param c_boundary Boundary scaling factor for HSGP. The HSGP domain is
+#'   extended to `c_boundary` times the half-range of scaled coordinates.
+#'   Default 1.5.
 #'
 #' @return A `ratiod_svc` object
 #'

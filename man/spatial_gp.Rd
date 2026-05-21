@@ -63,6 +63,11 @@ effects (triggers warning about potential confounding).}
 
 \item{scale_coords}{Logical; if TRUE (default), coordinates are scaled to
 unit variance before computing distances.}
+
+\item{parameterization}{Parameterization of the latent field. One of
+\code{"centered"} (default), \code{"noncentered"} (Matt trick, better for diffuse
+prior regimes), or \code{"collapsed"} (marginalize spatial variance for
+improved mixing). Centered is robust for informative priors.}
 }
 \value{
 A \code{ratiod_gp} object

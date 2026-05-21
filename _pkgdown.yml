@@ -1,4 +1,4 @@
-url: https://gillescolling.com/numdenom
+url: https://gillescolling.com/tulpaRatio
 
 template:
   bootstrap: 5
@@ -11,7 +11,7 @@ figures:
   bg: "#F5F6F8"
 
 home:
-  title: "numdenom: Bayesian Hierarchical Models for Ratios"
+  title: "tulpaRatio: Bayesian Hierarchical Models for Ratios"
   description: >
     Joint modelling of numerator and denominator processes with shared latent
     structure. Ratios computed post hoc with full uncertainty propagation.
@@ -44,7 +44,7 @@ navbar:
           href: articles/random-effects.html
     github:
       icon: fab fa-github
-      href: https://github.com/gcol33/numdenom
+      href: https://github.com/gcol33/tulpaRatio
       aria-label: GitHub
 
 reference:

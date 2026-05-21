@@ -6,6 +6,16 @@
 \usage{
 \method{summary}{ratiod_vi}(object, prob = 0.95, ...)
 }
+\arguments{
+\item{object}{A \code{ratiod_vi} fit object.}
+
+\item{prob}{Probability mass for credible intervals (default 0.95).}
+
+\item{...}{Unused, for S3 consistency.}
+}
+\value{
+An object of class \code{summary.ratiod_vi}.
+}
 \description{
 Summary method for ratiod_vi objects
 }
