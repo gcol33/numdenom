@@ -15,8 +15,8 @@ will be m^2. Default 6. Higher values give better approximation but
 slower computation. Recommended range: 5-15.}
 
 \item{c}{Boundary factor controlling domain extension beyond data range.
-Default 1.5. The domain is extended to  where L is half the
-data range. Larger values improve approximation at boundaries.}
+Default 1.5. The domain is extended to \eqn{[-cL, cL]} where \eqn{L} is
+half the data range. Larger values improve approximation at boundaries.}
 
 \item{shared}{Logical; if TRUE (default), spatial effect enters both
 numerator and denominator. Set to FALSE for process-specific spatial
@@ -68,6 +68,38 @@ The hyperparameters are:
 \item Less accurate for rough fields (Matern with low nu)
 \item Approximation quality depends on m and c choices
 }
+}
+\examples{
+# Create HSGP spatial structure
+hsgp <- spatial_hsgp(~ lon + lat)
+print(hsgp)
+
+\donttest{
+# Generate synthetic spatial data
+set.seed(42)
+n <- 100
+df <- data.frame(
+  lon = runif(n, 0, 10),
+  lat = runif(n, 0, 10),
+  x = rnorm(n),
+  count = rpois(n, 25),
+  effort = rgamma(n, shape = 4, rate = 1)
+)
+
+# Fast spatial effect with HSGP (much faster than spatial_gp)
+fit <- ratiod(
+  count | effort ~ x,
+  data = df,
+  family = ratiod_poisson_gamma(),
+  spatial = spatial_hsgp(~ lon + lat, m = 6),
+  backend = "hmc",
+  iter = 500,
+  warmup = 250,
+  chains = 2
+)
+summary(fit)
+}
+
 }
 \references{
 Riutort-Mayol, G., Bürkner, P. C., Andersen, M. R., Solin, A., & Vehtari, A.

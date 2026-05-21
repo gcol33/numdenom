@@ -372,8 +372,14 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   data.zi_type     = zi_type;
   data.p_zi        = 0;
   data.p_oi        = 0;
-  data.zi_prior_sd = 2.5;
-  data.oi_prior_sd = 2.5;
+  // Defaults match the legacy backend (R-side: priors$zi_prior_sd %||% 10.0,
+  // priors$oi_prior_sd %||% priors$zi_prior_sd %||% 10.0). R passes overrides
+  // via cfg_list$zi_prior_sd / cfg_list$oi_prior_sd so the engine stays
+  // signature-stable while the prior survives a path switch.
+  data.zi_prior_sd = cfg_list.containsElementNamed("zi_prior_sd")
+      ? Rcpp::as<double>(cfg_list["zi_prior_sd"]) : 10.0;
+  data.oi_prior_sd = cfg_list.containsElementNamed("oi_prior_sd")
+      ? Rcpp::as<double>(cfg_list["oi_prior_sd"]) : data.zi_prior_sd;
 
   int p_zi_block = 0;
   int p_oi_block = 0;
@@ -676,6 +682,22 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
   if (grad_rc != 0) {
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: unrecognised gradient_mode '%s'.",
                gradient_mode.c_str());
+  }
+
+  // Honor the user-requested gradient mode. tulpa's dispatcher (see
+  // hmc_gradient_dispatch.h:33) lets a registered `spec.gradient_fn` win for
+  // every mode except NUMERICAL, which silently routes A_r / A_t / A through
+  // the hand-coded H kernel — breaking parity with the legacy backend when
+  // the caller asks for A_r explicitly. Null the hook when the user requested
+  // an autodiff or numerical mode so the dispatcher resolves to the requested
+  // AD path (arena / forward / tape) or to NUMERICAL. AUTO and explicit "H"
+  // keep the hand-coded path.
+  const bool keep_handcoded =
+      (gradient_mode == "H") || (gradient_mode == "handcoded") ||
+      (gradient_mode == "analytical") ||
+      (gradient_mode == "auto") || (gradient_mode == "AUTO");
+  if (!keep_handcoded) {
+    spec.gradient_fn = nullptr;
   }
 
   // ---- Run NUTS via the registered tulpa entry point ---------------------

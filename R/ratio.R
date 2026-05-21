@@ -798,6 +798,9 @@ predict.ratiod_fit <- function(object, newdata, type = c("response", "link"),
   } else if (backend == "pg") {
     pred_result <- predict_pg(object, newdata, type, re_formula, allow_new_levels,
                               coords.0, include_spatial, return_spatial)
+  } else if (backend == "gibbs") {
+    pred_result <- predict_gibbs(object, newdata, type, re_formula, allow_new_levels,
+                                 include_spatial, return_spatial)
   } else if (backend == "laplace") {
     pred_result <- predict_laplace(object, newdata, type, re_formula, allow_new_levels,
                                    coords.0, include_spatial, return_spatial,
@@ -1595,6 +1598,149 @@ add_spatial_to_predictions_pg <- function(pred_draws, w_pred, type) {
     pred_draws$ratio <- pred_draws$numerator
   }
   pred_draws
+}
+
+
+#' Predict for Gibbs backend
+#'
+#' @description
+#' Posterior predictive draws for the Gibbs ICAR/BYM2 spatial sampler.
+#' Mirrors `predict_pg`: builds the design matrix for `newdata`, looks up
+#' each new row's spatial group against the levels stored in the fit, and
+#' assembles `eta = X beta + phi[group]` per draw. For binomial families
+#' (the supported case under the gibbs backend), the response-scale
+#' prediction is `plogis(eta)`. Continuous-denominator families
+#' (poisson_gamma, negbin_gamma) and count-denominator families
+#' (negbin_negbin) add `eta_denom = X_denom beta_denom + phi[group]` and
+#' return `mu_num / mu_denom` on the response scale.
+#'
+#' @keywords internal
+predict_gibbs <- function(object, newdata, type, re_formula, allow_new_levels,
+                          include_spatial, return_spatial) {
+  family_str <- get_gibbs_family_string(object$family)
+
+  # Build design matrices for newdata. Reuse the PG builder for the
+  # numerator (same model.matrix discipline). For two-process families
+  # we also need a denominator design matrix.
+  pred_data <- build_prediction_data_pg(object, newdata, re_formula, allow_new_levels)
+  X_new <- pred_data$X
+  n_new <- nrow(newdata)
+
+  draws_mat <- object$draws
+  if (is.array(draws_mat) && length(dim(draws_mat)) == 3L) {
+    # [iter, chain, var] -> [iter, var]
+    draws_mat <- matrix(draws_mat, nrow = dim(draws_mat)[1L],
+                        ncol = dim(draws_mat)[3L],
+                        dimnames = list(NULL, dimnames(draws_mat)[[3L]]))
+  }
+  n_samples <- nrow(draws_mat)
+
+  p_num <- ncol(object$.internal$X)
+  beta_num_cols <- seq_len(p_num)
+  beta_num <- draws_mat[, beta_num_cols, drop = FALSE]
+
+  has_denom <- !(family_str == "binomial")
+  if (has_denom) {
+    formula <- object$formula
+    denom_terms <- formula$denominator$terms
+    if (!is.null(denom_terms)) {
+      X_denom_new <- model.matrix(denom_terms, data = newdata)
+    } else {
+      X_denom_new <- model.matrix(~ 1, data = newdata)
+    }
+    p_denom <- ncol(X_denom_new)
+    beta_denom_cols <- p_num + seq_len(p_denom)
+    beta_denom <- draws_mat[, beta_denom_cols, drop = FALSE]
+  } else {
+    X_denom_new <- NULL
+    beta_denom <- NULL
+  }
+
+  # Map newdata rows to original spatial group indices.
+  spatial <- object$spatial
+  spatial_var <- spatial$group_var
+  phi_draws <- object$.internal$phi_draws  # [n_save, S]
+  if (is.null(phi_draws) || is.null(spatial_var) ||
+      !spatial_var %in% names(newdata)) {
+    stop("Gibbs predict requires spatial group_var to be present in newdata.",
+         call. = FALSE)
+  }
+
+  group_factor_orig <- as.factor(object$data[[spatial_var]])
+  orig_levels <- levels(group_factor_orig)
+  new_levels <- as.character(newdata[[spatial_var]])
+  group_idx <- match(new_levels, orig_levels)
+
+  if (any(is.na(group_idx))) {
+    if (!isTRUE(allow_new_levels)) {
+      missing <- unique(new_levels[is.na(group_idx)])
+      stop("New level(s) '", paste(missing, collapse = "', '"),
+           "' found in '", spatial_var,
+           "'. Set allow_new_levels = TRUE to predict at population level.",
+           call. = FALSE)
+    }
+    group_idx[is.na(group_idx)] <- 0L
+  }
+
+  # Per-draw linear predictor: eta_num[s, i] = X_new[i,] %*% beta_num[s,] +
+  # (include_spatial ? phi[s, group_idx[i]] : 0). w_samples = phi columns
+  # corresponding to newdata rows (n_samples x n_new) when caller asks.
+  w_samples <- matrix(0, n_samples, n_new)
+  if (isTRUE(include_spatial)) {
+    for (i in seq_len(n_new)) {
+      g <- group_idx[i]
+      if (g >= 1L && g <= ncol(phi_draws)) {
+        w_samples[, i] <- phi_draws[, g]
+      }
+    }
+  }
+
+  eta_num <- X_new %*% t(beta_num) + t(w_samples)
+  # eta_num is [n_new, n_samples]; transpose to [n_samples, n_new]
+  eta_num <- t(eta_num)
+
+  if (has_denom) {
+    eta_denom <- X_denom_new %*% t(beta_denom) + t(w_samples)
+    eta_denom <- t(eta_denom)
+  }
+
+  if (identical(type, "link")) {
+    if (has_denom) {
+      pred_draws <- list(
+        numerator = eta_num,
+        denominator = eta_denom,
+        ratio = eta_num - eta_denom
+      )
+    } else {
+      pred_draws <- list(
+        numerator = eta_num,
+        denominator = matrix(0, n_samples, n_new),
+        ratio = eta_num
+      )
+    }
+  } else {
+    if (family_str == "binomial") {
+      prob <- 1 / (1 + exp(-eta_num))
+      pred_draws <- list(
+        numerator = prob,
+        denominator = matrix(1, n_samples, n_new),
+        ratio = prob
+      )
+    } else {
+      mu_num <- exp(eta_num)
+      mu_denom <- exp(eta_denom)
+      pred_draws <- list(
+        numerator = mu_num,
+        denominator = mu_denom,
+        ratio = mu_num / mu_denom
+      )
+    }
+  }
+
+  list(
+    draws = pred_draws,
+    w_samples = if (isTRUE(return_spatial)) w_samples else NULL
+  )
 }
 
 

@@ -783,6 +783,13 @@ fit_hmc <- function(formula,
       has_oi_block <- zi_type_str %in% c("oi_binomial", "zoib")
       if (has_zi_block) cfg$X_zi <- zi_info$X_zi
       if (has_oi_block) cfg$X_oi <- zi_info$X_oi
+      # Pass the same ZI / OI prior scales the legacy backend uses so a path
+      # switch does not silently change the prior (the bridge defaults to
+      # tulpa's engine default of 2.5 otherwise; legacy default is 10.0).
+      if (has_zi_block || has_oi_block) {
+        cfg$zi_prior_sd <- priors$zi_prior_sd %||% 10.0
+        cfg$oi_prior_sd <- priors$oi_prior_sd %||% cfg$zi_prior_sd
+      }
       # X_list carries one design matrix per process. Single-process families
       # (binomial / beta_binomial) pass length-1; two-process families append
       # X_denom. Adding a 3-process family is a list element, not a new arg.

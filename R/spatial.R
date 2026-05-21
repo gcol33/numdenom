@@ -760,8 +760,8 @@ print.ratiod_gp <- function(x, ...) {
 #'   will be m^2. Default 6. Higher values give better approximation but
 #'   slower computation. Recommended range: 5-15.
 #' @param c Boundary factor controlling domain extension beyond data range.
-#'   Default 1.5. The domain is extended to [-c*L, c*L] where L is half the
-#'   data range. Larger values improve approximation at boundaries.
+#'   Default 1.5. The domain is extended to \eqn{[-cL, cL]} where \eqn{L} is
+#'   half the data range. Larger values improve approximation at boundaries.
 #' @param shared Logical; if TRUE (default), spatial effect enters both
 #'   numerator and denominator. Set to FALSE for process-specific spatial
 #'   effects (triggers warning about potential confounding).
@@ -799,7 +799,7 @@ print.ratiod_gp <- function(x, ...) {
 #' hsgp <- spatial_hsgp(~ lon + lat)
 #' print(hsgp)
 #'
-#' \donttest
+#' \donttest{
 #' # Generate synthetic spatial data
 #' set.seed(42)
 #' n <- 100
