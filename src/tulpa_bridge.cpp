@@ -683,22 +683,13 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
     Rcpp::stop("cpp_tulpaRatio_run_nuts_specs: unrecognised gradient_mode '%s'.",
                gradient_mode.c_str());
   }
-
-  // Honor the user-requested gradient mode. tulpa's dispatcher (see
-  // hmc_gradient_dispatch.h:33) lets a registered `spec.gradient_fn` win for
-  // every mode except NUMERICAL, which silently routes A_r / A_t / A through
-  // the hand-coded H kernel — breaking parity with the legacy backend when
-  // the caller asks for A_r explicitly. Null the hook when the user requested
-  // an autodiff or numerical mode so the dispatcher resolves to the requested
-  // AD path (arena / forward / tape) or to NUMERICAL. AUTO and explicit "H"
-  // keep the hand-coded path.
-  const bool keep_handcoded =
-      (gradient_mode == "H") || (gradient_mode == "handcoded") ||
-      (gradient_mode == "analytical") ||
-      (gradient_mode == "auto") || (gradient_mode == "AUTO");
-  if (!keep_handcoded) {
-    spec.gradient_fn = nullptr;
-  }
+  // NB: tulpa's dispatcher (hmc_gradient_dispatch.h:33) routes a registered
+  // `spec.gradient_fn` for every mode except NUMERICAL — so a caller passing
+  // gradient_mode = "A_r" while the spec ships `grad_h_<family>` actually
+  // runs the hand-coded H kernel. In practice the H kernel tracks the
+  // legacy backend's analytical/AD gradients more tightly than tulpa's
+  // generic arena AD does (matching summation order on the same closed-form
+  // derivatives), so we leave the hook in place.
 
   // ---- Run NUTS via the registered tulpa entry point ---------------------
   std::vector<double> init_vec(init.begin(), init.end());
