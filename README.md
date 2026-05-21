@@ -91,7 +91,7 @@ This makes the package useful for:
 
 ```r
 # Install development version from GitHub
-# install.packages("pak")
+install.packages("pak")
 pak::pak("gcol33/numdenom")
 ```
 
