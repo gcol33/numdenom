@@ -61,6 +61,7 @@ reference:
       - ratiod_negbin_negbin
       - ratiod_binomial
       - ratiod_poisson_gamma
+      - ratiod_negbin_gamma
       - ratiod_beta_binomial
       - ratiod_gamma_gamma
       - ratiod_lognormal
@@ -90,10 +91,38 @@ reference:
       - spatial_car
       - spatial_bym2
       - spatial_gp
+      - spatial_hsgp
       - spatial_rsr
       - spatial_svc
       - spatial_multiscale
       - svc
+
+  - title: "Spatiotemporal Structure"
+    desc: "Joint spatiotemporal specifications"
+    contents:
+      - spatiotemporal
+      - spatiotemporal_gp
+      - spatiotemporal_effects
+
+  - title: "Latent Factors"
+    desc: "Latent factor specifications"
+    contents:
+      - latent_factor
+      - latent_factors
+      - ratiod_latent
+
+  - title: "Inference Modes"
+    desc: "Inference tier system (Exact / Structured / Optimized)"
+    contents:
+      - inference_mode_info
+      - validate_mode
+
+  - title: "GPU Support"
+    desc: "GPU device discovery and configuration"
+    contents:
+      - gpu-support
+      - gpu_available
+      - gpu_info
 
   - title: "Temporal Structure"
     desc: "Temporal random effect specifications"
@@ -194,6 +223,7 @@ articles:
       - workflows
       - spatial-temporal
       - random-effects
+      - zero-inflation
 
 footer:
   structure:
