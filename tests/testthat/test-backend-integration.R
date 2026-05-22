@@ -734,6 +734,10 @@ test_that("HMC backend works with cyclic RW1", {
 # ---------------------------------------------------------------------------
 
 test_that("HMC backend works with parallel chains", {
+  # PSOCK + OpenMP on Windows accumulates state that crashes a later
+  # test-cpp-unit OpenMP reduction with exit 127 (no traceback). See
+  # gcol33/tulpaRatio#2 — applies to every cores>1 test in this file.
+  skip_on_os("windows")
   set.seed(3001)
   n <- 30
   df <- data.frame(
@@ -762,6 +766,7 @@ test_that("HMC backend works with parallel chains", {
 
 
 test_that("HMC backend with 4 chains produces consistent results", {
+  skip_on_os("windows")  # see gcol33/tulpaRatio#2
   set.seed(3002)
   n <- 30
   df <- data.frame(
