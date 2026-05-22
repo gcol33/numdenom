@@ -795,6 +795,10 @@ test_that("HMC backend with 4 chains produces consistent results", {
 
 
 test_that("Temporal model works with multiple chains", {
+  # PSOCK cluster + random intercept + temporal_rw1 hard-kills R on Windows
+  # with exit 127, no traceback. Same parallel infrastructure works for
+  # poisson_gamma without RE+temporal. See gcol33/tulpaRatio#2.
+  skip_on_os("windows")
   set.seed(3003)
   n_times <- 6
   n_sites <- 3
