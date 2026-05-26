@@ -26,7 +26,7 @@
 // Closed-form per-obs gradient (recorded for B2; AD provides it now)
 // ------------------------------------------------------------------
 //   d ll_i / d eta_num_i   = y_num_i - mu_num_i
-//   d ll_i / d eta_denom_i = shape * (1 - y_denom_i / mu_denom_i)
+//   d ll_i / d eta_denom_i = shape * (y_denom_i / mu_denom_i - 1)
 //   d ll_i / d log_shape   = shape * (1 + log(rate_i) - rate_i*y_denom_i/shape
 //                                      - digamma(shape) + log(y_denom_i))
 //
