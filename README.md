@@ -1,217 +1,140 @@
-# numdenom
+# tulpaRatio
 
-[![R-CMD-check](https://github.com/gcol33/numdenom/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/gcol33/numdenom/actions/workflows/R-CMD-check.yml)
-[![Codecov test coverage](https://codecov.io/gh/gcol33/numdenom/graph/badge.svg)](https://app.codecov.io/gh/gcol33/numdenom)
+*a ratio with its uncertainty kept*
+
+[![R-CMD-check](https://github.com/gcol33/tulpaRatio/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/gcol33/tulpaRatio/actions/workflows/R-CMD-check.yml)
+[![Codecov test coverage](https://codecov.io/gh/gcol33/tulpaRatio/graph/badge.svg)](https://app.codecov.io/gh/gcol33/tulpaRatio)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Bayesian Hierarchical Modelling of Ratios, Rates, and Proportions**
+**Bayesian hierarchical models for ratios, rates, and proportions, with inference on the numerator and denominator rather than their quotient.**
 
-The `numdenom` package provides a principled framework for modelling ratios, rates, and proportions in ecological and related data. Unlike traditional approaches that model ratios directly, `numdenom` performs inference on the latent processes generating the numerator and denominator, computing ratios post hoc with full uncertainty propagation.
-
-## Philosophy
-
-**Ratios are not data. They are derived quantities.**
-
-All inference is performed on the latent processes generating the numerator and denominator, never on their quotient. This approach:
-
-- Prevents spurious ratio effects from unmeasured confounders
-- Naturally handles shared structure between numerator and denominator
-- Propagates uncertainty correctly through the ratio computation
-- Avoids the statistical pathologies of ratio regression
-
-## Quick Start
+Give it the two counts, not the ratio. `tulpaRatio` fits the numerator and
+denominator processes jointly, with shared random effects between them, and
+derives the ratio posterior afterwards with uncertainty carried through from
+both components. Sampling runs on a native HMC/NUTS backend built on the
+[tulpa](https://github.com/gcol33/tulpa) engine, with no Stan or JAGS to
+install. The usual approach divides first and models the quotient (or pins
+the denominator into an `offset`); that discards the shared structure and
+mis-states the uncertainty.
 
 ```r
-library(numdenom)
+library(tulpaRatio)
 
-# Fit a model for count ratios (e.g., relative abundance)
+# catch-per-unit-effort: model catch and effort, derive CPUE
 fit <- ratiod(
-  species_count | total_count ~ habitat + (1 | site),
-  data = df,
-  family = ratiod_negbin_negbin()
+  catch | effort ~ depth + season + (1 | site),
+  data   = trawl_data,
+  family = ratiod_poisson_gamma()
 )
 
-# Extract ratio posteriors
-ratio(fit)
-
-# Compare conditions
-ratio_contrast(fit, "habitat")
+ratio(fit)                    # CPUE posteriors, uncertainty propagated
+ratio_contrast(fit, ~ season) # compare seasons on the derived ratio
 ```
 
-## Statement of Need
+## Derived, not divided
 
-Ratios, rates, and proportions are ubiquitous in ecological and biological research: relative abundance, catch-per-unit-effort (CPUE), survival rates, proportional cover. Yet standard statistical approaches—modelling ratios directly or using offsets—can produce biased inference when numerator and denominator share unmeasured drivers.
+Dividing two measured quantities inherits the error of both and creates
+heteroscedasticity by construction: a site with more effort gives a more
+precise CPUE, yet a model fit to the quotient treats every ratio as equally
+informative. The offset fix assumes effort acts on catch with a coefficient of
+exactly 1 and that effort carries no structure of its own. `tulpaRatio` keeps
+both processes as what they are, models them together, and computes the ratio
+from the joint posterior.
 
-`numdenom` addresses this by:
+```r
+# the offset approach assumes proportionality and a structureless denominator
+glm(catch ~ depth + season + offset(log(effort)), family = poisson, data = df)
 
-1. **Modelling both components jointly** with shared random effects by default
-2. **Computing ratios post hoc** from the full posterior, preserving uncertainty
-3. **Providing spatial and temporal extensions** for structured data
-4. **Using native HMC/NUTS sampling** with no external dependencies
+# tulpaRatio models both processes, derives the ratio post hoc
+ratiod(catch | effort ~ depth + season + (1 | site),
+       data = df, family = ratiod_poisson_gamma())
+```
 
-This makes the package useful for:
+See [Why Ratios Are Not Data](https://gillescolling.com/tulpaRatio/articles/philosophy.html)
+for the full argument.
 
-- Relative abundance modelling in community ecology
-- CPUE standardization in fisheries science
-- Proportional cover in vegetation surveys
-- Any application where the ratio's components share latent structure
+## Model families
 
-## Features
-
-### Model Families
-
-| Family | Numerator | Denominator | Use Case |
+| Family | Numerator | Denominator | Use case |
 |--------|-----------|-------------|----------|
 | `ratiod_negbin_negbin()` | NegBin | NegBin | Count/count ratios (relative abundance) |
-| `ratiod_binomial()` | Binomial | Fixed trials | Success/trial proportions |
-| `ratiod_poisson_gamma()` | Poisson | Gamma | CPUE (count/continuous effort) |
+| `ratiod_poisson_gamma()` | Poisson | Gamma | Count/continuous effort (CPUE) |
+| `ratiod_binomial()` | Binomial | Known trials | Success/trial proportions |
+| `ratiod_negbin_gamma()` | NegBin | Gamma | Overdispersed count/effort |
+| `ratiod_beta_binomial()` | Beta-Binomial | Known trials | Overdispersed proportions |
+| `ratiod_gamma_gamma()` | Gamma | Gamma | Continuous/continuous ratios |
+| `ratiod_lognormal()` | Lognormal | Lognormal | Continuous ratios on the log scale |
 
-### Hierarchical Structure
+Zero-inflation, one-inflation, hurdle, and zero-and-one-inflated variants are
+available for the relevant families.
 
-- **Shared random effects** by default — prevents spurious ratio effects
-- **Random slopes**: correlated `(1 + x | site)` and uncorrelated `(1 + x || site)`
-- **Nested RE**: `(1 | site/plot)` with automatic expansion
-- **Crossed RE**: `(1 | site) + (1 | year)` for multi-way structure
+## Hierarchical, spatial, and temporal structure
 
-### Spatial and Temporal
+- **Shared random effects** between numerator and denominator by default;
+  `(1 + x | site)` correlated and `(1 + x || site)` uncorrelated slopes;
+  nested `(1 | site/plot)` and crossed `(1 | site) + (1 | year)`.
+- **Latent factors** (`latent_factor()`) for unmeasured confounders shared
+  across the two processes.
+- **Spatial**: `spatial_car()`, `spatial_bym2()`, and Gaussian-process priors
+  for areal or point-referenced data.
+- **Temporal**: `temporal_ar1()`, `temporal_rw1()`, `temporal_rw2()`.
+- **Spatiotemporal**: `spatiotemporal()` for Knorr-Held Type I-IV interactions
+  and `spatiotemporal_gp()` for non-separable space-time GPs.
 
-- **CAR priors**: `spatial_car()` for areal data
-- **BYM2 priors**: `spatial_bym2()` for combined spatial + IID effects
-- **Temporal AR(1)**: `temporal_ar1()` for autocorrelated time series
-- **Random walk**: `temporal_rw()` for flexible temporal trends
+## Inference backends and tiers
 
-### Inference
+`mode = "auto"` picks an exact or structured backend for the model and never
+silently drops to an approximation that lacks a convergence guarantee.
 
-- **Native HMC/NUTS backend** — no Stan or JAGS required
-- **Laplace approximation** for very large datasets (N > 50k)
-- **Pólya-Gamma Gibbs** for binomial models (experimental)
-- **LOO and WAIC** for model comparison
+- **Tier 1 (exact):** HMC/NUTS (default), elliptical slice sampling,
+  Pólya-Gamma Gibbs for binomial models.
+- **Tier 2 (structured):** Laplace approximation for large datasets.
+- **Tier 3 (optimized):** variational inference and stochastic-gradient MCMC,
+  available by explicit opt-in only.
+
+LOO and WAIC are provided for model comparison. See
+[inference_mode_info()] for the tier system.
+
+## Process-specific predictors
+
+The numerator and denominator can take different predictors:
+
+```r
+fit <- ratiod(
+  species_count | total_count ~ (1 | site),
+  formula_num   = ~ depth + temperature,   # numerator process
+  formula_denom = ~ sampling_effort,        # denominator process
+  data   = df,
+  family = ratiod_negbin_negbin()
+)
+```
 
 ## Installation
 
 ```r
-# Install development version from GitHub
-install.packages("pak")
-pak::pak("gcol33/numdenom")
+install.packages("pak")                   # development version
+pak::pak("gcol33/tulpaRatio")
 ```
-
-## Usage Examples
-
-### Basic: Count Ratios
-
-```r
-library(numdenom)
-
-# Relative abundance of a focal species
-fit <- ratiod(
-  focal_count | total_count ~ treatment + (1 | site),
-  data = abundance_data,
-  family = ratiod_negbin_negbin()
-)
-
-# Summary of model fit
-summary(fit)
-
-# Extract ratio posteriors with credible intervals
-ratio(fit)
-
-# Compare treatment levels
-ratio_contrast(fit, "treatment")
-```
-
-### CPUE with Continuous Effort
-
-```r
-# Catch-per-unit-effort with varying tow duration
-fit <- ratiod(
-  catch | tow_hours ~ depth + season + (1 | vessel),
-  data = fisheries_data,
-  family = ratiod_poisson_gamma()
-)
-
-# Posterior predictive check
-pp_check(fit)
-```
-
-### Binomial Proportions
-
-```r
-# Survival rates
-fit <- ratiod(
-  survivors | n_released ~ treatment + (1 | cohort),
-  data = survival_data,
-  family = ratiod_binomial()
-)
-```
-
-### Spatial Models
-
-```r
-# Relative abundance with spatial structure
-fit <- ratiod(
-  species_count | total_count ~ habitat,
-  data = grid_data,
-  family = ratiod_negbin_negbin(),
-  spatial = spatial_car(adj_matrix, group_var = "grid_id")
-)
-```
-
-### Shared vs Independent Structure
-
-```r
-# Default: shared random effects (recommended)
-fit_shared <- ratiod(
-  num | denom ~ x + (1 | group),
-  data = df,
-  family = ratiod_negbin_negbin()
-)
-
-# Explicit independence (triggers warning)
-fit_indep <- ratiod(
-  num | denom ~ x + (1 | group),
-  data = df,
-  family = ratiod_negbin_negbin(),
-  shared = ~ 0
-)
-```
-
-### Process-Specific Predictors
-
-```r
-# Different predictors for numerator and denominator
-fit <- ratiod(
-  species_count | total_count ~ (1 | site),
-  formula_num = ~ depth + temperature,
-  formula_denom = ~ sampling_effort,
-  data = df,
-  family = ratiod_negbin_negbin()
-)
-```
-
-## Comparison with Alternative Approaches
-
-| Approach | Shared Structure | Uncertainty | Flexibility |
-|----------|-----------------|-------------|-------------|
-| Ratio regression | ✗ | ✗ | Low |
-| GLM with offset | ✗ | Partial | Medium |
-| Separate models | ✗ | ✗ | High |
-| **numdenom** | ✓ (default) | ✓ | High |
 
 ## Documentation
 
-- [Quick Start](https://gillescolling.com/numdenom/articles/getting-started.html) — Installation and basic usage
-- [Why Ratios Are Not Data](https://gillescolling.com/numdenom/articles/philosophy.html) — Statistical motivation
-- [Complete Workflows](https://gillescolling.com/numdenom/articles/workflows.html) — Real-world analysis examples
-- [Spatial and Temporal Models](https://gillescolling.com/numdenom/articles/spatial-temporal.html) — CAR, BYM2, AR(1), random walk
-- [Random Effects](https://gillescolling.com/numdenom/articles/random-effects.html) — Random slopes, nested/crossed RE
+- [Quick Start](https://gillescolling.com/tulpaRatio/articles/getting-started.html)
+- [Why Ratios Are Not Data](https://gillescolling.com/tulpaRatio/articles/philosophy.html)
+- [Complete Workflows](https://gillescolling.com/tulpaRatio/articles/workflows.html)
+- [Spatial and Temporal Models](https://gillescolling.com/tulpaRatio/articles/spatial-temporal.html)
+- [Random Effects](https://gillescolling.com/tulpaRatio/articles/random-effects.html)
+- [Zero-Inflation](https://gillescolling.com/tulpaRatio/articles/zero-inflation.html)
 
 ## Support
 
 > "Software is like sex: it's better when it's free." — Linus Torvalds
 
-I'm a PhD student who builds R packages in my free time because I believe good tools should be free and open. I started these projects for my own work and figured others might find them useful too.
+I'm a PhD student who builds R packages in my free time because I believe good tools
+should be free and open. I started these projects for my own work and figured others
+might find them useful too.
 
-If this package saved you some time, buying me a coffee is a nice way to say thanks. It helps with my coffee addiction.
+If this package saved you some time, buying me a coffee is a nice way to say thanks.
+It helps with my coffee addiction.
 
 [![Buy Me A Coffee](https://img.shields.io/badge/-Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/gcol33)
 
@@ -222,10 +145,10 @@ MIT (see the LICENSE.md file)
 ## Citation
 
 ```bibtex
-@software{numdenom,
+@software{tulpaRatio,
   author = {Colling, Gilles},
-  title = {numdenom: Bayesian Hierarchical Modelling of Ratios, Rates, and Proportions},
-  year = {2025},
-  url = {https://github.com/gcol33/numdenom}
+  title  = {tulpaRatio: Bayesian Hierarchical Models for Ratios, Rates, and Proportions},
+  year   = {2025},
+  url    = {https://github.com/gcol33/tulpaRatio}
 }
 ```
