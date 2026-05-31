@@ -1011,7 +1011,8 @@ fit_hmc <- function(formula,
         max_treedepth = as.integer(max_treedepth),
         metric_str = metric,
         adapt_delta = adapt_delta_value,
-        riemannian = riemannian_value
+        riemannian = riemannian_value,
+        n_cores = as.integer(cores)
       )
     }
   }

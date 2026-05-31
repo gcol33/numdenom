@@ -734,10 +734,6 @@ test_that("HMC backend works with cyclic RW1", {
 # ---------------------------------------------------------------------------
 
 test_that("HMC backend works with parallel chains", {
-  # PSOCK + OpenMP on Windows accumulates state that crashes a later
-  # test-cpp-unit OpenMP reduction with exit 127 (no traceback). See
-  # gcol33/tulpaRatio#2 — applies to every cores>1 test in this file.
-  skip_on_os("windows")
   set.seed(3001)
   n <- 30
   df <- data.frame(
@@ -766,7 +762,6 @@ test_that("HMC backend works with parallel chains", {
 
 
 test_that("HMC backend with 4 chains produces consistent results", {
-  skip_on_os("windows")  # see gcol33/tulpaRatio#2
   set.seed(3002)
   n <- 30
   df <- data.frame(
@@ -800,10 +795,6 @@ test_that("HMC backend with 4 chains produces consistent results", {
 
 
 test_that("Temporal model works with multiple chains", {
-  # PSOCK cluster + random intercept + temporal_rw1 hard-kills R on Windows
-  # with exit 127, no traceback. Same parallel infrastructure works for
-  # poisson_gamma without RE+temporal. See gcol33/tulpaRatio#2.
-  skip_on_os("windows")
   set.seed(3003)
   n_times <- 6
   n_sites <- 3

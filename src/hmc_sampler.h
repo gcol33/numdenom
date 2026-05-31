@@ -312,6 +312,11 @@ struct ModelData {
 
   // Parallelization
   int n_threads;
+  // Across-chain core budget. Bounds the multi-chain OpenMP team size so the
+  // team stays the same size across successive fits in one session; a team
+  // that grows then shrinks corrupts the GOMP thread pool and faults at
+  // process teardown on Windows.
+  int n_cores = 1;
 };
 
 // =====================================================================

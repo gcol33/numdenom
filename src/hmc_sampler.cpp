@@ -13342,8 +13342,14 @@ std::vector<HMCResult> run_hmc_parallel_chains(
 
 #ifdef _OPENMP
   if (n_chains > 1) {
-    // Run chains in parallel - all gradient modes are now thread-safe
-    #pragma omp parallel for schedule(static) num_threads(n_chains)
+    // The OpenMP team must stay the same size across successive fits in one
+    // session: a team that grows then shrinks corrupts the GOMP pool and
+    // faults at process teardown on Windows. Bound the team by the core
+    // budget so it is stable across fits; chains beyond the team size are
+    // handled by the static schedule looping each worker over several
+    // iterations.
+    int team_size = data.n_cores > 0 ? std::min(n_chains, data.n_cores) : n_chains;
+    #pragma omp parallel for schedule(static) num_threads(team_size)
     for (int c = 0; c < n_chains; c++) {
       cpp_results[c] = run_hmc_chain_cpp(
         q_init, data, layout,
@@ -13431,7 +13437,8 @@ Rcpp::List cpp_hmc_fit(
     int max_treedepth = 10,
     std::string metric_str = "auto",
     double adapt_delta = -1.0,
-    int riemannian = -1
+    int riemannian = -1,
+    int n_cores = 0
 ) {
   using namespace ratiod_hmc;
 
@@ -13868,6 +13875,10 @@ Rcpp::List cpp_hmc_fit(
 
   // Parallelization
   data.n_threads = n_threads;
+  // Across-chain team bound. n_cores == 0 means "size the team to the chain
+  // count"; a positive value (the R backend passes the core budget) keeps the
+  // multi-chain team the same size across fits.
+  data.n_cores = (n_cores > 0) ? n_cores : n_chains;
 
   // Initialize feature flags that are not used in cpp_hmc_fit (only in cpp_hmc_fit_gp)
   data.has_gp = false;
