@@ -158,59 +158,249 @@ prior_predict <- function(formula, family, data, priors = NULL, n = 100) {
   stop("prior_predict not yet implemented", call. = FALSE)
 }
 
+# ============================================================================
+# Pointwise log-likelihood
+# ----------------------------------------------------------------------------
+# WAIC, PSIS-LOO, LOO stacking, and pseudo-BMA all consume the same
+# [n_draws x n_obs] pointwise log-likelihood matrix, so it is reconstructed in
+# one place from the posterior draws, the design matrices, and the family --
+# no backend is required to store it. This is the ratiod analogue of
+# tulpaObs::.tobs_pointwise_loglik().
+#
+# The per-observation densities use the mean / shape / precision
+# parameterizations of the C++ likelihood kernels (src/lik_specs/lik_helpers.h),
+# evaluated with R's fully-normalized `d*()` functions so the resulting WAIC /
+# elpd are on the standard scale.
+#
+# Fidelity note: the linear predictors are evaluated from the fixed-effect
+# (population-level) coefficient draws -- the `beta_num[]` / `beta_denom[]`
+# columns. Structured-term contributions (random effects, spatial, temporal
+# fields) are not added to the predictor, so for models with those components
+# the score is conditional on the fixed-effect predictor. This mirrors the
+# documented behaviour of the sibling occupancy package.
+# ============================================================================
+
+# Model types this engine supports (the two-process / trial-based families).
+.ratiod_supported_model_types <- c(
+  "binomial", "beta_binomial", "poisson_gamma", "negbin_gamma",
+  "negbin_negbin", "gamma_gamma", "lognormal"
+)
+
+# Resolve a fit's model type regardless of which backend produced it (hmc /
+# laplace store it in `.internal`, others at the top level; fall back to the
+# family map).
+.ratiod_model_type <- function(fit) {
+  fit$model_type %||% fit$.internal$model_type %||% get_hmc_model_type(fit$family)
+}
+
+# Fixed-effect linear-predictor draws for both processes.
+# Returns a list(eta_num, eta_denom) of [n_draws x n_obs] matrices; eta_denom is
+# NULL for single-process families (binomial, beta_binomial).
+.ratiod_linpred_fixed <- function(draws, hmc_data) {
+  cn <- colnames(draws)
+
+  pick <- function(prefix) {
+    cols <- grep(paste0("^", prefix, "\\[[0-9]+\\]$"), cn)
+    if (length(cols) == 0L) return(NULL)
+    # Order by the bracketed index so eta is X %*% beta with matching columns.
+    idx <- as.integer(sub(paste0("^", prefix, "\\[([0-9]+)\\]$"), "\\1", cn[cols]))
+    draws[, cols[order(idx)], drop = FALSE]
+  }
+
+  beta_num <- pick("beta_num")
+  if (is.null(beta_num)) {
+    stop("Could not locate `beta_num[]` coefficient draws in the fit.",
+         call. = FALSE)
+  }
+  if (ncol(beta_num) != hmc_data$p_num) {
+    stop("Numerator coefficient draws (", ncol(beta_num),
+         ") do not match the design matrix (", hmc_data$p_num, ").",
+         call. = FALSE)
+  }
+  eta_num <- beta_num %*% t(hmc_data$X_num)
+
+  eta_denom <- NULL
+  if (hmc_data$p_denom > 0L) {
+    beta_denom <- pick("beta_denom")
+    if (is.null(beta_denom) || ncol(beta_denom) != hmc_data$p_denom) {
+      stop("Could not locate matching `beta_denom[]` coefficient draws.",
+           call. = FALSE)
+    }
+    eta_denom <- beta_denom %*% t(hmc_data$X_denom)
+  }
+
+  list(eta_num = eta_num, eta_denom = eta_denom)
+}
+
+# Per-draw dispersion / shape / scale parameters on the natural scale.
+# Backends differ in both the column name and whether the parameter is stored
+# on the log scale, so each quantity is resolved from an ordered list of
+# candidate names; a `log_`-prefixed match is exponentiated.
+.ratiod_dispersion <- function(draws, model_type) {
+  cn <- colnames(draws)
+  get_param <- function(natural, logged, what) {
+    for (nm in natural) if (nm %in% cn) return(draws[, nm])
+    for (nm in logged)  if (nm %in% cn) return(exp(draws[, nm]))
+    stop("Could not locate the ", what, " parameter draws ",
+         "(looked for: ", paste(c(natural, logged), collapse = ", "), ").",
+         call. = FALSE)
+  }
+
+  switch(
+    model_type,
+    binomial = list(),
+    beta_binomial = list(
+      phi = get_param("phi", c("log_phi", "log_phi_num"), "beta-binomial precision")
+    ),
+    poisson_gamma = list(
+      shape = get_param(c("shape", "shape_denom"),
+                        c("log_shape", "log_phi_denom"), "Gamma shape")
+    ),
+    negbin_negbin = list(
+      phi_num   = get_param("phi_num",   "log_phi_num",   "numerator overdispersion"),
+      phi_denom = get_param("phi_denom", "log_phi_denom", "denominator overdispersion")
+    ),
+    negbin_gamma = list(
+      phi_num   = get_param("phi_num",   "log_phi_num",   "numerator overdispersion"),
+      phi_denom = get_param("phi_denom", "log_phi_denom", "Gamma shape")
+    ),
+    gamma_gamma = list(
+      shape_num   = get_param("shape_num",   c("log_shape_num",   "log_phi_num"),   "numerator Gamma shape"),
+      shape_denom = get_param("shape_denom", c("log_shape_denom", "log_phi_denom"), "denominator Gamma shape")
+    ),
+    lognormal = list(
+      sigma_num   = get_param("sigma_num",   c("log_sigma_num",   "log_phi_num"),   "numerator log-scale SD"),
+      sigma_denom = get_param("sigma_denom", c("log_sigma_denom", "log_phi_denom"), "denominator log-scale SD")
+    ),
+    stop("Pointwise log-likelihood is not implemented for model type '",
+         model_type, "'.", call. = FALSE)
+  )
+}
+
+# Pointwise log-likelihood matrix [n_draws x n_obs] for a fitted ratiod model.
+#' @keywords internal
+.ratiod_pointwise_loglik <- function(fit) {
+  draws <- fit$draws
+  if (!is.matrix(draws)) {
+    stop("Pointwise log-likelihood needs a posterior draw matrix; the '",
+         fit$backend %||% "unknown", "' backend does not store one. WAIC / LOO ",
+         "are supported on the hmc, ess, sghmc, and vi backends.",
+         call. = FALSE)
+  }
+
+  if (isTRUE(fit$family$zero_inflated) || isTRUE(fit$family$one_inflated)) {
+    stop("Pointwise log-likelihood is not yet implemented for zero-/one-inflated ",
+         "models.", call. = FALSE)
+  }
+
+  model_type <- .ratiod_model_type(fit)
+  if (!model_type %in% .ratiod_supported_model_types) {
+    stop("Pointwise log-likelihood is not implemented for model type '",
+         model_type, "'.", call. = FALSE)
+  }
+
+  hmc_data <- fit$.internal$hmc_data
+  if (is.null(hmc_data)) {
+    hmc_data <- suppressWarnings(
+      prepare_hmc_data(fit$formula, fit$data, fit$family, model_type)
+    )
+  }
+
+  lp  <- .ratiod_linpred_fixed(draws, hmc_data)
+  disp <- .ratiod_dispersion(draws, model_type)
+
+  S <- nrow(lp$eta_num)
+  N <- ncol(lp$eta_num)
+  # Observed responses broadcast to [n_draws x n_obs] (constant down each column).
+  ymat <- function(y) matrix(as.numeric(y), nrow = S, ncol = N, byrow = TRUE)
+
+  ll <- switch(
+    model_type,
+    binomial = {
+      p <- stats::plogis(lp$eta_num)
+      matrix(stats::dbinom(ymat(hmc_data$y_num), size = ymat(hmc_data$y_denom),
+                           prob = p, log = TRUE), S, N)
+    },
+    beta_binomial = {
+      p <- stats::plogis(lp$eta_num)
+      y <- ymat(hmc_data$y_num); n <- ymat(hmc_data$y_denom)
+      alpha <- p * disp$phi          # disp$phi length S -> per-draw (per-row)
+      beta  <- (1 - p) * disp$phi
+      lchoose(n, y) + lbeta(y + alpha, n - y + beta) - lbeta(alpha, beta)
+    },
+    poisson_gamma = {
+      mu_num   <- exp(lp$eta_num)
+      mu_denom <- exp(lp$eta_denom)
+      ll_num <- matrix(stats::dpois(ymat(hmc_data$y_num), lambda = mu_num,
+                                    log = TRUE), S, N)
+      ll_den <- matrix(stats::dgamma(ymat(hmc_data$y_denom_cont), shape = disp$shape,
+                                     rate = disp$shape / mu_denom, log = TRUE), S, N)
+      ll_num + ll_den
+    },
+    negbin_negbin = {
+      mu_num   <- exp(lp$eta_num)
+      mu_denom <- exp(lp$eta_denom)
+      ll_num <- matrix(stats::dnbinom(ymat(hmc_data$y_num), size = disp$phi_num,
+                                      mu = mu_num, log = TRUE), S, N)
+      ll_den <- matrix(stats::dnbinom(ymat(hmc_data$y_denom), size = disp$phi_denom,
+                                      mu = mu_denom, log = TRUE), S, N)
+      ll_num + ll_den
+    },
+    negbin_gamma = {
+      mu_num   <- exp(lp$eta_num)
+      mu_denom <- exp(lp$eta_denom)
+      ll_num <- matrix(stats::dnbinom(ymat(hmc_data$y_num), size = disp$phi_num,
+                                      mu = mu_num, log = TRUE), S, N)
+      ll_den <- matrix(stats::dgamma(ymat(hmc_data$y_denom_cont), shape = disp$phi_denom,
+                                     rate = disp$phi_denom / mu_denom, log = TRUE), S, N)
+      ll_num + ll_den
+    },
+    gamma_gamma = {
+      mu_num   <- exp(lp$eta_num)
+      mu_denom <- exp(lp$eta_denom)
+      ll_num <- matrix(stats::dgamma(ymat(hmc_data$y_num_cont), shape = disp$shape_num,
+                                     rate = disp$shape_num / mu_num, log = TRUE), S, N)
+      ll_den <- matrix(stats::dgamma(ymat(hmc_data$y_denom_cont), shape = disp$shape_denom,
+                                     rate = disp$shape_denom / mu_denom, log = TRUE), S, N)
+      ll_num + ll_den
+    },
+    lognormal = {
+      ll_num <- matrix(stats::dlnorm(ymat(hmc_data$y_num_cont), meanlog = lp$eta_num,
+                                     sdlog = disp$sigma_num, log = TRUE), S, N)
+      ll_den <- matrix(stats::dlnorm(ymat(hmc_data$y_denom_cont), meanlog = lp$eta_denom,
+                                     sdlog = disp$sigma_denom, log = TRUE), S, N)
+      ll_num + ll_den
+    }
+  )
+
+  ll
+}
+
 #' LOO cross-validation
 #'
 #' @description
 #' Compute leave-one-out cross-validation using Pareto-smoothed
 #' importance sampling (PSIS-LOO).
 #'
+#' @details
+#' The pointwise log-likelihood is reconstructed from the posterior draws and
+#' the model (see [ratiod_compare()]); it works on any fit produced by the
+#' hmc, ess, sghmc, or vi backend. The score is conditional on the fixed-effect
+#' (population-level) linear predictor.
+#'
 #' @param x A `ratiod_fit` object
 #' @param ... Additional arguments passed to loo::loo
 #'
 #' @return A loo object
 #'
-#' @export
+#' @importFrom loo loo
+#' @exportS3Method loo::loo
 loo.ratiod_fit <- function(x, ...) {
   if (!requireNamespace("loo", quietly = TRUE)) {
     stop("Package 'loo' is required. Install with:\n",
          "  install.packages('loo')", call. = FALSE)
   }
-
-  # Try combined log_lik first (all models should have this)
-  # Handle both list and matrix draws formats
-  if (is.list(x$draws) && !is.matrix(x$draws)) {
-    ll <- x$draws$log_lik
-  } else {
-    ll <- NULL
-  }
-
-  if (!is.null(ll)) {
-    return(loo::loo(ll, ...))
-  }
-
-  # Fall back to separate components for two-process models
-  if (is.list(x$draws) && !is.matrix(x$draws)) {
-    ll_num <- x$draws$log_lik_num
-    ll_denom <- x$draws$log_lik_denom
-  } else {
-    ll_num <- NULL
-    ll_denom <- NULL
-  }
-
-  if (is.null(ll_num) && is.null(ll_denom)) {
-    stop("Log-likelihood not found in model output.", call. = FALSE)
-  }
-
-  # Sum components that exist
-  if (!is.null(ll_num) && !is.null(ll_denom)) {
-    ll <- ll_num + ll_denom
-  } else if (!is.null(ll_num)) {
-    ll <- ll_num
-  } else {
-    ll <- ll_denom
-  }
-
-  loo::loo(ll, ...)
+  loo::loo(.ratiod_pointwise_loglik(x), ...)
 }
 
 #' WAIC computation
@@ -218,52 +408,24 @@ loo.ratiod_fit <- function(x, ...) {
 #' @description
 #' Compute Widely Applicable Information Criterion (WAIC).
 #'
+#' @details
+#' Uses the same reconstructed pointwise log-likelihood as [loo.ratiod_fit()];
+#' supported on the hmc, ess, sghmc, and vi backends and conditional on the
+#' fixed-effect linear predictor.
+#'
 #' @param x A `ratiod_fit` object
 #' @param ... Additional arguments passed to loo::waic
 #'
 #' @return A waic object
 #'
-#' @export
+#' @importFrom loo waic
+#' @exportS3Method loo::waic
 waic.ratiod_fit <- function(x, ...) {
   if (!requireNamespace("loo", quietly = TRUE)) {
     stop("Package 'loo' is required. Install with:\n",
          "  install.packages('loo')", call. = FALSE)
   }
-
-  # Try combined log_lik first
-  # Handle both list and matrix draws formats
-  if (is.list(x$draws) && !is.matrix(x$draws)) {
-    ll <- x$draws$log_lik
-  } else {
-    ll <- NULL
-  }
-
-  if (!is.null(ll)) {
-    return(loo::waic(ll, ...))
-  }
-
-  # Fall back to separate components
-  if (is.list(x$draws) && !is.matrix(x$draws)) {
-    ll_num <- x$draws$log_lik_num
-    ll_denom <- x$draws$log_lik_denom
-  } else {
-    ll_num <- NULL
-    ll_denom <- NULL
-  }
-
-  if (is.null(ll_num) && is.null(ll_denom)) {
-    stop("Log-likelihood not found in model output.", call. = FALSE)
-  }
-
-  if (!is.null(ll_num) && !is.null(ll_denom)) {
-    ll <- ll_num + ll_denom
-  } else if (!is.null(ll_num)) {
-    ll <- ll_num
-  } else {
-    ll <- ll_denom
-  }
-
-  loo::waic(ll, ...)
+  loo::waic(.ratiod_pointwise_loglik(x), ...)
 }
 
 #' Compare ratiod models
@@ -423,8 +585,11 @@ ratiod_average <- function(..., weights = c("loo", "waic", "pbma", "pbma+"),
   }
   names(models) <- model_names
 
-  # Check data compatibility
-  n_obs <- vapply(models, function(m) m$.internal$hmc_data$N, integer(1))
+  # Check data compatibility (number of observations). `.internal$hmc_data` is
+  # only populated by some backends, so fall back to the stored data frame.
+  n_obs <- vapply(models, function(m) {
+    as.integer(m$.internal$hmc_data$N %||% nrow(m$data))
+  }, integer(1))
   if (length(unique(n_obs)) > 1) {
     stop("All models must be fitted to the same data", call. = FALSE)
   }
@@ -500,6 +665,34 @@ compute_model_weights <- function(models, method) {
 }
 
 
+# Response-scale fitted draws [n_draws x n_obs] for one component, reconstructed
+# from the fixed-effect linear predictors (the same machinery as the pointwise
+# log-likelihood, so the two stay consistent). `type` is one of "ratio",
+# "numerator", "denominator".
+#' @keywords internal
+.ratiod_component_draws <- function(fit, type) {
+  model_type <- .ratiod_model_type(fit)
+  hmc_data <- fit$.internal$hmc_data
+  if (is.null(hmc_data)) {
+    hmc_data <- suppressWarnings(
+      prepare_hmc_data(fit$formula, fit$data, fit$family, model_type)
+    )
+  }
+  lp <- .ratiod_linpred_fixed(fit$draws, hmc_data)
+
+  if (model_type %in% c("binomial", "beta_binomial")) {
+    mu_num   <- stats::plogis(lp$eta_num)              # success probability
+    mu_denom <- matrix(1, nrow(mu_num), ncol(mu_num))  # trials are data
+    ratio    <- mu_num
+  } else {
+    mu_num   <- exp(lp$eta_num)
+    mu_denom <- exp(lp$eta_denom)
+    ratio    <- mu_num / mu_denom
+  }
+
+  switch(type, ratio = ratio, numerator = mu_num, denominator = mu_denom)
+}
+
 #' Get predictions from a model
 #'
 #' @param model A ratiod_fit object
@@ -516,20 +709,20 @@ get_predictions <- function(model, newdata, type, summary) {
     return(pred)
   }
 
-  # Extract fitted values from model
+  # Matrix-draw backends (hmc, ess, sghmc, vi): reconstruct fitted draws from
+  # the fixed-effect linear predictors.
+  if (is.matrix(model$draws)) {
+    return(.ratiod_component_draws(model, type))
+  }
+
+  # Legacy list-shaped draws: read the stored component if present.
   if (type == "ratio") {
-    # Get ratio predictions
     if (!is.null(model$draws$ratio)) {
       pred <- model$draws$ratio
+    } else if (!is.null(model$draws$eta_num) && !is.null(model$draws$eta_denom)) {
+      pred <- exp(model$draws$eta_num - model$draws$eta_denom)
     } else {
-      # Compute from eta
-      eta_num <- model$draws$eta_num
-      eta_denom <- model$draws$eta_denom
-      if (!is.null(eta_num) && !is.null(eta_denom)) {
-        pred <- exp(eta_num - eta_denom)
-      } else {
-        stop("Cannot extract ratio predictions from model", call. = FALSE)
-      }
+      stop("Cannot extract ratio predictions from model", call. = FALSE)
     }
   } else if (type == "numerator") {
     pred <- model$draws$mu_num

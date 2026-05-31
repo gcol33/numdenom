@@ -4,7 +4,7 @@
 \alias{loo.ratiod_fit}
 \title{LOO cross-validation}
 \usage{
-loo.ratiod_fit(x, ...)
+\method{loo}{ratiod_fit}(x, ...)
 }
 \arguments{
 \item{x}{A \code{ratiod_fit} object}
@@ -17,4 +17,10 @@ A loo object
 \description{
 Compute leave-one-out cross-validation using Pareto-smoothed
 importance sampling (PSIS-LOO).
+}
+\details{
+The pointwise log-likelihood is reconstructed from the posterior draws and
+the model (see \code{\link[=ratiod_compare]{ratiod_compare()}}); it works on any fit produced by the
+hmc, ess, sghmc, or vi backend. The score is conditional on the fixed-effect
+(population-level) linear predictor.
 }

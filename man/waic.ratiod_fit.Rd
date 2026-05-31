@@ -4,7 +4,7 @@
 \alias{waic.ratiod_fit}
 \title{WAIC computation}
 \usage{
-waic.ratiod_fit(x, ...)
+\method{waic}{ratiod_fit}(x, ...)
 }
 \arguments{
 \item{x}{A \code{ratiod_fit} object}
@@ -16,4 +16,9 @@ A waic object
 }
 \description{
 Compute Widely Applicable Information Criterion (WAIC).
+}
+\details{
+Uses the same reconstructed pointwise log-likelihood as \code{\link[=loo.ratiod_fit]{loo.ratiod_fit()}};
+supported on the hmc, ess, sghmc, and vi backends and conditional on the
+fixed-effect linear predictor.
 }

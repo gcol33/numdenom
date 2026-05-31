@@ -555,8 +555,9 @@ test_that("ratiod_compare handles model comparison setup", {
     error = function(e) "expected_error"
   )
 
-  # Either succeeds or fails gracefully
-  expect_true(is.data.frame(result) || is.list(result) || result == "expected_error")
+  # Either succeeds (loo_compare returns a matrix) or fails gracefully.
+  expect_true(is.matrix(result) || is.data.frame(result) ||
+              identical(result, "expected_error"))
 })
 
 

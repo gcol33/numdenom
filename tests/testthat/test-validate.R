@@ -206,15 +206,17 @@ test_that("pp_check_single requires bayesplot", {
 
 # ---------------------------------------------------------------------------
 # Integration tests for loo.ratiod_fit and waic.ratiod_fit
-# Note: These require log_lik draws which are not yet produced by HMC backend
+# The pointwise log-likelihood is reconstructed centrally from the posterior
+# draws + design + family, so WAIC / LOO work on every matrix-draw backend
+# (hmc, ess, sghmc, vi) without the backend storing log_lik (gcol33/tulpaRatio#3).
 # ---------------------------------------------------------------------------
 
-test_that("loo.ratiod_fit errors gracefully without log_lik", {
+test_that("loo.ratiod_fit works on the HMC backend", {
   skip_on_cran()
   skip_if_not_installed("loo")
 
   set.seed(123)
-  n <- 20
+  n <- 30
   df <- data.frame(
     count = rpois(n, lambda = 10),
     effort = rgamma(n, shape = 5, rate = 1),
@@ -226,22 +228,23 @@ test_that("loo.ratiod_fit errors gracefully without log_lik", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
+    iter = 200,
+    warmup = 100,
     chains = 1,
     verbose = FALSE
   )
 
-  # HMC backend doesn't produce log_lik, so this should error
-  expect_error(loo::loo(fit), "Log-likelihood not found")
+  l <- suppressWarnings(loo::loo(fit))
+  expect_s3_class(l, "loo")
+  expect_true(is.finite(l$estimates["looic", "Estimate"]))
 })
 
-test_that("waic.ratiod_fit errors gracefully without log_lik", {
+test_that("waic.ratiod_fit works on the HMC backend", {
   skip_on_cran()
   skip_if_not_installed("loo")
 
   set.seed(456)
-  n <- 20
+  n <- 30
   df <- data.frame(
     count = rpois(n, lambda = 10),
     effort = rgamma(n, shape = 5, rate = 1),
@@ -253,14 +256,152 @@ test_that("waic.ratiod_fit errors gracefully without log_lik", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
+    iter = 200,
+    warmup = 100,
     chains = 1,
     verbose = FALSE
   )
 
-  # HMC backend doesn't produce log_lik, so this should error
-  expect_error(loo::waic(fit), "Log-likelihood not found")
+  w <- loo::waic(fit)
+  expect_s3_class(w, "waic")
+  expect_true(is.finite(w$estimates["waic", "Estimate"]))
+})
+
+test_that("pointwise log-likelihood matches an independent recomputation", {
+  skip_on_cran()
+
+  set.seed(11)
+  n <- 40
+  df <- data.frame(
+    y_num = rnbinom(n, size = 5, mu = 8),
+    y_denom = rnbinom(n, size = 8, mu = 60),
+    x = rnorm(n)
+  )
+  fit <- ratiod(
+    y_num | y_denom ~ x,
+    data = df,
+    family = ratiod_negbin_negbin(),
+    mode = "hmc",
+    iter = 150, warmup = 75, chains = 1, verbose = FALSE
+  )
+
+  ll <- tulpaRatio:::.ratiod_pointwise_loglik(fit)
+  expect_equal(dim(ll), c(nrow(fit$draws), n))
+  expect_true(all(is.finite(ll)))
+
+  # Recompute from scratch: eta = X %*% beta per draw, summed NegBin densities.
+  d  <- fit$draws
+  hd <- fit$.internal$hmc_data
+  bn <- d[, grep("^beta_num\\[",   colnames(d)), drop = FALSE]
+  bd <- d[, grep("^beta_denom\\[", colnames(d)), drop = FALSE]
+  phi_n <- d[, "phi_num"]
+  phi_d <- d[, "phi_denom"]
+  ref <- matrix(NA_real_, nrow(d), n)
+  for (s in seq_len(nrow(d))) {
+    mu_n <- exp(as.numeric(hd$X_num   %*% bn[s, ]))
+    mu_d <- exp(as.numeric(hd$X_denom %*% bd[s, ]))
+    ref[s, ] <- dnbinom(hd$y_num,   size = phi_n[s], mu = mu_n, log = TRUE) +
+                dnbinom(hd$y_denom, size = phi_d[s], mu = mu_d, log = TRUE)
+  }
+  expect_equal(ll, ref, tolerance = 1e-10)
+})
+
+test_that("WAIC / LOO work on the ESS backend (no stored log_lik)", {
+  skip_on_cran()
+  skip_if_not_installed("loo")
+
+  set.seed(202)
+  n <- 30
+  df <- data.frame(
+    y_num = rnbinom(n, size = 5, mu = 8),
+    y_denom = rnbinom(n, size = 8, mu = 60),
+    x = rnorm(n)
+  )
+  fit <- ratiod(
+    y_num | y_denom ~ x,
+    data = df,
+    family = ratiod_negbin_negbin(),
+    mode = "ess",
+    iter = 200, warmup = 100, chains = 1, verbose = FALSE
+  )
+
+  expect_true(is.matrix(fit$draws))
+  w <- loo::waic(fit)
+  expect_true(is.finite(w$estimates["waic", "Estimate"]))
+})
+
+test_that("ratiod_compare ranks two HMC fits", {
+  skip_on_cran()
+  skip_if_not_installed("loo")
+
+  set.seed(303)
+  n <- 40
+  df <- data.frame(
+    count = rpois(n, lambda = 10),
+    effort = rgamma(n, shape = 5, rate = 1),
+    x = rnorm(n),
+    z = rnorm(n)
+  )
+  fit1 <- ratiod(count | effort ~ x, data = df,
+                 family = ratiod_poisson_gamma(), mode = "hmc",
+                 iter = 200, warmup = 100, chains = 1, verbose = FALSE)
+  fit2 <- ratiod(count | effort ~ x + z, data = df,
+                 family = ratiod_poisson_gamma(), mode = "hmc",
+                 iter = 200, warmup = 100, chains = 1, verbose = FALSE)
+
+  cmp <- suppressWarnings(ratiod_compare(fit1, fit2, criterion = "waic"))
+  expect_true(nrow(cmp) == 2)
+  expect_true("elpd_diff" %in% colnames(cmp))
+})
+
+test_that("ratiod_average works end-to-end across backends", {
+  skip_on_cran()
+  skip_if_not_installed("loo")
+
+  set.seed(505)
+  n <- 40
+  df <- data.frame(
+    y_num = rnbinom(n, size = 5, mu = 8),
+    y_denom = rnbinom(n, size = 8, mu = 60),
+    x = rnorm(n),
+    z = rnorm(n)
+  )
+
+  for (m in c("hmc", "ess")) {
+    f1 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+                 mode = m, iter = 200, warmup = 100, chains = 1, verbose = FALSE)
+    f2 <- ratiod(y_num | y_denom ~ x + z, data = df, family = ratiod_negbin_negbin(),
+                 mode = m, iter = 200, warmup = 100, chains = 1, verbose = FALSE)
+
+    avg <- suppressWarnings(ratiod_average(f1, f2))
+    expect_s3_class(avg, "ratiod_average")
+    expect_length(weights(avg), 2)
+    expect_equal(sum(weights(avg)), 1, tolerance = 1e-6)
+    expect_true(is.data.frame(avg$predictions))
+    expect_equal(nrow(avg$predictions), n)
+  }
+})
+
+test_that("WAIC errors informatively on a backend without a draw matrix", {
+  skip_on_cran()
+
+  set.seed(404)
+  n <- 30
+  df <- data.frame(
+    succ = rbinom(n, 10, 0.4),
+    trials = rep(10L, n),
+    x = rnorm(n)
+  )
+  fit <- suppressWarnings(ratiod(
+    succ | trials ~ x, data = df, family = ratiod_binomial(),
+    mode = "pg", iter = 100, warmup = 50, chains = 1, verbose = FALSE
+  ))
+
+  if (!is.matrix(fit$draws)) {
+    expect_error(tulpaRatio:::.ratiod_pointwise_loglik(fit), "does not store")
+  } else {
+    succeed()
+  }
 })
 
 test_that("ratio() extracts ratio posterior draws", {
