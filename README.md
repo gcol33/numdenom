@@ -1,7 +1,5 @@
 # tulpaRatio
 
-> Small exact engines for scientific computing in R.
-
 *a ratio with its uncertainty kept*
 
 [![R-CMD-check](https://github.com/gcol33/tulpaRatio/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/gcol33/tulpaRatio/actions/workflows/R-CMD-check.yml)
