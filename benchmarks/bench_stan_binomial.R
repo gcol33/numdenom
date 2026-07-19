@@ -1,0 +1,244 @@
+# =============================================================================
+# tulpaRatio vs Stan (brms/cmdstanr), binomial family, live head-to-head.
+#
+# The binomial family is the fair brms comparison: trials are fixed, so brms
+# with y | trials(trials) fits the same model tulpaRatio does. (For
+# poisson_gamma / negbin_negbin the denominator is a random variable in
+# tulpaRatio but a fixed offset in brms, so those need custom Stan models and
+# are out of scope here.)
+#
+# Protocol (both engines, exact HMC):
+#   - 4 chains, 1000 iter, 500 warmup, N = 500 observations
+#   - Both engines run live on identical data in one R session.
+#   - Stan model compilation is a one-time cost: each model is compiled once
+#     (untimed warm-up), then the timed fit reuses the cached binary, so the
+#     reported Stan time is sampling wall-clock, not compilation.
+#   - Convergence is verified independently for BOTH engines (posterior::rhat
+#     on the reshaped chains) -- tulpaRatio's own summary rhat is not trusted.
+#   - A row is published only if both engines converge (rhat < 1.05) and their
+#     x coefficients agree within 2 SE. Failing rows are printed with the
+#     reason they failed.
+#   - The headline metric is ESS/second, not wall-clock. A sampler that fails
+#     to mix finishes quickly, so wall-clock alone rewards non-convergence;
+#     ESS/s prices in mixing and cannot be gamed that way.
+#
+# Usage:
+#   Rscript benchmarks/bench_stan_binomial.R            # full, 7 configs
+#   Rscript benchmarks/bench_stan_binomial.R --smoke    # 1 config, small
+# =============================================================================
+
+args  <- commandArgs(trailingOnly = TRUE)
+SMOKE <- "--smoke" %in% args
+
+suppressMessages({
+  library(tulpaRatio)
+  library(brms)
+  stopifnot(requireNamespace("posterior", quietly = TRUE))
+})
+
+ITER   <- if (SMOKE) 1000 else 1000
+WARMUP <- 500
+CHAINS <- if (SMOKE) 2 else 4
+
+set.seed(123)
+N <- 500; N_SITES <- 50; N_TIMES <- 20
+x    <- rnorm(N)
+site <- factor(rep(1:N_SITES, length.out = N))
+time <- factor(rep(1:N_TIMES, length.out = N))
+
+n_side <- ceiling(sqrt(N_SITES))
+grid   <- expand.grid(lon = 1:n_side, lat = 1:n_side)[1:N_SITES, ]
+si     <- as.integer(site)
+lon <- grid$lon[si]; lat <- grid$lat[si]
+
+adj_mat <- matrix(0, N_SITES, N_SITES)
+for (i in 1:N_SITES) for (j in 1:N_SITES) {
+  if (i != j &&
+      sqrt((grid$lon[i]-grid$lon[j])^2 + (grid$lat[i]-grid$lat[j])^2) <= 1.5)
+    adj_mat[i, j] <- 1
+}
+spatial_site <- factor(rep(1:N_SITES, length.out = N))
+# brms car() matches the adjacency to the grouping factor by rownames
+dimnames(adj_mat) <- list(levels(spatial_site), levels(spatial_site))
+
+trials <- sample(10:50, N, replace = TRUE)
+y_bin  <- rbinom(N, trials, plogis(0.5 + 0.3 * x))     # true x = 0.3
+df     <- data.frame(y = y_bin, trials = trials, x = x, site = site,
+                     time = time, lon = lon, lat = lat,
+                     spatial_site = spatial_site)
+df_zi  <- df; df_zi$y <- ifelse(runif(N) < 0.3, 0, df_zi$y)
+
+# ---- independent convergence of a tulpaRatio fit (its summary rhat is buggy) --
+nd_conv <- function(fit) {
+  dr <- tryCatch(as.matrix(fit$draws), error = function(e) NULL)
+  ch <- fit$chains
+  if (is.null(dr) || is.null(ch) || nrow(dr) %% ch != 0) return(c(rhat = NA, ess = NA))
+  per <- nrow(dr) / ch
+  rr <- ee <- numeric(ncol(dr))
+  for (p in seq_len(ncol(dr))) {
+    m <- matrix(dr[, p], nrow = per, ncol = ch)   # contiguous chain blocks
+    rr[p] <- posterior::rhat(m)
+    ee[p] <- posterior::ess_bulk(m)
+  }
+  c(rhat = max(rr, na.rm = TRUE), ess = min(ee, na.rm = TRUE))
+}
+nd_x_summary <- function(fit) {
+  dr <- as.matrix(fit$draws); nm <- colnames(dr)
+  col <- grep("beta_num\\[2\\]", nm, value = TRUE)
+  if (!length(col)) col <- grep("(^|[^a-z])x($|[^a-z])", nm, value = TRUE)
+  if (!length(col)) return(c(mean = NA, sd = NA))
+  v <- dr[, col[1]]; c(mean = mean(v), sd = sd(v))
+}
+
+safe <- function(expr) tryCatch(eval(expr, envir = globalenv()),
+                                error = function(e) structure(list(), err = conditionMessage(e)))
+is_err <- function(x) !is.null(attr(x, "err"))
+
+run_row <- function(name, nd_call, brm_call) {
+  cat(sprintf("\n===== %s =====\n", name)); flush.console()
+  blank <- data.frame(model = name, tulpaRatio_s = NA, stan_s = NA, stan_cold_s = NA,
+                      speedup = NA, nd_x = NA, stan_x = NA, agree = NA,
+                      nd_rhat = NA, stan_rhat = NA, nd_ess = NA, stan_ess = NA,
+                      nd_ess_s = NA, stan_ess_s = NA, eff_ratio = NA)
+
+  # --- tulpaRatio (in-process; no per-fit compilation) ---
+  cat("  tulpaRatio ... "); flush.console()
+  t_nd <- system.time(fit_nd <- safe(nd_call))[["elapsed"]]
+  if (is_err(fit_nd)) { cat("ERROR:", attr(fit_nd, "err"), "\n"); return(blank) }
+  cv  <- nd_conv(fit_nd); ndx <- nd_x_summary(fit_nd)
+  cat(sprintf("%.2fs (rhat=%.3f ess=%.0f)\n", t_nd, cv["rhat"], cv["ess"]))
+
+  # --- Stan: compile once (untimed), then time the warm fit ---
+  cat("  Stan compile ... "); flush.console()
+  t_cold <- system.time(fit_warm <- safe(brm_call))[["elapsed"]]
+  if (is_err(fit_warm)) { cat("ERROR:", attr(fit_warm, "err"), "\n")
+    blank$tulpaRatio_s <- round(t_nd, 2); return(blank) }
+  cat(sprintf("%.1fs (cold)\n", t_cold))
+  cat("  Stan sample  ... "); flush.console()
+  t_st <- system.time(fit_st <- safe(brm_call))[["elapsed"]]     # reuses cached binary
+  if (is_err(fit_st)) fit_st <- fit_warm                          # fall back to warm fit
+  cat(sprintf("%.2fs (warm)\n", t_st))
+
+  fe   <- tryCatch(brms::fixef(fit_st), error = function(e) NULL)
+  st_x <- if (!is.null(fe) && "x" %in% rownames(fe)) fe["x", "Estimate"] else NA
+  st_se<- if (!is.null(fe) && "x" %in% rownames(fe)) fe["x", "Est.Error"] else NA
+  st_sum  <- tryCatch(summary(fit_st)$fixed, error = function(e) NULL)
+  st_rhat <- if (!is.null(st_sum)) max(st_sum[, "Rhat"], na.rm = TRUE) else NA
+  st_ess  <- if (!is.null(st_sum)) min(st_sum[, "Bulk_ESS"], na.rm = TRUE) else NA
+  agree <- isTRUE(abs(ndx["mean"] - st_x) < 2 * max(ndx["sd"], st_se, na.rm = TRUE))
+
+  # Efficiency, not wall-clock, is the honest MCMC metric: a stuck sampler is
+  # always fast. ESS/s prices in mixing, so a non-converged fit cannot win.
+  nd_eff <- unname(cv["ess"]) / t_nd
+  st_eff <- unname(st_ess) / t_st
+
+  cat(sprintf("  x: tulpaRatio %.3f | Stan %.3f | agree=%s | %.1fx wall | %.1fx ESS/s\n",
+              ndx["mean"], st_x, agree, t_st / t_nd, nd_eff / st_eff))
+
+  data.frame(model = name, tulpaRatio_s = round(t_nd, 2), stan_s = round(t_st, 2),
+             stan_cold_s = round(t_cold, 1), speedup = round(t_st / t_nd, 1),
+             nd_x = round(unname(ndx["mean"]), 3), stan_x = round(unname(st_x), 3),
+             agree = agree, nd_rhat = round(unname(cv["rhat"]), 3),
+             stan_rhat = round(unname(st_rhat), 3),
+             nd_ess = round(unname(cv["ess"])), stan_ess = round(unname(st_ess)),
+             nd_ess_s = round(nd_eff, 1), stan_ess_s = round(st_eff, 1),
+             eff_ratio = round(nd_eff / st_eff, 1))
+}
+
+brmf <- function(f, family, data = quote(df))
+  bquote(brm(.(f), data = .(data), family = .(family), iter = .(ITER),
+             warmup = .(WARMUP), chains = .(CHAINS), backend = "cmdstanr",
+             data2 = list(adj_mat = adj_mat), silent = 2, refresh = 0))
+ndf <- function(extra)
+  bquote(ratiod(.(extra$formula), data = .(extra$data %||% quote(df)),
+                family = .(extra$family), spatial = .(extra$spatial),
+                temporal = .(extra$temporal), iter = .(ITER), warmup = .(WARMUP),
+                chains = .(CHAINS), verbose = FALSE))
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+rows <- list(
+  list("Bin_base",
+       ndf(list(formula = quote(y | trials ~ x), family = quote(ratiod_binomial()),
+                spatial = NULL, temporal = NULL)),
+       brmf(quote(y | trials(trials) ~ x), quote(binomial()))),
+  list("Bin_RE",
+       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_binomial()),
+                spatial = NULL, temporal = NULL)),
+       brmf(quote(y | trials(trials) ~ x + (1|site)), quote(binomial()))),
+  list("Bin_ICAR",
+       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_binomial()),
+                spatial = quote(spatial_car(adj_mat, level="group", group_var="spatial_site")),
+                temporal = NULL)),
+       brmf(quote(y | trials(trials) ~ x + (1|site) +
+                    car(adj_mat, gr = spatial_site, type = "icar")), quote(binomial()))),
+  list("Bin_BYM2",
+       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_binomial()),
+                spatial = quote(spatial_bym2(adj_mat, level="group", group_var="spatial_site")),
+                temporal = NULL)),
+       brmf(quote(y | trials(trials) ~ x + (1|site) +
+                    car(adj_mat, gr = spatial_site, type = "bym2")), quote(binomial()))),
+  list("Bin_RW1",
+       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_binomial()),
+                spatial = NULL, temporal = quote(temporal_rw1("time")))),
+       brmf(quote(y | trials(trials) ~ x + (1|site) + (1|time)), quote(binomial()))),
+  list("Bin_ZI",
+       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_zibinomial()),
+                spatial = NULL, temporal = NULL, data = quote(df_zi))),
+       brmf(quote(y | trials(trials) ~ x + (1|site)), quote(zero_inflated_binomial()), quote(df_zi))),
+  list("Bin_ICAR_RW1",
+       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_binomial()),
+                spatial = quote(spatial_car(adj_mat, level="group", group_var="spatial_site")),
+                temporal = quote(temporal_rw1("time")))),
+       brmf(quote(y | trials(trials) ~ x + (1|site) +
+                    car(adj_mat, gr = spatial_site, type = "icar") + (1|time)), quote(binomial())))
+)
+if (SMOKE) rows <- rows[1]
+
+cat(sprintf("tulpaRatio %s vs brms %s / cmdstan %s | %d chains x %d iter (warmup %d), N=%d | %d configs%s\n",
+            packageVersion("tulpaRatio"), packageVersion("brms"),
+            cmdstanr::cmdstan_version(), CHAINS, ITER, WARMUP, N, length(rows),
+            if (SMOKE) " [SMOKE]" else ""))
+
+res <- do.call(rbind, lapply(rows, function(r) run_row(r[[1]], r[[2]], r[[3]])))
+
+cat("\n\n================ RESULTS ================\n")
+print(res, row.names = FALSE)
+
+if (!SMOKE) {
+  saveRDS(res, "benchmarks/results_stan_binomial.rds")
+
+  # A row is publishable only if BOTH engines converged and agree on x. Rows
+  # that fail are listed with the reason, never silently dropped: an excluded
+  # row is a finding about the sampler, not a blemish to hide.
+  why <- function(i) {
+    if (is.na(res$stan_s[i]))                        return("Stan fit failed")
+    if (is.na(res$nd_rhat[i]))                       return("no tulpaRatio draws")
+    if (isTRUE(res$nd_rhat[i]   >= 1.05))            return(sprintf("tulpaRatio not converged (Rhat %.2f, ESS %d)", res$nd_rhat[i], res$nd_ess[i]))
+    if (isTRUE(res$stan_rhat[i] >= 1.05))            return(sprintf("Stan not converged (Rhat %.2f)", res$stan_rhat[i]))
+    if (!isTRUE(res$agree[i]))                       return("x coefficients disagree")
+    NA_character_
+  }
+  reason <- vapply(seq_len(nrow(res)), why, character(1))
+  ok     <- res[is.na(reason), ]
+
+  md <- c(
+    "| Model | tulpaRatio (s) | Stan (s) | tulpaRatio ESS/s | Stan ESS/s | Efficiency |",
+    "|-------|---------------:|---------:|-----------------:|-----------:|-----------:|")
+  for (i in which(is.na(reason))) md <- c(md, sprintf(
+    "| %s | %.2f | %.2f | %.1f | %.1f | %.1fx |",
+    res$model[i], res$tulpaRatio_s[i], res$stan_s[i],
+    res$nd_ess_s[i], res$stan_ess_s[i], res$eff_ratio[i]))
+
+  excl <- which(!is.na(reason))
+  if (length(excl)) {
+    md <- c(md, "", "Excluded:", "")
+    for (i in excl) md <- c(md, sprintf("- `%s` -- %s", res$model[i], reason[i]))
+  }
+  writeLines(md, "benchmarks/results_stan_binomial.md")
+
+  cat(sprintf("\nSaved results_stan_binomial.{rds,md}  (%d/%d rows publishable)\n",
+              nrow(ok), nrow(res)))
+  for (i in excl) cat(sprintf("  excluded %-14s %s\n", res$model[i], reason[i]))
+}
+writeLines("DONE", "benchmarks/.bench_done")
+cat("DONE\n")
