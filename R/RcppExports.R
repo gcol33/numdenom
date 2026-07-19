@@ -433,6 +433,14 @@ cpp_tulpa_abi_version <- function() {
     .Call(`_tulpaRatio_cpp_tulpa_abi_version`)
 }
 
+cpp_tulpa_compiled_abi_version <- function() {
+    .Call(`_tulpaRatio_cpp_tulpa_compiled_abi_version`)
+}
+
+cpp_tulpa_runtime_abi_version <- function() {
+    .Call(`_tulpaRatio_cpp_tulpa_runtime_abi_version`)
+}
+
 cpp_tulpa_pg_binomial_gibbs <- function(y, n, X, group, n_groups, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_scale = 2.5, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
     .Call(`_tulpaRatio_cpp_tulpa_pg_binomial_gibbs`, y, n, X, group, n_groups, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_scale, store_eta, verbose, n_threads)
 }

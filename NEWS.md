@@ -47,6 +47,25 @@
   `dev_notes/B1c_zi_surface.md`). Autodiff only; ZI variants for the
   hand-coded H-kernel remain deferred.
 
+* The tulpa ABI test no longer pins a hardcoded version number. It compared
+  `cpp_tulpa_abi_version()` against a literal `32L`, a second copy of a
+  constant tulpa already owns, so every tulpa ABI bump broke the test with a
+  stale-literal failure that said nothing about compatibility. Two unguarded
+  accessors (`cpp_tulpa_compiled_abi_version()`, the value baked in from the
+  `LinkingTo` headers, and `cpp_tulpa_runtime_abi_version()`, the value in the
+  loaded tulpa DLL) let the test assert the invariant that matters — that the
+  two agree — and report both numbers when they do not. tulpa remains the
+  single source of truth for the version.
+
+* Documentation is regenerated under roxygen2 8.0.0, matching the rest of the
+  packages that link against tulpa. `RoxygenNote` migrates to
+  `Config/roxygen2/version`. Two external links now resolve to a topic alias
+  rather than an Rd filename (`posterior::as_draws_df()`,
+  `loo::stacking_weights()`), which clears the "Non-topic package-anchored
+  link(s)" note from `R CMD check`; `INFERENCE_TIERS` drops the `\docType{data}`
+  and `\format{}` entries roxygen2 8.0.0 no longer emits for documented values;
+  and the package page lists authors alongside the maintainer.
+
 # numdenom 1.3.0
 
 ## New Inference Backends

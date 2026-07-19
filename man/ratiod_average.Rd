@@ -78,5 +78,5 @@ fit2 <- ratiod(count | effort ~ x + z + (1 | site), data = df,
 
 }
 \seealso{
-\code{\link[=ratiod_compare]{ratiod_compare()}} for model comparison, \code{\link[loo:loo_model_weights]{loo::stacking_weights()}}
+\code{\link[=ratiod_compare]{ratiod_compare()}} for model comparison, \code{\link[loo:stacking_weights]{loo::stacking_weights()}}
 }

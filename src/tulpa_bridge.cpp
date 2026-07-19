@@ -177,6 +177,24 @@ int cpp_tulpa_abi_version() {
   return fn();
 }
 
+// The ABI constant baked into this package at compile time, taken from the
+// tulpa headers seen via LinkingTo. Unguarded, so a mismatch can be reported
+// as two numbers rather than thrown.
+// [[Rcpp::export]]
+int cpp_tulpa_compiled_abi_version() {
+  return tulpa::TULPA_ABI_VERSION;
+}
+
+// The ABI constant carried by the tulpa DLL currently loaded. Unguarded, as
+// above.
+// [[Rcpp::export]]
+int cpp_tulpa_runtime_abi_version() {
+  auto fn = reinterpret_cast<tulpa::GetABIVersionFn>(
+    R_GetCCallable("tulpa", "tulpa_get_abi_version")
+  );
+  return fn();
+}
+
 // [[Rcpp::export]]
 Rcpp::List cpp_tulpa_pg_binomial_gibbs(
     Rcpp::IntegerVector y,

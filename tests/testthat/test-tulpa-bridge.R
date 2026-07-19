@@ -1,8 +1,13 @@
-test_that("tulpa engine ABI is available", {
-  # Track tulpa's TULPA_ABI_VERSION (currently 32; see
-  # tulpa/inst/include/tulpa/model_data.h). Bump here whenever tulpa
-  # bumps the ABI.
-  expect_equal(tulpaRatio:::cpp_tulpa_abi_version(), 32L)
+test_that("compiled tulpa ABI matches the loaded tulpa DLL", {
+  compiled <- tulpaRatio:::cpp_tulpa_compiled_abi_version()
+  runtime  <- tulpaRatio:::cpp_tulpa_runtime_abi_version()
+  expect_identical(compiled, runtime)
+})
+
+test_that("tulpa engine ABI handshake succeeds", {
+  v <- tulpaRatio:::cpp_tulpa_abi_version()
+  expect_type(v, "integer")
+  expect_gte(v, 1L)
 })
 
 test_that("tulpa PG binomial bridge returns legacy result shape", {

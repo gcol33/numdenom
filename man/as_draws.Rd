@@ -65,5 +65,5 @@ if (requireNamespace("posterior", quietly = TRUE)) {
 
 }
 \seealso{
-\code{\link[posterior:draws_df]{posterior::as_draws_df()}}, \code{\link[=ratio]{ratio()}} for ratio-specific extraction
+\code{\link[posterior:as_draws_df]{posterior::as_draws_df()}}, \code{\link[=ratio]{ratio()}} for ratio-specific extraction
 }
