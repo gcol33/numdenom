@@ -15,10 +15,14 @@ mcmc_diagnostics(fit, pars = NULL)
 A data frame with columns: parameter, rhat, ess_bulk, ess_tail.
 }
 \description{
-Computes split-Rhat and effective sample size (ESS) for all parameters
-using the posterior package. Works with all backends.
+Computes per-parameter improved Rhat and bulk / tail effective sample size
+by delegating to the engine's \code{\link[tulpa:mcmc_diagnostics]{tulpa::mcmc_diagnostics()}}, the single source
+of truth for convergence diagnostics in the tulpa ecosystem. Works with all
+backends.
 }
 \details{
-For single-chain fits, Rhat is computed using split-Rhat (splitting the
-chain in half). Multi-chain fits use the standard multi-chain Rhat.
+Rhat is the improved value of Vehtari et al. (2021): the maximum of
+rank-normalized split-Rhat and folded split-Rhat. Split-Rhat is defined for a
+single chain (the chain is split in half), so single-chain fits also get a
+value.
 }

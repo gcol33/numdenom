@@ -1,5 +1,25 @@
 # tulpaRatio (development)
 
+## Bug fixes
+
+* `mcmc_diagnostics()` now reports per-parameter Rhat and ESS (#4). It handed a
+  multi-parameter draws array to the single-variable `posterior::rhat()` /
+  `ess_bulk()` / `ess_tail()`, collapsing every parameter to one scalar that was
+  then recycled across the returned rows: a well-mixed four-chain fit reported
+  `rhat = 2.124`, `ess_bulk = 1`. Diagnostics now delegate to
+  `tulpa::mcmc_diagnostics()`, the engine's per-parameter implementation, which
+  removes the local re-derivation (`compute_diagnostics_basic()`,
+  `compute_split_rhat()`, `compute_ess_basic()`). `summary()`, `plot_rhat()`,
+  `plot_ess()`, `diagnostic_summary()` and `check_diagnostics()` all inherit the
+  correction, and a converged fit no longer prints a false non-convergence
+  warning.
+
+* `print()` on a `ratiod_diagnostic_summary` no longer errors when a fit has a
+  parameter with Rhat > 1.01 or ESS < 400. The worst-Rhat and worst-ESS tables
+  are column extracts of the diagnostics table and dispatched on
+  `print.ratiod_diagnostics()`, which rounded columns the extract does not
+  carry.
+
 ## Internal
 
 * B1a PoC: plain binomial fits can route through tulpa's `LikelihoodSpec`

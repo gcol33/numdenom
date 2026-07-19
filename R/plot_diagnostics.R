@@ -860,6 +860,14 @@ plot_energy_base <- function(energy, energy_diff, e_bfmi, status) {
 }
 
 
+# A display extract of a diagnostics table is a plain data frame: it carries a
+# column subset, so it must not dispatch on print.ratiod_diagnostics.
+.plain_table <- function(df) {
+  class(df) <- "data.frame"
+  df
+}
+
+
 #' Comprehensive Diagnostic Summary
 #'
 #' @description
@@ -921,7 +929,7 @@ diagnostic_summary <- function(fit, quiet = FALSE) {
       bad_rhat <- diag[!is.na(diag$rhat) & diag$rhat > 1.01, ]
       if (nrow(bad_rhat) > 0) {
         bad_rhat <- bad_rhat[order(bad_rhat$rhat, decreasing = TRUE), ]
-        result$worst_rhat <- head(bad_rhat[, c("parameter", "rhat")], 5)
+        result$worst_rhat <- .plain_table(head(bad_rhat[, c("parameter", "rhat")], 5))
         recommendations <- c(recommendations,
           "Rhat > 1.01: Run more iterations or chains")
         status <- "WARN"
@@ -931,7 +939,8 @@ diagnostic_summary <- function(fit, quiet = FALSE) {
       low_ess <- diag[!is.na(diag$ess_bulk) & diag$ess_bulk < 400, ]
       if (nrow(low_ess) > 0) {
         low_ess <- low_ess[order(low_ess$ess_bulk), ]
-        result$worst_ess <- head(low_ess[, c("parameter", "ess_bulk", "ess_tail")], 5)
+        result$worst_ess <- .plain_table(
+          head(low_ess[, c("parameter", "ess_bulk", "ess_tail")], 5))
         recommendations <- c(recommendations,
           "ESS < 400: Run more iterations or use thinning")
         status <- "WARN"

@@ -542,50 +542,6 @@ test_that("get_draws_array returns correct structure", {
   expect_equal(draws_info$n_chains, 1)
 })
 
-test_that("compute_split_rhat returns reasonable values", {
-  set.seed(3333)
-  # Well-mixed chain should have Rhat near 1
-  good_chain <- matrix(rnorm(200), ncol = 1)
-  rhat_good <- tulpaRatio:::compute_split_rhat(good_chain)
-  expect_true(rhat_good > 0.9 && rhat_good < 1.2)
-
-  # Poorly mixed chain (trending) should have higher Rhat
-  poor_chain <- matrix(1:200 + rnorm(200, sd = 1), ncol = 1)
-  rhat_poor <- tulpaRatio:::compute_split_rhat(poor_chain)
-  expect_true(rhat_poor > 1.0)
-})
-
-test_that("compute_ess_basic returns positive values", {
-  set.seed(4444)
-  x <- rnorm(200)
-  ess <- tulpaRatio:::compute_ess_basic(x)
-
-  expect_true(ess > 0)
-  expect_true(ess <= length(x))
-})
-
-test_that("compute_diagnostics_basic works", {
-  set.seed(5555)
-  draws_array <- array(
-    rnorm(200),
-    dim = c(100, 1, 2),
-    dimnames = list(
-      iteration = 1:100,
-      chain = 1,
-      parameter = c("a", "b")
-    )
-  )
-
-  diag <- tulpaRatio:::compute_diagnostics_basic(draws_array)
-
-  expect_equal(nrow(diag), 2)
-  expect_true("parameter" %in% names(diag))
-  expect_true("rhat" %in% names(diag))
-  expect_true("ess_bulk" %in% names(diag))
-  expect_true(all(diag$rhat > 0))
-  expect_true(all(diag$ess_bulk > 0))
-})
-
 test_that("print.ratiod_diagnostics works", {
   set.seed(6666)
   diag <- data.frame(

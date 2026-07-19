@@ -1400,8 +1400,10 @@ plot_with_base <- function(draws_array, type, n_chains, n_col = NULL) {
 #' Compute MCMC diagnostics (Rhat, ESS) for ratiod_fit
 #'
 #' @description
-#' Computes split-Rhat and effective sample size (ESS) for all parameters
-#' using the posterior package. Works with all backends.
+#' Computes per-parameter improved Rhat and bulk / tail effective sample size
+#' by delegating to the engine's [tulpa::mcmc_diagnostics()], the single source
+#' of truth for convergence diagnostics in the tulpa ecosystem. Works with all
+#' backends.
 #'
 #' @param fit A ratiod_fit object
 #' @param pars Character vector of parameter names (default: all).
@@ -1409,9 +1411,10 @@ plot_with_base <- function(draws_array, type, n_chains, n_col = NULL) {
 #' @return A data frame with columns: parameter, rhat, ess_bulk, ess_tail.
 #'
 #' @details
-#' For single-chain fits, Rhat is computed using split-Rhat (splitting the
-
-#' chain in half). Multi-chain fits use the standard multi-chain Rhat.
+#' Rhat is the improved value of Vehtari et al. (2021): the maximum of
+#' rank-normalized split-Rhat and folded split-Rhat. Split-Rhat is defined for a
+#' single chain (the chain is split in half), so single-chain fits also get a
+#' value.
 #'
 #' @export
 mcmc_diagnostics <- function(fit, pars = NULL) {
@@ -1430,130 +1433,13 @@ mcmc_diagnostics <- function(fit, pars = NULL) {
     draws_array <- draws_array[, , pars, drop = FALSE]
   }
 
-  # Convert to posterior::draws_array for diagnostics
-  if (requireNamespace("posterior", quietly = TRUE)) {
-    draws_post <- posterior::as_draws_array(draws_array)
-
-    # Compute diagnostics
-    rhat_vals <- posterior::rhat(draws_post)
-    ess_bulk_vals <- posterior::ess_bulk(draws_post)
-    ess_tail_vals <- posterior::ess_tail(draws_post)
-
-    # Get parameter names from the draws array
-    par_names <- dimnames(draws_array)[[3]]
-
-    result <- data.frame(
-      parameter = par_names,
-      rhat = as.numeric(rhat_vals),
-      ess_bulk = as.numeric(ess_bulk_vals),
-      ess_tail = as.numeric(ess_tail_vals),
-      stringsAsFactors = FALSE
-    )
-  } else {
-    # Fallback: basic Rhat computation without posterior package
-    result <- compute_diagnostics_basic(draws_array)
-  }
+  # The engine reads the [iteration, chain, parameter] layout directly and
+  # computes each statistic per parameter.
+  result <- tulpa::mcmc_diagnostics(list(draws = draws_array))
+  if (is.null(result)) return(NULL)
 
   class(result) <- c("ratiod_diagnostics", "data.frame")
   return(result)
-}
-
-
-#' Basic Rhat computation (fallback when posterior package unavailable)
-#' @keywords internal
-compute_diagnostics_basic <- function(draws_array) {
-  n_iter <- dim(draws_array)[1]
-  n_chains <- dim(draws_array)[2]
-  n_pars <- dim(draws_array)[3]
-  par_names <- dimnames(draws_array)[[3]]
-
-  rhat_vals <- numeric(n_pars)
-  ess_vals <- numeric(n_pars)
-
-  for (p in seq_len(n_pars)) {
-    if (n_chains == 1) {
-      # Split-Rhat for single chain
-      half <- floor(n_iter / 2)
-      chain1 <- draws_array[1:half, 1, p]
-      chain2 <- draws_array[(half + 1):(2 * half), 1, p]
-      chains_split <- cbind(chain1, chain2)
-      rhat_vals[p] <- compute_split_rhat(chains_split)
-      ess_vals[p] <- compute_ess_basic(draws_array[, 1, p])
-    } else {
-      # Multi-chain Rhat
-      chains_mat <- matrix(draws_array[, , p], nrow = n_iter, ncol = n_chains)
-      rhat_vals[p] <- compute_split_rhat(chains_mat)
-      ess_vals[p] <- compute_ess_basic(as.vector(draws_array[, , p]))
-    }
-  }
-
-  data.frame(
-    parameter = par_names,
-    rhat = rhat_vals,
-    ess_bulk = ess_vals,
-    ess_tail = ess_vals,  # Simplified - same as bulk
-    stringsAsFactors = FALSE
-  )
-}
-
-
-#' Compute split-Rhat
-#' @keywords internal
-compute_split_rhat <- function(chains_mat) {
-  # chains_mat: [iterations, chains]
-  n <- nrow(chains_mat)
-  m <- ncol(chains_mat)
-
-  # Split each chain in half
-  half <- floor(n / 2)
-  split_chains <- matrix(NA_real_, nrow = half, ncol = 2 * m)
-  for (j in seq_len(m)) {
-    split_chains[, 2 * j - 1] <- chains_mat[1:half, j]
-    split_chains[, 2 * j] <- chains_mat[(half + 1):(2 * half), j]
-  }
-
-  m_split <- 2 * m
-  n_split <- half
-
-  # Chain means and variances
-  chain_means <- colMeans(split_chains)
-  chain_vars <- apply(split_chains, 2, stats::var)
-
-  # Between-chain variance
-  B <- n_split * stats::var(chain_means)
-
-  # Within-chain variance
-  W <- mean(chain_vars)
-
-  # Estimated variance
-  var_plus <- ((n_split - 1) / n_split) * W + (1 / n_split) * B
-
-  # Rhat
-  rhat <- sqrt(var_plus / W)
-
-  return(rhat)
-}
-
-
-#' Basic ESS computation
-#' @keywords internal
-compute_ess_basic <- function(x) {
-  n <- length(x)
-  if (n < 10) return(n)
-
-  # Autocorrelation
-  acf_vals <- stats::acf(x, lag.max = min(n - 1, 100), plot = FALSE)$acf[-1]
-
-  # Find first negative autocorrelation
-  first_neg <- which(acf_vals < 0)[1]
-  if (is.na(first_neg)) first_neg <- length(acf_vals)
-
-  # Sum of autocorrelations (Geyer's method simplified)
-  tau <- 1 + 2 * sum(acf_vals[1:min(first_neg, length(acf_vals))])
-  tau <- max(tau, 1)
-
-  ess <- n / tau
-  return(ess)
 }
 
 
@@ -1567,10 +1453,11 @@ print.ratiod_diagnostics <- function(x, ...) {
   cat("MCMC Diagnostics\n")
   cat("================\n\n")
 
-  # Format for printing
-  x$rhat <- round(x$rhat, 3)
-  x$ess_bulk <- round(x$ess_bulk, 0)
-  x$ess_tail <- round(x$ess_tail, 0)
+  # Format for printing. A column subset of a diagnostics table keeps this
+  # class, so round only the columns that are present.
+  if (!is.null(x$rhat))     x$rhat     <- round(x$rhat, 3)
+  if (!is.null(x$ess_bulk)) x$ess_bulk <- round(x$ess_bulk, 0)
+  if (!is.null(x$ess_tail)) x$ess_tail <- round(x$ess_tail, 0)
 
   print.data.frame(x, row.names = FALSE)
 

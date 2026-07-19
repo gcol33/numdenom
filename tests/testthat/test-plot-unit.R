@@ -72,6 +72,48 @@ test_that("mcmc_diagnostics returns diagnostics data frame", {
   expect_true("ess_bulk" %in% names(diag) || "ess" %in% names(diag))
 })
 
+test_that("mcmc_diagnostics is per-parameter on a well-mixed multi-chain fit", {
+  skip_if_not_installed("posterior")
+
+  set.seed(20260719)
+  n_chains <- 4L
+  n_iter   <- 500L
+  par_names <- c("beta_num[1]", "beta_num[2]", "sigma_re")
+
+  # Independent draws with different locations/scales per parameter: the true
+  # Rhat is ~1 for each and the per-parameter ESS values differ.
+  draws <- cbind(
+    rnorm(n_chains * n_iter, mean = 0.5, sd = 0.10),
+    rnorm(n_chains * n_iter, mean = 0.3, sd = 0.05),
+    rgamma(n_chains * n_iter, shape = 9, rate = 9)
+  )
+  colnames(draws) <- par_names
+
+  fit <- structure(
+    list(draws = draws, backend = "hmc", chains = n_chains),
+    class = "ratiod_fit"
+  )
+
+  diag <- mcmc_diagnostics(fit)
+
+  expect_equal(diag$parameter, par_names)
+  expect_true(all(diag$rhat < 1.05))
+  expect_true(all(diag$ess_bulk > 400))
+
+  # Per-parameter, not one value recycled across every row.
+  expect_equal(length(unique(diag$rhat)), length(par_names))
+  expect_equal(length(unique(diag$ess_bulk)), length(par_names))
+
+  # Agreement with an independent per-parameter computation on the same draws.
+  arr <- tulpaRatio:::get_draws_array(fit)$draws
+  for (p in seq_along(par_names)) {
+    m <- arr[, , p]
+    expect_equal(diag$rhat[p],     posterior::rhat(m),     tolerance = 1e-6)
+    expect_equal(diag$ess_bulk[p], posterior::ess_bulk(m), tolerance = 1e-6)
+    expect_equal(diag$ess_tail[p], posterior::ess_tail(m), tolerance = 1e-6)
+  }
+})
+
 # Test select_main_params helper
 test_that("select_main_params filters correctly", {
   all_pars <- c("beta_num[1]", "beta_num[2]", "sigma_re", "re[1]", "re[2]", "spatial[1]")
@@ -257,6 +299,32 @@ test_that("print.ratiod_diagnostic_summary works", {
   output <- capture.output(print(summ))
   expect_true(length(output) > 0)
   expect_true(any(grepl("Diagnostic|diagnostic", output)))
+})
+
+test_that("print.ratiod_diagnostic_summary prints the worst-Rhat table", {
+  # A fit with a genuinely bad Rhat populates worst_rhat / worst_ess, which are
+  # column extracts of the diagnostics table.
+  set.seed(99)
+  n_iter <- 200L
+  draws <- cbind(
+    c(rnorm(n_iter, 0, 1), rnorm(n_iter, 8, 1)),   # chains disagree: Rhat >> 1
+    rnorm(2L * n_iter)
+  )
+  colnames(draws) <- c("beta_num[1]", "beta_num[2]")
+
+  fit <- structure(
+    list(draws = draws, backend = "hmc", chains = 2L,
+         diagnostics = list(divergent_idx = integer(0))),
+    class = "ratiod_fit"
+  )
+
+  summ <- diagnostic_summary(fit, quiet = TRUE)
+  expect_true(!is.null(summ$worst_rhat))
+  expect_true(summ$worst_rhat$rhat[1] > 1.01)
+
+  output <- capture.output(print(summ))
+  expect_true(any(grepl("Rhat > 1.01", output)))
+  expect_true(any(grepl("beta_num\\[1\\]", output)))
 })
 
 # Test geweke_test
