@@ -434,6 +434,7 @@ ratiod <- function(formula,
       iter = iter,
       warmup = warmup,
       thin = thin,
+      chains = chains,
       seed = seed,
       verbose = verbose
     )

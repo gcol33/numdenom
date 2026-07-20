@@ -34,6 +34,7 @@ NULL
 #' @param iter Total iterations
 #' @param warmup Warmup iterations
 #' @param thin Thinning interval
+#' @param chains Number of independent chains
 #' @param seed Random seed
 #' @param verbose Print progress
 #'
@@ -47,8 +48,14 @@ fit_gibbs <- function(formula,
                       iter = 2000,
                       warmup = floor(iter / 2),
                       thin = 1,
+                      chains = 4,
                       seed = NULL,
                       verbose = TRUE) {
+
+  chains <- as.integer(chains)
+  if (is.na(chains) || chains < 1L) {
+    stop("`chains` must be a positive integer.", call. = FALSE)
+  }
 
   if (is.null(spatial)) {
     stop("Gibbs backend requires spatial structure. Use spatial_car().",
@@ -175,61 +182,58 @@ fit_gibbs <- function(formula,
     data_list$tvc_structure <- tvc$structure %||% "rw1"
   }
 
-  # Call C++
-  cpp_result <- cpp_gibbs_spatial(data_list)
+  # Each chain is an independent run of the sampler under its own seed. The
+  # seeds are drawn once from `seed` so the whole fit stays reproducible.
+  chain_seeds <- (as.numeric(seed) + seq_len(chains) * 7919) %% .Machine$integer.max
 
-  # Build ratiod_fit object
-  n_save <- cpp_result$n_save
-  n_params <- cpp_result$n_params
+  run_chain <- function(chain_seed) {
+    dl <- data_list
+    dl$seed <- as.integer(chain_seed)
+    cpp_result <- cpp_gibbs_spatial(dl)
 
-  # Draws matrix: C++ stores row-major but Rcpp::NumericMatrix fills column-major
-  # Reconstruct with byrow=TRUE to fix the layout
-  draws_mat <- matrix(as.numeric(cpp_result$draws),
-                      nrow = n_save, ncol = n_params, byrow = TRUE)
-  param_names <- as.character(cpp_result$param_names)
-  colnames(draws_mat) <- param_names
-
-  # Phi draws: same row-major issue
-  phi_draws <- matrix(as.numeric(cpp_result$phi_draws),
+    n_save <- cpp_result$n_save
+    # C++ stores row-major but Rcpp::NumericMatrix fills column-major, so the
+    # layout is reconstructed with byrow = TRUE.
+    draws_mat <- matrix(as.numeric(cpp_result$draws),
+                        nrow = n_save, ncol = cpp_result$n_params, byrow = TRUE)
+    colnames(draws_mat) <- as.character(cpp_result$param_names)
+    phi_mat <- matrix(as.numeric(cpp_result$phi_draws),
                       nrow = n_save, ncol = cpp_result$S, byrow = TRUE)
+    colnames(phi_mat) <- paste0("phi[", seq_len(cpp_result$S), "]")
+    list(draws = draws_mat, phi = phi_mat, cpp = cpp_result)
+  }
 
-  # Build 3D draws array [iteration, chain, variable] for posterior compatibility
-  draws_array <- array(draws_mat,
-                       dim = c(n_save, 1L, n_params),
-                       dimnames = list(
-                         iteration = seq_len(n_save),
-                         chain = 1L,
-                         variable = param_names
-                       ))
+  chain_fits <- lapply(chain_seeds, run_chain)
 
-  # Compute eta for ratio extraction
-  # eta_num[i,draw] = phi[spatial_group[i],draw] + X_num[i,] %*% beta_num[draw,]
-  # For each draw, compute eta_num and eta_denom per observation
+  # Chains are stacked contiguously (chain 1 first), matching the HMC backend
+  # so that a [iteration, chain] reshape is valid on either.
+  samples_list <- lapply(chain_fits, function(cf) cbind(cf$draws, cf$phi))
+  draws_mat <- do.call(rbind, lapply(chain_fits, `[[`, "draws"))
+  phi_draws <- do.call(rbind, lapply(chain_fits, `[[`, "phi"))
+  draws_full <- do.call(rbind, samples_list)
+
+  cpp_result <- chain_fits[[1]]$cpp
+  n_save_per_chain <- cpp_result$n_save
+  n_save <- nrow(draws_mat)
+  n_params <- ncol(draws_mat)
+  param_names <- colnames(draws_mat)
+
+  # eta_num[draw, i] = phi[draw, spatial_group[i]] + X_num[i, ] %*% beta_num[draw, ]
   beta_num_cols <- seq_len(p_num)
   beta_denom_cols <- if (p_denom > 0) (p_num + 1):(p_num + p_denom) else integer(0)
 
-  eta_num <- matrix(NA_real_, nrow = n_save, ncol = N)
-  eta_denom <- matrix(NA_real_, nrow = n_save, ncol = N)
-
-  for (draw in seq_len(n_save)) {
-    beta_n <- draws_mat[draw, beta_num_cols]
-    beta_d <- if (p_denom > 0) draws_mat[draw, beta_denom_cols] else numeric(0)
-    phi_vec <- phi_draws[draw, ]
-
-    for (i in seq_len(N)) {
-      s <- spatial_group[i]
-      eta_num[draw, i] <- phi_vec[s] + sum(X_num[i, ] * beta_n)
-      if (is_binomial) {
-        eta_denom[draw, i] <- 0.0
-      } else {
-        eta_denom[draw, i] <- phi_vec[s] + sum(X_denom[i, ] * beta_d)
-      }
-    }
+  phi_by_obs <- phi_draws[, spatial_group, drop = FALSE]
+  eta_num <- draws_mat[, beta_num_cols, drop = FALSE] %*% t(X_num) + phi_by_obs
+  eta_denom <- if (is_binomial) {
+    matrix(0.0, nrow = n_save, ncol = N)
+  } else {
+    draws_mat[, beta_denom_cols, drop = FALSE] %*% t(X_denom) + phi_by_obs
   }
 
   # Build ratiod_fit
   fit <- list(
-    draws = draws_array,
+    draws = draws_full,
+    samples = samples_list,
     formula = formula,
     data = data,
     family = family,
@@ -238,19 +242,20 @@ fit_gibbs <- function(formula,
     iter = iter,
     warmup = warmup,
     thin = thin,
-    chains = 1L,
+    chains = chains,
     n_save = n_save,
-    n_save_per_chain = n_save,
+    n_save_per_chain = n_save_per_chain,
     .internal = list(
       eta_num = eta_num,
       eta_denom = eta_denom,
       eta = eta_num,  # For methods expecting single eta
-      eta_array = array(eta_num, dim = c(n_save, 1L, N)),
+      eta_array = array(eta_num, dim = c(n_save_per_chain, chains, N)),
       phi_draws = phi_draws,
       X = X_num,
-      accept_phi = cpp_result$accept_phi,
-      accept_beta = cpp_result$accept_beta,
-      accept_disp = cpp_result$accept_disp
+      # One row per chain; acceptance rates are per-site for phi.
+      accept_phi = do.call(rbind, lapply(chain_fits, function(cf) cf$cpp$accept_phi)),
+      accept_beta = do.call(rbind, lapply(chain_fits, function(cf) cf$cpp$accept_beta)),
+      accept_disp = do.call(rbind, lapply(chain_fits, function(cf) cf$cpp$accept_disp))
     )
   )
 
