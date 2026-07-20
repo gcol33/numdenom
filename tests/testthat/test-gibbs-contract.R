@@ -52,8 +52,9 @@ test_that("Gibbs draws are a named 2-D matrix including the spatial field", {
   expect_length(dim(dr), 2L)
   expect_false(is.null(colnames(dr)))
   expect_true(all(c("beta_num[1]", "beta_num[2]", "log_tau") %in% colnames(dr)))
-  # The spatial field is part of the posterior, not a side channel.
-  expect_true(any(grepl("^phi\\[", colnames(dr))))
+  # The spatial field is part of the posterior, not a side channel, and is
+  # named as every other backend names it.
+  expect_true(any(grepl("^phi_spatial\\[", colnames(dr))))
 })
 
 test_that("split-Rhat is computable on a Gibbs fit and the chains agree", {

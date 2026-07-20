@@ -85,11 +85,16 @@ test_that("analytic and autodiff log posteriors agree up to a constant", {
   # Both implementations omit the same normalizing constant, so the offset
   # between compute_log_post and each mode's fused value must not depend on
   # the model. A model-dependent offset means the two densities differ.
-  offsets <- vapply(FIELDS, function(field) {
-    r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
-    r$log_post - r$log_post_mode
-  }, numeric(1))
-  expect_lt(max(offsets) - min(offsets), 1e-6)
+  # The fused value each mode reports must satisfy this, not just the autodiff
+  # one: NUTS consumes it as log_prob, so a mode whose value disagrees with its
+  # own gradient drives the Hamiltonian off a different density.
+  for (mode in c("arena", "handcoded")) {
+    offsets <- vapply(FIELDS, function(field) {
+      r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
+      r$log_post - r$log_post_mode
+    }, numeric(1))
+    expect_lt(max(offsets) - min(offsets), 1e-6)
+  }
 })
 
 test_that("centring makes the spatial field's mean invisible to the likelihood", {

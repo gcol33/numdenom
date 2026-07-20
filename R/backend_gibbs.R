@@ -210,7 +210,7 @@ fit_gibbs <- function(formula,
     colnames(draws_mat) <- as.character(cpp_result$param_names)
     phi_mat <- matrix(as.numeric(cpp_result$phi_draws),
                       nrow = n_save, ncol = cpp_result$S, byrow = TRUE)
-    colnames(phi_mat) <- paste0("phi[", seq_len(cpp_result$S), "]")
+    colnames(phi_mat) <- paste0("phi_spatial[", seq_len(cpp_result$S), "]")
     list(draws = draws_mat, phi = phi_mat, cpp = cpp_result)
   }
 

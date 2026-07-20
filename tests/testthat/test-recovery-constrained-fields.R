@@ -77,13 +77,6 @@ test_that("RW1 recovers the intercept and slope with calibrated intervals", {
 test_that("ICAR combined with RW1 recovers the intercept", {
   skip_on_cran()
   skip_if_not_installed("posterior")
-  # The intercept is recovered and the ICAR ridge is gone, but the (tau, phi)
-  # pair is centered-parameterized and funnels when the data carry no spatial
-  # signal: treedepth saturates and rhat sits near 1.2. Convergence is asserted
-  # separately below and is expected to fail until the spatial field gains a
-  # non-centered parameterization, matching gp_parameterization.
-  skip("blocked on non-centered spatial parameterization; see dev_notes/diag_stiffness.R")
-
   r <- fit_one(sim_data(11), spatial = spatial_car(grid_adj(50), level = "group",
                                                    group_var = "spatial_site"),
                temporal = temporal_rw1("time"))
@@ -93,16 +86,14 @@ test_that("ICAR combined with RW1 recovers the intercept", {
 
 test_that("a spatial-only model reaches a sampler that reports its chains", {
   skip_on_cran()
-  # Spatial-only models route to the Gibbs backend, which returns a single
-  # chain whatever chains= asked for and exposes no phi_spatial, so none of the
-  # convergence diagnostics above can be computed for them.
-  skip("spatial-only models dispatch to the Gibbs backend; see dev_notes/diag_backend_pick.R")
-
+  # Spatial-only models route to the Gibbs backend, which must honour chains=
+  # and expose the spatial field so the convergence diagnostics above apply to
+  # them too.
   df <- sim_data(11)
   f <- ratiod(y | trials ~ x, data = df, family = ratiod_binomial(),
               spatial = spatial_car(grid_adj(50), level = "group",
                                     group_var = "spatial_site"),
               iter = 1000, warmup = 500, chains = 4, verbose = FALSE)
-  expect_identical(f$chains, 4)
+  expect_identical(as.integer(f$chains), 4L)
   expect_true(any(grepl("^phi_spatial\\[", colnames(as.matrix(f$draws)))))
 })

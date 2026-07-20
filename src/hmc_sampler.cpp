@@ -4125,8 +4125,11 @@ void compute_gradient_analytical(
   // Prior/structural terms are computed via compute_log_post with skip_obs_loop=true (O(p+S+T)).
   // Observation log-lik was accumulated inline during the gradient computation (O(N)).
   // Total: one O(N) pass instead of two.
+  // compute_log_post centres its own copy and recovers phi_raw_sum from the raw
+  // field, so it takes params_in; the centred copy would zero that sum and drop
+  // the freed constant direction from the prior.
   if (log_post_out) {
-    *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+    *log_post_out = compute_log_post(params_in, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
   }
 
 }
