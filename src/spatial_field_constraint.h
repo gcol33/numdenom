@@ -67,6 +67,37 @@ inline void project_gradient(double* g, int n) {
   for (int i = 0; i < n; i++) g[i] -= mean;
 }
 
+// Binds the parameter vector that every downstream reader of a gradient
+// function should see. When the spatial block is intrinsic it is centred into
+// an owned copy and raw_sum() carries the freed constant direction; otherwise
+// the caller's vector is passed through untouched and raw_sum() is zero.
+//
+// Applied at a function's entry rather than at each binding site, so that the
+// vectorized paths which index the vector directly see the constrained field
+// too. Gradients produced under it are with respect to the raw parameters, so
+// the spatial likelihood gradient must be projected.
+class CenteredSpatialParams {
+ public:
+  CenteredSpatialParams(const std::vector<double>& params_in, bool center,
+                        int start, int n)
+      : in_(&params_in), active_(center && start >= 0 && n > 0) {
+    if (active_) {
+      storage_ = params_in;
+      raw_sum_ = center_spatial_block(storage_, start, n);
+    }
+  }
+
+  const std::vector<double>& params() const { return active_ ? storage_ : *in_; }
+  double raw_sum() const { return raw_sum_; }
+  bool active() const { return active_; }
+
+ private:
+  const std::vector<double>* in_;
+  std::vector<double> storage_;
+  double raw_sum_ = 0.0;
+  bool active_;
+};
+
 }  // namespace ratiod_constraints
 
 #endif  // RATIOD_SPATIAL_FIELD_CONSTRAINT_H

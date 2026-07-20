@@ -6,6 +6,11 @@
 # central differences of the log posterior it is supposed to be the gradient of.
 
 FIELDS <- c("icar", "bym2", "rw1", "rw2", "icar_rw1")
+# The spatial field carried alongside a second structure, which routes to the
+# multi-feature gradient paths rather than the main one. Those paths identified
+# the field by a soft penalty while the log posterior hard-centred it, so their
+# gradient described a different density; nothing reached them until these.
+MULTI_FIELDS <- c("icar_ms", "bym2_ms", "icar_st", "bym2_st")
 MODES <- c("handcoded", "arena")
 
 # Relative deviation per parameter, floored so that near-zero entries do not
@@ -17,6 +22,28 @@ rel_dev <- function(a, f) {
 for (field in FIELDS) {
   for (mode in MODES) {
     test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
+      r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
+      expect_gt(r$n_params, 0)
+      dev <- rel_dev(r$analytic, r$finite_diff)
+      worst <- which.max(dev)
+      expect_lt(
+        max(dev),
+        1e-4,
+        label = sprintf(
+          "%s/%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+          field, mode, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+        )
+      )
+    })
+  }
+}
+
+for (field in MULTI_FIELDS) {
+  for (mode in MODES) {
+    test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
+      if (mode == "arena" && grepl("_st$", field)) {
+        skip("blocked on gcol33/tulpaRatio#14")
+      }
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
       expect_gt(r$n_params, 0)
       dev <- rel_dev(r$analytic, r$finite_diff)
@@ -89,7 +116,12 @@ test_that("analytic and autodiff log posteriors agree up to a constant", {
   # one: NUTS consumes it as log_prob, so a mode whose value disagrees with its
   # own gradient drives the Hamiltonian off a different density.
   for (mode in c("arena", "handcoded")) {
-    offsets <- vapply(FIELDS, function(field) {
+    # The spatiotemporal autodiff path reports an offset of its own; excluded
+    # here rather than loosening the bound, which would stop the invariant
+    # holding for everything else. See gcol33/tulpaRatio#14.
+    fields <- c(FIELDS, MULTI_FIELDS)
+    if (mode == "arena") fields <- setdiff(fields, c("icar_st", "bym2_st"))
+    offsets <- vapply(fields, function(field) {
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
       r$log_post - r$log_post_mode
     }, numeric(1))
@@ -101,7 +133,7 @@ test_that("centring makes the spatial field's mean invisible to the likelihood",
   # A hard sum-to-zero constraint means the intercept, not the field, carries
   # the level. Shifting every phi by a constant must leave the gradient of the
   # fixed effects untouched.
-  for (field in c("icar", "bym2", "icar_rw1")) {
+  for (field in c("icar", "bym2", "icar_rw1", MULTI_FIELDS)) {
     raw <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded", precenter = FALSE)
     cen <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded", precenter = TRUE)
     beta <- which(raw$block == "beta_num")

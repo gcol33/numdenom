@@ -116,9 +116,17 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   data.total_re_groups = 0;
   data.re_parameterization = 0;
 
-  const bool want_icar = (field == "icar" || field == "icar_rw1");
-  const bool want_bym2 = (field == "bym2");
-  const bool want_rw1  = (field == "rw1"  || field == "icar_rw1");
+  // icar_ms / icar_st / bym2_ms / bym2_st reach the multi-feature gradient
+  // paths, which carry the spatial field alongside another structure and are
+  // therefore the ones that must agree with the log posterior about how that
+  // field is identified.
+  const bool want_ms = (field == "icar_ms" || field == "bym2_ms");
+  const bool want_st = (field == "icar_st" || field == "bym2_st");
+  const bool want_icar = (field == "icar" || field == "icar_rw1" ||
+                          field == "icar_ms" || field == "icar_st");
+  const bool want_bym2 = (field == "bym2" || field == "bym2_ms" ||
+                          field == "bym2_st");
+  const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st);
   const bool want_rw2  = (field == "rw2");
 
   if (want_icar || want_bym2) {
@@ -151,6 +159,54 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.n_times = 0;
     data.n_temporal_groups = 0;
     data.n_temporal_params = 0;
+  }
+
+  // Multiscale temporal: trend plus a short-term AR1, which is what routes to
+  // compute_gradient_ms_temporal_handcoded.
+  if (want_ms) {
+    auto& mst = data.multiscale_temporal_data;
+    mst.n_times = n_times;
+    mst.n_groups = 1;
+    mst.n_obs = n_obs;
+    mst.trend_type = ratiod_temporal::TemporalType::RW1;
+    mst.seasonal_period = 0;
+    mst.short_term_type = ratiod_temporal::TemporalType::AR1;
+    mst.shared = true;
+    mst.time_index.resize(n_obs);
+    mst.group_index.assign(n_obs, 1);
+    for (int i = 0; i < n_obs; i++) mst.time_index[i] = (i % n_times) + 1;
+    data.has_multiscale_temporal = true;
+  }
+
+  // Spatiotemporal interaction: Type I (IID) over the S x T grid, which routes
+  // to compute_gradient_spatiotemporal_handcoded.
+  if (want_st) {
+    auto& st = data.spatiotemporal_data;
+    st.type = ratiod_spatiotemporal::STType::TYPE_I;
+    st.shared = true;
+    st.n_spatial = n_units;
+    st.n_times = n_times;
+    st.n_params = n_units * n_times;
+    st.s_idx.resize(n_obs);
+    st.t_idx.resize(n_obs);
+    st.st_flat.resize(n_obs);
+    for (int i = 0; i < n_obs; i++) {
+      const int s = (i % n_units) + 1;
+      const int t = (i % n_times) + 1;
+      st.s_idx[i] = s;
+      st.t_idx[i] = t;
+      st.st_flat[i] = (s - 1) * n_times + t;
+    }
+    st.spatial_is_gp = false;
+    st.spatial_proper = false;
+    st.bym2_scale = 1.0;
+    st.temporal_type = ratiod_temporal::TemporalType::NONE;
+    st.temporal_cyclic = false;
+    st.sigma2_prior_U = 1.0;
+    st.sigma2_prior_alpha = 0.01;
+    data.has_spatiotemporal = true;
+    data.st_is_hsgp = false;
+    data.st_parameterization = 0;
   }
 
   data.zi_type = ZIType::NONE;

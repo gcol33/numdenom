@@ -2390,11 +2390,17 @@ static inline std::pair<GPData, GPData> make_msgp_gp_views(
     const MultiscaleGPData& msgp);
 static inline void spatial_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
-    const double* spatial_phi, double tau_spatial,
+    const double* phi_spatial, double phi_raw_sum, bool centered,
+    double tau_spatial,
     double sigma_s_bym2, double sigma_u_bym2, double rho_bym2,
     const double* theta_bym2,
-    const double* grad_spatial_lik, const double* grad_theta_lik,
+    const double* grad_spatial_lik,
     double* grad);
+static inline void spatial_lik_grad_to_param_scale(
+    const ModelData& data, const ParamLayout& layout,
+    double sigma_s_bym2, double sigma_u_bym2,
+    const double* theta_bym2, const double* grad_theta_lik,
+    double* grad_spatial_lik, double* grad);
 
 void compute_gradient_analytical(
     const std::vector<double>& params_in,
@@ -4048,77 +4054,9 @@ void compute_gradient_analytical(
 
   // ============ Spatial GMRF prior gradients (ICAR and BYM2) ============
   if (layout.has_spatial && n_spatial > 0) {
-    // The likelihood sees the centred field, so its gradient with respect to
-    // the raw parameters is the projection (I - 11'/n). Applied here only:
-    // d(eta)/d(sigma_bym2) is a function of the centred field with no such
-    // projection, so grad_spatial_lik itself must stay unprojected.
-    double glik_mean = 0.0;
-    if (center_spatial) {
-      for (int s = 0; s < n_spatial; s++) glik_mean += grad_spatial_lik[s];
-      glik_mean /= static_cast<double>(n_spatial);
-    }
-    for (int s = 0; s < n_spatial; s++) {
-      grad[layout.spatial_start + s] = grad_spatial_lik[s] - glik_mean;
-    }
-
-    // ICAR prior: -0.5 * tau * phi' * Q * phi where Q_ij = n_neighbors[i] if i=j, -1 if i~j
-    // d/d(phi[i]) = -tau * (n_neighbors[i]*phi[i] - sum_{j~i} phi[j])
-    double icar_quad = 0.0;
-    // Gradient of the freed constant direction; see spatial_field_constraint.h.
-    const double free_scale =
-        (data.spatial_type == SpatialType::BYM2) ? 1.0 : tau_spatial;
-    const double free_grad =
-        ratiod_constraints::free_direction_grad(phi_raw_sum, n_spatial, free_scale);
-    for (int i = 0; i < n_spatial; i++) {
-      double Qphi_i = data.n_neighbors[i] * phi_spatial[i];
-      int row_start = data.adj_row_ptr[i];
-      int row_end = data.adj_row_ptr[i + 1];
-      for (int k = row_start; k < row_end; k++) {
-        int j = data.adj_col_idx[k];
-        Qphi_i -= phi_spatial[j];
-        if (j > i) {
-          double diff = phi_spatial[i] - phi_spatial[j];
-          icar_quad += diff * diff;
-        }
-      }
-
-      if (data.spatial_type == SpatialType::BYM2) {
-        // For BYM2, ICAR prior has no tau scaling (it's absorbed into sigma/rho)
-        grad[layout.spatial_start + i] += -Qphi_i + free_grad;
-      } else {
-        // For plain ICAR
-        grad[layout.spatial_start + i] += -tau_spatial * Qphi_i + free_grad;
-      }
-    }
-
-    if (data.spatial_type == SpatialType::BYM2) {
-      // BYM2 Riebler: transform (grad_sigma_s, grad_sigma_u) to (grad_log_sigma, grad_logit_rho)
-      // grad_sigma_s_lik = d(LL)/d(sigma_s) * sigma_s  (chain rule for log)
-      // grad_sigma_u_lik = d(LL)/d(sigma_u) * sigma_u
-      double grad_sigma_s_lik = 0.0;
-      double grad_sigma_u_lik = 0.0;
-
-      for (int s = 0; s < n_spatial; s++) {
-        double scaled_phi = phi_spatial[s] * data.bym2_scale_factor;
-        double d_LL_d_spatial = grad_spatial_lik[s] / (sigma_s_bym2 * data.bym2_scale_factor);
-        grad_sigma_s_lik += d_LL_d_spatial * sigma_s_bym2 * scaled_phi;
-        grad_sigma_u_lik += d_LL_d_spatial * sigma_u_bym2 * theta_bym2[s];
-      }
-
-      // grad[log_sigma] = grad_sigma_s_lik + grad_sigma_u_lik
-      grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
-      // grad[logit_rho] = 0.5 * ((1-rho)*grad_sigma_s_lik - rho*grad_sigma_u_lik)
-      grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
-                                                  - rho_bym2 * grad_sigma_u_lik);
-
-    } else {
-      // Plain ICAR: tau gradient. (Q + 11'/J) is full rank, so the exponent on
-      // tau is n/2 and the quadratic form carries the freed direction.
-      // log_post = 0.5*n*log(tau) - 0.5*tau*(quad + sum^2/n) + const
-      const double quad_full =
-          icar_quad + ratiod_constraints::free_direction_quad(phi_raw_sum, n_spatial);
-      grad[layout.log_tau_spatial_idx] += 0.5 * n_spatial - 0.5 * tau_spatial * quad_full;
-    }
+    spatial_gmrf_prior_grad(data, layout, phi_spatial, phi_raw_sum, center_spatial,
+                            tau_spatial, sigma_s_bym2, sigma_u_bym2, rho_bym2,
+                            theta_bym2, grad_spatial_lik.data(), grad.data());
   }
 
   // Fused log-posterior output: combine prior/structural terms with observation log-lik.
@@ -4851,59 +4789,120 @@ static inline std::pair<GPData, GPData> make_msgp_gp_views(
 }
 
 // =====================================================================
-// Spatial ICAR/BYM2 GMRF prior gradient helper
-// Used by ms_temporal and spatiotemporal gradient functions.
-// Writes phi_spatial gradients, theta_bym2 gradients (BYM2), tau gradient (ICAR).
-// grad_spatial_lik and grad_theta_lik must hold accumulated likelihood contributions.
+// Spatial ICAR/BYM2 GMRF prior gradient.
+//
+// The single source of truth for the intrinsic spatial field's gradient, used
+// by every gradient path that carries one. It identifies the field the way
+// compute_log_post does -- hard centring plus the freed constant direction,
+// see spatial_field_constraint.h -- so that the gradient and the density it is
+// returned alongside describe the same target.
+//
+// phi_spatial must be the centred field and phi_raw_sum its pre-centring sum,
+// both as produced by CenteredSpatialParams. grad_spatial_lik holds the
+// accumulated likelihood gradient with respect to the phi *parameters*, so for
+// BYM2 the sigma_s * scale chain factor is already applied by the caller's
+// scatter. theta_bym2 gradients stay with the caller, which sets the prior term
+// and accumulates the likelihood term during its own scatter.
 // =====================================================================
+// The multi-feature gradient paths scatter the spatial field's likelihood
+// gradient in eta units (a bare dLL per observation). spatial_gmrf_prior_grad
+// works in phi-parameter units, which for BYM2 differ by the sigma_s * scale
+// chain factor; the vectorized main path applies that during its own scatter.
+// Settles the BYM2 theta block at the same time, which stays with the caller
+// because its likelihood term is scattered per observation.
+static inline void spatial_lik_grad_to_param_scale(
+    const ModelData& data, const ParamLayout& layout,
+    double sigma_s_bym2, double sigma_u_bym2,
+    const double* theta_bym2, const double* grad_theta_lik,
+    double* grad_spatial_lik, double* grad
+) {
+    if (data.spatial_type != SpatialType::BYM2) return;
+    const int S = data.n_spatial_units;
+    const double chain = sigma_s_bym2 * data.bym2_scale_factor;
+    for (int s = 0; s < S; s++) {
+        grad_spatial_lik[s] *= chain;
+        grad[layout.theta_bym2_start + s] =
+            grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
+    }
+}
+
 static inline void spatial_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
-    const double* spatial_phi,
+    const double* phi_spatial,
+    double phi_raw_sum,
+    bool centered,
     double tau_spatial,
     double sigma_s_bym2, double sigma_u_bym2,
     double rho_bym2,
     const double* theta_bym2,
     const double* grad_spatial_lik,
-    const double* grad_theta_lik,
     double* grad
 ) {
-    int S = data.n_spatial_units;
-    if (layout.is_bym2) {
-        // Soft sum-to-zero gradient: -precision * sum(phi) for each phi[s]
-        double phi_sum = 0.0;
-        for (int s = 0; s < S; s++) phi_sum += spatial_phi[s];
-        for (int s = 0; s < S; s++) {
-            double icar_grad = 0.0;
-            for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
-                int j = data.adj_col_idx[idx];
-                icar_grad += (spatial_phi[j] - spatial_phi[s]);
+    const int S = data.n_spatial_units;
+    const bool is_bym2 = (data.spatial_type == SpatialType::BYM2);
+
+    // The likelihood sees the centred field, so its gradient with respect to
+    // the raw parameters is the projection (I - 11'/n). Applied here only:
+    // d(eta)/d(sigma_bym2) is a function of the centred field with no such
+    // projection, so grad_spatial_lik itself must stay unprojected.
+    double glik_mean = 0.0;
+    if (centered) {
+        for (int s = 0; s < S; s++) glik_mean += grad_spatial_lik[s];
+        glik_mean /= static_cast<double>(S);
+    }
+    for (int s = 0; s < S; s++) {
+        grad[layout.spatial_start + s] = grad_spatial_lik[s] - glik_mean;
+    }
+
+    // ICAR prior: -0.5 * tau * phi' * Q * phi where Q_ij = n_neighbors[i] if i=j, -1 if i~j
+    // d/d(phi[i]) = -tau * (n_neighbors[i]*phi[i] - sum_{j~i} phi[j])
+    double icar_quad = 0.0;
+    // Gradient of the freed constant direction; see spatial_field_constraint.h.
+    const double free_scale = is_bym2 ? 1.0 : tau_spatial;
+    const double free_grad =
+        ratiod_constraints::free_direction_grad(phi_raw_sum, S, free_scale);
+    for (int i = 0; i < S; i++) {
+        double Qphi_i = data.n_neighbors[i] * phi_spatial[i];
+        for (int k = data.adj_row_ptr[i]; k < data.adj_row_ptr[i + 1]; k++) {
+            const int j = data.adj_col_idx[k];
+            Qphi_i -= phi_spatial[j];
+            if (j > i) {
+                const double diff = phi_spatial[i] - phi_spatial[j];
+                icar_quad += diff * diff;
             }
-            grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad - ratiod_constraints::s2z_precision(S) * phi_sum;
-            grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
         }
-        double grad_sigma_s_lik = 0.0, grad_sigma_u_lik = 0.0;
+
+        if (is_bym2) {
+            // For BYM2, ICAR prior has no tau scaling (it's absorbed into sigma/rho)
+            grad[layout.spatial_start + i] += -Qphi_i + free_grad;
+        } else {
+            grad[layout.spatial_start + i] += -tau_spatial * Qphi_i + free_grad;
+        }
+    }
+
+    if (is_bym2) {
+        // BYM2 Riebler: transform (grad_sigma_s, grad_sigma_u) to (grad_log_sigma, grad_logit_rho)
+        // grad_sigma_s_lik = d(LL)/d(sigma_s) * sigma_s  (chain rule for log)
+        // grad_sigma_u_lik = d(LL)/d(sigma_u) * sigma_u
+        double grad_sigma_s_lik = 0.0;
+        double grad_sigma_u_lik = 0.0;
         for (int s = 0; s < S; s++) {
-            grad_sigma_s_lik += grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor * spatial_phi[s];
-            grad_sigma_u_lik += grad_theta_lik[s] * sigma_u_bym2 * theta_bym2[s];
+            const double scaled_phi = phi_spatial[s] * data.bym2_scale_factor;
+            const double d_LL_d_spatial =
+                grad_spatial_lik[s] / (sigma_s_bym2 * data.bym2_scale_factor);
+            grad_sigma_s_lik += d_LL_d_spatial * sigma_s_bym2 * scaled_phi;
+            grad_sigma_u_lik += d_LL_d_spatial * sigma_u_bym2 * theta_bym2[s];
         }
         grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
         grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
                                                     - rho_bym2 * grad_sigma_u_lik);
     } else {
-        // Matches the soft sum-to-zero term in the ICAR log posterior.
-        double phi_sum = 0.0;
-        for (int s = 0; s < S; s++) phi_sum += spatial_phi[s];
-        const double s2z = ratiod_constraints::s2z_precision(S);
-        for (int s = 0; s < S; s++) {
-            double icar_grad = 0.0;
-            for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
-                int j = data.adj_col_idx[idx];
-                icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
-            }
-            grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad - s2z * phi_sum;
-        }
-        double icar_qf = icar_quadratic_form_ptr(spatial_phi, S, data);
-        grad[layout.log_tau_spatial_idx] += 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
+        // Plain ICAR: tau gradient. (Q + 11'/J) is full rank, so the exponent on
+        // tau is n/2 and the quadratic form carries the freed direction.
+        // log_post = 0.5*n*log(tau) - 0.5*tau*(quad + sum^2/n) + const
+        const double quad_full =
+            icar_quad + ratiod_constraints::free_direction_quad(phi_raw_sum, S);
+        grad[layout.log_tau_spatial_idx] += 0.5 * S - 0.5 * tau_spatial * quad_full;
     }
 }
 
@@ -8424,12 +8423,21 @@ void compute_gradient_msgp_hsgp(
 // =====================================================================
 
 void compute_gradient_ms_temporal_handcoded(
-    const std::vector<double>& params,
+    const std::vector<double>& params_in,
     const ModelData& data,
     const ParamLayout& layout,
     std::vector<double>& grad,
     double* log_post_out = nullptr
 ) {
+    // Centre the spatial block once, matching compute_log_post; see
+    // spatial_field_constraint.h. The returned gradient is with respect to the
+    // raw parameters, which is what spatial_gmrf_prior_grad projects for.
+    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
+                                && !data.icar_collapsed && !data.bym2_collapsed;
+    ratiod_constraints::CenteredSpatialParams centering(
+        params_in, center_spatial, layout.spatial_start, data.n_spatial_units);
+    const std::vector<double>& params = centering.params();
+
     const bool fuse_lp = (log_post_out != nullptr);
     double obs_log_lik = 0.0;
     int n_params = params.size();
@@ -8632,9 +8640,13 @@ void compute_gradient_ms_temporal_handcoded(
 
     // Spatial GMRF prior gradients (ICAR/BYM2)
     if (layout.has_spatial) {
-        spatial_gmrf_prior_grad(data, layout, spatial_phi, tau_spatial,
+        spatial_lik_grad_to_param_scale(data, layout, sigma_s_bym2, sigma_u_bym2,
+                                        theta_bym2, grad_theta_lik.data(),
+                                        grad_spatial_lik.data(), grad.data());
+        spatial_gmrf_prior_grad(data, layout, spatial_phi, centering.raw_sum(),
+                                centering.active(), tau_spatial,
                                 sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
-                                grad_spatial_lik.data(), grad_theta_lik.data(), grad.data());
+                                grad_spatial_lik.data(), grad.data());
     }
 
     // =========================================================================
@@ -8661,7 +8673,9 @@ void compute_gradient_ms_temporal_handcoded(
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
 
-    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
+    // params_in, not params: compute_log_post centres its own copy and recovers
+    // phi_raw_sum from the raw field, which the centred copy has zeroed.
+    if (fuse_lp) *log_post_out = compute_log_post(params_in, data, layout, /*skip_obs_loop=*/true) + obs_log_lik;
 }
 
 // =====================================================================
@@ -8670,12 +8684,21 @@ void compute_gradient_ms_temporal_handcoded(
 // =====================================================================
 
 void compute_gradient_spatiotemporal_handcoded(
-    const std::vector<double>& params,
+    const std::vector<double>& params_in,
     const ModelData& data,
     const ParamLayout& layout,
     std::vector<double>& grad,
     double* log_post_out = nullptr
 ) {
+    // Centre the spatial block once, matching compute_log_post; see
+    // spatial_field_constraint.h. The returned gradient is with respect to the
+    // raw parameters, which is what spatial_gmrf_prior_grad projects for.
+    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
+                                && !data.icar_collapsed && !data.bym2_collapsed;
+    ratiod_constraints::CenteredSpatialParams centering(
+        params_in, center_spatial, layout.spatial_start, data.n_spatial_units);
+    const std::vector<double>& params = centering.params();
+
     const bool fuse_lp = (log_post_out != nullptr);
     double obs_log_lik = 0.0;
     int n_params = params.size();
@@ -8915,9 +8938,13 @@ void compute_gradient_spatiotemporal_handcoded(
 
     // Spatial GMRF prior gradients (ICAR/BYM2)
     if (layout.has_spatial) {
-        spatial_gmrf_prior_grad(data, layout, spatial_phi, tau_spatial,
+        spatial_lik_grad_to_param_scale(data, layout, sigma_s_bym2, sigma_u_bym2,
+                                        theta_bym2, grad_theta_lik.data(),
+                                        grad_spatial_lik.data(), grad.data());
+        spatial_gmrf_prior_grad(data, layout, spatial_phi, centering.raw_sum(),
+                                centering.active(), tau_spatial,
                                 sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
-                                grad_spatial_lik.data(), grad_theta_lik.data(), grad.data());
+                                grad_spatial_lik.data(), grad.data());
     }
 
     // Temporal GMRF prior gradients
@@ -9166,7 +9193,9 @@ void compute_gradient_spatiotemporal_handcoded(
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
 
-    if (fuse_lp) *log_post_out = compute_log_post(params, data, layout, /*skip_obs_loop=*/true, &st_lp_accum) + obs_log_lik;
+    // params_in, not params: compute_log_post centres its own copy and recovers
+    // phi_raw_sum from the raw field, which the centred copy has zeroed.
+    if (fuse_lp) *log_post_out = compute_log_post(params_in, data, layout, /*skip_obs_loop=*/true, &st_lp_accum) + obs_log_lik;
 }
 
 // =====================================================================
@@ -9183,14 +9212,25 @@ void compute_gradient_spatiotemporal_handcoded(
 // =====================================================================
 
 void compute_gradient_composite(
-    const std::vector<double>& params,
+    const std::vector<double>& params_in,
     const ModelData& data,
     const ParamLayout& layout,
     std::vector<double>& grad,
     double* log_post_out = nullptr
 ) {
+    // Centre the spatial block once, matching compute_log_post; see
+    // spatial_field_constraint.h. The returned gradient is with respect to the
+    // raw parameters, which is what spatial_gmrf_prior_grad projects for.
+    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
+                                && !data.icar_collapsed && !data.bym2_collapsed;
+    ratiod_constraints::CenteredSpatialParams centering(
+        params_in, center_spatial, layout.spatial_start, data.n_spatial_units);
+    const std::vector<double>& params = centering.params();
+
     const bool fuse_lp = (log_post_out != nullptr) && !layout.has_zi;
-    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params, data, layout);
+    // params_in, not params: compute_log_post centres its own copy and recovers
+    // phi_raw_sum from the raw field, which the centred copy has zeroed.
+    if (log_post_out && layout.has_zi) *log_post_out = compute_log_post(params_in, data, layout);
     double obs_log_lik = 0.0;
     int n_params = params.size();
     grad.assign(n_params, 0.0);
@@ -10026,11 +10066,14 @@ void compute_gradient_composite(
 
     // ICAR/BYM2 spatial GMRF
     if (has_icar_bym2) {
-        spatial_gmrf_prior_grad(data, layout, spatial_phi, tau_spatial,
+        spatial_lik_grad_to_param_scale(data, layout, sigma_s_bym2, sigma_u_bym2,
+                                        theta_bym2,
+                                        layout.is_bym2 ? grad_theta_lik.data() : nullptr,
+                                        grad_spatial_lik.data(), grad.data());
+        spatial_gmrf_prior_grad(data, layout, spatial_phi, centering.raw_sum(),
+                                centering.active(), tau_spatial,
                                 sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
-                                grad_spatial_lik.data(),
-                                layout.is_bym2 ? grad_theta_lik.data() : nullptr,
-                                grad.data());
+                                grad_spatial_lik.data(), grad.data());
     }
 
     // HSGP spectral density gradients
@@ -10419,9 +10462,11 @@ void compute_gradient_composite(
         }
     }
 
-    // Fused log-posterior
+    // Fused log-posterior. params_in, not params: compute_log_post centres its
+    // own copy and recovers phi_raw_sum from the raw field, which the centred
+    // copy has zeroed.
     if (fuse_lp && !layout.has_zi) {
-        *log_post_out = compute_log_post(params, data, layout);
+        *log_post_out = compute_log_post(params_in, data, layout);
     }
 }
 
