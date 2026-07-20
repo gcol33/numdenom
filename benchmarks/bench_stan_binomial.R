@@ -13,8 +13,15 @@
 #   - Stan model compilation is a one-time cost: each model is compiled once
 #     (untimed warm-up), then the timed fit reuses the cached binary, so the
 #     reported Stan time is sampling wall-clock, not compilation.
+#   - Each tulpaRatio fit is checked against what was requested: same number of
+#     chains, named draws. A backend that accepts an argument and discards it
+#     (tulpaRatio#5) yields a fit that did less sampling than the Stan side, so
+#     the row is refused as not comparable instead of being timed.
 #   - Convergence is verified independently for BOTH engines (posterior::rhat
 #     on the reshaped chains) -- tulpaRatio's own summary rhat is not trusted.
+#     Both sides are restricted to FIXED EFFECTS, since a structured field is
+#     weakly identified by construction and would otherwise be read as a
+#     tulpaRatio convergence failure against Stan's fixed-only summary.
 #   - A row is published only if both engines converge (rhat < 1.05) and their
 #     x coefficients agree within 2 SE. Failing rows are printed with the
 #     reason they failed.
@@ -68,17 +75,40 @@ df     <- data.frame(y = y_bin, trials = trials, x = x, site = site,
                      spatial_site = spatial_site)
 df_zi  <- df; df_zi$y <- ifelse(runif(N) < 0.3, 0, df_zi$y)
 
-# ---- independent convergence of a tulpaRatio fit (its summary rhat is buggy) --
-nd_conv <- function(fit) {
+# ---- the fit must be the fit that was requested ------------------------------
+# ratiod() routes some structures to backends that do not accept every argument
+# (the Gibbs spatial path drops `chains` and returns unnamed draws, tulpaRatio#5).
+# Such a fit is not comparable to a 4-chain NUTS run, so the row is refused
+# rather than timed: a benchmark that silently accepts less sampling than it
+# asked for reports a speedup it did not measure.
+nd_contract <- function(fit) {
+  if (is.null(fit$draws))                    return("fit has no draws")
   dr <- tryCatch(as.matrix(fit$draws), error = function(e) NULL)
-  ch <- fit$chains
-  if (is.null(dr) || is.null(ch) || nrow(dr) %% ch != 0) return(c(rhat = NA, ess = NA))
+  if (is.null(dr) || !ncol(dr))              return("draws matrix is empty")
+  if (is.null(colnames(dr)))                 return("draws carry no parameter names")
+  ch <- fit$chains %||% 1
+  if (!identical(as.integer(ch), as.integer(CHAINS)))
+    return(sprintf("ran %d chain(s), requested %d (backend '%s')",
+                   ch, CHAINS, fit$backend %||% "?"))
+  if (nrow(dr) %% ch != 0)                   return("draws not divisible by chains")
+  NA_character_
+}
+
+# Fixed effects only, to match what summary(brmsfit)$fixed reports on the Stan
+# side. A structured field (ICAR, RW1) is weakly identified by construction, so
+# folding it into the same max() would compare all-parameters against
+# fixed-only and read the difference as a tulpaRatio failure.
+FIXED_RE <- "^beta_num\\["
+nd_conv <- function(fit) {
+  dr <- as.matrix(fit$draws); ch <- fit$chains
+  cols <- grep(FIXED_RE, colnames(dr))
+  if (!length(cols)) return(c(rhat = NA, ess = NA))
   per <- nrow(dr) / ch
-  rr <- ee <- numeric(ncol(dr))
-  for (p in seq_len(ncol(dr))) {
-    m <- matrix(dr[, p], nrow = per, ncol = ch)   # contiguous chain blocks
-    rr[p] <- posterior::rhat(m)
-    ee[p] <- posterior::ess_bulk(m)
+  rr <- ee <- numeric(length(cols))
+  for (k in seq_along(cols)) {
+    m <- matrix(dr[, cols[k]], nrow = per, ncol = ch)   # contiguous chain blocks
+    rr[k] <- posterior::rhat(m)
+    ee[k] <- posterior::ess_bulk(m)
   }
   c(rhat = max(rr, na.rm = TRUE), ess = min(ee, na.rm = TRUE))
 }
@@ -99,12 +129,20 @@ run_row <- function(name, nd_call, brm_call) {
   blank <- data.frame(model = name, tulpaRatio_s = NA, stan_s = NA, stan_cold_s = NA,
                       speedup = NA, nd_x = NA, stan_x = NA, agree = NA,
                       nd_rhat = NA, stan_rhat = NA, nd_ess = NA, stan_ess = NA,
-                      nd_ess_s = NA, stan_ess_s = NA, eff_ratio = NA)
+                      nd_ess_s = NA, stan_ess_s = NA, eff_ratio = NA,
+                      contract = NA_character_)
 
   # --- tulpaRatio (in-process; no per-fit compilation) ---
   cat("  tulpaRatio ... "); flush.console()
   t_nd <- system.time(fit_nd <- safe(nd_call))[["elapsed"]]
   if (is_err(fit_nd)) { cat("ERROR:", attr(fit_nd, "err"), "\n"); return(blank) }
+
+  bad <- nd_contract(fit_nd)
+  if (!is.na(bad)) {
+    cat(sprintf("%.2fs -- NOT COMPARABLE: %s\n", t_nd, bad))
+    blank$tulpaRatio_s <- round(t_nd, 2); blank$contract <- bad
+    return(blank)
+  }
   cv  <- nd_conv(fit_nd); ndx <- nd_x_summary(fit_nd)
   cat(sprintf("%.2fs (rhat=%.3f ess=%.0f)\n", t_nd, cv["rhat"], cv["ess"]))
 
@@ -142,7 +180,7 @@ run_row <- function(name, nd_call, brm_call) {
              stan_rhat = round(unname(st_rhat), 3),
              nd_ess = round(unname(cv["ess"])), stan_ess = round(unname(st_ess)),
              nd_ess_s = round(nd_eff, 1), stan_ess_s = round(st_eff, 1),
-             eff_ratio = round(nd_eff / st_eff, 1))
+             eff_ratio = round(nd_eff / st_eff, 1), contract = NA_character_)
 }
 
 brmf <- function(f, family, data = quote(df))
@@ -211,6 +249,7 @@ if (!SMOKE) {
   # that fail are listed with the reason, never silently dropped: an excluded
   # row is a finding about the sampler, not a blemish to hide.
   why <- function(i) {
+    if (!is.na(res$contract[i]))                     return(res$contract[i])
     if (is.na(res$stan_s[i]))                        return("Stan fit failed")
     if (is.na(res$nd_rhat[i]))                       return("no tulpaRatio draws")
     if (isTRUE(res$nd_rhat[i]   >= 1.05))            return(sprintf("tulpaRatio not converged (Rhat %.2f, ESS %d)", res$nd_rhat[i], res$nd_ess[i]))
