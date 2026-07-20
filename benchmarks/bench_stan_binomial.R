@@ -29,13 +29,23 @@
 #     to mix finishes quickly, so wall-clock alone rewards non-convergence;
 #     ESS/s prices in mixing and cannot be gamed that way.
 #
+#   - Every config is run REPS times and the median is reported with its
+#     observed range. A single timing of a sub-second fit is noise, and quoting
+#     one to three significant figures overstates what was measured.
+#
 # Usage:
-#   Rscript benchmarks/bench_stan_binomial.R            # full, 7 configs
-#   Rscript benchmarks/bench_stan_binomial.R --smoke    # 1 config, small
+#   Rscript benchmarks/bench_stan_binomial.R                     # 7 configs
+#   Rscript benchmarks/bench_stan_binomial.R --n=5000 --reps=3
+#   Rscript benchmarks/bench_stan_binomial.R --smoke             # 1 config
 # =============================================================================
 
 args  <- commandArgs(trailingOnly = TRUE)
 SMOKE <- "--smoke" %in% args
+argval <- function(flag, default) {
+  hit <- grep(paste0("^", flag, "="), args, value = TRUE)
+  if (!length(hit)) return(default)
+  as.integer(sub(paste0("^", flag, "="), "", hit[1]))
+}
 
 suppressMessages({
   library(tulpaRatio)
@@ -47,8 +57,11 @@ ITER   <- if (SMOKE) 1000 else 1000
 WARMUP <- 500
 CHAINS <- if (SMOKE) 2 else 4
 
+REPS <- if (SMOKE) 1L else argval("--reps", 3L)
+
 set.seed(123)
-N <- 500; N_SITES <- 50; N_TIMES <- 20
+N <- if (SMOKE) 500L else argval("--n", 500L)
+N_SITES <- 50; N_TIMES <- 20
 x    <- rnorm(N)
 site <- factor(rep(1:N_SITES, length.out = N))
 time <- factor(rep(1:N_TIMES, length.out = N))
@@ -237,13 +250,46 @@ cat(sprintf("tulpaRatio %s vs brms %s / cmdstan %s | %d chains x %d iter (warmup
             cmdstanr::cmdstan_version(), CHAINS, ITER, WARMUP, N, length(rows),
             if (SMOKE) " [SMOKE]" else ""))
 
-res <- do.call(rbind, lapply(rows, function(r) run_row(r[[1]], r[[2]], r[[3]])))
+raw <- do.call(rbind, lapply(seq_len(REPS), function(rep) {
+  cat(sprintf("\n############ replicate %d/%d ############\n", rep, REPS))
+  cbind(rep = rep, do.call(rbind, lapply(rows, function(r) run_row(r[[1]], r[[2]], r[[3]]))))
+}))
 
-cat("\n\n================ RESULTS ================\n")
+cat("\n\n================ ALL REPLICATES ================\n")
+print(raw, row.names = FALSE)
+
+# Aggregate across replicates: report the median and the observed spread rather
+# than a single draw from a noisy timer. A model is disqualified if it failed in
+# ANY replicate -- the worst case is the honest one.
+agg1 <- function(d) {
+  med <- function(v) if (all(is.na(v))) NA else stats::median(v, na.rm = TRUE)
+  ctr <- d$contract[!is.na(d$contract)]
+  data.frame(
+    model        = d$model[1],
+    n_rep        = nrow(d),
+    tulpaRatio_s = round(med(d$tulpaRatio_s), 2),
+    stan_s       = round(med(d$stan_s), 2),
+    nd_ess_s     = round(med(d$nd_ess_s), 1),
+    stan_ess_s   = round(med(d$stan_ess_s), 1),
+    eff_ratio    = round(med(d$eff_ratio), 1),
+    eff_lo       = if (all(is.na(d$eff_ratio))) NA else round(min(d$eff_ratio, na.rm = TRUE), 1),
+    eff_hi       = if (all(is.na(d$eff_ratio))) NA else round(max(d$eff_ratio, na.rm = TRUE), 1),
+    nd_rhat      = if (all(is.na(d$nd_rhat))) NA else round(max(d$nd_rhat, na.rm = TRUE), 3),
+    stan_rhat    = if (all(is.na(d$stan_rhat))) NA else round(max(d$stan_rhat, na.rm = TRUE), 3),
+    nd_ess       = if (all(is.na(d$nd_ess))) NA else round(min(d$nd_ess, na.rm = TRUE)),
+    agree        = all(d$agree %in% TRUE),
+    contract     = if (length(ctr)) ctr[1] else NA_character_,
+    stringsAsFactors = FALSE)
+}
+res <- do.call(rbind, lapply(split(raw, factor(raw$model, levels = vapply(rows, `[[`, "", 1))), agg1))
+
+cat("\n\n================ RESULTS (median of", REPS, "replicates) ================\n")
 print(res, row.names = FALSE)
 
 if (!SMOKE) {
-  saveRDS(res, "benchmarks/results_stan_binomial.rds")
+  saveRDS(list(agg = res, raw = raw, n = N, reps = REPS, chains = CHAINS,
+               iter = ITER, warmup = WARMUP),
+          "benchmarks/results_stan_binomial.rds")
 
   # A row is publishable only if BOTH engines converged and agree on x. Rows
   # that fail are listed with the reason, never silently dropped: an excluded
@@ -261,12 +307,16 @@ if (!SMOKE) {
   ok     <- res[is.na(reason), ]
 
   md <- c(
-    "| Model | tulpaRatio (s) | Stan (s) | tulpaRatio ESS/s | Stan ESS/s | Efficiency |",
-    "|-------|---------------:|---------:|-----------------:|-----------:|-----------:|")
+    sprintf("N = %d, %d chains x %d iter (warmup %d), median of %d replicates.",
+            N, CHAINS, ITER, WARMUP, REPS),
+    "",
+    "| Model | tulpaRatio (s) | Stan (s) | tulpaRatio ESS/s | Stan ESS/s | Efficiency | Range |",
+    "|-------|---------------:|---------:|-----------------:|-----------:|-----------:|------:|")
   for (i in which(is.na(reason))) md <- c(md, sprintf(
-    "| %s | %.2f | %.2f | %.1f | %.1f | %.1fx |",
+    "| %s | %.2f | %.2f | %.1f | %.1f | %.1fx | %.1f-%.1f |",
     res$model[i], res$tulpaRatio_s[i], res$stan_s[i],
-    res$nd_ess_s[i], res$stan_ess_s[i], res$eff_ratio[i]))
+    res$nd_ess_s[i], res$stan_ess_s[i], res$eff_ratio[i],
+    res$eff_lo[i], res$eff_hi[i]))
 
   excl <- which(!is.na(reason))
   if (length(excl)) {
