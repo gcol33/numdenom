@@ -170,7 +170,7 @@ inline void compute_tvc_eta(
 inline double tvc_sum_to_zero_penalty(
     const std::vector<double>& w_flat,
     const TVCData& tvc_data,
-    double lambda = 0.001
+    double lambda
 ) {
   int n_times = tvc_data.n_times;
   int n_tvc = tvc_data.n_tvc;

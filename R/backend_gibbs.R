@@ -35,6 +35,7 @@ NULL
 #' @param warmup Warmup iterations
 #' @param thin Thinning interval
 #' @param chains Number of independent chains
+#' @param cores Number of cores used to run chains in parallel
 #' @param seed Random seed
 #' @param verbose Print progress
 #'
@@ -49,6 +50,7 @@ fit_gibbs <- function(formula,
                       warmup = floor(iter / 2),
                       thin = 1,
                       chains = 4,
+                      cores = NULL,
                       seed = NULL,
                       verbose = TRUE) {
 
@@ -56,6 +58,13 @@ fit_gibbs <- function(formula,
   if (is.na(chains) || chains < 1L) {
     stop("`chains` must be a positive integer.", call. = FALSE)
   }
+
+  # Bound the OpenMP team by both the chain count and the machine, so the team
+  # size is stable across successive fits in one session.
+  if (is.null(cores)) cores <- chains
+  cores <- as.integer(cores)
+  if (is.na(cores) || cores < 1L) cores <- 1L
+  cores <- min(cores, chains, cpp_get_max_threads())
 
   if (is.null(spatial)) {
     stop("Gibbs backend requires spatial structure. Use spatial_car().",
@@ -184,13 +193,15 @@ fit_gibbs <- function(formula,
 
   # Each chain is an independent run of the sampler under its own seed. The
   # seeds are drawn once from `seed` so the whole fit stays reproducible.
-  chain_seeds <- (as.numeric(seed) + seq_len(chains) * 7919) %% .Machine$integer.max
+  data_list$chain_seeds <- (as.numeric(seed) + seq_len(chains) * 7919) %%
+    .Machine$integer.max
+  data_list$n_cores <- as.integer(cores)
 
-  run_chain <- function(chain_seed) {
-    dl <- data_list
-    dl$seed <- as.integer(chain_seed)
-    cpp_result <- cpp_gibbs_spatial(dl)
+  # The chains run under OpenMP inside cpp_gibbs_spatial(), which returns one
+  # result list per chain.
+  cpp_chains <- cpp_gibbs_spatial(data_list)
 
+  convert_chain <- function(cpp_result) {
     n_save <- cpp_result$n_save
     # C++ stores row-major but Rcpp::NumericMatrix fills column-major, so the
     # layout is reconstructed with byrow = TRUE.
@@ -203,7 +214,7 @@ fit_gibbs <- function(formula,
     list(draws = draws_mat, phi = phi_mat, cpp = cpp_result)
   }
 
-  chain_fits <- lapply(chain_seeds, run_chain)
+  chain_fits <- lapply(cpp_chains, convert_chain)
 
   # Chains are stacked contiguously (chain 1 first), matching the HMC backend
   # so that a [iteration, chain] reshape is valid on either.

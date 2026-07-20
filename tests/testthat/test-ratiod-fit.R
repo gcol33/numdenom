@@ -296,7 +296,7 @@ test_that("mcmc_diagnostics works", {
     chains = 1
   )
 
-  diag <- mcmc_diagnostics(fit)
+  diag <- diagnostics(fit)
 
   expect_s3_class(diag, "ratiod_diagnostics")
   expect_true("parameter" %in% names(diag))
@@ -327,7 +327,7 @@ test_that("mcmc_diagnostics filters parameters", {
     chains = 1
   )
 
-  diag <- mcmc_diagnostics(fit, pars = "beta_num")
+  diag <- diagnostics(fit, pars = "beta_num")
 
   expect_true(all(grepl("beta_num", diag$parameter)))
 })

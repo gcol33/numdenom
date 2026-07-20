@@ -126,19 +126,19 @@ struct ModelData {
   // Design matrices (stored as flat vectors for cache efficiency)
   std::vector<double> X_num_flat;
   std::vector<double> X_denom_flat;
-  int p_num, p_denom;
+  int p_num = 0, p_denom = 0;
 
   // Random effects (supports multiple crossed RE terms with slopes)
   std::vector<int> re_group;  // 1-based group index (0 = no RE) - legacy single term
-  int n_re_groups;            // Number of groups for first RE term
+  int n_re_groups = 0;        // Number of groups for first RE term
 
   // Multi-term RE structure
-  int n_re_terms;                              // Number of RE terms (0 if none)
+  int n_re_terms = 0;                          // Number of RE terms (0 if none)
   std::vector<std::vector<int>> re_group_multi; // [term][obs] -> group index (1-based) LEGACY
   std::vector<int> re_group_multi_flat;        // [obs * n_re_terms + term] -> group index (1-based), obs-major
   std::vector<int> re_n_groups_multi;          // Groups per term
   std::vector<int> re_offsets;                 // Offset in flattened RE parameter vector per term
-  int total_re_groups;                         // Sum of all groups across terms
+  int total_re_groups = 0;                     // Sum of all groups across terms
 
   // Random slopes support
   bool has_re_slopes = false;                  // Whether any RE term has slopes
@@ -148,49 +148,49 @@ struct ModelData {
   std::vector<int> re_n_slopes;                // Number of slope variables per term
   std::vector<bool> re_correlated;             // Whether each term has correlated slopes
   std::vector<int> re_n_chol;                  // Cholesky parameters per term (k*(k-1)/2 for correlated, 0 otherwise)
-  int total_re_params;                         // Total RE parameters (groups * coefs)
-  int total_sigma_params;                      // Total variance parameters (sum of n_coefs)
-  int total_chol_params;                       // Total Cholesky correlation parameters
+  int total_re_params = 0;                     // Total RE parameters (groups * coefs)
+  int total_sigma_params = 0;                  // Total variance parameters (sum of n_coefs)
+  int total_chol_params = 0;                   // Total Cholesky correlation parameters
 
   // RE parameterization: 0 = centered (default), 1 = non-centered
   // Non-centered stores z ~ N(0,1) instead of re ~ N(0, sigma^2)
   // and computes re = sigma * z (or re = diag(sigma) * L * z for correlated)
-  int re_parameterization;                     // 0 = centered, 1 = non-centered
+  int re_parameterization = 0;                 // 0 = centered, 1 = non-centered
 
   // Spatial structure
-  SpatialType spatial_type;
+  SpatialType spatial_type = SpatialType::NONE;
   std::vector<int> spatial_group;    // Maps obs to spatial unit (1-based)
-  int n_spatial_units;
+  int n_spatial_units = 0;
   std::vector<int> adj_row_ptr;      // CSR format: row pointers
   std::vector<int> adj_col_idx;      // CSR format: column indices
   std::vector<int> n_neighbors;      // Number of neighbors per unit
-  double bym2_scale_factor;          // For BYM2 scaling
+  double bym2_scale_factor = 1.0;    // For BYM2 scaling
   // Precision mass matrix data (precomputed from Q)
   std::vector<double> spatial_Q_inv;    // (Q + lambda*I)^{-1}, column-major [S×S]
   std::vector<double> spatial_L_Q;      // Cholesky L of (Q + lambda*I), column-major [S×S]
 
   // Temporal structure
-  TemporalType temporal_type;
+  TemporalType temporal_type = TemporalType::NONE;
   std::vector<int> temporal_time_idx;   // Maps obs to time point (1-based, 0 = no temporal)
   std::vector<int> temporal_group_idx;  // Maps obs to temporal group (1-based)
-  int n_times;                          // Number of time points
-  int n_temporal_groups;                // Number of temporal groups (1 if no grouping)
-  int n_temporal_params;                // Total temporal parameters
-  bool temporal_cyclic;                 // Whether RW is cyclic
-  bool temporal_shared;                 // Whether effect is shared between num/denom
-  double tau_temporal_shape;            // Gamma shape for temporal precision
-  double tau_temporal_rate;             // Gamma rate for temporal precision
+  int n_times = 0;                      // Number of time points
+  int n_temporal_groups = 1;            // Number of temporal groups (1 if no grouping)
+  int n_temporal_params = 0;            // Total temporal parameters
+  bool temporal_cyclic = false;         // Whether RW is cyclic
+  bool temporal_shared = true;          // Whether effect is shared between num/denom
+  double tau_temporal_shape = 1.0;      // Gamma shape for temporal precision
+  double tau_temporal_rate = 0.01;      // Gamma rate for temporal precision
 
   // Zero-inflation structure
-  ZIType zi_type;
+  ZIType zi_type = ZIType::NONE;
   std::vector<double> X_zi_flat;        // Design matrix for ZI probability (flat)
-  int p_zi;                             // Number of ZI predictors
-  double zi_prior_sd;                   // Prior SD for ZI coefficients
+  int p_zi = 0;                         // Number of ZI predictors
+  double zi_prior_sd = 1.0;             // Prior SD for ZI coefficients
 
   // One-inflation structure (for OI-binomial and ZOIB models)
   std::vector<double> X_oi_flat;        // Design matrix for OI probability (flat)
-  int p_oi;                             // Number of OI predictors
-  double oi_prior_sd;                   // Prior SD for OI coefficients
+  int p_oi = 0;                         // Number of OI predictors
+  double oi_prior_sd = 1.0;             // Prior SD for OI coefficients
 
   // SVC (Spatially-Varying Coefficients) structure
   ratiod_svc::SVCData svc_data;
@@ -297,21 +297,21 @@ struct ModelData {
   double tvc_tau_rate = 0.01;           // Gamma rate for TVC precision
 
   // Dimensions
-  int N;
+  int N = 0;
 
   // Prior parameters
-  double sigma_beta;
-  double sigma_re_scale;
-  double phi_prior_shape;
-  double phi_prior_rate;
-  double tau_spatial_shape;
-  double tau_spatial_rate;
+  double sigma_beta = 1.0;
+  double sigma_re_scale = 1.0;
+  double phi_prior_shape = 1.0;
+  double phi_prior_rate = 1.0;
+  double tau_spatial_shape = 1.0;
+  double tau_spatial_rate = 1.0;
 
   // Model type
-  ModelType model_type;
+  ModelType model_type = ModelType::BINOMIAL;
 
   // Parallelization
-  int n_threads;
+  int n_threads = 1;
   // Across-chain core budget. Bounds the multi-chain OpenMP team size so the
   // team stays the same size across successive fits in one session; a team
   // that grows then shrinks corrupts the GOMP thread pool and faults at

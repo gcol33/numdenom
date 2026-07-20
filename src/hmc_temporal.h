@@ -292,7 +292,7 @@ inline double temporal_log_prior(
 // =====================================================================
 
 // Apply soft sum-to-zero constraint penalty for RW models
-inline double sum_to_zero_penalty(const double* phi, int T, double lambda = 0.001) {
+inline double sum_to_zero_penalty(const double* phi, int T, double lambda) {
   double sum = 0.0;
   for (int t = 0; t < T; t++) {
     sum += phi[t];

@@ -299,9 +299,9 @@ inline double pc_prior_tau_log(double tau, double lambda) {
 struct GibbsResult {
     std::vector<double> draws_flat;     // (n_save × n_params) row-major
     std::vector<double> phi_draws_flat; // (n_save × S)
-    int n_params;
-    int n_save;
-    int S;
+    int n_params = 0;
+    int n_save = 0;
+    int S = 0;
     std::vector<std::string> param_names;
 
     // TVC draws
@@ -311,8 +311,8 @@ struct GibbsResult {
 
     // Diagnostics
     std::vector<double> accept_phi;     // Acceptance rate per site
-    double accept_beta;
-    double accept_disp;
+    double accept_beta = 0.0;
+    double accept_disp = 0.0;
     double accept_tvc = 0.0;
 };
 

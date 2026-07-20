@@ -3,6 +3,50 @@
 
 #include "gibbs_spatial.h"
 #include <Rcpp.h>
+#include <algorithm>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+namespace {
+
+// Convert one chain's pure-C++ result into the R list the backend expects.
+// Called only from the serial section: it allocates SEXPs, which is not
+// permitted on an OpenMP worker thread.
+Rcpp::List gibbs_result_to_r(const gibbs::GibbsResult& res,
+                             const gibbs::GibbsData& d,
+                             int S) {
+    Rcpp::CharacterVector param_names(res.param_names.size());
+    for (size_t i = 0; i < res.param_names.size(); i++)
+        param_names[i] = res.param_names[i];
+
+    Rcpp::List result = Rcpp::List::create(
+        Rcpp::Named("draws") = Rcpp::NumericMatrix(res.n_save, res.n_params,
+                                                     res.draws_flat.begin()),
+        Rcpp::Named("phi_draws") = Rcpp::NumericMatrix(res.n_save, S,
+                                                        res.phi_draws_flat.begin()),
+        Rcpp::Named("param_names") = param_names,
+        Rcpp::Named("n_save") = res.n_save,
+        Rcpp::Named("n_params") = res.n_params,
+        Rcpp::Named("S") = S,
+        Rcpp::Named("accept_phi") = Rcpp::wrap(res.accept_phi),
+        Rcpp::Named("accept_beta") = res.accept_beta,
+        Rcpp::Named("accept_disp") = res.accept_disp
+    );
+
+    if (d.has_tvc && res.tvc_n_w > 0) {
+        result["tvc_w_draws"] = Rcpp::NumericMatrix(res.n_save, res.tvc_n_w,
+                                                     res.tvc_w_draws_flat.begin());
+        result["tvc_tau_draws"] = Rcpp::NumericMatrix(res.n_save, d.tvc_n_terms,
+                                                       res.tvc_tau_draws_flat.begin());
+        result["accept_tvc"] = res.accept_tvc;
+    }
+
+    return result;
+}
+
+}  // namespace
 
 // [[Rcpp::export]]
 Rcpp::List cpp_gibbs_spatial(Rcpp::List data_list) {
@@ -26,6 +70,25 @@ Rcpp::List cpp_gibbs_spatial(Rcpp::List data_list) {
     unsigned int seed = Rcpp::as<unsigned int>(data_list["seed"]);
     bool verbose = Rcpp::as<bool>(data_list["verbose"]);
     std::string family_str = Rcpp::as<std::string>(data_list["family"]);
+
+    // One seed per chain, derived on the R side so the fit stays reproducible.
+    std::vector<unsigned int> chain_seeds;
+    if (data_list.containsElementNamed("chain_seeds")) {
+        Rcpp::NumericVector cs = Rcpp::as<Rcpp::NumericVector>(data_list["chain_seeds"]);
+        chain_seeds.reserve(cs.size());
+        for (int c = 0; c < cs.size(); c++)
+            chain_seeds.push_back(static_cast<unsigned int>(cs[c]));
+    }
+    if (chain_seeds.empty()) chain_seeds.push_back(seed);
+    const int n_chains = static_cast<int>(chain_seeds.size());
+
+    // Across-chain core budget. Bounds the OpenMP team so it stays the same
+    // size across successive fits in one session; a team that grows then
+    // shrinks corrupts the GOMP thread pool and faults at process teardown
+    // on Windows.
+    int n_cores = data_list.containsElementNamed("n_cores") ?
+                  Rcpp::as<int>(data_list["n_cores"]) : 1;
+    if (n_cores < 1) n_cores = 1;
 
     // Map family string
     GibbsFamily family;
@@ -127,53 +190,62 @@ Rcpp::List cpp_gibbs_spatial(Rcpp::List data_list) {
         Rcpp::Rcout << "Running Gibbs sampler (" << (is_bym2 ? "BYM2" : "ICAR") << ")..." << std::endl;
         Rcpp::Rcout << "  Sites: " << S << ", Observations: " << N << std::endl;
         Rcpp::Rcout << "  Iterations: " << n_iter << " (warmup: " << n_warmup << ")" << std::endl;
+        Rcpp::Rcout << "  Chains: " << n_chains << std::endl;
         if (is_bym2) Rcpp::Rcout << "  BYM2 scale factor: " << d.bym2_scale << std::endl;
     }
 
-    GibbsResult res = is_bym2 ?
-        run_gibbs_bym2(d, n_iter, n_warmup, thin, seed, verbose) :
-        run_gibbs_icar(d, n_iter, n_warmup, thin, seed, verbose);
+    // `d` is read-only for the duration of the sampler: build_site_obs_map and
+    // build_time_obs_map are the only writers and both ran above, so a single
+    // const view is shared safely across chains. Every other piece of sampler
+    // state, including the RNG, is function-local to run_gibbs_*.
+    const GibbsData& d_shared = d;
+    std::vector<GibbsResult> chain_res(n_chains);
+
+#ifdef _OPENMP
+    if (n_chains > 1) {
+        const int team_size = std::min(n_chains, n_cores);
+        // verbose is forced off inside the region: the progress blocks in
+        // run_gibbs_* write to Rcpp::Rcout, and R's API must not be touched
+        // from a worker thread.
+        #pragma omp parallel for schedule(static) num_threads(team_size)
+        for (int c = 0; c < n_chains; c++) {
+            chain_res[c] = is_bym2 ?
+                run_gibbs_bym2(d_shared, n_iter, n_warmup, thin, chain_seeds[c], false) :
+                run_gibbs_icar(d_shared, n_iter, n_warmup, thin, chain_seeds[c], false);
+        }
+    } else {
+        chain_res[0] = is_bym2 ?
+            run_gibbs_bym2(d_shared, n_iter, n_warmup, thin, chain_seeds[0], verbose) :
+            run_gibbs_icar(d_shared, n_iter, n_warmup, thin, chain_seeds[0], verbose);
+    }
+#else
+    for (int c = 0; c < n_chains; c++) {
+        chain_res[c] = is_bym2 ?
+            run_gibbs_bym2(d_shared, n_iter, n_warmup, thin, chain_seeds[c], verbose) :
+            run_gibbs_icar(d_shared, n_iter, n_warmup, thin, chain_seeds[c], verbose);
+    }
+#endif
 
     if (verbose) {
         Rcpp::Rcout << "Gibbs complete." << std::endl;
-        double avg_phi_accept = 0.0;
-        for (int s = 0; s < S; s++) avg_phi_accept += res.accept_phi[s];
-        avg_phi_accept /= S;
-        Rcpp::Rcout << "  Avg phi acceptance: " << avg_phi_accept << std::endl;
-        Rcpp::Rcout << "  Beta acceptance: " << res.accept_beta << std::endl;
-        Rcpp::Rcout << "  Dispersion acceptance: " << res.accept_disp << std::endl;
-        if (d.has_tvc)
-            Rcpp::Rcout << "  TVC acceptance: " << res.accept_tvc << std::endl;
+        for (int c = 0; c < n_chains; c++) {
+            const GibbsResult& res = chain_res[c];
+            double avg_phi_accept = 0.0;
+            for (int s = 0; s < S; s++) avg_phi_accept += res.accept_phi[s];
+            avg_phi_accept /= S;
+            Rcpp::Rcout << "  Chain " << (c + 1)
+                        << ": avg phi acceptance " << avg_phi_accept
+                        << ", beta " << res.accept_beta
+                        << ", dispersion " << res.accept_disp;
+            if (d.has_tvc) Rcpp::Rcout << ", TVC " << res.accept_tvc;
+            Rcpp::Rcout << std::endl;
+        }
     }
 
-    // Convert param names
-    Rcpp::CharacterVector param_names(res.param_names.size());
-    for (size_t i = 0; i < res.param_names.size(); i++)
-        param_names[i] = res.param_names[i];
+    // Serial conversion: allocating R objects is only safe here.
+    Rcpp::List out(n_chains);
+    for (int c = 0; c < n_chains; c++)
+        out[c] = gibbs_result_to_r(chain_res[c], d, S);
 
-    // Return results
-    Rcpp::List result = Rcpp::List::create(
-        Rcpp::Named("draws") = Rcpp::NumericMatrix(res.n_save, res.n_params,
-                                                     res.draws_flat.begin()),
-        Rcpp::Named("phi_draws") = Rcpp::NumericMatrix(res.n_save, S,
-                                                        res.phi_draws_flat.begin()),
-        Rcpp::Named("param_names") = param_names,
-        Rcpp::Named("n_save") = res.n_save,
-        Rcpp::Named("n_params") = res.n_params,
-        Rcpp::Named("S") = S,
-        Rcpp::Named("accept_phi") = Rcpp::wrap(res.accept_phi),
-        Rcpp::Named("accept_beta") = res.accept_beta,
-        Rcpp::Named("accept_disp") = res.accept_disp
-    );
-
-    // TVC results
-    if (d.has_tvc && res.tvc_n_w > 0) {
-        result["tvc_w_draws"] = Rcpp::NumericMatrix(res.n_save, res.tvc_n_w,
-                                                     res.tvc_w_draws_flat.begin());
-        result["tvc_tau_draws"] = Rcpp::NumericMatrix(res.n_save, d.tvc_n_terms,
-                                                       res.tvc_tau_draws_flat.begin());
-        result["accept_tvc"] = res.accept_tvc;
-    }
-
-    return result;
+    return out;
 }

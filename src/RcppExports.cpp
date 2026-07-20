@@ -877,6 +877,43 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_gradient_check
+Rcpp::List cpp_gradient_check(std::string field, int n_obs, int n_units, int n_times, double eps, unsigned int seed, std::string mode, bool precenter, std::string family, bool temporal_shared);
+RcppExport SEXP _tulpaRatio_cpp_gradient_check(SEXP fieldSEXP, SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_timesSEXP, SEXP epsSEXP, SEXP seedSEXP, SEXP modeSEXP, SEXP precenterSEXP, SEXP familySEXP, SEXP temporal_sharedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type field(fieldSEXP);
+    Rcpp::traits::input_parameter< int >::type n_obs(n_obsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_units(n_unitsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_times(n_timesSEXP);
+    Rcpp::traits::input_parameter< double >::type eps(epsSEXP);
+    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< std::string >::type mode(modeSEXP);
+    Rcpp::traits::input_parameter< bool >::type precenter(precenterSEXP);
+    Rcpp::traits::input_parameter< std::string >::type family(familySEXP);
+    Rcpp::traits::input_parameter< bool >::type temporal_shared(temporal_sharedSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_gradient_check(field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_logpost_at
+double cpp_logpost_at(std::string field, int n_obs, int n_units, int n_times, unsigned int seed, std::string family, bool temporal_shared);
+RcppExport SEXP _tulpaRatio_cpp_logpost_at(SEXP fieldSEXP, SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_timesSEXP, SEXP seedSEXP, SEXP familySEXP, SEXP temporal_sharedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type field(fieldSEXP);
+    Rcpp::traits::input_parameter< int >::type n_obs(n_obsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_units(n_unitsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_times(n_timesSEXP);
+    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< std::string >::type family(familySEXP);
+    Rcpp::traits::input_parameter< bool >::type temporal_shared(temporal_sharedSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_logpost_at(field, n_obs, n_units, n_times, seed, family, temporal_shared));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_test_leapfrog
 List cpp_test_leapfrog(NumericVector q_init, NumericVector p_init, double epsilon, int L);
 RcppExport SEXP _tulpaRatio_cpp_test_leapfrog(SEXP q_initSEXP, SEXP p_initSEXP, SEXP epsilonSEXP, SEXP LSEXP) {
@@ -1900,6 +1937,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_rpg", (DL_FUNC) &_tulpaRatio_cpp_rpg, 2},
     {"_tulpaRatio_cpp_sghmc_fit", (DL_FUNC) &_tulpaRatio_cpp_sghmc_fit, 22},
     {"_tulpaRatio_cpp_sgld_fit", (DL_FUNC) &_tulpaRatio_cpp_sgld_fit, 24},
+    {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 10},
+    {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 7},
     {"_tulpaRatio_cpp_test_leapfrog", (DL_FUNC) &_tulpaRatio_cpp_test_leapfrog, 4},
     {"_tulpaRatio_cpp_test_hamiltonian", (DL_FUNC) &_tulpaRatio_cpp_test_hamiltonian, 2},
     {"_tulpaRatio_cpp_test_log_sum_exp", (DL_FUNC) &_tulpaRatio_cpp_test_log_sum_exp, 1},

@@ -63,6 +63,11 @@ test_that("B1d spec path matches legacy for ICAR (group-level)", {
 
 test_that("B1d spec path matches legacy for BYM2 (group-level)", {
   skip_on_cran()
+  # The legacy path now applies a hard sum-to-zero constraint; the spec path
+  # delegates to tulpa::compute_log_post_generic, which still penalises
+  # sum(phi) with 0.01 read as a precision. Only one of the two engines has
+  # been corrected, so the equivalence assertion is expected to fail.
+  skip("blocked on gcol33/tulpa#241")
   sim <- simulate_spatial_binomial()
   sp  <- tulpaRatio::spatial_bym2(adjacency = sim$adj, level = "group",
                                    group_var = "unit",

@@ -64,7 +64,7 @@ make_mock_fit <- function(n_draws = 100, n_params = 5, n_chains = 1, backend = "
 test_that("mcmc_diagnostics returns diagnostics data frame", {
   fit <- make_mock_fit()
 
-  diag <- mcmc_diagnostics(fit)
+  diag <- diagnostics(fit)
 
   expect_s3_class(diag, "data.frame")
   expect_true("parameter" %in% names(diag))
@@ -94,7 +94,7 @@ test_that("mcmc_diagnostics is per-parameter on a well-mixed multi-chain fit", {
     class = "ratiod_fit"
   )
 
-  diag <- mcmc_diagnostics(fit)
+  diag <- diagnostics(fit)
 
   expect_equal(diag$parameter, par_names)
   expect_true(all(diag$rhat < 1.05))

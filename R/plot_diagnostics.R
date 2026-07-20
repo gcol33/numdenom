@@ -67,7 +67,7 @@ theme_ratiod <- function() {
 #' # plot_rhat(fit)
 #' }
 #'
-#' @seealso [plot_ess()], [diagnostic_summary()], [mcmc_diagnostics()]
+#' @seealso [plot_ess()], [diagnostic_summary()], [diagnostics()]
 #' @export
 plot_rhat <- function(fit, threshold = 1.01, pars = NULL) {
   if (!inherits(fit, "ratiod_fit")) {
@@ -76,7 +76,7 @@ plot_rhat <- function(fit, threshold = 1.01, pars = NULL) {
 
   # Get diagnostics
 
-  diag <- mcmc_diagnostics(fit, pars = pars)
+  diag <- diagnostics(fit, pars = pars)
 
   # Filter to main parameters if not specified
   if (is.null(pars)) {
@@ -184,7 +184,7 @@ plot_rhat_base <- function(diag, threshold) {
 #' # plot_ess(fit)
 #' # plot_ess(fit, type = "tail")
 #'
-#' @seealso [plot_rhat()], [diagnostic_summary()], [mcmc_diagnostics()]
+#' @seealso [plot_rhat()], [diagnostic_summary()], [diagnostics()]
 #' @export
 plot_ess <- function(fit, type = c("bulk", "tail"), threshold = 400, pars = NULL) {
   if (!inherits(fit, "ratiod_fit")) {
@@ -194,7 +194,7 @@ plot_ess <- function(fit, type = c("bulk", "tail"), threshold = 400, pars = NULL
   type <- match.arg(type)
 
   # Get diagnostics
-  diag <- mcmc_diagnostics(fit, pars = pars)
+  diag <- diagnostics(fit, pars = pars)
 
   # Filter to main parameters if not specified
   if (is.null(pars)) {
@@ -299,7 +299,7 @@ plot_ess_base <- function(diag, threshold, type) {
 #' # plot_acf(fit)
 #' # plot_acf(fit, pars = c("beta_num[1]", "sigma_re"))
 #'
-#' @seealso [plot_ess()], [mcmc_diagnostics()]
+#' @seealso [plot_ess()], [diagnostics()]
 #' @export
 plot_acf <- function(fit, pars = NULL, lags = 25, n_pars = 6) {
   if (!inherits(fit, "ratiod_fit")) {
@@ -315,7 +315,7 @@ plot_acf <- function(fit, pars = NULL, lags = 25, n_pars = 6) {
   # Select parameters
   if (is.null(pars)) {
     # Select worst ESS parameters
-    diag <- mcmc_diagnostics(fit)
+    diag <- diagnostics(fit)
     main_pars <- select_main_params(diag$parameter)
     diag <- diag[diag$parameter %in% main_pars, ]
     diag <- diag[order(diag$ess_bulk), ]
@@ -422,7 +422,7 @@ plot_acf_base <- function(draws, pars, lags) {
 #' # plot_pairs(fit)
 #' # plot_pairs(fit, pars = c("sigma_re", "phi_num", "phi_denom"))
 #'
-#' @seealso [plot_divergences()], [mcmc_diagnostics()]
+#' @seealso [plot_divergences()], [diagnostics()]
 #' @export
 plot_pairs <- function(fit, pars = NULL, highlight_divergent = TRUE,
                        n_pars = 5, alpha = 0.3) {
@@ -893,7 +893,7 @@ plot_energy_base <- function(energy, energy_diff, e_bfmi, status) {
 #' # ds <- diagnostic_summary(fit)
 #' # print(ds)
 #'
-#' @seealso [check_diagnostics()], [mcmc_diagnostics()], [plot_diagnostics()]
+#' @seealso [check_diagnostics()], [diagnostics()], [plot_diagnostics()]
 #' @export
 diagnostic_summary <- function(fit, quiet = FALSE) {
   if (!inherits(fit, "ratiod_fit")) {
@@ -918,7 +918,7 @@ diagnostic_summary <- function(fit, quiet = FALSE) {
 
   # Get MCMC diagnostics
   if (backend %in% c("hmc", "pg")) {
-    diag <- tryCatch(mcmc_diagnostics(fit), error = function(e) NULL)
+    diag <- tryCatch(diagnostics(fit), error = function(e) NULL)
 
     if (!is.null(diag)) {
       # Filter to main parameters
@@ -1138,7 +1138,7 @@ plot_diagnostics <- function(fit, pars = NULL) {
   p_ess <- plot_ess(fit) + ggplot2::ggtitle("ESS (bulk)")
 
   # Trace plot for worst parameter
-  diag <- tryCatch(mcmc_diagnostics(fit), error = function(e) NULL)
+  diag <- tryCatch(diagnostics(fit), error = function(e) NULL)
   if (!is.null(diag)) {
     main_pars <- select_main_params(diag$parameter)
     diag <- diag[diag$parameter %in% main_pars, ]
@@ -1211,7 +1211,7 @@ plot_diagnostics <- function(fit, pars = NULL) {
 #' # See plot_rhat() examples for fitting a model
 #' # geweke_test(fit)
 #'
-#' @seealso [mcmc_diagnostics()], [check_diagnostics()]
+#' @seealso [diagnostics()], [check_diagnostics()]
 #' @export
 geweke_test <- function(fit, frac1 = 0.1, frac2 = 0.5, pars = NULL) {
   if (!inherits(fit, "ratiod_fit")) {

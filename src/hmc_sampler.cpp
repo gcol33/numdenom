@@ -10,6 +10,8 @@
 #include "autodiff_utils.h"
 #include "hmc_gp_autodiff.h"
 #include "hmc_gp_collapsed.h"
+#include "soft_sum_to_zero.h"
+#include "spatial_field_constraint.h"
 #include "hmc_icar_collapsed.h"
 #include "hmc_temporal_autodiff.h"
 #include "hmc_tvc_grad.h"
@@ -765,13 +767,27 @@ static thread_local CollapsedICARWorkspace collapsed_icar_ws;
 // =====================================================================
 
 double compute_log_post(
-    const std::vector<double>& params,
+    const std::vector<double>& params_in,
     const ModelData& data,
     const ParamLayout& layout,
     bool skip_obs_loop,
     const double* precomputed_st_log_prior,
     const double* precomputed_tgp_log_prior
 ) {
+  // Hard sum-to-zero: centre the spatial block once, here, so every reader
+  // below sees the constrained field. phi_raw_sum carries the freed constant
+  // direction into the prior. See spatial_field_constraint.h.
+  std::vector<double> params_centered;
+  double phi_raw_sum = 0.0;
+  const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
+                              && !data.icar_collapsed && !data.bym2_collapsed;
+  if (center_spatial) {
+    params_centered = params_in;
+    phi_raw_sum = ratiod_constraints::center_spatial_block(
+        params_centered, layout.spatial_start, data.n_spatial_units);
+  }
+  const std::vector<double>& params = center_spatial ? params_centered : params_in;
+
   // Extract parameters
   const double* beta_num = &params[layout.beta_num_start];
   const double* beta_denom = &params[layout.beta_denom_start];
@@ -1051,16 +1067,11 @@ double compute_log_post(
 
       if (!data.bym2_collapsed) {
         // Standard: phi/theta are explicit params
-        // phi_scaled ~ N(0, Q^{-1}) with soft sum-to-zero
+        // phi_scaled ~ N(0, (Q + 11'/J)^{-1}); the likelihood sees phi centred,
+        // so the constant direction is a free draw at the field's own scale.
         std::vector<double> phi_vec(phi_spatial, phi_spatial + J);
         double quad = icar_quadratic_form(phi_vec, data);
-        log_post -= 0.5 * quad;
-
-        {
-          double phi_sum = 0.0;
-          for (int j = 0; j < J; j++) phi_sum += phi_spatial[j];
-          log_post -= 0.5 * 0.01 * phi_sum * phi_sum;
-        }
+        log_post -= 0.5 * (quad + ratiod_constraints::free_direction_quad(phi_raw_sum, J));
 
         // theta ~ N(0, I)
         for (int j = 0; j < J; j++) {
@@ -1075,11 +1086,15 @@ double compute_log_post(
                 - data.tau_spatial_rate * tau_spatial + log_tau_spatial;
 
       if (!data.icar_collapsed) {
-        // Standard: phi is explicit param
-        // phi ~ ICAR(tau): p(phi|tau) propto tau^{(J-1)/2} exp(-0.5 * tau * phi'Qphi)
+        // Standard: phi is explicit param.
+        // phi_raw ~ N(0, (tau*(Q + 11'/J))^{-1}), full rank, so the exponent
+        // on tau is J/2 rather than (J-1)/2. The likelihood sees phi centred,
+        // which identifies the intercept exactly.
         std::vector<double> phi_vec(phi_spatial, phi_spatial + J);
         double quad = icar_quadratic_form(phi_vec, data);
-        log_post += 0.5 * (J - 1) * log_tau_spatial - 0.5 * tau_spatial * quad;
+        log_post += 0.5 * J * log_tau_spatial
+                  - 0.5 * tau_spatial
+                        * (quad + ratiod_constraints::free_direction_quad(phi_raw_sum, J));
       }
       // Collapsed: ICAR prior on phi* + 0.5*(J-1)*log(tau) already in collapsed_lp above
     }
@@ -1225,14 +1240,14 @@ double compute_log_post(
           int rank = data.temporal_cyclic ? T : T - 1;
           log_post += 0.5 * rank * log_tau_temporal - 0.5 * tau_temporal * quad;
           // Soft sum-to-zero constraint
-          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, 0.001);
+          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, ratiod_constraints::s2z_precision(T));
 
         } else if (data.temporal_type == TemporalType::RW2) {
           double quad = ratiod_temporal::rw2_quadratic_form(phi_g, T, data.temporal_cyclic);
           int rank = data.temporal_cyclic ? T : T - 2;
           log_post += 0.5 * rank * log_tau_temporal - 0.5 * tau_temporal * quad;
           // Soft sum-to-zero constraint
-          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, 0.001);
+          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, ratiod_constraints::s2z_precision(T));
 
         } else if (data.temporal_type == TemporalType::AR1) {
           log_post += ratiod_temporal::ar1_log_density(phi_g, T, rho_ar1, tau_temporal);
@@ -2382,12 +2397,27 @@ static inline void spatial_gmrf_prior_grad(
     double* grad);
 
 void compute_gradient_analytical(
-    const std::vector<double>& params,
+    const std::vector<double>& params_in,
     const ModelData& data,
     const ParamLayout& layout,
     std::vector<double>& grad,
     double* log_post_out = nullptr
 ) {
+  // Centre the spatial block once, matching compute_log_post. The vectorized
+  // fast paths index params directly, so centring here is what makes them see
+  // the constrained field. The returned gradient is with respect to the raw
+  // parameters, which is why the spatial likelihood gradient is projected below.
+  std::vector<double> params_centered;
+  double phi_raw_sum = 0.0;
+  const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
+                              && !data.icar_collapsed && !data.bym2_collapsed;
+  if (center_spatial) {
+    params_centered = params_in;
+    phi_raw_sum = ratiod_constraints::center_spatial_block(
+        params_centered, layout.spatial_start, data.n_spatial_units);
+  }
+  const std::vector<double>& params = center_spatial ? params_centered : params_in;
+
   int n_params = params.size();
   grad.assign(n_params, 0.0);
 
@@ -2979,6 +3009,20 @@ void compute_gradient_analytical(
   double grad_phi_denom_lik = 0.0;
 
   #ifdef _OPENMP
+  // Per-thread partial sums, reduced afterwards in thread-index order rather
+  // than in a critical section: a critical section sums in thread-arrival
+  // order, which varies from run to run. The team size is left at the default
+  // and the buffer sized by omp_get_max_threads(); pinning it per fit would
+  // make the team grow and shrink across successive fits in one session,
+  // which corrupts the GOMP pool and faults at teardown on Windows.
+  const int grad_team = std::max(1, omp_get_max_threads());
+  const int red_n_re = layout.has_re ? data.n_re_groups : 0;
+  const int red_n_re_crossed =
+      (layout.has_re && data.n_re_terms > 1) ? data.total_re_groups : 0;
+  const int red_stride = data.p_num + data.p_denom + 2 + red_n_re +
+                         red_n_re_crossed + 1;
+  std::vector<double> red_partials((size_t)grad_team * red_stride, 0.0);
+
   #pragma omp parallel
   {
     std::vector<double> local_grad_beta_num(data.p_num, 0.0);
@@ -3799,34 +3843,43 @@ void compute_gradient_analytical(
     }
 
   #ifdef _OPENMP
-    // Reduce local accumulators
-    #pragma omp critical
+    // Park this thread's partials; the reduction runs serially below.
     {
-      for (int j = 0; j < data.p_num; j++) {
-        grad_beta_num[j] += local_grad_beta_num[j];
-      }
-      for (int j = 0; j < data.p_denom; j++) {
-        grad_beta_denom[j] += local_grad_beta_denom[j];
-      }
-      grad_phi_num_lik += local_grad_phi_num;
-      grad_phi_denom_lik += local_grad_phi_denom;
-      for (int g = 0; g < (int)local_grad_re.size(); g++) {
-        grad[layout.re_start + g] += local_grad_re[g];
-      }
-      // Reduce crossed RE thread-local buffers to scattered grad positions
-      // Only for crossed intercept-only RE (n_re_terms > 1, not slopes)
-      if (!local_grad_re_crossed.empty()) {
-        for (int t = 0; t < (int)data.re_n_groups_multi.size(); t++) {
-          int re_start_t = layout.re_start_multi[t];
-          int offset_t = data.re_offsets[t];
-          for (int g = 0; g < data.re_n_groups_multi[t]; g++) {
-            grad[re_start_t + g] += local_grad_re_crossed[offset_t + g];
-          }
-        }
-      }
-      obs_log_lik += local_obs_ll;
+      double* slot = &red_partials[(size_t)omp_get_thread_num() * red_stride];
+      int off = 0;
+      for (int j = 0; j < data.p_num; j++) slot[off++] = local_grad_beta_num[j];
+      for (int j = 0; j < data.p_denom; j++) slot[off++] = local_grad_beta_denom[j];
+      slot[off++] = local_grad_phi_num;
+      slot[off++] = local_grad_phi_denom;
+      for (int g = 0; g < red_n_re; g++) slot[off++] = local_grad_re[g];
+      for (int g = 0; g < red_n_re_crossed; g++) slot[off++] = local_grad_re_crossed[g];
+      slot[off] = local_obs_ll;
     }
   }  // end parallel
+
+  // Deterministic reduction: thread-index order, fixed team size.
+  for (int th = 0; th < grad_team; th++) {
+    const double* slot = &red_partials[(size_t)th * red_stride];
+    int off = 0;
+    for (int j = 0; j < data.p_num; j++) grad_beta_num[j] += slot[off++];
+    for (int j = 0; j < data.p_denom; j++) grad_beta_denom[j] += slot[off++];
+    grad_phi_num_lik += slot[off++];
+    grad_phi_denom_lik += slot[off++];
+    for (int g = 0; g < red_n_re; g++) grad[layout.re_start + g] += slot[off++];
+    // Crossed intercept-only RE (n_re_terms > 1, not slopes) scatter to
+    // non-contiguous grad positions.
+    if (red_n_re_crossed > 0) {
+      for (int t = 0; t < (int)data.re_n_groups_multi.size(); t++) {
+        int re_start_t = layout.re_start_multi[t];
+        int offset_t = data.re_offsets[t];
+        for (int g = 0; g < data.re_n_groups_multi[t]; g++) {
+          grad[re_start_t + g] += slot[off + offset_t + g];
+        }
+      }
+    }
+    off += red_n_re_crossed;
+    obs_log_lik += slot[off];
+  }
   #endif
 
   // Add likelihood gradients to total
@@ -3995,19 +4048,27 @@ void compute_gradient_analytical(
 
   // ============ Spatial GMRF prior gradients (ICAR and BYM2) ============
   if (layout.has_spatial && n_spatial > 0) {
-    // Add likelihood contribution to phi_spatial gradients
+    // The likelihood sees the centred field, so its gradient with respect to
+    // the raw parameters is the projection (I - 11'/n). Applied here only:
+    // d(eta)/d(sigma_bym2) is a function of the centred field with no such
+    // projection, so grad_spatial_lik itself must stay unprojected.
+    double glik_mean = 0.0;
+    if (center_spatial) {
+      for (int s = 0; s < n_spatial; s++) glik_mean += grad_spatial_lik[s];
+      glik_mean /= static_cast<double>(n_spatial);
+    }
     for (int s = 0; s < n_spatial; s++) {
-      grad[layout.spatial_start + s] = grad_spatial_lik[s];
+      grad[layout.spatial_start + s] = grad_spatial_lik[s] - glik_mean;
     }
 
     // ICAR prior: -0.5 * tau * phi' * Q * phi where Q_ij = n_neighbors[i] if i=j, -1 if i~j
     // d/d(phi[i]) = -tau * (n_neighbors[i]*phi[i] - sum_{j~i} phi[j])
     double icar_quad = 0.0;
-    // BYM2 soft sum-to-zero: -0.01 * sum(phi)
-    double bym2_phi_sum = 0.0;
-    if (data.spatial_type == SpatialType::BYM2) {
-      for (int i = 0; i < n_spatial; i++) bym2_phi_sum += phi_spatial[i];
-    }
+    // Gradient of the freed constant direction; see spatial_field_constraint.h.
+    const double free_scale =
+        (data.spatial_type == SpatialType::BYM2) ? 1.0 : tau_spatial;
+    const double free_grad =
+        ratiod_constraints::free_direction_grad(phi_raw_sum, n_spatial, free_scale);
     for (int i = 0; i < n_spatial; i++) {
       double Qphi_i = data.n_neighbors[i] * phi_spatial[i];
       int row_start = data.adj_row_ptr[i];
@@ -4023,11 +4084,10 @@ void compute_gradient_analytical(
 
       if (data.spatial_type == SpatialType::BYM2) {
         // For BYM2, ICAR prior has no tau scaling (it's absorbed into sigma/rho)
-        // + soft sum-to-zero gradient
-        grad[layout.spatial_start + i] += -Qphi_i - 0.01 * bym2_phi_sum;
+        grad[layout.spatial_start + i] += -Qphi_i + free_grad;
       } else {
         // For plain ICAR
-        grad[layout.spatial_start + i] += -tau_spatial * Qphi_i;
+        grad[layout.spatial_start + i] += -tau_spatial * Qphi_i + free_grad;
       }
     }
 
@@ -4052,10 +4112,12 @@ void compute_gradient_analytical(
                                                   - rho_bym2 * grad_sigma_u_lik);
 
     } else {
-      // Plain ICAR: tau gradient
-      // log_post = 0.5*(n-1)*log(tau) - 0.5*tau*quad + const
-      // d/d(log_tau) = 0.5*(n-1) - 0.5*tau*quad
-      grad[layout.log_tau_spatial_idx] += 0.5 * (n_spatial - 1) - 0.5 * tau_spatial * icar_quad;
+      // Plain ICAR: tau gradient. (Q + 11'/J) is full rank, so the exponent on
+      // tau is n/2 and the quadratic form carries the freed direction.
+      // log_post = 0.5*n*log(tau) - 0.5*tau*(quad + sum^2/n) + const
+      const double quad_full =
+          icar_quad + ratiod_constraints::free_direction_quad(phi_raw_sum, n_spatial);
+      grad[layout.log_tau_spatial_idx] += 0.5 * n_spatial - 0.5 * tau_spatial * quad_full;
     }
   }
 
@@ -4674,7 +4736,7 @@ static inline void temporal_gmrf_prior_grad(
             }
             total_qf += qf;
             total_rank += data.temporal_cyclic ? T : T - 1;
-            temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad);
+            temporal_sum_to_zero_grad(phi_g, T, base, ratiod_constraints::s2z_precision(T), grad);
         }
         grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
 
@@ -4709,7 +4771,7 @@ static inline void temporal_gmrf_prior_grad(
             }
             total_qf += qf;
             total_rank += data.temporal_cyclic ? T : T - 2;
-            temporal_sum_to_zero_grad(phi_g, T, base, 0.001, grad);
+            temporal_sum_to_zero_grad(phi_g, T, base, ratiod_constraints::s2z_precision(T), grad);
         }
         grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
 
@@ -4804,7 +4866,7 @@ static inline void spatial_gmrf_prior_grad(
 ) {
     int S = data.n_spatial_units;
     if (layout.is_bym2) {
-        // Soft sum-to-zero gradient: -0.01 * sum(phi) for each phi[s]
+        // Soft sum-to-zero gradient: -precision * sum(phi) for each phi[s]
         double phi_sum = 0.0;
         for (int s = 0; s < S; s++) phi_sum += spatial_phi[s];
         for (int s = 0; s < S; s++) {
@@ -4813,7 +4875,7 @@ static inline void spatial_gmrf_prior_grad(
                 int j = data.adj_col_idx[idx];
                 icar_grad += (spatial_phi[j] - spatial_phi[s]);
             }
-            grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad - 0.01 * phi_sum;
+            grad[layout.spatial_start + s] = grad_spatial_lik[s] * sigma_s_bym2 * data.bym2_scale_factor + icar_grad - ratiod_constraints::s2z_precision(S) * phi_sum;
             grad[layout.theta_bym2_start + s] = grad_theta_lik[s] * sigma_u_bym2 - theta_bym2[s];
         }
         double grad_sigma_s_lik = 0.0, grad_sigma_u_lik = 0.0;
@@ -4825,13 +4887,17 @@ static inline void spatial_gmrf_prior_grad(
         grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
                                                     - rho_bym2 * grad_sigma_u_lik);
     } else {
+        // Matches the soft sum-to-zero term in the ICAR log posterior.
+        double phi_sum = 0.0;
+        for (int s = 0; s < S; s++) phi_sum += spatial_phi[s];
+        const double s2z = ratiod_constraints::s2z_precision(S);
         for (int s = 0; s < S; s++) {
             double icar_grad = 0.0;
             for (int idx = data.adj_row_ptr[s]; idx < data.adj_row_ptr[s + 1]; idx++) {
                 int j = data.adj_col_idx[idx];
                 icar_grad += tau_spatial * (spatial_phi[j] - spatial_phi[s]);
             }
-            grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad;
+            grad[layout.spatial_start + s] = grad_spatial_lik[s] + icar_grad - s2z * phi_sum;
         }
         double icar_qf = icar_quadratic_form_ptr(spatial_phi, S, data);
         grad[layout.log_tau_spatial_idx] += 0.5 * (S - 1) - 0.5 * tau_spatial * icar_qf;
@@ -5473,7 +5539,7 @@ void compute_gradient_icar_collapsed(
             collapsed_icar_ws, beta_num, beta_denom,
             tau, phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, layout, n_params);
+            data, layout, n_params, ratiod_constraints::s2z_precision(data.n_spatial_units));
 
         if (laplace_result.success) {
             for (int j = 0; j < n_params; j++) {
@@ -5682,7 +5748,7 @@ void compute_gradient_icar_collapsed(
             a, c_bym2, rho,
             phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, layout, n_params);
+            data, layout, n_params, ratiod_constraints::s2z_precision(data.n_spatial_units));
 
         if (laplace_result.success) {
             for (int j = 0; j < n_params; j++) {

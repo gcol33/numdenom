@@ -13,6 +13,8 @@ fit_gibbs(
   iter = 2000,
   warmup = floor(iter/2),
   thin = 1,
+  chains = 4,
+  cores = NULL,
   seed = NULL,
   verbose = TRUE
 )
@@ -31,6 +33,10 @@ fit_gibbs(
 \item{warmup}{Warmup iterations}
 
 \item{thin}{Thinning interval}
+
+\item{chains}{Number of independent chains}
+
+\item{cores}{Number of cores used to run chains in parallel}
 
 \item{seed}{Random seed}
 

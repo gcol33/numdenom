@@ -435,6 +435,7 @@ ratiod <- function(formula,
       warmup = warmup,
       thin = thin,
       chains = chains,
+      cores = cores,
       seed = seed,
       verbose = verbose
     )
@@ -961,7 +962,7 @@ summary.ratiod_fit <- function(object, prob = 0.95, ...) {
   # Add diagnostics for MCMC backends
   if (backend %in% c("hmc", "pg", "sghmc", "sgld", "ess")) {
     diag <- tryCatch(
-      mcmc_diagnostics(object),
+      diagnostics(object),
       error = function(e) NULL
     )
     if (!is.null(diag)) {
@@ -1398,12 +1399,12 @@ plot_with_base <- function(draws_array, type, n_chains, n_col = NULL) {
 }
 
 
-#' Compute MCMC diagnostics (Rhat, ESS) for ratiod_fit
+#' Posterior diagnostics for a ratiod_fit
 #'
 #' @description
 #' Computes per-parameter improved Rhat and bulk / tail effective sample size
-#' by delegating to the engine's [tulpa::mcmc_diagnostics()], the single source
-#' of truth for convergence diagnostics in the tulpa ecosystem. Works with all
+#' by delegating to the engine's [tulpa::diagnostics()], the single source of
+#' truth for convergence diagnostics in the tulpa ecosystem. Works with all
 #' backends.
 #'
 #' @param fit A ratiod_fit object
@@ -1417,12 +1418,9 @@ plot_with_base <- function(draws_array, type, n_chains, n_col = NULL) {
 #' single chain (the chain is split in half), so single-chain fits also get a
 #' value.
 #'
-#' @export
-mcmc_diagnostics <- function(fit, pars = NULL) {
-  if (!inherits(fit, "ratiod_fit")) {
-    stop("fit must be a ratiod_fit object", call. = FALSE)
-  }
-
+#' @param ... Ignored.
+#' @exportS3Method tulpa::diagnostics
+diagnostics.ratiod_fit <- function(fit, pars = NULL, ...) {
   # Get draws in array format
   draws_info <- get_draws_array(fit)
   draws_array <- draws_info$draws
@@ -1436,11 +1434,30 @@ mcmc_diagnostics <- function(fit, pars = NULL) {
 
   # The engine reads the [iteration, chain, parameter] layout directly and
   # computes each statistic per parameter.
-  result <- tulpa::mcmc_diagnostics(list(draws = draws_array))
+  result <- tulpa::diagnostics(list(draws = draws_array))
   if (is.null(result)) return(NULL)
 
   class(result) <- c("ratiod_diagnostics", "data.frame")
   return(result)
+}
+
+#' Compute MCMC diagnostics (Rhat, ESS) for ratiod_fit
+#'
+#' @description
+#' `r lifecycle::badge("deprecated")`
+#'
+#' Use [diagnostics()]. The engine reports approximation reliability rather
+#' than chain mixing for deterministic fits, so the name described only one of
+#' the two answers it can return.
+#'
+#' @param fit A ratiod_fit object
+#' @param pars Character vector of parameter names (default: all).
+#' @return The value of [tulpa::diagnostics()] for `fit`.
+#' @keywords internal
+#' @export
+mcmc_diagnostics <- function(fit, pars = NULL) {
+  lifecycle::deprecate_warn("0.1.1", "mcmc_diagnostics()", "diagnostics()")
+  diagnostics(fit, pars = pars)
 }
 
 
@@ -1520,7 +1537,7 @@ check_diagnostics <- function(fit, quiet = FALSE) {
 
   if (backend %in% c("hmc", "pg", "sghmc", "sgld", "ess")) {
     mcmc_diag <- tryCatch(
-      mcmc_diagnostics(fit, pars = NULL),
+      diagnostics(fit, pars = NULL),
       error = function(e) NULL
     )
 

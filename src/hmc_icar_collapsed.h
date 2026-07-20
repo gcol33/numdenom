@@ -18,6 +18,8 @@
 #ifndef ratiod_hmc_ICAR_COLLAPSED_H
 #define ratiod_hmc_ICAR_COLLAPSED_H
 
+#include "soft_sum_to_zero.h"
+
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -148,7 +150,7 @@ inline void icar_hessian_matvec(
     const CollapsedICARWorkspace& ws,
     double tau,
     const ModelData& data,
-    double lambda_s2z = 0.001  // sum-to-zero penalty strength
+    double lambda_s2z  // sum-to-zero precision; see soft_sum_to_zero.h
 ) {
     int S = ws.S;
 
@@ -178,7 +180,7 @@ inline void bym2_hessian_matvec(
     double a,                  // sigma_s * scale = sigma_total * sqrt(rho) * scale
     double c,                  // sigma_u = sigma_total * sqrt(1-rho)
     const ModelData& data,
-    double lambda_s2z = 0.001
+    double lambda_s2z
 ) {
     int S = ws.S;
     const double* v_phi = v;
@@ -227,9 +229,9 @@ inline int icar_cg_solve(
 
     // r = b - H*x
     if (ws.is_bym2) {
-        bym2_hessian_matvec(x, ws.cg_Ap.data(), ws, a, cc, data);
+        bym2_hessian_matvec(x, ws.cg_Ap.data(), ws, a, cc, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
     } else {
-        icar_hessian_matvec(x, ws.cg_Ap.data(), ws, tau, data);
+        icar_hessian_matvec(x, ws.cg_Ap.data(), ws, tau, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
     }
     for (int i = 0; i < N; i++) ws.cg_r[i] = b[i] - ws.cg_Ap[i];
 
@@ -246,9 +248,9 @@ inline int icar_cg_solve(
         if (rr / b_norm < tol * tol) return iter;
 
         if (ws.is_bym2) {
-            bym2_hessian_matvec(ws.cg_p.data(), ws.cg_Ap.data(), ws, a, cc, data);
+            bym2_hessian_matvec(ws.cg_p.data(), ws.cg_Ap.data(), ws, a, cc, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
         } else {
-            icar_hessian_matvec(ws.cg_p.data(), ws.cg_Ap.data(), ws, tau, data);
+            icar_hessian_matvec(ws.cg_p.data(), ws.cg_Ap.data(), ws, tau, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
         }
 
         double pAp = 0.0;
@@ -283,7 +285,7 @@ inline double compute_laplace_log_det_icar(
     const CollapsedICARWorkspace& ws,
     double tau,
     const ModelData& data,
-    double lambda_s2z = 0.001
+    double lambda_s2z
 ) {
     int S = ws.S;
 
@@ -340,7 +342,7 @@ inline double compute_laplace_log_det_bym2(
     const CollapsedICARWorkspace& ws,
     double a, double cc,
     const ModelData& data,
-    double lambda_s2z = 0.001
+    double lambda_s2z
 ) {
     int S = ws.S;
     int dim = 2 * S;
@@ -428,7 +430,7 @@ inline LaplaceGradICARResult compute_laplace_grad_icar(
     const CollapsedICARWorkspace& ws,
     double tau,
     const ModelData& data,
-    double lambda_s2z = 0.001
+    double lambda_s2z
 ) {
     int S = ws.S;
     LaplaceGradICARResult result = {0.0, 0.0};
@@ -514,7 +516,7 @@ inline LaplaceGradBYM2Result compute_laplace_grad_bym2(
     double a, double cc,
     double rho,
     const ModelData& data,
-    double lambda_s2z = 0.001
+    double lambda_s2z
 ) {
     int S = ws.S;
     int dim = 2 * S;
@@ -797,7 +799,7 @@ inline double collapsed_icar_find_mode(
         double sum_phi = 0.0;
         for (int i = 0; i < S; i++) sum_phi += ws.phi_star[i];
         for (int i = 0; i < S; i++) {
-            ws.grad[i] -= tau * Qphi[i] + 0.001 * sum_phi;  // ICAR + sum-to-zero
+            ws.grad[i] -= tau * Qphi[i] + ratiod_constraints::s2z_precision(S) * sum_phi;  // ICAR + sum-to-zero
         }
 
         // Check convergence
@@ -830,7 +832,7 @@ inline double collapsed_icar_find_mode(
         ws.W_data[s] = std::max(lr.neg_hess, 1e-8);  // Update for Laplace
     }
 
-    // ICAR prior: -0.5 * tau * phi' Q phi + 0.5*(S-1)*log(tau) - 0.5*0.001*(sum phi)^2
+    // ICAR prior: -0.5 * tau * phi' Q phi + 0.5*(S-1)*log(tau) - 0.5*lambda_s2z*(sum phi)^2
     icar_precision_matvec(ws.phi_star.data(), Qphi.data(), S,
                           data.adj_row_ptr, data.adj_col_idx, data.n_neighbors);
     double phiQphi = 0.0;
@@ -838,10 +840,10 @@ inline double collapsed_icar_find_mode(
     double sum_phi = 0.0;
     for (int i = 0; i < S; i++) sum_phi += ws.phi_star[i];
     double icar_prior = -0.5 * tau * phiQphi + 0.5 * (S - 1) * std::log(tau)
-                        - 0.5 * 0.001 * sum_phi * sum_phi;
+                        - 0.5 * ratiod_constraints::s2z_precision(S) * sum_phi * sum_phi;
 
     // Laplace correction
-    ws.laplace_log_det = compute_laplace_log_det_icar(ws, tau, data);
+    ws.laplace_log_det = compute_laplace_log_det_icar(ws, tau, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
 
     return data_ll + icar_prior;
 }
@@ -930,7 +932,7 @@ inline double collapsed_bym2_find_mode(
         double sum_phi = 0.0;
         for (int i = 0; i < S; i++) sum_phi += inner[i];
         for (int i = 0; i < S; i++) {
-            ws.grad[i] -= Qphi[i] + 0.001 * sum_phi;  // ICAR + sum-to-zero
+            ws.grad[i] -= Qphi[i] + ratiod_constraints::s2z_precision(S) * sum_phi;  // ICAR + sum-to-zero
         }
         // theta: IID N(0,1) → gradient = -theta
         for (int i = 0; i < S; i++) {
@@ -973,7 +975,7 @@ inline double collapsed_bym2_find_mode(
         ws.W_data[s] = std::max(lr.neg_hess, 1e-8);
     }
 
-    // ICAR prior on phi: -0.5 * phi' Q phi - 0.5*0.001*(sum phi)^2
+    // ICAR prior on phi: -0.5 * phi' Q phi - 0.5*lambda_s2z*(sum phi)^2
     icar_precision_matvec(ws.phi_star.data(), Qphi.data(), S,
                           data.adj_row_ptr, data.adj_col_idx, data.n_neighbors);
     double phiQphi = 0.0;
@@ -982,7 +984,8 @@ inline double collapsed_bym2_find_mode(
         phiQphi += ws.phi_star[i] * Qphi[i];
         sum_phi += ws.phi_star[i];
     }
-    double phi_prior = -0.5 * phiQphi - 0.5 * 0.001 * sum_phi * sum_phi;
+    double phi_prior = -0.5 * phiQphi
+                     - 0.5 * ratiod_constraints::s2z_precision(S) * sum_phi * sum_phi;
 
     // IID prior on theta: -0.5 * sum(theta^2)
     double theta_prior = 0.0;
@@ -991,7 +994,7 @@ inline double collapsed_bym2_find_mode(
     }
 
     // Laplace correction
-    ws.laplace_log_det = compute_laplace_log_det_bym2(ws, a, c, data);
+    ws.laplace_log_det = compute_laplace_log_det_bym2(ws, a, c, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
 
     return data_ll + phi_prior + theta_prior;
 }
@@ -1149,7 +1152,7 @@ inline double laplace_log_det_icar_full(
         double sum_phi = 0.0;
         for (int i = 0; i < S; i++) sum_phi += temp_ws.phi_star[i];
         for (int i = 0; i < S; i++) {
-            temp_ws.grad[i] -= tau * Qphi[i] + 0.001 * sum_phi;
+            temp_ws.grad[i] -= tau * Qphi[i] + ratiod_constraints::s2z_precision(S) * sum_phi;
         }
 
         double grad_norm = 0.0;
@@ -1173,7 +1176,7 @@ inline double laplace_log_det_icar_full(
         temp_ws.W_data[s] = std::max(lr.neg_hess, 1e-8);
     }
 
-    return compute_laplace_log_det_icar(temp_ws, tau, data);
+    return compute_laplace_log_det_icar(temp_ws, tau, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
 }
 
 // BYM2 version of full Laplace log-det with Newton
@@ -1235,7 +1238,7 @@ inline double laplace_log_det_bym2_full(
         double sum_phi = 0.0;
         for (int i = 0; i < S; i++) sum_phi += inner[i];
         for (int i = 0; i < S; i++) {
-            temp_ws.grad[i] -= Qphi[i] + 0.001 * sum_phi;
+            temp_ws.grad[i] -= Qphi[i] + ratiod_constraints::s2z_precision(S) * sum_phi;
             temp_ws.grad[S + i] -= inner[S + i];
         }
 
@@ -1261,7 +1264,7 @@ inline double laplace_log_det_bym2_full(
         temp_ws.W_data[s] = std::max(lr.neg_hess, 1e-8);
     }
 
-    return compute_laplace_log_det_bym2(temp_ws, a, c, data);
+    return compute_laplace_log_det_bym2(temp_ws, a, c, data, ratiod_constraints::s2z_precision(data.n_spatial_units));
 }
 
 // =========================================================================
@@ -1292,7 +1295,7 @@ inline LaplaceGradFullResult compute_laplace_gradient_icar_H(
     const ModelData& data,
     const ratiod_hmc::ParamLayout& layout,
     int n_params,
-    double lambda_s2z = 0.001
+    double lambda_s2z
 ) {
     int S = ws.S;
     int N = data.N;
@@ -1612,7 +1615,7 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
     const ModelData& data,
     const ratiod_hmc::ParamLayout& layout,
     int n_params,
-    double lambda_s2z = 0.001
+    double lambda_s2z
 ) {
     int S = ws.S;
     int dim = 2 * S;
@@ -2019,7 +2022,8 @@ inline CollapsedICARLogPostResult collapsed_icar_log_post_contribution(
             phiQphi += ws.phi_star[i] * Qphi[i];
             sum_phi += ws.phi_star[i];
         }
-        res.log_post_contribution += -0.5 * phiQphi - 0.5 * 0.001 * sum_phi * sum_phi;
+        res.log_post_contribution += -0.5 * phiQphi
+                                   - 0.5 * ratiod_constraints::s2z_precision(S) * sum_phi * sum_phi;
 
         // N(0,1) prior on theta*
         for (int i = 0; i < S; i++) {
@@ -2044,7 +2048,7 @@ inline CollapsedICARLogPostResult collapsed_icar_log_post_contribution(
         }
         res.log_post_contribution += -0.5 * tau_spatial * phiQphi
                                    + 0.5 * (S - 1) * std::log(tau_spatial)
-                                   - 0.5 * 0.001 * sum_phi * sum_phi;
+                                   - 0.5 * ratiod_constraints::s2z_precision(S) * sum_phi * sum_phi;
     }
 
     // Laplace correction: -0.5 * log det(H)

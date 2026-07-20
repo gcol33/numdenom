@@ -1,6 +1,43 @@
 # tulpaRatio (development)
 
+## 1.3.1
+
+* `diagnostics()` replaces `mcmc_diagnostics()`, following the engine rename in
+  tulpa 0.0.95. It delegates to `tulpa::diagnostics()`, which selects chain or
+  approximation diagnostics from the fit's draws provenance rather than from the
+  function's name. `mcmc_diagnostics()` is deprecated and still returns the same
+  value.
+
 ## Bug fixes
+
+* The Gibbs spatial backend runs its chains in parallel under OpenMP (#7). It
+  looped over chains in R, so a 4-chain fit cost close to four times a 1-chain
+  fit; on a 40-site binomial ICAR model that ratio drops from 3.7x to 0.94x.
+  `cores` now reaches this backend, bounded by the chain count and the machine.
+  Chain seeds are still derived in R, so a fit with a given seed returns the
+  same draws as before, and the parallel and serial paths agree bitwise.
+
+* The handcoded gradient no longer disagrees with its own log posterior when a
+  temporal effect is not shared between numerator and denominator. The
+  vectorized and fused kernels added the temporal effect to the denominator's
+  linear predictor and fed the denominator residual back into the temporal
+  gradient, both unconditionally, while `compute_log_post()` applied the effect
+  to the numerator alone. NUTS therefore sampled a density whose gradient
+  pointed elsewhere, silently, for every family with a real denominator
+  (`poisson_gamma`, `negbin_negbin`, `negbin_gamma`, `gamma_gamma`,
+  `lognormal`). Binomial models were unaffected. The gradient checks now cover
+  a continuous-denominator family with `shared = FALSE`, which is the only
+  configuration that can see this.
+
+* `ModelData`'s scalar members are initialised at declaration. The constructor
+  set only `unique_id`, so roughly thirty members held indeterminate values
+  until assigned; the GP entry point never assigned `re_parameterization` and
+  read stack residue to choose between the centred and non-centred
+  parameterisation.
+
+* The scalar gradient fallback reduces its per-thread partial sums in
+  thread-index order rather than in a critical section, whose summation order
+  varies from run to run.
 
 * `mcmc_diagnostics()` now reports per-parameter Rhat and ESS (#4). It handed a
   multi-parameter draws array to the single-variable `posterior::rhat()` /

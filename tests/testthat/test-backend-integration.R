@@ -243,7 +243,7 @@ test_that("predict.ratiod_fit without newdata returns fitted", {
 test_that("mcmc_diagnostics returns diagnostics", {
   fit <- quick_fit()
 
-  diag <- mcmc_diagnostics(fit)
+  diag <- diagnostics(fit)
   expect_s3_class(diag, "data.frame")
   expect_true("rhat" %in% names(diag) || "Rhat" %in% names(diag))
   expect_true("ess_bulk" %in% names(diag) || "n_eff" %in% names(diag))
@@ -786,7 +786,7 @@ test_that("HMC backend with 4 chains produces consistent results", {
   expect_equal(fit$chains, 4)
 
   # Rhat should be reasonable for converged chains
-  diag <- mcmc_diagnostics(fit)
+  diag <- diagnostics(fit)
   if ("rhat" %in% names(diag)) {
     # All Rhats should be < 2.0 for very short chains (not converged, but not broken)
     expect_true(all(diag$rhat < 2.0, na.rm = TRUE))

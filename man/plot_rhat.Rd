@@ -52,5 +52,5 @@ fit <- ratiod(count | effort ~ depth + (1|site), data = df,
 
 }
 \seealso{
-\code{\link[=plot_ess]{plot_ess()}}, \code{\link[=diagnostic_summary]{diagnostic_summary()}}, \code{\link[=mcmc_diagnostics]{mcmc_diagnostics()}}
+\code{\link[=plot_ess]{plot_ess()}}, \code{\link[=diagnostic_summary]{diagnostic_summary()}}, \code{\link[=diagnostics]{diagnostics()}}
 }

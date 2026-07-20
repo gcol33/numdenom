@@ -83,7 +83,7 @@ test_that("mcmc_diagnostics returns list with diagnostic info", {
     refresh = 0
   )
 
-  diag <- mcmc_diagnostics(fit)
+  diag <- diagnostics(fit)
   expect_true(is.list(diag) || inherits(diag, "data.frame"))
 })
 

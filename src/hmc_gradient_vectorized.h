@@ -728,8 +728,10 @@ inline void accumulate_temporal_gradient(
   int T = data.n_times;
   for (int i = 0; i < N; i++) {
     if (tidx[i] > 0) {
+      // An unshared temporal effect enters the numerator only, so the
+      // denominator residual must not feed its gradient.
       double temp_grad_i = resid_num[i];
-      if (!is_binomial) temp_grad_i += resid_denom[i];
+      if (!is_binomial && data.temporal_shared) temp_grad_i += resid_denom[i];
       int t = tidx[i] - 1;
       int g = gidx[i] - 1;
       grad_temporal_lik[g * T + t] += temp_grad_i;  // Panel temporal: flat index
@@ -980,7 +982,10 @@ void compute_gradient_fused(
         int g = data.temporal_group_idx[i] - 1;
         int flat = g * data.n_times + (t - 1);  // Panel temporal: flat index
         eta_n += phi_temporal[flat];
-        if constexpr (!is_binomial) eta_d += phi_temporal[flat];
+        // An unshared temporal effect enters the numerator only.
+        if constexpr (!is_binomial) {
+          if (data.temporal_shared) eta_d += phi_temporal[flat];
+        }
       }
     }
   };
@@ -1025,7 +1030,11 @@ void compute_gradient_fused(
       if (t > 0) {
         int g = data.temporal_group_idx[i] - 1;
         int flat = g * data.n_times + (t - 1);  // Panel temporal: flat index
-        grad_temporal_lik_out[flat] += total_lik_grad;
+        double temporal_lik_grad = resid_n;
+        if constexpr (!is_binomial) {
+          if (data.temporal_shared) temporal_lik_grad += resid_d;
+        }
+        grad_temporal_lik_out[flat] += temporal_lik_grad;
       }
     }
   };
@@ -1455,8 +1464,11 @@ void compute_obs_gradients_vectorized(
     Eigen::Map<VectorXd>(ws.eta_num.data(), N) +=
         Eigen::Map<const VectorXd>(ws.effect_dense.data(), N);
     if constexpr (!is_binomial) {
-      Eigen::Map<VectorXd>(ws.eta_denom.data(), N) +=
-          Eigen::Map<const VectorXd>(ws.effect_dense.data(), N);
+      // An unshared temporal effect enters the numerator only.
+      if (data.temporal_shared) {
+        Eigen::Map<VectorXd>(ws.eta_denom.data(), N) +=
+            Eigen::Map<const VectorXd>(ws.effect_dense.data(), N);
+      }
     }
   }
 

@@ -12,17 +12,13 @@ mcmc_diagnostics(fit, pars = NULL)
 \item{pars}{Character vector of parameter names (default: all).}
 }
 \value{
-A data frame with columns: parameter, rhat, ess_bulk, ess_tail.
+The value of \code{\link[tulpa:diagnostics]{tulpa::diagnostics()}} for \code{fit}.
 }
 \description{
-Computes per-parameter improved Rhat and bulk / tail effective sample size
-by delegating to the engine's \code{\link[tulpa:mcmc_diagnostics]{tulpa::mcmc_diagnostics()}}, the single source
-of truth for convergence diagnostics in the tulpa ecosystem. Works with all
-backends.
+\ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#deprecated}{\figure{lifecycle-deprecated.svg}{options: alt='[Deprecated]'}}}{\strong{[Deprecated]}}
+
+Use \code{\link[=diagnostics]{diagnostics()}}. The engine reports approximation reliability rather
+than chain mixing for deterministic fits, so the name described only one of
+the two answers it can return.
 }
-\details{
-Rhat is the improved value of Vehtari et al. (2021): the maximum of
-rank-normalized split-Rhat and folded split-Rhat. Split-Rhat is defined for a
-single chain (the chain is split in half), so single-chain fits also get a
-value.
-}
+\keyword{internal}

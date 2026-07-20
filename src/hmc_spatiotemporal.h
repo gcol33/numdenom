@@ -634,7 +634,7 @@ inline double st_sum_to_zero_penalty(
     const double* delta,
     int S,
     int T,
-    double lambda = 0.001,
+    double lambda,
     bool marginal_space = true,
     bool marginal_time = true
 ) {

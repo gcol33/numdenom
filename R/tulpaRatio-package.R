@@ -3,11 +3,20 @@
 
 #' @useDynLib tulpaRatio, .registration = TRUE
 #' @importFrom Rcpp sourceCpp
+#' @importFrom lifecycle deprecated
 #' @importFrom stats as.formula model.frame model.matrix na.pass quantile sd optim fitted predict rnorm rnbinom var ar cor pnorm qnorm reshape qlogis
 #' @importFrom utils head
 #' @importFrom grDevices adjustcolor
 #' @importFrom graphics abline lines polygon
 NULL
+
+# The diagnostic front door is tulpa's generic; tulpaRatio contributes the
+# `ratiod_fit` method (see diagnostics.ratiod_fit). Re-exported so
+# `library(tulpaRatio)` puts the same object on the search path rather than a
+# same-named function that would mask the engine's.
+#' @importFrom tulpa diagnostics
+#' @export
+tulpa::diagnostics
 
 #' tulpaRatio: Bayesian Hierarchical Models for Ratios, Rates, and Proportions
 #'

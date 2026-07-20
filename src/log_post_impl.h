@@ -10,6 +10,8 @@
 
 #include <vector>
 #include "autodiff_utils.h"
+#include "soft_sum_to_zero.h"
+#include "spatial_field_constraint.h"
 #include "hmc_gp_autodiff.h"  // Templated GP/NNGP functions
 #include "hmc_svc_autodiff.h"  // Templated SVC functions
 #include "hmc_tvc_autodiff.h"  // Templated TVC functions
@@ -39,10 +41,23 @@ using namespace math;
 
 template<typename T>
 T compute_log_post_impl(
-    const std::vector<T>& params,
+    const std::vector<T>& params_in,
     const ModelData& data,
     const ParamLayout& layout
 ) {
+    // Hard sum-to-zero: centre the spatial block once, matching the analytic
+    // compute_log_post. See spatial_field_constraint.h.
+    std::vector<T> params_centered;
+    T phi_spatial_raw_sum = T(0.0);
+    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
+                                && !data.icar_collapsed && !data.bym2_collapsed;
+    if (center_spatial) {
+        params_centered = params_in;
+        phi_spatial_raw_sum = ratiod_constraints::center_spatial_block(
+            params_centered, layout.spatial_start, data.n_spatial_units);
+    }
+    const std::vector<T>& params = center_spatial ? params_centered : params_in;
+
     T log_post = T(0.0);
 
     // ========================================================================
@@ -235,14 +250,12 @@ T compute_log_post_impl(
                     }
                 }
             }
-            log_post = log_post - T(0.5) * quad_form;
-
-            // Soft sum-to-zero constraint on ICAR phi
-            {
-                T phi_sum = T(0.0);
-                for (int s = 0; s < data.n_spatial_units; s++) phi_sum = phi_sum + phi_spatial[s];
-                log_post = log_post - T(0.5) * T(0.01) * phi_sum * phi_sum;
-            }
+            // phi_scaled ~ N(0, (Q + 11'/J)^{-1}); the likelihood sees phi
+            // centred, so the constant direction is a free draw at the
+            // field's own scale.
+            log_post = log_post - T(0.5) * (quad_form
+                + ratiod_constraints::free_direction_quad(
+                      phi_spatial_raw_sum, data.n_spatial_units));
 
             // N(0, I) prior on theta
             for (int s = 0; s < data.n_spatial_units; s++) {
@@ -268,7 +281,11 @@ T compute_log_post_impl(
             }
             int J = data.n_spatial_units;
             T log_tau_sp = params[layout.log_tau_spatial_idx];
-            log_post = log_post + T(0.5 * (J - 1)) * log_tau_sp - T(0.5) * tau_spatial * quad_form;
+            // (Q + 11'/J) is full rank, so the exponent on tau is J/2 rather
+            // than (J-1)/2, and the quadratic form carries the freed direction.
+            log_post = log_post + T(0.5 * J) * log_tau_sp
+                     - T(0.5) * tau_spatial * (quad_form
+                         + ratiod_constraints::free_direction_quad(phi_spatial_raw_sum, J));
         }
     }
 
@@ -518,6 +535,17 @@ T compute_log_post_impl(
                 log_post = log_post + T(0.5 * rank_rw1 * data.n_temporal_groups) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
 
+                // Soft sum-to-zero, per group; matches the analytic log posterior.
+                {
+                    const T s2z = T(ratiod_constraints::s2z_precision(T_times));
+                    for (int g = 0; g < data.n_temporal_groups; g++) {
+                        T grp_sum = T(0.0);
+                        for (int t = 0; t < T_times; t++)
+                            grp_sum = grp_sum + phi_temporal[g * T_times + t];
+                        log_post = log_post - T(0.5) * s2z * grp_sum * grp_sum;
+                    }
+                }
+
             } else if (data.temporal_type == TemporalType::RW2) {
                 // RW2: sum of (phi[t] - 2*phi[t-1] + phi[t-2])^2
                 T quad_form = T(0.0);
@@ -543,6 +571,17 @@ T compute_log_post_impl(
                 int rank_rw2 = data.temporal_cyclic ? T_times : T_times - 2;
                 log_post = log_post + T(0.5 * rank_rw2 * data.n_temporal_groups) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
+
+                // Soft sum-to-zero, per group; matches the analytic log posterior.
+                {
+                    const T s2z = T(ratiod_constraints::s2z_precision(T_times));
+                    for (int g = 0; g < data.n_temporal_groups; g++) {
+                        T grp_sum = T(0.0);
+                        for (int t = 0; t < T_times; t++)
+                            grp_sum = grp_sum + phi_temporal[g * T_times + t];
+                        log_post = log_post - T(0.5) * s2z * grp_sum * grp_sum;
+                    }
+                }
 
             } else if (data.temporal_type == TemporalType::AR1) {
                 // AR1: phi[t] | phi[t-1] ~ N(rho * phi[t-1], 1/tau)
