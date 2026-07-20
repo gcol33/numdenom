@@ -32,6 +32,14 @@
 #   - Every config is run REPS times and the median is reported with its
 #     observed range. A single timing of a sub-second fit is noise, and quoting
 #     one to three significant figures overstates what was measured.
+#   - Both engines are given an explicit seed, so a published row can be
+#     reproduced rather than re-rolled.
+#   - Time-varying rows use an iid random intercept (1|time) on BOTH sides.
+#     temporal_rw1() fits an intrinsic RW1 GMRF, which brms has no equivalent
+#     for -- pairing it against (1|time) would compare a rank-deficient
+#     structured field against a full-rank exchangeable one and read the
+#     geometry difference as a tulpaRatio result. Benchmarking the RW1 path
+#     itself is blocked on tulpaRatio#6.
 #
 # Usage:
 #   Rscript benchmarks/bench_stan_binomial.R                     # 7 configs
@@ -58,6 +66,7 @@ WARMUP <- 500
 CHAINS <- if (SMOKE) 2 else 4
 
 REPS <- if (SMOKE) 1L else argval("--reps", 3L)
+SEED <- 20260720L
 
 set.seed(123)
 N <- if (SMOKE) 500L else argval("--n", 500L)
@@ -132,6 +141,16 @@ nd_x_summary <- function(fit) {
   if (!length(col)) return(c(mean = NA, sd = NA))
   v <- dr[, col[1]]; c(mean = mean(v), sd = sd(v))
 }
+# ESS/s is driven by the worst fixed effect, so agreement has to cover the same
+# set. Checking only the slope lets an unidentified intercept destroy ESS/s
+# while the row still reports agree=TRUE, which reads as a sampler being slow
+# rather than a parameter being unidentified.
+nd_intercept_summary <- function(fit) {
+  dr <- as.matrix(fit$draws); nm <- colnames(dr)
+  col <- grep("beta_num\\[1\\]", nm, value = TRUE)
+  if (!length(col)) return(c(mean = NA, sd = NA))
+  v <- dr[, col[1]]; c(mean = mean(v), sd = sd(v))
+}
 
 safe <- function(expr) tryCatch(eval(expr, envir = globalenv()),
                                 error = function(e) structure(list(), err = conditionMessage(e)))
@@ -157,6 +176,7 @@ run_row <- function(name, nd_call, brm_call) {
     return(blank)
   }
   cv  <- nd_conv(fit_nd); ndx <- nd_x_summary(fit_nd)
+  ndi <- nd_intercept_summary(fit_nd)
   cat(sprintf("%.2fs (rhat=%.3f ess=%.0f)\n", t_nd, cv["rhat"], cv["ess"]))
 
   # --- Stan: compile once (untimed), then time the warm fit ---
@@ -176,7 +196,15 @@ run_row <- function(name, nd_call, brm_call) {
   st_sum  <- tryCatch(summary(fit_st)$fixed, error = function(e) NULL)
   st_rhat <- if (!is.null(st_sum)) max(st_sum[, "Rhat"], na.rm = TRUE) else NA
   st_ess  <- if (!is.null(st_sum)) min(st_sum[, "Bulk_ESS"], na.rm = TRUE) else NA
-  agree <- isTRUE(abs(ndx["mean"] - st_x) < 2 * max(ndx["sd"], st_se, na.rm = TRUE))
+  st_i    <- if (!is.null(fe) && "Intercept" %in% rownames(fe)) fe["Intercept", "Estimate"] else NA
+  st_i_se <- if (!is.null(fe) && "Intercept" %in% rownames(fe)) fe["Intercept", "Est.Error"] else NA
+  agree_x <- isTRUE(abs(ndx["mean"] - st_x) < 2 * max(ndx["sd"], st_se, na.rm = TRUE))
+  agree_i <- if (is.na(st_i) || is.na(ndi["mean"])) NA else
+    isTRUE(abs(ndi["mean"] - st_i) < 2 * max(ndi["sd"], st_i_se, na.rm = TRUE))
+  agree <- if (isTRUE(is.na(agree_i))) agree_x else (agree_x && agree_i)
+  if (isTRUE(agree_x) && isTRUE(!agree_i))
+    cat(sprintf("  intercept DISAGREES: tulpaRatio %.3f (sd %.3f) | Stan %.3f (se %.3f)\n",
+                ndi["mean"], ndi["sd"], st_i, st_i_se))
 
   # Efficiency, not wall-clock, is the honest MCMC metric: a stuck sampler is
   # always fast. ESS/s prices in mixing, so a non-converged fit cannot win.
@@ -199,12 +227,13 @@ run_row <- function(name, nd_call, brm_call) {
 brmf <- function(f, family, data = quote(df))
   bquote(brm(.(f), data = .(data), family = .(family), iter = .(ITER),
              warmup = .(WARMUP), chains = .(CHAINS), backend = "cmdstanr",
-             data2 = list(adj_mat = adj_mat), silent = 2, refresh = 0))
+             seed = .(SEED), data2 = list(adj_mat = adj_mat),
+             silent = 2, refresh = 0))
 ndf <- function(extra)
   bquote(ratiod(.(extra$formula), data = .(extra$data %||% quote(df)),
                 family = .(extra$family), spatial = .(extra$spatial),
                 temporal = .(extra$temporal), iter = .(ITER), warmup = .(WARMUP),
-                chains = .(CHAINS), verbose = FALSE))
+                chains = .(CHAINS), seed = .(SEED), verbose = FALSE))
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 rows <- list(
@@ -228,18 +257,20 @@ rows <- list(
                 temporal = NULL)),
        brmf(quote(y | trials(trials) ~ x + (1|site) +
                     car(adj_mat, gr = spatial_site, type = "bym2")), quote(binomial()))),
-  list("Bin_RW1",
-       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_binomial()),
-                spatial = NULL, temporal = quote(temporal_rw1("time")))),
+  list("Bin_TIME_RE",
+       ndf(list(formula = quote(y | trials ~ x + (1|site) + (1|time)),
+                family = quote(ratiod_binomial()),
+                spatial = NULL, temporal = NULL)),
        brmf(quote(y | trials(trials) ~ x + (1|site) + (1|time)), quote(binomial()))),
   list("Bin_ZI",
        ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_zibinomial()),
                 spatial = NULL, temporal = NULL, data = quote(df_zi))),
        brmf(quote(y | trials(trials) ~ x + (1|site)), quote(zero_inflated_binomial()), quote(df_zi))),
-  list("Bin_ICAR_RW1",
-       ndf(list(formula = quote(y | trials ~ x + (1|site)), family = quote(ratiod_binomial()),
+  list("Bin_ICAR_TIME",
+       ndf(list(formula = quote(y | trials ~ x + (1|site) + (1|time)),
+                family = quote(ratiod_binomial()),
                 spatial = quote(spatial_car(adj_mat, level="group", group_var="spatial_site")),
-                temporal = quote(temporal_rw1("time")))),
+                temporal = NULL)),
        brmf(quote(y | trials(trials) ~ x + (1|site) +
                     car(adj_mat, gr = spatial_site, type = "icar") + (1|time)), quote(binomial())))
 )
