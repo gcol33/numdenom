@@ -35,6 +35,17 @@ int cpp_chain_visits(int n_chains, int max_concurrent) {
   return visits.load();
 }
 
+// Moves the nthreads-var, so that the chain team can be shown to be immune to
+// it without depending on a backend to leave it moved.
+// [[Rcpp::export]]
+void cpp_set_max_threads(int n_threads) {
+#ifdef _OPENMP
+  omp_set_num_threads(n_threads);
+#else
+  (void)n_threads;
+#endif
+}
+
 // [[Rcpp::export]]
 int cpp_num_procs() {
 #ifdef _OPENMP

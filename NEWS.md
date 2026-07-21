@@ -10,6 +10,14 @@
 
 ## Bug fixes
 
+* A fit no longer decides how many threads later fits get (#16). The Laplace
+  and Polya-Gamma backends take a per-fit `cores`, which they applied by moving
+  the process-wide OpenMP thread count and leaving it moved, and it defaults to
+  one thread. Every region in the session that read that value afterwards was
+  therefore sized by whichever of those fits ran last, in fits it knew nothing
+  about. Each backend now restores the previous value when it returns, on the
+  interrupt path as well as the normal one.
+
 * Successive fits in one session no longer corrupt the heap on Windows (#8).
   The OpenMP team for chain-parallel work was sized per fit from `cores`, so a
   fit asking for fewer cores than the one before it shrank the team; libgomp

@@ -5,6 +5,7 @@
 #include "pg_binomial.h"
 #include "pg_rng.h"
 #include "linalg_fast.h"
+#include "omp_thread_scope.h"
 #include <Rcpp.h>
 #include <cmath>
 #include <algorithm>
@@ -294,12 +295,7 @@ List pg_binomial_gibbs_impl(
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  // Set number of threads
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   NumericMatrix beta_draws(n_save, p);
@@ -510,12 +506,7 @@ Rcpp::List cpp_pg_binomial_gibbs_spatial(
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  // Set number of threads
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   Rcpp::NumericMatrix beta_draws(n_save, p);
@@ -745,12 +736,7 @@ Rcpp::List cpp_pg_binomial_gibbs_bym2(
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  // Set number of threads
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   Rcpp::NumericMatrix beta_draws(n_save, p);
@@ -1097,9 +1083,7 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  #ifdef _OPENMP
-  if (n_threads > 0) omp_set_num_threads(n_threads);
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   Rcpp::NumericMatrix beta_draws(n_save, p);
@@ -1328,9 +1312,7 @@ Rcpp::List cpp_pg_binomial_gibbs_temporal(
   int n_seasonal = (seasonal_period > 0) ? seasonal_period : 0;
   int n_short = (short_type > 0) ? n_times : 0;
 
-  #ifdef _OPENMP
-  if (n_threads > 0) omp_set_num_threads(n_threads);
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   Rcpp::NumericMatrix beta_draws(n_save, p);
@@ -2018,11 +2000,7 @@ Rcpp::List cpp_pg_binomial_gibbs_rsr(
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage for draws
   Rcpp::NumericMatrix beta_draws(n_save, p);

@@ -901,6 +901,16 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_set_max_threads
+void cpp_set_max_threads(int n_threads);
+RcppExport SEXP _tulpaRatio_cpp_set_max_threads(SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    cpp_set_max_threads(n_threads);
+    return R_NilValue;
+END_RCPP
+}
 // cpp_num_procs
 int cpp_num_procs();
 RcppExport SEXP _tulpaRatio_cpp_num_procs() {
@@ -1973,6 +1983,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_sgld_fit", (DL_FUNC) &_tulpaRatio_cpp_sgld_fit, 24},
     {"_tulpaRatio_cpp_chain_concurrency", (DL_FUNC) &_tulpaRatio_cpp_chain_concurrency, 2},
     {"_tulpaRatio_cpp_chain_visits", (DL_FUNC) &_tulpaRatio_cpp_chain_visits, 2},
+    {"_tulpaRatio_cpp_set_max_threads", (DL_FUNC) &_tulpaRatio_cpp_set_max_threads, 1},
     {"_tulpaRatio_cpp_num_procs", (DL_FUNC) &_tulpaRatio_cpp_num_procs, 0},
     {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 10},
     {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 7},

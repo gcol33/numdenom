@@ -157,6 +157,10 @@ cpp_chain_visits <- function(n_chains, max_concurrent) {
     .Call(`_tulpaRatio_cpp_chain_visits`, n_chains, max_concurrent)
 }
 
+cpp_set_max_threads <- function(n_threads) {
+    invisible(.Call(`_tulpaRatio_cpp_set_max_threads`, n_threads))
+}
+
 cpp_num_procs <- function() {
     .Call(`_tulpaRatio_cpp_num_procs`)
 }

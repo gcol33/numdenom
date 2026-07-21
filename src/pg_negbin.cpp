@@ -7,6 +7,7 @@
 #include "pg_rng.h"
 #include "crt_rng.h"
 #include "linalg_fast.h"
+#include "omp_thread_scope.h"
 #include <Rcpp.h>
 #include <cmath>
 #include <algorithm>
@@ -471,11 +472,7 @@ List pg_negbin_gibbs(
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   NumericMatrix beta_draws(n_save, p);
@@ -732,11 +729,7 @@ List pg_negbin_negbin_gibbs(
   int p_denom = X_denom.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   NumericMatrix beta_num_draws(n_save, p_num);
@@ -980,11 +973,7 @@ List pg_negbin_gibbs_spatial(
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
 
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   // Storage
   NumericMatrix beta_draws(n_save, p);

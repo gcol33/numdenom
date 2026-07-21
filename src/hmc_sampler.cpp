@@ -3021,7 +3021,10 @@ void compute_gradient_analytical(
   // order, which varies from run to run. The team size is left at the default
   // and the buffer sized by omp_get_max_threads(); pinning it per fit would
   // make the team grow and shrink across successive fits in one session,
-  // which corrupts the GOMP pool and faults at teardown on Windows.
+  // which corrupts the GOMP pool and faults at teardown on Windows. That is
+  // worth something only while the default holds still, so the backends that
+  // take a thread count scope it (omp_thread_scope.h) instead of leaving the
+  // nthreads-var moved for whatever runs next.
   const int grad_team = std::max(1, omp_get_max_threads());
   const int red_n_re = layout.has_re ? data.n_re_groups : 0;
   const int red_n_re_crossed =

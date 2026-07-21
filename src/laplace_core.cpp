@@ -4,6 +4,7 @@
 
 #include "laplace_core.h"
 #include "linalg_fast.h"
+#include "omp_thread_scope.h"
 #include <Rcpp.h>
 #include <cmath>
 #include <algorithm>
@@ -178,12 +179,7 @@ LaplaceResult laplace_mode_dense(
 
   double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
 
-  // Set number of threads
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   for (int iter = 0; iter < max_iter; iter++) {
     // Compute linear predictor (parallelized)
@@ -626,12 +622,7 @@ LaplaceResult laplace_mode_spatial(
   // Indices
   int spatial_start = p + n_re_groups;
 
-  // Set number of threads
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   for (int iter = 0; iter < max_iter; iter++) {
     // Compute linear predictor (parallelized)
@@ -1076,12 +1067,7 @@ LaplaceResult laplace_mode_bym2(
   double sqrt_rho = std::sqrt(rho + 1e-10);
   double sqrt_1_rho = std::sqrt(1.0 - rho + 1e-10);
 
-  // Set number of threads
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   for (int iter = 0; iter < max_iter; iter++) {
     // Compute spatial effects and linear predictor
@@ -1840,9 +1826,7 @@ ratiod::LaplaceResult laplace_mode_gp(
 
   std::vector<double> w(n_spatial);
 
-  #ifdef _OPENMP
-  if (n_threads > 0) omp_set_num_threads(n_threads);
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   for (int iter = 0; iter < max_iter; iter++) {
     for (int s = 0; s < n_spatial; s++) {
@@ -2211,9 +2195,7 @@ ratiod::LaplaceResult laplace_mode_multiscale_temporal(
   int seasonal_start = trend_start + n_trend;
   int short_start = seasonal_start + n_seasonal;
 
-  #ifdef _OPENMP
-  if (n_threads > 0) omp_set_num_threads(n_threads);
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   for (int iter = 0; iter < max_iter; iter++) {
     Rcpp::NumericVector eta(N);
@@ -2768,12 +2750,7 @@ LaplaceResult laplace_mode_rsr(
   // Indices
   int spatial_start = p + n_re_groups;
 
-  // Set number of threads
-  #ifdef _OPENMP
-  if (n_threads > 0) {
-    omp_set_num_threads(n_threads);
-  }
-  #endif
+  ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
   for (int iter = 0; iter < max_iter; iter++) {
     // Compute projected spatial effects: w_proj = P_perp * w
