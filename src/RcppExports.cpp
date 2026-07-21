@@ -877,6 +877,40 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_chain_concurrency
+int cpp_chain_concurrency(int n_chains, int max_concurrent);
+RcppExport SEXP _tulpaRatio_cpp_chain_concurrency(SEXP n_chainsSEXP, SEXP max_concurrentSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_chains(n_chainsSEXP);
+    Rcpp::traits::input_parameter< int >::type max_concurrent(max_concurrentSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_chain_concurrency(n_chains, max_concurrent));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_chain_visits
+int cpp_chain_visits(int n_chains, int max_concurrent);
+RcppExport SEXP _tulpaRatio_cpp_chain_visits(SEXP n_chainsSEXP, SEXP max_concurrentSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_chains(n_chainsSEXP);
+    Rcpp::traits::input_parameter< int >::type max_concurrent(max_concurrentSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_chain_visits(n_chains, max_concurrent));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_num_procs
+int cpp_num_procs();
+RcppExport SEXP _tulpaRatio_cpp_num_procs() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(cpp_num_procs());
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_gradient_check
 Rcpp::List cpp_gradient_check(std::string field, int n_obs, int n_units, int n_times, double eps, unsigned int seed, std::string mode, bool precenter, std::string family, bool temporal_shared);
 RcppExport SEXP _tulpaRatio_cpp_gradient_check(SEXP fieldSEXP, SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_timesSEXP, SEXP epsSEXP, SEXP seedSEXP, SEXP modeSEXP, SEXP precenterSEXP, SEXP familySEXP, SEXP temporal_sharedSEXP) {
@@ -1937,6 +1971,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_rpg", (DL_FUNC) &_tulpaRatio_cpp_rpg, 2},
     {"_tulpaRatio_cpp_sghmc_fit", (DL_FUNC) &_tulpaRatio_cpp_sghmc_fit, 22},
     {"_tulpaRatio_cpp_sgld_fit", (DL_FUNC) &_tulpaRatio_cpp_sgld_fit, 24},
+    {"_tulpaRatio_cpp_chain_concurrency", (DL_FUNC) &_tulpaRatio_cpp_chain_concurrency, 2},
+    {"_tulpaRatio_cpp_chain_visits", (DL_FUNC) &_tulpaRatio_cpp_chain_visits, 2},
+    {"_tulpaRatio_cpp_num_procs", (DL_FUNC) &_tulpaRatio_cpp_num_procs, 0},
     {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 10},
     {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 7},
     {"_tulpaRatio_cpp_test_leapfrog", (DL_FUNC) &_tulpaRatio_cpp_test_leapfrog, 4},

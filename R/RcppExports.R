@@ -149,6 +149,18 @@ cpp_sgld_fit <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, m
     .Call(`_tulpaRatio_cpp_sgld_fit`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, model_type_str, re_params, spatial_params, temporal_params, prior_params, zi_params, latent_params, st_params, n_iter, n_warmup, batch_size, epsilon, schedule_a, schedule_b, schedule_gamma, use_schedule, seed, verbose)
 }
 
+cpp_chain_concurrency <- function(n_chains, max_concurrent) {
+    .Call(`_tulpaRatio_cpp_chain_concurrency`, n_chains, max_concurrent)
+}
+
+cpp_chain_visits <- function(n_chains, max_concurrent) {
+    .Call(`_tulpaRatio_cpp_chain_visits`, n_chains, max_concurrent)
+}
+
+cpp_num_procs <- function() {
+    .Call(`_tulpaRatio_cpp_num_procs`)
+}
+
 cpp_gradient_check <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, eps = 1e-5, seed = 42L, mode = "handcoded", precenter = FALSE, family = "binomial", temporal_shared = TRUE) {
     .Call(`_tulpaRatio_cpp_gradient_check`, field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared)
 }

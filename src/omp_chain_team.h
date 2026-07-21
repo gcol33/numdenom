@@ -9,22 +9,29 @@
 
 namespace ratiod_omp {
 
-// The team used for chain-parallel work is fixed for the life of the session.
+// The team used for chain-parallel work never shrinks within a session.
 //
-// Sizing it per fit lets it shrink between fits in one session, and a shrink
-// makes libgomp destroy the surplus workers and run their thread_local
-// destructors while later work is still in flight. On Windows that ends in
-// heap corruption (STATUS_HEAP_CORRUPTION at a free() on a worker thread).
-// A team that only ever grows is safe; only the shrink faults.
+// Sizing it per fit lets it shrink between fits, and a shrink makes libgomp
+// destroy the surplus workers and run their thread_local destructors while
+// later work is still in flight. On Windows that ends in heap corruption
+// (STATUS_HEAP_CORRUPTION at a free() on a worker thread). A team that only
+// ever grows is safe; only the shrink faults.
 //
-// The size is read once and cached. Reading it on every call would track the
-// nthreads-var that laplace_core and the Polya-Gamma samplers set through
-// omp_set_num_threads(), which is exactly the moving value to avoid.
-inline int chain_team_size() {
+// The size is the widest budget any fit has asked for so far, never
+// omp_get_max_threads(). The nthreads-var is not a fixed quantity: laplace_core
+// and the Polya-Gamma samplers move it through omp_set_num_threads(), so a
+// Laplace fit ahead of the first chain fit would pin the team at 1 and
+// serialize every chain fit for the rest of the session.
+//
+// Called only from the thread that launches a fit, which is R's, so the running
+// maximum needs no synchronization.
+inline int chain_team_size(int wanted) {
 #ifdef _OPENMP
-  static const int team = std::max(1, omp_get_max_threads());
+  static int team = 1;
+  if (wanted > team) team = wanted;
   return team;
 #else
+  (void)wanted;
   return 1;
 #endif
 }
@@ -32,14 +39,14 @@ inline int chain_team_size() {
 // Runs fn(c) for chains 0..n_chains-1, at most max_concurrent at a time.
 //
 // Concurrency is bounded by how many chains are offered to each region, not by
-// resizing the team: the team stays at chain_team_size() and threads with no
-// iteration simply sit out. That keeps `cores` meaning what it says while the
-// team size stays constant across fits.
+// resizing the team: a fit narrower than an earlier one leaves the surplus
+// threads without an iteration and they sit out. That keeps `cores` meaning
+// what it says while the team itself only ever grows.
 template <typename Fn>
 inline void for_each_chain(int n_chains, int max_concurrent, Fn fn) {
 #ifdef _OPENMP
   const int width = std::max(1, std::min(max_concurrent, n_chains));
-  const int team = chain_team_size();
+  const int team = chain_team_size(width);
   for (int base = 0; base < n_chains; base += width) {
     const int stop = std::min(base + width, n_chains);
     #pragma omp parallel for schedule(static) num_threads(team)

@@ -16,9 +16,14 @@
   then destroyed the surplus workers and ran their `thread_local` destructors
   while later work was still in flight, and the damage surfaced as
   `STATUS_HEAP_CORRUPTION` at an unrelated `free()`. Four chains followed by
-  two was enough to trigger it. The team is now fixed for the life of the
-  session and `cores` bounds how many chains are in flight instead, so it keeps
-  its meaning. Growing a team was always safe; only shrinking faulted.
+  two was enough to trigger it. The team now only ever grows, sized by the
+  widest core budget any fit has asked for, and `cores` bounds how many chains
+  are in flight instead, so it keeps its meaning. Growing a team was always
+  safe; only shrinking faulted. Its size never comes from
+  `omp_get_max_threads()`: the Laplace and Polya-Gamma backends move that value
+  through `omp_set_num_threads()` and leave it moved, so reading it let a
+  Laplace fit ahead of the first chain fit pin the team at one thread and
+  serialize the chains of every fit after it.
 
 * The Gibbs spatial backend runs its chains in parallel under OpenMP (#7). It
   looped over chains in R, so a 4-chain fit cost close to four times a 1-chain
