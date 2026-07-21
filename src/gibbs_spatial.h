@@ -40,6 +40,11 @@ struct GibbsData {
 
     const int* spatial_group;           // Maps obs -> site (0-based)
 
+    // Column holding the intercept in each design matrix, or -1 when the
+    // formula has none. The spatial field's level is carried here.
+    int icept_num = -1;
+    int icept_denom = -1;
+
     // CSR obs-to-site mapping (built once)
     std::vector<int> site_obs_ptr;      // site_obs_ptr[s] = start index
     std::vector<int> site_obs_idx;      // observation indices for each site
@@ -85,6 +90,36 @@ inline void build_site_obs_map(GibbsData& d) {
         int s = d.spatial_group[i];
         d.site_obs_idx[pos[s]++] = i;
     }
+}
+
+// Column of a row-major design matrix that is all ones, or -1 if there is none.
+inline int find_intercept_col(const double* X, int N, int p) {
+    if (X == nullptr || p <= 0 || N <= 0) return -1;
+    for (int j = 0; j < p; j++) {
+        bool all_ones = true;
+        for (int i = 0; i < N; i++) {
+            if (X[i * p + j] != 1.0) { all_ones = false; break; }
+        }
+        if (all_ones) return j;
+    }
+    return -1;
+}
+
+inline void build_intercept_index(GibbsData& d) {
+    d.icept_num = find_intercept_col(d.X_num, d.N, d.p_num);
+    d.icept_denom = (d.family == GibbsFamily::BINOMIAL)
+                    ? -1
+                    : find_intercept_col(d.X_denom, d.N, d.p_denom);
+}
+
+// The spatial effect enters eta_num always, and eta_denom for every family
+// whose denominator is modelled. Recentring the field shifts each of those
+// linear predictors by the same amount, so it is level-preserving only when
+// every one of them has an intercept to absorb the shift.
+inline bool can_recentre_field(const GibbsData& d) {
+    if (d.icept_num < 0) return false;
+    if (d.family == GibbsFamily::BINOMIAL) return true;
+    return d.icept_denom >= 0;
 }
 
 // Build CSR time->obs mapping for TVC updates
@@ -334,6 +369,7 @@ inline GibbsResult run_gibbs_icar(
     bool has_phi_num = (d.family == GibbsFamily::NEGBIN_NEGBIN ||
                         d.family == GibbsFamily::NEGBIN_GAMMA);
     bool has_phi_denom = !is_binomial;
+    const bool recentre = can_recentre_field(d);
 
     // Parameter dimensions
     int p_num = d.p_num;
@@ -424,11 +460,18 @@ inline GibbsResult run_gibbs_icar(
             phi_total[s]++;
         }
 
-        // Soft sum-to-zero centering
-        double phi_mean = 0.0;
-        for (int s = 0; s < S; s++) phi_mean += phi[s];
-        phi_mean /= S;
-        for (int s = 0; s < S; s++) phi[s] -= phi_mean;
+        // Sum-to-zero constraint. Q1 = 0 leaves the field's level unidentified
+        // against the intercept, so the level is moved into the intercept
+        // rather than dropped: eta is then the same before and after, and the
+        // intercept alone carries what the field's mean was holding.
+        if (recentre) {
+            double phi_mean = 0.0;
+            for (int s = 0; s < S; s++) phi_mean += phi[s];
+            phi_mean /= S;
+            for (int s = 0; s < S; s++) phi[s] -= phi_mean;
+            beta_num[d.icept_num] += phi_mean;
+            if (d.icept_denom >= 0) beta_denom[d.icept_denom] += phi_mean;
+        }
 
         // ---- 2. Update tau (ICAR precision) via conjugate Gamma ----
         {
@@ -763,6 +806,7 @@ inline GibbsResult run_gibbs_bym2(
     bool has_disp_num = (d.family == GibbsFamily::NEGBIN_NEGBIN ||
                          d.family == GibbsFamily::NEGBIN_GAMMA);
     bool has_disp_denom = !is_binomial;
+    const bool recentre = can_recentre_field(d);
 
     // Parameter dimensions
     int p_num = d.p_num;
@@ -790,6 +834,7 @@ inline GibbsResult run_gibbs_bym2(
     double disp_scale = 0.1;
     double sigma_scale = 0.1;
     double rho_scale = 0.3;
+    double level_scale = 0.2;
 
     // Acceptance tracking
     std::vector<int> phi_accept(S, 0), phi_total(S, 0);
@@ -798,6 +843,7 @@ inline GibbsResult run_gibbs_bym2(
     int disp_accept_cnt = 0, disp_total_cnt = 0;
     int sigma_accept_cnt = 0, sigma_total_cnt = 0;
     int rho_accept_cnt = 0, rho_total_cnt = 0;
+    int level_accept_cnt = 0, level_total_cnt = 0;
 
     // Output
     int n_save = (n_iter - n_warmup) / thin;
@@ -818,15 +864,17 @@ inline GibbsResult run_gibbs_bym2(
         double disp_num_val = has_disp_num ? std::exp(log_disp_num) : 1.0;
         double disp_denom_val = has_disp_denom ? std::exp(log_disp_denom) : 1.0;
 
-        // Implied ICAR precision for the structured component
+        // Scale the structured component contributes to eta; the Riebler
+        // parameterization carries it here rather than in phi's own precision.
         double sigma_s = sigma_total * std::sqrt(rho);
-        double tau_phi = (sigma_s * scale_factor > 1e-10) ?
-                         1.0 / (sigma_s * sigma_s * scale_factor * scale_factor) : 100.0;
 
         // ---- 1. Update phi (ICAR structured) via MH ----
         for (int s = 0; s < S; s++) {
+            // phi is the standardised ICAR field: precision 1, scale carried by
+            // sigma and rho. Drawing from its own full conditional is what makes
+            // the acceptance ratio the likelihood ratio alone.
             auto [cond_mean, cond_prec] = icar_conditional(
-                s, phi.data(), tau_phi, d.adj_row_ptr, d.adj_col_idx, d.n_neighbors);
+                s, phi.data(), 1.0, d.adj_row_ptr, d.adj_col_idx, d.n_neighbors);
 
             double phi_prop = cond_mean + rnorm(rng) / std::sqrt(cond_prec + 1e-10);
 
@@ -850,11 +898,18 @@ inline GibbsResult run_gibbs_bym2(
             phi_total[s]++;
         }
 
-        // Soft sum-to-zero for phi
-        double phi_mean = 0.0;
-        for (int s = 0; s < S; s++) phi_mean += phi[s];
-        phi_mean /= S;
-        for (int s = 0; s < S; s++) phi[s] -= phi_mean;
+        // Sum-to-zero constraint on the structured component. The field reaches
+        // eta as sigma_s * scale_factor * phi, so that product of the mean is
+        // what the intercept takes on and eta is unchanged across the shift.
+        if (recentre) {
+            double phi_mean = 0.0;
+            for (int s = 0; s < S; s++) phi_mean += phi[s];
+            phi_mean /= S;
+            for (int s = 0; s < S; s++) phi[s] -= phi_mean;
+            const double level = sigma_s * scale_factor * phi_mean;
+            beta_num[d.icept_num] += level;
+            if (d.icept_denom >= 0) beta_denom[d.icept_denom] += level;
+        }
 
         // ---- 2. Update theta (iid unstructured) via MH ----
         // Prior: theta_s ~ N(0, 1)
@@ -878,6 +933,39 @@ inline GibbsResult run_gibbs_bym2(
                 theta[s] = old_theta_s;
             }
             theta_total[s]++;
+        }
+
+        // ---- 2b. Move the unstructured component's level against the intercept ----
+        // sigma_u * mean(theta) is a level the intercept can carry just as well,
+        // and the per-site theta updates only reach it by agreeing S times over.
+        // Translating the whole of theta at once walks that direction in one
+        // step, at eta held fixed, so the acceptance ratio is the priors alone.
+        if (recentre) {
+            const double sigma_u = sigma_total * std::sqrt(1.0 - rho);
+            const double c = level_scale * rnorm(rng);
+            const double shift = sigma_u * c;
+
+            double theta_sum = 0.0;
+            for (int s = 0; s < S; s++) theta_sum += theta[s];
+
+            // theta_s ~ N(0, 1), shifted by -c
+            double log_ratio = -0.5 * (S * c * c - 2.0 * c * theta_sum);
+
+            // beta ~ N(0, 10^2), shifted by +sigma_u * c
+            const double b_num = beta_num[d.icept_num];
+            log_ratio -= 0.5 * (shift * shift + 2.0 * b_num * shift) / 100.0;
+            if (d.icept_denom >= 0) {
+                const double b_den = beta_denom[d.icept_denom];
+                log_ratio -= 0.5 * (shift * shift + 2.0 * b_den * shift) / 100.0;
+            }
+
+            if (std::log(runif(rng)) < log_ratio) {
+                for (int s = 0; s < S; s++) theta[s] -= c;
+                beta_num[d.icept_num] += shift;
+                if (d.icept_denom >= 0) beta_denom[d.icept_denom] += shift;
+                level_accept_cnt++;
+            }
+            level_total_cnt++;
         }
 
         // ---- 3. Update sigma_total via MH on log scale ----
@@ -1034,6 +1122,7 @@ inline GibbsResult run_gibbs_bym2(
             adapt(beta_scale, beta_accept_cnt, beta_total_cnt);
             adapt(sigma_scale, sigma_accept_cnt, sigma_total_cnt);
             adapt(rho_scale, rho_accept_cnt, rho_total_cnt);
+            adapt(level_scale, level_accept_cnt, level_total_cnt);
             if (has_disp_num || has_disp_denom)
                 adapt(disp_scale, disp_accept_cnt, disp_total_cnt);
         }

@@ -163,6 +163,9 @@ Rcpp::List cpp_gibbs_spatial(Rcpp::List data_list) {
     // Build site->obs mapping
     build_site_obs_map(d);
 
+    // Locate the intercepts the spatial field's level is moved into.
+    build_intercept_index(d);
+
     // TVC data
     std::vector<int> tvc_ti, tvc_gi;
     std::vector<double> tvc_X;

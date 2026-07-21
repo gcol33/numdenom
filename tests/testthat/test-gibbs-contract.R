@@ -98,6 +98,52 @@ test_that("Gibbs recovers the fixed effect under a spatial field", {
   expect_gt(ci[2], 0.3)
 })
 
+# An ICAR precision satisfies Q1 = 0, and under BYM2 sigma_u * mean(theta) is a
+# level the intercept carries just as well. Both directions are invisible to the
+# likelihood, so a sampler that leaves them to the intercept's own updates mixes
+# the intercept far worse than the slope at the same problem size. The field here
+# is strong enough for that gap to be measurable; at the milder field the earlier
+# tests use, the intercept clears any threshold either way.
+gibbs_field_data <- function(n = 400, n_sites = 25, amp = 3.0, seed = 2024) {
+  set.seed(seed)
+  n_side <- ceiling(sqrt(n_sites))
+  grid <- expand.grid(lon = seq_len(n_side), lat = seq_len(n_side))[seq_len(n_sites), ]
+  adj <- matrix(0, n_sites, n_sites)
+  for (i in seq_len(n_sites)) for (j in seq_len(n_sites)) {
+    d <- sqrt((grid$lon[i] - grid$lon[j])^2 + (grid$lat[i] - grid$lat[j])^2)
+    if (i != j && d <= 1.5) adj[i, j] <- 1
+  }
+  site <- factor(rep(seq_len(n_sites), length.out = n))
+  dimnames(adj) <- list(levels(site), levels(site))
+
+  field <- amp * scale(grid$lon + grid$lat)[, 1]
+  field <- field - mean(field)
+  x <- rnorm(n)
+  trials <- sample(10:50, n, replace = TRUE)
+  y <- rbinom(n, trials, plogis(0.5 + 0.3 * x + field[as.integer(site)]))
+  list(df = data.frame(y = y, trials = trials, x = x, site = site), adj = adj)
+}
+
+test_that("the intercept mixes under a spatial field", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+  d <- gibbs_field_data()
+
+  intercept_ess <- function(spatial) {
+    fit <- ratiod(y | trials ~ x, data = d$df, family = ratiod_binomial(),
+                  spatial = spatial, iter = 1000, warmup = 500, chains = 4,
+                  seed = 99, verbose = FALSE)
+    dr <- as.matrix(fit$draws)
+    posterior::ess_bulk(matrix(dr[, "beta_num[1]"],
+                               nrow = nrow(dr) / fit$chains, ncol = fit$chains))
+  }
+
+  # Measured on this fit: 76 before the field was identified against the
+  # intercept, 212 after. BYM2 carries the second level too: 6 before, 178 after.
+  expect_gt(intercept_ess(spatial_car(d$adj, level = "group", group_var = "site")), 120)
+  expect_gt(intercept_ess(spatial_bym2(d$adj, level = "group", group_var = "site")), 80)
+})
+
 test_that("single-chain and BYM2 fits keep the contract", {
   skip_on_cran()
   d <- gibbs_test_data()
