@@ -10,6 +10,16 @@
 
 ## Bug fixes
 
+* Successive fits in one session no longer corrupt the heap on Windows (#8).
+  The OpenMP team for chain-parallel work was sized per fit from `cores`, so a
+  fit asking for fewer cores than the one before it shrank the team; libgomp
+  then destroyed the surplus workers and ran their `thread_local` destructors
+  while later work was still in flight, and the damage surfaced as
+  `STATUS_HEAP_CORRUPTION` at an unrelated `free()`. Four chains followed by
+  two was enough to trigger it. The team is now fixed for the life of the
+  session and `cores` bounds how many chains are in flight instead, so it keeps
+  its meaning. Growing a team was always safe; only shrinking faulted.
+
 * The Gibbs spatial backend runs its chains in parallel under OpenMP (#7). It
   looped over chains in R, so a 4-chain fit cost close to four times a 1-chain
   fit; on a 40-site binomial ICAR model that ratio drops from 3.7x to 0.94x.

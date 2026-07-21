@@ -2,6 +2,7 @@
 // Rcpp interface for the Gibbs spatial sampler
 
 #include "gibbs_spatial.h"
+#include "omp_chain_team.h"
 #include <Rcpp.h>
 #include <algorithm>
 
@@ -201,30 +202,22 @@ Rcpp::List cpp_gibbs_spatial(Rcpp::List data_list) {
     const GibbsData& d_shared = d;
     std::vector<GibbsResult> chain_res(n_chains);
 
-#ifdef _OPENMP
     if (n_chains > 1) {
-        const int team_size = std::min(n_chains, n_cores);
         // verbose is forced off inside the region: the progress blocks in
         // run_gibbs_* write to Rcpp::Rcout, and R's API must not be touched
-        // from a worker thread.
-        #pragma omp parallel for schedule(static) num_threads(team_size)
-        for (int c = 0; c < n_chains; c++) {
+        // from a worker thread. The team is session-stable and n_cores caps
+        // how many chains run at once; see omp_chain_team.h. Without OpenMP
+        // the helper runs the chains in order.
+        ratiod_omp::for_each_chain(n_chains, n_cores, [&](int c) {
             chain_res[c] = is_bym2 ?
                 run_gibbs_bym2(d_shared, n_iter, n_warmup, thin, chain_seeds[c], false) :
                 run_gibbs_icar(d_shared, n_iter, n_warmup, thin, chain_seeds[c], false);
-        }
+        });
     } else {
         chain_res[0] = is_bym2 ?
             run_gibbs_bym2(d_shared, n_iter, n_warmup, thin, chain_seeds[0], verbose) :
             run_gibbs_icar(d_shared, n_iter, n_warmup, thin, chain_seeds[0], verbose);
     }
-#else
-    for (int c = 0; c < n_chains; c++) {
-        chain_res[c] = is_bym2 ?
-            run_gibbs_bym2(d_shared, n_iter, n_warmup, thin, chain_seeds[c], verbose) :
-            run_gibbs_icar(d_shared, n_iter, n_warmup, thin, chain_seeds[c], verbose);
-    }
-#endif
 
     if (verbose) {
         Rcpp::Rcout << "Gibbs complete." << std::endl;

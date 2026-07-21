@@ -3,6 +3,7 @@
 // Provides Stan-free Bayesian inference for all ratiod models
 
 #include "hmc_sampler.h"
+#include "omp_chain_team.h"
 #include "linalg_fast.h"
 #include <RcppEigen.h>
 #include "hmc_progress.h"
@@ -13454,22 +13455,20 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   // All gradient modes (N, A, A_t, H) are now thread-safe and can run in parallel.
   // The old global tape limitation has been removed.
 
-#ifdef _OPENMP
   if (n_chains > 1) {
-    // The OpenMP team must stay the same size across successive fits in one
-    // session: a team that grows then shrinks corrupts the GOMP pool and
-    // faults at process teardown on Windows. Bound the team by the core
-    // budget so it is stable across fits; chains beyond the team size are
-    // handled by the static schedule looping each worker over several
-    // iterations.
-    int team_size = data.n_cores > 0 ? std::min(n_chains, data.n_cores) : n_chains;
-    #pragma omp parallel for schedule(static) num_threads(team_size)
-    for (int c = 0; c < n_chains; c++) {
+    // The team stays at ratiod_omp::chain_team_size() for the whole session;
+    // n_cores caps how many chains are in flight at once. Sizing the team from
+    // n_cores instead let it shrink between fits, which corrupts the heap on
+    // Windows (see omp_chain_team.h). Without OpenMP the helper runs the chains
+    // in order. verbose is off inside the region either way; the per-chain
+    // summary is printed below.
+    const int max_concurrent = data.n_cores > 0 ? data.n_cores : n_chains;
+    ratiod_omp::for_each_chain(n_chains, max_concurrent, [&](int c) {
       cpp_results[c] = run_hmc_chain_cpp(
         q_init, data, layout,
         n_iter, n_warmup, L, c, seed, false, max_treedepth, metric_type, adapt_delta, riemannian
       );
-    }
+    });
   } else {
     // Single chain - run sequentially with verbose output
     cpp_results[0] = run_hmc_chain_cpp(
@@ -13477,15 +13476,6 @@ std::vector<HMCResult> run_hmc_parallel_chains(
       n_iter, n_warmup, L, 0, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
     );
   }
-#else
-  // Sequential fallback when OpenMP not available
-  for (int c = 0; c < n_chains; c++) {
-    cpp_results[c] = run_hmc_chain_cpp(
-      q_init, data, layout,
-      n_iter, n_warmup, L, c, seed, verbose, max_treedepth, metric_type, adapt_delta, riemannian
-    );
-  }
-#endif
 
   // Convert to R objects outside parallel region (single-threaded)
   std::vector<HMCResult> results(n_chains);
