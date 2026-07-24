@@ -47,12 +47,11 @@ cat(sprintf("  denom: mean=%.2f, sd=%.2f, range=[%.2f, %.2f]\n",
 # Fit numdenom
 cat("\nFitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x, data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd))

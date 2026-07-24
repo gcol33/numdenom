@@ -55,7 +55,7 @@ Default 1.5.}
 A \code{ratiod_svc} object
 }
 \description{
-Specify spatially-varying coefficients for ratiod models. SVCs allow
+Specify spatially-varying coefficients for ratio models. SVCs allow
 regression coefficients to vary smoothly across space using a Gaussian
 process prior. This captures local effects that may differ from global
 relationships.
@@ -110,7 +110,7 @@ df <- data.frame(
 )
 
 # Spatially-varying intercept (random spatial field)
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth,
   data = df,
   family = ratiod_poisson_gamma(),

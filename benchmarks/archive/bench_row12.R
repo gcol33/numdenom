@@ -12,9 +12,8 @@ df <- data.frame(y=y, effort=effort, x=x, site=site)
 
 cat("Row 12: poisson_gamma + ZI\n")
 time_H <- system.time({
-  fit <- ratiod(y | effort ~ x + (1 | site), data=df,
+  fit <- tratio(y | effort ~ x + (1 | site), data=df,
                 family=ratiod_zipois(),
-                iter=500, warmup=250, chains=1, verbose=FALSE,
-                gradient_mode="H")
+                control = list(iter=500, warmup=250, chains=1, verbose=FALSE, gradient_mode="H"))
 })["elapsed"]
 cat(sprintf("  H: %.1fs\n", time_H))

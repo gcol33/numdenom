@@ -21,12 +21,10 @@ cat("Testing lognormal gradient modes...\n")
 # Currently A-mode (since LOGNORMAL is excluded from H)
 cat("\n=== Test 1: Base lognormal (no RE) ===\n")
 t_A <- system.time({
-  fit_A <- ratiod(
+  fit_A <- tratio(
     y | denom ~ x, data = df,
     family = ratiod_lognormal(),
-    iter = 200, warmup = 100, chains = 1,
-    gradient_mode = "A",
-    verbose = FALSE
+    control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "A", verbose = FALSE)
   )
 })[[3]]
 cat(sprintf("A-mode: %.2fs\n", t_A))
@@ -35,12 +33,10 @@ cat(sprintf("A-mode: %.2fs\n", t_A))
 # This will currently error or use A fallback since LOGNORMAL is excluded
 tryCatch({
   t_H <- system.time({
-    fit_H <- ratiod(
+    fit_H <- tratio(
       y | denom ~ x, data = df,
       family = ratiod_lognormal(),
-      iter = 200, warmup = 100, chains = 1,
-      gradient_mode = "H",
-      verbose = FALSE
+      control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "H", verbose = FALSE)
     )
   })[[3]]
   cat(sprintf("H-mode: %.2fs\n", t_H))
@@ -94,24 +90,20 @@ df_re <- data.frame(
 )
 
 t_A_re <- system.time({
-  fit_A_re <- ratiod(
+  fit_A_re <- tratio(
     y | denom ~ x + (1 | site), data = df_re,
     family = ratiod_lognormal(),
-    iter = 200, warmup = 100, chains = 1,
-    gradient_mode = "A",
-    verbose = FALSE
+    control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "A", verbose = FALSE)
   )
 })[[3]]
 cat(sprintf("A-mode with RE: %.2fs\n", t_A_re))
 
 tryCatch({
   t_H_re <- system.time({
-    fit_H_re <- ratiod(
+    fit_H_re <- tratio(
       y | denom ~ x + (1 | site), data = df_re,
       family = ratiod_lognormal(),
-      iter = 200, warmup = 100, chains = 1,
-      gradient_mode = "H",
-      verbose = FALSE
+      control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "H", verbose = FALSE)
     )
   })[[3]]
   cat(sprintf("H-mode with RE: %.2fs\n", t_H_re))

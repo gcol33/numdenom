@@ -2,9 +2,9 @@
 % Please edit documentation in R/temporal.R
 \name{ratiod_temporal}
 \alias{ratiod_temporal}
-\title{Temporal structure specifications for ratiod}
+\title{Temporal structure specifications for tulpaRatio}
 \description{
-Functions to specify temporal random effects for ratiod models.
+Functions to specify temporal random effects for ratio models.
 Temporal effects are shared between numerator and denominator by default,
 which helps prevent spurious ratio effects from temporally-structured
 unmeasured confounders.

@@ -63,9 +63,9 @@ cat("Fitting... ")
 flush.console()
 t_26 <- system.time({
   fit_26 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_26, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_26, family = ratiod_poisson_gamma(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -118,9 +118,9 @@ cat("Fitting... ")
 flush.console()
 t_56 <- system.time({
   fit_56 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_56, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_56, family = ratiod_negbin_negbin(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

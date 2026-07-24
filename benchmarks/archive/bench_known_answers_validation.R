@@ -91,13 +91,12 @@ tryCatch({
   )
 
   t7 <- system.time({
-    fit7 <- ratiod(
+    fit7 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df7,
       family = ratiod_poisson_gamma(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -151,13 +150,12 @@ tryCatch({
   )
 
   t15 <- system.time({
-    fit15 <- ratiod(
+    fit15 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df15,
       family = ratiod_poisson_gamma(),
       temporal = temporal_multiscale(time_var = "time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -211,13 +209,12 @@ tryCatch({
   )
 
   t30 <- system.time({
-    fit30 <- ratiod(
+    fit30 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df30,
       family = ratiod_poisson_gamma(),
       latent = latent_factor(n_factors = K_LATENT),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -272,13 +269,12 @@ tryCatch({
   )
 
   t37 <- system.time({
-    fit37 <- ratiod(
+    fit37 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df37,
       family = ratiod_negbin_negbin(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -331,13 +327,12 @@ tryCatch({
   )
 
   t45 <- system.time({
-    fit45 <- ratiod(
+    fit45 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df45,
       family = ratiod_negbin_negbin(),
       temporal = temporal_multiscale(time_var = "time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -391,13 +386,12 @@ tryCatch({
   )
 
   t60 <- system.time({
-    fit60 <- ratiod(
+    fit60 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df60,
       family = ratiod_negbin_negbin(),
       latent = latent_factor(n_factors = K_LATENT),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 

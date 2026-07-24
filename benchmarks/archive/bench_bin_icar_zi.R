@@ -71,13 +71,12 @@ df <- data.frame(
 cat("Fitting numdenom (ZI binomial + ICAR)... ")
 t_nd <- system.time({
   fit_nd <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df,
       family = ratiod_zibinomial(),
       spatial = spatial_car(adj_matrix, group_var = "site"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

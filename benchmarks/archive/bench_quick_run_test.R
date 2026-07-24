@@ -38,16 +38,13 @@ message("\n>>> Row 52: negbin_negbin + RE + HSGP + RW1 <<<")
 
 tryCatch({
   time52 <- system.time({
-    fit52 <- ratiod(
+    fit52 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df,
       family = ratiod_negbin_negbin(),
       spatial = spatial_hsgp(coords = ~ x_coord + y_coord),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -62,15 +59,12 @@ message("\n>>> Row 39: negbin_negbin + RE + MSGP <<<")
 
 tryCatch({
   time39 <- system.time({
-    fit39 <- ratiod(
+    fit39 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df,
       family = ratiod_negbin_negbin(),
       spatial = spatial_multiscale(coords = ~ x_coord + y_coord),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -85,16 +79,13 @@ message("\n>>> Row 53: negbin_negbin + RE + MSGP + RW1 <<<")
 
 tryCatch({
   time53 <- system.time({
-    fit53 <- ratiod(
+    fit53 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df,
       family = ratiod_negbin_negbin(),
       spatial = spatial_multiscale(coords = ~ x_coord + y_coord),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 

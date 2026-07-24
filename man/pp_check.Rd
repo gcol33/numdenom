@@ -33,13 +33,13 @@ pp_check(object, ...)
 A ggplot object
 }
 \description{
-Generate posterior predictive checks for a fitted ratiod model.
+Generate posterior predictive checks for a fitted ratio model.
 Compares observed data to replicated data from the posterior predictive
 distribution.
 }
 \examples{
 # pp_check requires a fitted model with posterior predictive draws
-# See ratiod() examples for fitting models
+# See tratio() examples for fitting models
 
 \donttest{
 # Simulate data and fit model (slow, not run on CRAN)
@@ -51,7 +51,7 @@ df <- data.frame(
   x = rnorm(n),
   site = factor(rep(1:10, each = 5))
 )
-fit <- ratiod(
+fit <- tratio(
   count | total ~ x + (1 | site),
   data = df,
   family = ratiod_negbin_negbin(),

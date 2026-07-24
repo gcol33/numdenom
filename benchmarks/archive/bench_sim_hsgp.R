@@ -93,9 +93,9 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_68 <- system.time({
   fit_68 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_68, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_68, family = ratiod_binomial(),
            spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -123,10 +123,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_22 <- system.time({
   fit_22 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_22, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_22, family = ratiod_poisson_gamma(),
            spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -156,10 +156,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_52 <- system.time({
   fit_52 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_52, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_52, family = ratiod_negbin_negbin(),
            spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -187,10 +187,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_84 <- system.time({
   fit_84 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_84, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_84, family = ratiod_binomial(),
            spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

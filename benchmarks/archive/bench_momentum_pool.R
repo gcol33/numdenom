@@ -20,36 +20,36 @@ cat(sprintf("N=%d, iter=500, warmup=250, chains=1\n\n", N))
 # PG base
 cat("PG base (poisson_gamma)...\n")
 t_pg <- system.time({
-  fit_pg <- ratiod(y_num | y_denom ~ x, data = df,
+  fit_pg <- tratio(y_num | y_denom ~ x, data = df,
                    family = ratiod_poisson_gamma(),
-                   iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                   control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("  Time: %.2fs\n", t_pg))
 
 # NB base
 cat("NB base (negbin_negbin)...\n")
 t_nb <- system.time({
-  fit_nb <- ratiod(y_num | y_denom ~ x, data = df,
+  fit_nb <- tratio(y_num | y_denom ~ x, data = df,
                    family = ratiod_negbin_negbin(),
-                   iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                   control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("  Time: %.2fs\n", t_nb))
 
 # PG + RE
 cat("PG + RE...\n")
 t_pg_re <- system.time({
-  fit_pg_re <- ratiod(y_num | y_denom ~ x + (1 | site), data = df,
+  fit_pg_re <- tratio(y_num | y_denom ~ x + (1 | site), data = df,
                       family = ratiod_poisson_gamma(),
-                      iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                      control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("  Time: %.2fs\n", t_pg_re))
 
 # NB + RE
 cat("NB + RE...\n")
 t_nb_re <- system.time({
-  fit_nb_re <- ratiod(y_num | y_denom ~ x + (1 | site), data = df,
+  fit_nb_re <- tratio(y_num | y_denom ~ x + (1 | site), data = df,
                       family = ratiod_negbin_negbin(),
-                      iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                      control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("  Time: %.2fs\n", t_nb_re))
 
@@ -61,9 +61,9 @@ df_bin <- data.frame(
 )
 cat("Binomial base...\n")
 t_bin <- system.time({
-  fit_bin <- ratiod(y_num | y_denom ~ x, data = df_bin,
+  fit_bin <- tratio(y_num | y_denom ~ x, data = df_bin,
                     family = ratiod_binomial(),
-                    iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                    control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("  Time: %.2fs\n", t_bin))
 

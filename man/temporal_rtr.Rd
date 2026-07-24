@@ -72,7 +72,7 @@ df <- data.frame(
 )
 
 # Standard RW2 (may have temporal confounding)
-fit1 <- ratiod(
+fit1 <- tratio(
   count | effort ~ temperature,
   data = df,
   temporal = temporal_rw2("year"),
@@ -83,7 +83,7 @@ fit1 <- ratiod(
 )
 
 # RTR to protect temperature coefficient
-fit2 <- ratiod(
+fit2 <- tratio(
   count | effort ~ temperature,
   data = df,
   temporal = temporal_rtr(

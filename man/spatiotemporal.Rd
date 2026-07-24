@@ -2,7 +2,7 @@
 % Please edit documentation in R/spatiotemporal.R
 \name{spatiotemporal}
 \alias{spatiotemporal}
-\title{Spatiotemporal interaction specifications for ratiod}
+\title{Spatiotemporal interaction specifications for tulpaRatio}
 \usage{
 spatiotemporal(
   spatial,
@@ -35,11 +35,11 @@ numerator and denominator. Set to FALSE for process-specific effects
 A \code{ratiod_spatiotemporal} object
 }
 \description{
-Functions to specify spatiotemporal interaction effects for ratiod models.
+Functions to specify spatiotemporal interaction effects for ratio models.
 These capture dependencies that arise when spatial patterns vary over time,
 or when temporal trends differ across space.
 
-Specify a spatiotemporal interaction effect for ratiod models.
+Specify a spatiotemporal interaction effect for ratio models.
 The interaction captures structured or unstructured deviation from
 the additive spatial + temporal model.
 }
@@ -140,7 +140,7 @@ df$count <- rpois(nrow(df), lambda = 20)
 df$effort <- rgamma(nrow(df), shape = 4, rate = 1)
 
 # Fit model with spatiotemporal interaction
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),

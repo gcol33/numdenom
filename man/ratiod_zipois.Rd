@@ -57,7 +57,7 @@ df <- data.frame(
 
 \dontrun{
 # Fit model (not run - ZI models require specialized backend support)
-fit <- ratiod(
+fit <- tratio(
   catch | effort ~ depth + (1 | vessel),
   data = df,
   family = ratiod_zipois(denom_family = "gamma"),

@@ -40,14 +40,11 @@ cat("Any zeros? y_num:", any(y_num == 0), "y_denom:", any(y_denom == 0), "\n")
 # Fit with numdenom
 # ============================================
 cat("\n=== Fitting numdenom ===\n")
-nd_fit <- ratiod(
+nd_fit <- tratio(
   y_num | y_denom ~ x,
   data = dat,
   family = ratiod_gamma_gamma(),
-  iter = 1000,
-  warmup = 500,
-  chains = 2,
-  seed = 123
+  control = list(iter = 1000, warmup = 500, chains = 2, seed = 123)
 )
 
 nd_summary <- summary(nd_fit)

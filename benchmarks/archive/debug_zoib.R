@@ -66,9 +66,9 @@ cat(sprintf("  Binomial that happened to be trials: %d\n", binomial_ones))
 
 cat("\nFitting ZOIB model...\n")
 fit <- tryCatch({
-  ratiod(successes | trials ~ x + (1 | site), data = df,
+  tratio(successes | trials ~ x + (1 | site), data = df,
          family = ratiod_zoibinomial(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = TRUE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = TRUE))
 }, error = function(e) {
   cat(sprintf("ERROR: %s\n", e$message))
   NULL

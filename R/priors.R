@@ -1,4 +1,4 @@
-#' Prior specification for ratiod models
+#' Prior specification for ratio models
 #'
 #' @description
 #' Specify priors for model parameters. Supports both PC (penalized complexity)
@@ -363,7 +363,7 @@ ratiod_priors_legacy <- function(
 #'
 #' @export
 print.ratiod_priors <- function(x, ...) {
-  cat("ratiod prior specification\n")
+  cat("tulpaRatio prior specification\n")
   cat("=========================\n\n")
 
   cat("Fixed effects (beta):\n")
@@ -435,14 +435,14 @@ print_prior <- function(prior, indent = "") {
 }
 
 
-#' Show default priors for a ratiod family
+#' Show default priors for a tulpaRatio family
 #'
 #' @description
 #' Display the default prior specifications used for each model family.
 #' Useful for understanding what priors are applied before fitting
 #' and as a starting point for customization.
 #'
-#' @param family A ratiod family object (e.g., `ratiod_negbin_negbin()`).
+#' @param family A tulpaRatio family object (e.g., `ratiod_negbin_negbin()`).
 #'   If NULL (default), shows defaults for all families.
 #' @param spatial Logical; if TRUE, include spatial priors. Default FALSE.
 #' @param temporal Logical; if TRUE, include temporal priors. Default FALSE.
@@ -451,7 +451,7 @@ print_prior <- function(prior, indent = "") {
 #'   Primarily called for its side effect of printing.
 #'
 #' @details
-#' Default priors in ratiod follow these principles:
+#' Default priors in tulpaRatio follow these principles:
 #'
 #' - **Fixed effects (beta)**: Normal(0, 2.5) - weakly informative, allows
 #'   coefficients roughly in \[-5, 5\] on the link scale.
@@ -495,7 +495,7 @@ priors_default <- function(family = NULL, spatial = FALSE, temporal = FALSE) {
 
   if (is.null(family)) {
     # Show defaults for all families
-    cat("Default priors for ratiod models\n")
+    cat("Default priors for ratio models\n")
     cat("================================\n\n")
 
     cat("These defaults apply to all families unless overridden.\n\n")

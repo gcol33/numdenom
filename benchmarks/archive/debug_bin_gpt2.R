@@ -22,11 +22,10 @@ df <- data.frame(y = y, trials = trials, x = x, site = site,
 cat("=== Bin+GP_t: N=500, S=50, T=20 ===\n")
 cat("Testing H mode...\n")
 fit <- tryCatch({
-  ratiod(y | trials ~ x + (1 | site), data = df,
+  tratio(y | trials ~ x + (1 | site), data = df,
          family = ratiod_binomial(),
          temporal = temporal_gp(time_var = "time_num"),
-         iter = 10, warmup = 5, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 
 if (is.character(fit)) cat(fit, "\n") else cat("H mode: SUCCESS\n")

@@ -1,7 +1,7 @@
-#' Benchmark ratiod performance
+#' Benchmark tulpaRatio performance
 #'
 #' @description
-#' Utilities for benchmarking ratiod model fitting performance across
+#' Utilities for benchmarking ratio model fitting performance across
 #' different dataset sizes and configurations.
 #'
 #' @name ratiod_benchmark
@@ -102,15 +102,11 @@ ratiod_benchmark <- function(
   # Time the fit
   start_time <- Sys.time()
 
-  fit <- ratiod(
+  fit <- tratio(
     formula,
     data = df,
     family = family,
-    iter = n_iter,
-    warmup = n_warmup,
-    chains = n_chains,
-    threads = n_threads,
-    refresh = if (verbose) 100 else 0
+    control = list(iter = n_iter, warmup = n_warmup, chains = n_chains)
   )
 
   end_time <- Sys.time()
@@ -167,7 +163,7 @@ ratiod_benchmark <- function(
 #'
 #' @export
 print.ratiod_benchmark <- function(x, ...) {
-  cat("ratiod Benchmark Results\n")
+  cat("tulpaRatio Benchmark Results\n")
   cat("=======================\n\n")
 
   cat("Configuration:\n")

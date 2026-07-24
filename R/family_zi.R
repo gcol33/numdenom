@@ -1,4 +1,4 @@
-#' Zero-inflated model families for ratiod
+#' Zero-inflated model families for tulpaRatio
 #'
 #' @description
 #' Distribution families for handling excess zeros in count data.
@@ -34,7 +34,7 @@ NULL
 #'
 #' @details
 #' The zero-inflation probability can have its own linear predictor via the
-#' `zi` argument in `ratiod()`. If not specified, a single intercept is estimated.
+#' `zi` argument in `tratio()`. If not specified, a single intercept is estimated.
 #'
 #' For ecological data, zero-inflation often represents:
 #' - Structural zeros (species truly absent vs not detected)
@@ -59,7 +59,7 @@ NULL
 #'
 #' \dontrun{
 #' # Fit model (not run - ZI models require specialized backend support)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | total ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_zinegbin(),
@@ -144,7 +144,7 @@ ratiod_zinegbin <- function(link_num = "log", link_denom = "log",
 #'
 #' \dontrun{
 #' # Fit model (not run - ZI models require specialized backend support)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   catch | effort ~ depth + (1 | vessel),
 #'   data = df,
 #'   family = ratiod_zipois(denom_family = "gamma"),
@@ -244,7 +244,7 @@ ratiod_zipois <- function(link_num = "log", link_denom = "log",
 #'
 #' \dontrun{
 #' # Fit model (not run - hurdle models require specialized backend support)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | total ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_hurdle_negbin(),
@@ -372,7 +372,7 @@ is_hurdle_family <- function(family) {
 #' @export
 print.ratiod_family_zi <- function(x, ...) {
   zi_type <- if (x$zi_type == "hurdle") "Hurdle" else "Zero-inflated"
-  cat("ratiod family:", x$name, "\n")
+  cat("tulpaRatio family:", x$name, "\n")
   cat(sprintf("[%s model]\n", zi_type))
   cat(x$description, "\n\n")
 

@@ -6,7 +6,7 @@ library(numdenom)
 verify_gradient <- function(label, ...) {
   cat(sprintf("  %-30s", label))
   tryCatch({
-    fit <- ratiod(..., mode = "hmc", iter = 5, warmup = 2, chains = 1, verbose = FALSE)
+    fit <- tratio(..., mode = "hmc", control = list(iter = 5, warmup = 2, chains = 1, verbose = FALSE))
     cat("OK\n")
     invisible(TRUE)
   }, error = function(e) {

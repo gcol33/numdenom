@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_vi.R
 \name{fit_vi}
 \alias{fit_vi}
-\title{Fit ratiod model using Variational Inference}
+\title{Fit ratio model using Variational Inference}
 \usage{
 fit_vi(
   formula,
@@ -56,6 +56,6 @@ fit_vi(
 A ratiod_fit object with class "ratiod_vi"
 }
 \description{
-Fit ratiod model using Variational Inference
+Fit ratio model using Variational Inference
 }
 \keyword{internal}

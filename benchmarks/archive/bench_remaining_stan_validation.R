@@ -86,14 +86,13 @@ tryCatch({
 
   # numdenom fit
   t22_nd <- system.time({
-    fit22_nd <- ratiod(
+    fit22_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df22,
       family = ratiod_poisson_gamma(),
       spatial = spatial_hsgp(coords = c("coord_x", "coord_y")),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -155,7 +154,7 @@ tryCatch({
 
   # numdenom fit
   t28_nd <- system.time({
-    fit28_nd <- ratiod(
+    fit28_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df28,
       family = ratiod_poisson_gamma(),
@@ -164,8 +163,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "I"
       ),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -228,7 +226,7 @@ tryCatch({
 
   # numdenom fit
   t29_nd <- system.time({
-    fit29_nd <- ratiod(
+    fit29_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df29,
       family = ratiod_poisson_gamma(),
@@ -237,8 +235,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "IV"
       ),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -299,13 +296,12 @@ tryCatch({
 
   # numdenom fit
   t30_nd <- system.time({
-    fit30_nd <- ratiod(
+    fit30_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df30,
       family = ratiod_poisson_gamma(),
       latent = latent_factor(n_factors = K_LATENT),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -363,14 +359,13 @@ tryCatch({
 
   # numdenom fit
   t52_nd <- system.time({
-    fit52_nd <- ratiod(
+    fit52_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df52,
       family = ratiod_negbin_negbin(),
       spatial = spatial_hsgp(coords = c("coord_x", "coord_y")),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -432,7 +427,7 @@ tryCatch({
 
   # numdenom fit
   t58_nd <- system.time({
-    fit58_nd <- ratiod(
+    fit58_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df58,
       family = ratiod_negbin_negbin(),
@@ -441,8 +436,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "I"
       ),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -505,7 +499,7 @@ tryCatch({
 
   # numdenom fit
   t59_nd <- system.time({
-    fit59_nd <- ratiod(
+    fit59_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df59,
       family = ratiod_negbin_negbin(),
@@ -514,8 +508,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "IV"
       ),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -576,13 +569,12 @@ tryCatch({
 
   # numdenom fit
   t60_nd <- system.time({
-    fit60_nd <- ratiod(
+    fit60_nd <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df60,
       family = ratiod_negbin_negbin(),
       latent = latent_factor(n_factors = K_LATENT),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 

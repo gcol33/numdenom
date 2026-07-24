@@ -44,14 +44,11 @@ cat("  RE mean:", mean(true_re), "SD:", sd(true_re), "\n")
 # Fit numdenom
 # ====================
 cat("\n=== Fitting numdenom ===\n")
-nd_fit <- ratiod(
+nd_fit <- tratio(
   y_num | y_denom ~ x + (1 | site),
   data = df,
   family = ratiod_lognormal(),
-  iter = 4000,
-  warmup = 2000,
-  chains = 2,
-  cores = 2
+  control = list(iter = 4000, warmup = 2000, chains = 2, cores = 2)
 )
 
 # Extract posterior

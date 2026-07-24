@@ -35,16 +35,16 @@ timed <- function(desc, expr) {
 
 cat("Base models (fused single-pass, p<=4):\n")
 t1 <- timed("NB base", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 t2 <- timed("PG base", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 t3 <- timed("Binomial base", quote(
-  ratiod(y | n ~ x, data = df_bin, family = ratiod_binomial(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y | n ~ x, data = df_bin, family = ratiod_binomial(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 cat("\nReference (bench_3fixes.R, 5-rep median):\n")

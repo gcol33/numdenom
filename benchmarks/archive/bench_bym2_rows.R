@@ -101,18 +101,13 @@ for (row_cfg in bym2_rows) {
 
     tryCatch({
       elapsed <- system.time({
-        fit <- ratiod(
+        fit <- tratio(
           formula   = form,
           data      = df,
           family    = nd_family,
           spatial   = nd_spatial,
           temporal  = nd_temporal,
-          iter      = N_ITER,
-          warmup    = N_WARMUP,
-          chains    = N_CHAINS,
-          seed      = seed,
-          verbose   = TRUE,
-          gradient_mode = "H"
+          control = list(iter      = N_ITER, warmup    = N_WARMUP, chains    = N_CHAINS, seed      = seed, verbose   = TRUE, gradient_mode = "H")
         )
       })["elapsed"]
 

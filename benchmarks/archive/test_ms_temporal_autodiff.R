@@ -21,9 +21,9 @@ cat("=== Multiscale Temporal Autodiff Verification ===\n\n")
 cat("--- Test 1: H mode (reference) ---\n")
 tryCatch({
   set.seed(123)
-  fit_H <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_H <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-    iter = 50, warmup = 25, chains = 1, gradient_mode = "H", verbose = FALSE)
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "H", verbose = FALSE))
   draws_H <- as.matrix(fit_H$draws)
   nan_H <- sum(is.nan(draws_H))
   cat(sprintf("  H mode: OK, NaN: %d, params: %d\n", nan_H, ncol(draws_H)))
@@ -33,9 +33,9 @@ tryCatch({
 cat("\n--- Test 2: A mode (forward autodiff) ---\n")
 tryCatch({
   set.seed(123)
-  fit_A <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_A <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-    iter = 50, warmup = 25, chains = 1, gradient_mode = "A", verbose = FALSE)
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "A", verbose = FALSE))
   draws_A <- as.matrix(fit_A$draws)
   nan_A <- sum(is.nan(draws_A))
   cat(sprintf("  A mode: OK, NaN: %d\n", nan_A))
@@ -51,9 +51,9 @@ tryCatch({
 cat("\n--- Test 3: A_t mode (tape autodiff — previously segfaulted) ---\n")
 tryCatch({
   set.seed(123)
-  fit_At <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_At <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-    iter = 50, warmup = 25, chains = 1, gradient_mode = "A_t", verbose = FALSE)
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "A_t", verbose = FALSE))
   draws_At <- as.matrix(fit_At$draws)
   nan_At <- sum(is.nan(draws_At))
   cat(sprintf("  A_t mode: OK, NaN: %d\n", nan_At))
@@ -69,9 +69,9 @@ tryCatch({
 cat("\n--- Test 4: A_r mode (arena autodiff) ---\n")
 tryCatch({
   set.seed(123)
-  fit_Ar <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_Ar <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-    iter = 50, warmup = 25, chains = 1, gradient_mode = "A_r", verbose = FALSE)
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "A_r", verbose = FALSE))
   draws_Ar <- as.matrix(fit_Ar$draws)
   nan_Ar <- sum(is.nan(draws_Ar))
   cat(sprintf("  A_r mode: OK, NaN: %d\n", nan_Ar))
@@ -87,9 +87,9 @@ tryCatch({
 cat("\n--- Test 5: Trend only (RW1), A_t mode ---\n")
 tryCatch({
   set.seed(123)
-  fit_t5 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_t5 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", short_term = "none"),
-    iter = 50, warmup = 25, chains = 1, gradient_mode = "A_t", verbose = FALSE)
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "A_t", verbose = FALSE))
   draws_t5 <- as.matrix(fit_t5$draws)
   nan_t5 <- sum(is.nan(draws_t5))
   cat(sprintf("  A_t mode (trend only): OK, NaN: %d\n", nan_t5))
@@ -99,9 +99,9 @@ tryCatch({
 cat("\n--- Test 6: RW2 trend + IID short, A_t mode ---\n")
 tryCatch({
   set.seed(123)
-  fit_t6 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_t6 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw2", short_term = "iid"),
-    iter = 50, warmup = 25, chains = 1, gradient_mode = "A_t", verbose = FALSE)
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "A_t", verbose = FALSE))
   draws_t6 <- as.matrix(fit_t6$draws)
   nan_t6 <- sum(is.nan(draws_t6))
   cat(sprintf("  A_t mode (rw2+iid): OK, NaN: %d\n", nan_t6))

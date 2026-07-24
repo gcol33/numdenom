@@ -43,13 +43,12 @@ df <- data.frame(
 df$denom[df$denom == 0] <- 1
 
 cat("=== Test 1: ICAR only (no temporal) ===\n")
-fit1 <- ratiod(
+fit1 <- tratio(
   y | denom ~ x + (1|site),
   data = df,
   family = ratiod_negbin_negbin(),
   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-  iter = 500, warmup = 250, chains = 1,
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE)
 )
 draws1 <- as.matrix(fit1$draws)
 cat("Params:", paste(head(colnames(draws1), 20), collapse = ", "), "\n")
@@ -57,13 +56,12 @@ spatial_params1 <- colnames(draws1)[grep("^spatial\\[", colnames(draws1))]
 cat("Spatial params:", length(spatial_params1), "\n\n")
 
 cat("=== Test 2: RW1 only (no spatial) ===\n")
-fit2 <- ratiod(
+fit2 <- tratio(
   y | denom ~ x + (1|site),
   data = df,
   family = ratiod_negbin_negbin(),
   temporal = temporal_rw1("time_factor"),
-  iter = 500, warmup = 250, chains = 1,
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE)
 )
 draws2 <- as.matrix(fit2$draws)
 cat("Params:", paste(head(colnames(draws2), 20), collapse = ", "), "\n")
@@ -71,13 +69,12 @@ temporal_params2 <- colnames(draws2)[grep("^temporal\\[", colnames(draws2))]
 cat("Temporal params:", length(temporal_params2), "\n\n")
 
 cat("=== Test 3: AR1 only (no spatial) ===\n")
-fit3 <- ratiod(
+fit3 <- tratio(
   y | denom ~ x + (1|site),
   data = df,
   family = ratiod_negbin_negbin(),
   temporal = temporal_ar1("time_factor"),
-  iter = 500, warmup = 250, chains = 1,
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE)
 )
 draws3 <- as.matrix(fit3$draws)
 cat("Params:", paste(head(colnames(draws3), 20), collapse = ", "), "\n")
@@ -87,14 +84,13 @@ ar1_params <- colnames(draws3)[grep("rho", colnames(draws3))]
 cat("AR1 rho params:", paste(ar1_params, collapse = ", "), "\n\n")
 
 cat("=== Test 4: ICAR + RW1 ===\n")
-fit4 <- ratiod(
+fit4 <- tratio(
   y | denom ~ x + (1|site),
   data = df,
   family = ratiod_negbin_negbin(),
   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
   temporal = temporal_rw1("time_factor"),
-  iter = 500, warmup = 250, chains = 1,
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE)
 )
 draws4 <- as.matrix(fit4$draws)
 cat("Params:", paste(head(colnames(draws4), 30), collapse = ", "), "\n")
@@ -104,14 +100,13 @@ cat("Spatial params:", length(spatial_params4), "\n")
 cat("Temporal params:", length(temporal_params4), "\n\n")
 
 cat("=== Test 5: ICAR + AR1 ===\n")
-fit5 <- ratiod(
+fit5 <- tratio(
   y | denom ~ x + (1|site),
   data = df,
   family = ratiod_negbin_negbin(),
   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
   temporal = temporal_ar1("time_factor"),
-  iter = 500, warmup = 250, chains = 1,
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE)
 )
 draws5 <- as.matrix(fit5$draws)
 cat("Params:", paste(head(colnames(draws5), 30), collapse = ", "), "\n")

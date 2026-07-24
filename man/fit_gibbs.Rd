@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_gibbs.R
 \name{fit_gibbs}
 \alias{fit_gibbs}
-\title{Fit ratiod model using Gibbs sampling}
+\title{Fit ratio model using Gibbs sampling}
 \usage{
 fit_gibbs(
   formula,
@@ -10,6 +10,7 @@ fit_gibbs(
   family,
   spatial,
   temporal = NULL,
+  priors = NULL,
   iter = 2000,
   warmup = floor(iter/2),
   thin = 1,
@@ -27,6 +28,8 @@ fit_gibbs(
 \item{family}{Model family}
 
 \item{spatial}{Spatial structure from spatial_car()}
+
+\item{priors}{Prior specification. See \code{\link[=ratiod_priors]{ratiod_priors()}}.}
 
 \item{iter}{Total iterations}
 
@@ -46,6 +49,6 @@ fit_gibbs(
 A ratiod_fit object
 }
 \description{
-Fit ratiod model using Gibbs sampling
+Fit ratio model using Gibbs sampling
 }
 \keyword{internal}

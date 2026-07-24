@@ -22,10 +22,10 @@ for (s in seeds) {
 
   df <- data.frame(y = y, denom = d, x = x, lon = lon, lat = lat)
 
-  t_s <- system.time(fit <- ratiod(
+  t_s <- system.time(fit <- tratio(
     y | denom ~ x, data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_hsgp(coords = ~ lon + lat),
-    iter = 500, warmup = 250, chains = 1, verbose = FALSE
+    control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE)
   ))["elapsed"]
 
   n_div <- fit$diagnostics$n_divergent

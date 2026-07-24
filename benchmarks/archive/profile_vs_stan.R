@@ -52,16 +52,16 @@ cat("=== Data generated (N =", N, ") ===\n\n")
 cat("=== PART 2: Gradient kernel microbenchmark ===\n")
 
 # Fit a quick model to get the C++ data structures initialized
-fit_nb_quick <- ratiod(
+fit_nb_quick <- tratio(
   y_num | y_denom ~ x, data = df_nb,
   family = ratiod_negbin_negbin(),
-  iter = 10, warmup = 5, chains = 1, refresh = 0
+  control = list(iter = 10, warmup = 5, chains = 1)
 )
 
-fit_bin_quick <- ratiod(
+fit_bin_quick <- tratio(
   y | trials ~ x, data = df_bin,
   family = ratiod_binomial(),
-  iter = 10, warmup = 5, chains = 1, refresh = 0
+  control = list(iter = 10, warmup = 5, chains = 1)
 )
 
 # Now benchmark with more iterations to get stable timing
@@ -72,11 +72,10 @@ cat("\n--- NegBin base (numdenom) ---\n")
 nb_times <- numeric(n_reps)
 for (r in 1:n_reps) {
   t0 <- proc.time()["elapsed"]
-  fit_nb <- ratiod(
+  fit_nb <- tratio(
     y_num | y_denom ~ x, data = df_nb,
     family = ratiod_negbin_negbin(),
-    iter = 500, warmup = 250, chains = 1, refresh = 0,
-    gradient_mode = "H"
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H")
   )
   nb_times[r] <- proc.time()["elapsed"] - t0
 }
@@ -95,11 +94,10 @@ df_pg <- data.frame(y_num = y_pg_num, y_denom = y_pg_denom, x = x)
 pg_times <- numeric(n_reps)
 for (r in 1:n_reps) {
   t0 <- proc.time()["elapsed"]
-  fit_pg <- ratiod(
+  fit_pg <- tratio(
     y_num | y_denom ~ x, data = df_pg,
     family = ratiod_poisson_gamma(),
-    iter = 500, warmup = 250, chains = 1, refresh = 0,
-    gradient_mode = "H"
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H")
   )
   pg_times[r] <- proc.time()["elapsed"] - t0
 }
@@ -110,11 +108,10 @@ cat("\n--- Binomial base (numdenom) ---\n")
 bin_times <- numeric(n_reps)
 for (r in 1:n_reps) {
   t0 <- proc.time()["elapsed"]
-  fit_bin <- ratiod(
+  fit_bin <- tratio(
     y | trials ~ x, data = df_bin,
     family = ratiod_binomial(),
-    iter = 500, warmup = 250, chains = 1, refresh = 0,
-    gradient_mode = "H"
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H")
   )
   bin_times[r] <- proc.time()["elapsed"] - t0
 }
@@ -131,11 +128,10 @@ cat("  If H is much faster than N, gradient dominates.\n\n")
 
 for (mode in c("H", "A", "N")) {
   t0 <- proc.time()["elapsed"]
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x, data = df_nb,
     family = ratiod_negbin_negbin(),
-    iter = 500, warmup = 250, chains = 1, refresh = 0,
-    gradient_mode = mode
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = mode)
   )
   elapsed <- proc.time()["elapsed"] - t0
   cat(sprintf("  Mode %s: %.2fs\n", mode, elapsed))
@@ -158,11 +154,10 @@ for (cfg in configs) {
   iter <- cfg[1]
   warm <- cfg[2]
   t0 <- proc.time()["elapsed"]
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x, data = df_nb,
     family = ratiod_negbin_negbin(),
-    iter = iter, warmup = warm, chains = 1, refresh = 0,
-    gradient_mode = "H"
+    control = list(iter = iter, warmup = warm, chains = 1, gradient_mode = "H")
   )
   elapsed <- proc.time()["elapsed"] - t0
   n_sample <- iter - warm
@@ -252,11 +247,10 @@ for (n_test in c(100, 250, 500, 1000, 2000)) {
   df_t <- data.frame(y_num = y_n, y_denom = y_d, x = x_t)
 
   t0 <- proc.time()["elapsed"]
-  fit_t <- ratiod(
+  fit_t <- tratio(
     y_num | y_denom ~ x, data = df_t,
     family = ratiod_negbin_negbin(),
-    iter = 500, warmup = 250, chains = 1, refresh = 0,
-    gradient_mode = "H"
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H")
   )
   elapsed <- proc.time()["elapsed"] - t0
   cat(sprintf("  N=%5d: %.2fs  (%.3f ms/obs/iter)\n",
@@ -269,11 +263,10 @@ for (n_test in c(100, 250, 500, 1000, 2000)) {
 
 cat("\n=== PART 8: NUTS diagnostics (treedepth → leapfrog count) ===\n")
 
-fit_nb_diag <- ratiod(
+fit_nb_diag <- tratio(
   y_num | y_denom ~ x, data = df_nb,
   family = ratiod_negbin_negbin(),
-  iter = 500, warmup = 250, chains = 1, refresh = 0,
-  gradient_mode = "H"
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H")
 )
 
 if (!is.null(fit_nb_diag$diagnostics)) {

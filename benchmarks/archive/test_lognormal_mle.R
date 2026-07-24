@@ -29,13 +29,11 @@ cat("  mu_mle:", mu_mle_denom, " (true: 3)\n")
 cat("  sigma_mle:", sigma_mle_denom, " (true: 0.4)\n")
 
 cat("\n=== A_t mode ===\n")
-fit_At <- ratiod(
+fit_At <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_lognormal(),
-  iter = 1000, warmup = 500, chains = 1,
-  gradient_mode = "A_t",
-  verbose = FALSE
+  control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE)
 )
 draws_At <- as.matrix(fit_At$draws)
 cat("  beta_num[1]:", mean(draws_At[,"beta_num[1]"]), " (MLE:", mu_mle_num, ")\n")
@@ -44,13 +42,11 @@ cat("  beta_denom[1]:", mean(draws_At[,"beta_denom[1]"]), " (MLE:", mu_mle_denom
 cat("  sigma_denom:", mean(draws_At[,"sigma_denom"]), " (MLE:", sigma_mle_denom, ")\n")
 
 cat("\n=== H mode ===\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_lognormal(),
-  iter = 1000, warmup = 500, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 draws_H <- as.matrix(fit_H$draws)
 cat("  beta_num[1]:", mean(draws_H[,"beta_num[1]"]), " (MLE:", mu_mle_num, ")\n")

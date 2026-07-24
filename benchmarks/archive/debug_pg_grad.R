@@ -19,20 +19,18 @@ cat("x:", round(x, 3), "\n")
 # Fit with N mode (numerical) to see if it works
 cat("\n=== PG base, N mode ===\n")
 fit_n <- tryCatch({
-  ratiod(y | effort ~ x, data = df,
+  tratio(y | effort ~ x, data = df,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "N", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "N", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit_n)) cat(fit_n, "\n") else cat("N mode: SUCCESS\n")
 
 # Fit with H mode to see the mismatch
 cat("\n=== PG base, H mode ===\n")
 fit_h <- tryCatch({
-  ratiod(y | effort ~ x, data = df,
+  tratio(y | effort ~ x, data = df,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit_h)) cat(fit_h, "\n") else cat("H mode: SUCCESS\n")
 
@@ -43,9 +41,8 @@ y_d <- rnbinom(N, size = 5, mu = exp(1.0))
 y_d[y_d == 0] <- 1
 df_nb <- data.frame(y_num = y_nb, y_denom = y_d, x = x)
 fit_nb <- tryCatch({
-  ratiod(y_num | y_denom ~ x, data = df_nb,
+  tratio(y_num | y_denom ~ x, data = df_nb,
          family = ratiod_negbin_negbin(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit_nb)) cat(fit_nb, "\n") else cat("NB H mode: SUCCESS\n")

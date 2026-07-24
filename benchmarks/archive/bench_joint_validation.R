@@ -66,12 +66,11 @@ df_pg$effort[df_pg$effort < 0.01] <- 0.01
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x,
     data = df_pg,
     family = ratiod_poisson_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -142,12 +141,11 @@ df_pg_re$effort[df_pg_re$effort < 0.01] <- 0.01
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_re,
     family = ratiod_poisson_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -225,12 +223,11 @@ df_nb <- data.frame(
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x,
     data = df_nb,
     family = ratiod_negbin_negbin(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -297,12 +294,11 @@ df_nb_re <- data.frame(
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_re,
     family = ratiod_negbin_negbin(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

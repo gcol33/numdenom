@@ -1,4 +1,4 @@
-#' Model families for ratiod
+#' Model families for tulpaRatio
 #'
 #' @description
 #' Distribution families for the numerator and denominator processes.
@@ -41,7 +41,7 @@ NULL
 #'
 #' \dontrun{
 #' # Fit model (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   sp_count | total_count ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_negbin_negbin(),
@@ -107,7 +107,7 @@ ratiod_negbin_negbin <- function(link_num = "log", link_denom = "log") {
 #'
 #' \dontrun{
 #' # Fit model (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   detections | trials ~ effort + (1 | site),
 #'   data = df,
 #'   family = ratiod_binomial(),
@@ -177,7 +177,7 @@ ratiod_binomial <- function(link = "logit", denominator_known = TRUE) {
 #'
 #' \dontrun{
 #' # Fit model (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   catch | effort_hours ~ depth + season + (1 | vessel),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -244,7 +244,7 @@ ratiod_poisson_gamma <- function(link_num = "log", link_denom = "log") {
 #'
 #' \dontrun{
 #' # Fit model (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   catch | effort_hours ~ depth + (1 | vessel),
 #'   data = df,
 #'   family = ratiod_negbin_gamma(),
@@ -335,7 +335,7 @@ validate_link <- function(link, allowed) {
 #'
 #' \dontrun{
 #' # Fit model (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   infected | tested ~ treatment + (1 | site),
 #'   data = df,
 #'   family = ratiod_beta_binomial(),
@@ -391,7 +391,7 @@ ratiod_beta_binomial <- function(link = "logit", denominator_known = TRUE) {
 #' @details
 #' The gamma distribution is appropriate for positive continuous data
 #' with right skew. The ratio of two gamma random variables does not
-#' have a simple closed form, which is why ratiod models them jointly.
+#' have a simple closed form, which is why ratio models them jointly.
 #'
 #' Shape parameters are estimated for both numerator and denominator,
 #' allowing different amounts of variability in each process.
@@ -413,7 +413,7 @@ ratiod_beta_binomial <- function(link = "logit", denominator_known = TRUE) {
 #'
 #' \dontrun{
 #' # Fit model (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   species_biomass | total_biomass ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_gamma_gamma(),
@@ -490,7 +490,7 @@ ratiod_gamma_gamma <- function(link_num = "log", link_denom = "log") {
 #'
 #' \dontrun{
 #' # Fit model (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   weight | length_cubed ~ age + sex + (1 | cohort),
 #'   data = df,
 #'   family = ratiod_lognormal(),
@@ -537,7 +537,7 @@ ratiod_lognormal <- function(link_num = "log", link_denom = "log",
 #'
 #' @export
 print.ratiod_family <- function(x, ...) {
-  cat("ratiod family:", x$name, "\n")
+  cat("tulpaRatio family:", x$name, "\n")
   cat(x$description, "\n\n")
   cat("Numerator:  ", x$numerator$distribution,
       "(", x$numerator$link, ")\n", sep = "")

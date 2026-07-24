@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_sghmc.R
 \name{fit_sgld}
 \alias{fit_sgld}
-\title{Fit ratiod model using Stochastic Gradient Langevin Dynamics}
+\title{Fit ratio model using Stochastic Gradient Langevin Dynamics}
 \usage{
 fit_sgld(
   formula,
@@ -63,6 +63,6 @@ fit_sgld(
 A ratiod_fit object with class "ratiod_sgld"
 }
 \description{
-Fit ratiod model using Stochastic Gradient Langevin Dynamics
+Fit ratio model using Stochastic Gradient Langevin Dynamics
 }
 \keyword{internal}

@@ -28,7 +28,7 @@ cat(sprintf("=== ST Type IV: %d sites x %d times = %d params ===\n\n",
 
 run_st <- function(gradient_mode, label, iter = 200, warmup = 100) {
   t <- system.time({
-    fit <- ratiod(y | denom ~ x,
+    fit <- tratio(y | denom ~ x,
                   data = df, family = ratiod_poisson_gamma(),
                   spatial = spatial_car(adj, group_var = "site"),
                   temporal = temporal_rw1(time_var = "time"),
@@ -37,8 +37,8 @@ run_st <- function(gradient_mode, label, iter = 200, warmup = 100) {
                     temporal = temporal_rw1(time_var = "time"),
                     type = "IV"
                   ),
-                  mode = "hmc", gradient_mode = gradient_mode,
-                  iter = iter, warmup = warmup, chains = 1, verbose = FALSE)
+                  mode = "hmc",
+                  control = list(gradient_mode = gradient_mode, iter = iter, warmup = warmup, chains = 1, verbose = FALSE))
   })["elapsed"]
 
   div <- sum(fit$diagnostics$divergent, na.rm = TRUE)

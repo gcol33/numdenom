@@ -15,14 +15,11 @@ df <- data.frame(y = y_num, denom = y_denom)
 cat("=== Testing C++ gradient computation ===\n")
 
 # Use verbose mode and check if there are issues
-fit <- ratiod(
+fit <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 100, warmup = 50, chains = 1,
-  gradient_mode = "H",
-  seed = 42,
-  verbose = TRUE
+  control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "H", seed = 42, verbose = TRUE)
 )
 
 cat("\n=== Checking draws ===\n")
@@ -32,14 +29,11 @@ cat("shape_denom range:", range(draws[,"shape_denom"]), "\n")
 
 # Let's also try with N mode (numerical gradients)
 cat("\n=== Fitting with N (numerical) gradients ===\n")
-fit_N <- ratiod(
+fit_N <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 100, warmup = 50, chains = 1,
-  gradient_mode = "N",
-  seed = 42,
-  verbose = TRUE
+  control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "N", seed = 42, verbose = TRUE)
 )
 
 draws_N <- as.matrix(fit_N$draws)

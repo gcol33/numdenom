@@ -109,7 +109,7 @@ df <- data.frame(
 )
 
 # ICAR model (standard disease mapping approach)
-fit_icar <- ratiod(
+fit_icar <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -121,7 +121,7 @@ fit_icar <- ratiod(
 )
 
 # Proper CAR model (estimate spatial autocorrelation)
-fit_car <- ratiod(
+fit_car <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),

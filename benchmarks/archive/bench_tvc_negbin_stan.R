@@ -50,16 +50,12 @@ cat(sprintf("N = %d, T = %d\n\n", N_OBS, N_TIMES))
 # =============================================================================
 cat("Fitting numdenom (H gradient)...\n")
 t_numdenom <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    iter = 1000,
-    warmup = 500,
-    chains = 1,
-    gradient_mode = "H",
     temporal = temporal_tvc(time_var = "time", terms = "x"),
-    refresh = 0
+    control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "H")
   )
 })["elapsed"]
 

@@ -11,9 +11,9 @@ df <- data.frame(y = y, effort = eff, x = x, site = factor(site))
 
 # Fit with N mode (works) to get parameter names
 cat("=== PG+slopes (N mode) ===\n")
-fit <- ratiod(y | effort ~ (x | site), data = df,
+fit <- tratio(y | effort ~ (x | site), data = df,
        family = ratiod_poisson_gamma(),
-       iter = 5, warmup = 2, chains = 1, gradient_mode = "N", verbose = TRUE)
+       control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "N", verbose = TRUE))
 
 # Extract parameter names
 cat("\nParameter names:\n")

@@ -223,7 +223,7 @@ results <- list()
 
 # Row 3: pg + random slopes
 results[["3"]] <- run_bench(3, "pg_slopes",
-  nd_call = quote(ratiod(y | effort ~ x + (x | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (x | site), data = df_pg,
                          family = ratiod_poisson_gamma())),
   brms_call = quote(brm(y ~ x + (x | site) + offset(log(effort)), data = df_pg,
                         family = poisson(), iter = 1000, warmup = 500, chains = 2,
@@ -232,7 +232,7 @@ results[["3"]] <- run_bench(3, "pg_slopes",
 
 # Row 4: pg + crossed RE
 results[["4"]] <- run_bench(4, "pg_crossed",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site) + (1 | site2), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site) + (1 | site2), data = df_pg,
                          family = ratiod_poisson_gamma())),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | site2) + offset(log(effort)),
                         data = df_pg, family = poisson(),
@@ -242,7 +242,7 @@ results[["4"]] <- run_bench(4, "pg_crossed",
 
 # Row 10: pg + pCAR (proper CAR)
 results[["10"]] <- run_bench(10, "pg_pcar",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, proper = TRUE, level = "group",
                                                group_var = "spatial_site"))),
@@ -254,7 +254,7 @@ results[["10"]] <- run_bench(10, "pg_pcar",
 
 # Row 11: pg + RW1 (needs 4-mode, has Stan)
 results[["11"]] <- run_bench(11, "pg_rw1",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          temporal = temporal_rw1("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(effort)),
@@ -265,7 +265,7 @@ results[["11"]] <- run_bench(11, "pg_rw1",
 
 # Row 12: pg + RW2
 results[["12"]] <- run_bench(12, "pg_rw2",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          temporal = temporal_rw2("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(effort)),
@@ -276,7 +276,7 @@ results[["12"]] <- run_bench(12, "pg_rw2",
 
 # Row 13: pg + AR1
 results[["13"]] <- run_bench(13, "pg_ar1",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          temporal = temporal_ar1("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(effort)),
@@ -287,7 +287,7 @@ results[["13"]] <- run_bench(13, "pg_ar1",
 
 # Row 14: pg + temporal GP (use val_chains=1 due to parallel bug in temporal_gp)
 results[["14"]] <- run_bench(14, "pg_gp_t",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          temporal = temporal_gp("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(effort)),
@@ -299,7 +299,7 @@ results[["14"]] <- run_bench(14, "pg_gp_t",
 
 # Row 15: pg + multi-scale temporal (use val_chains=1 due to parallel bug)
 results[["15"]] <- run_bench(15, "pg_ms_t",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          temporal = temporal_multiscale("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(effort)),
@@ -311,7 +311,7 @@ results[["15"]] <- run_bench(15, "pg_ms_t",
 
 # Row 16: pg + ZI (needs 4-mode)
 results[["16"]] <- run_bench(16, "pg_zi",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg_zi,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg_zi,
                          family = ratiod_poisson_gamma(),
                          zi = zi_poisson())),
   brms_call = quote(brm(y ~ x + (1 | site) + offset(log(effort)),
@@ -322,7 +322,7 @@ results[["16"]] <- run_bench(16, "pg_zi",
 
 # Row 17: pg + Hurdle (needs 4-mode)
 results[["17"]] <- run_bench(17, "pg_hurdle",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg_zi,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg_zi,
                          family = ratiod_poisson_gamma(),
                          zi = numdenom::hurdle_poisson())),
   brms_call = quote(brm(y ~ x + (1 | site) + offset(log(effort)),
@@ -333,7 +333,7 @@ results[["17"]] <- run_bench(17, "pg_hurdle",
 
 # Row 19: pg + BYM2 + RW1
 results[["19"]] <- run_bench(19, "pg_bym2_rw1",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time"))),
@@ -345,7 +345,7 @@ results[["19"]] <- run_bench(19, "pg_bym2_rw1",
 
 # Row 20: pg + ICAR + AR1
 results[["20"]] <- run_bench(20, "pg_icar_ar1",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_ar1("time"))),
@@ -357,7 +357,7 @@ results[["20"]] <- run_bench(20, "pg_icar_ar1",
 
 # Row 24: pg + ICAR + ZI
 results[["24"]] <- run_bench(24, "pg_icar_zi",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg_zi,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg_zi,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          zi = zi_poisson())),
@@ -369,7 +369,7 @@ results[["24"]] <- run_bench(24, "pg_icar_zi",
 
 # Row 25: pg + slopes + ICAR
 results[["25"]] <- run_bench(25, "pg_slopes_icar",
-  nd_call = quote(ratiod(y | effort ~ x + (x | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (x | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"))),
   brms_call = quote(brm(y ~ x + (x | site) + (1 | spatial_site) + offset(log(effort)),
@@ -380,7 +380,7 @@ results[["25"]] <- run_bench(25, "pg_slopes_icar",
 
 # Row 27: pg + TVC
 results[["27"]] <- run_bench(27, "pg_tvc",
-  nd_call = quote(ratiod(y | effort ~ x + (1 | site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1 | site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          temporal = temporal_tvc("time", ~ x))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(effort)),
@@ -393,7 +393,7 @@ results[["27"]] <- run_bench(27, "pg_tvc",
 
 # Row 33: nb + random slopes
 results[["33"]] <- run_bench(33, "nb_slopes",
-  nd_call = quote(ratiod(y | denom ~ x + (x | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (x | site), data = df_nb,
                          family = ratiod_negbin_negbin())),
   brms_call = quote(brm(y ~ x + (x | site) + offset(log(denom)), data = df_nb,
                         family = negbinomial(), iter = 1000, warmup = 500, chains = 2,
@@ -402,7 +402,7 @@ results[["33"]] <- run_bench(33, "nb_slopes",
 
 # Row 40: nb + pCAR
 results[["40"]] <- run_bench(40, "nb_pcar",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          spatial = spatial_car(adj_mat, proper = TRUE, level = "group",
                                                group_var = "spatial_site"))),
@@ -414,7 +414,7 @@ results[["40"]] <- run_bench(40, "nb_pcar",
 
 # Row 41: nb + RW1
 results[["41"]] <- run_bench(41, "nb_rw1",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          temporal = temporal_rw1("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(denom)),
@@ -425,7 +425,7 @@ results[["41"]] <- run_bench(41, "nb_rw1",
 
 # Row 42: nb + RW2
 results[["42"]] <- run_bench(42, "nb_rw2",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          temporal = temporal_rw2("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(denom)),
@@ -436,7 +436,7 @@ results[["42"]] <- run_bench(42, "nb_rw2",
 
 # Row 43: nb + AR1
 results[["43"]] <- run_bench(43, "nb_ar1",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          temporal = temporal_ar1("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(denom)),
@@ -447,7 +447,7 @@ results[["43"]] <- run_bench(43, "nb_ar1",
 
 # Row 44: nb + temporal GP (use val_chains=1 due to parallel bug in temporal_gp)
 results[["44"]] <- run_bench(44, "nb_gp_t",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          temporal = temporal_gp("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(denom)),
@@ -459,7 +459,7 @@ results[["44"]] <- run_bench(44, "nb_gp_t",
 
 # Row 45: nb + multi-scale temporal (use val_chains=1 due to parallel bug)
 results[["45"]] <- run_bench(45, "nb_ms_t",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          temporal = temporal_multiscale("time"))),
   brms_call = quote(brm(y ~ x + (1 | site) + (1 | time) + offset(log(denom)),
@@ -471,7 +471,7 @@ results[["45"]] <- run_bench(45, "nb_ms_t",
 
 # Row 47: nb + Hurdle
 results[["47"]] <- run_bench(47, "nb_hurdle",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb_zi,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb_zi,
                          family = ratiod_negbin_negbin(),
                          zi = numdenom::hurdle_negbin())),
   brms_call = quote(brm(y ~ x + (1 | site) + offset(log(denom)),
@@ -482,7 +482,7 @@ results[["47"]] <- run_bench(47, "nb_hurdle",
 
 # Row 49: nb + BYM2 + RW1
 results[["49"]] <- run_bench(49, "nb_bym2_rw1",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time"))),
@@ -494,7 +494,7 @@ results[["49"]] <- run_bench(49, "nb_bym2_rw1",
 
 # Row 50: nb + ICAR + AR1
 results[["50"]] <- run_bench(50, "nb_icar_ar1",
-  nd_call = quote(ratiod(y | denom ~ x + (1 | site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1 | site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_ar1("time"))),

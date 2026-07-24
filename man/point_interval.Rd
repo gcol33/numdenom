@@ -54,7 +54,7 @@ df <- data.frame(
 )
 
 # Fit model
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site),
   data = df,
   family = ratiod_poisson_gamma(),

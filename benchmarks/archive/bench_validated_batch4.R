@@ -66,9 +66,9 @@ successes <- rbinom(N, trials, prob)
 df61 <- data.frame(successes = successes, trials = trials, x = x)
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df61,
+  fit_nd <- tratio(successes | trials ~ x, data = df61,
                    family = ratiod_binomial(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -95,9 +95,9 @@ successes <- rbinom(N, trials, prob)
 df62 <- data.frame(successes = successes, trials = trials, x = x, site = factor(site))
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x + (1|site), data = df62,
+  fit_nd <- tratio(successes | trials ~ x + (1|site), data = df62,
                    family = ratiod_binomial(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -124,9 +124,9 @@ successes <- rbinom(N, trials, prob)
 df63 <- data.frame(successes = successes, trials = trials, x = x, site = factor(site))
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x + (1 + x|site), data = df63,
+  fit_nd <- tratio(successes | trials ~ x + (1 + x|site), data = df63,
                    family = ratiod_binomial(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -154,10 +154,10 @@ successes <- rbinom(N, trials, prob)
 df71 <- data.frame(successes = successes, trials = trials, x = x, time = time)
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df71,
+  fit_nd <- tratio(successes | trials ~ x, data = df71,
                    family = ratiod_binomial(),
                    temporal = temporal_rw1(time_var = "time"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -180,10 +180,10 @@ results[[71]]$brms_time <- t_brms["elapsed"]
 cat("\n\n========== ROW 72: binomial + RW2 ==========\n")
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df71,
+  fit_nd <- tratio(successes | trials ~ x, data = df71,
                    family = ratiod_binomial(),
                    temporal = temporal_rw2(time_var = "time"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[72]] <- list(name = "Row 72: binomial + RW2",
@@ -197,10 +197,10 @@ results[[72]] <- list(name = "Row 72: binomial + RW2",
 cat("\n\n========== ROW 73: binomial + AR1 ==========\n")
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df71,
+  fit_nd <- tratio(successes | trials ~ x, data = df71,
                    family = ratiod_binomial(),
                    temporal = temporal_ar1(time_var = "time"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -230,9 +230,9 @@ successes <- ifelse(is_zero == 1, 0, rbinom(N, trials, prob))
 df76 <- data.frame(successes = successes, trials = trials, x = x)
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df76,
+  fit_nd <- tratio(successes | trials ~ x, data = df76,
                    family = ratiod_zibinomial(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[76]] <- list(name = "Row 76: ZI binomial",
@@ -243,9 +243,9 @@ results[[76]] <- list(name = "Row 76: ZI binomial",
 cat("\n\n========== ROW 77: binomial + Hurdle ==========\n")
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df76,
+  fit_nd <- tratio(successes | trials ~ x, data = df76,
                    family = ratiod_hurdle_binomial(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[77]] <- list(name = "Row 77: hurdle binomial",
@@ -256,9 +256,9 @@ results[[77]] <- list(name = "Row 77: hurdle binomial",
 cat("\n\n========== ROW 78: binomial + OI ==========\n")
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df76,
+  fit_nd <- tratio(successes | trials ~ x, data = df76,
                    family = ratiod_oibinomial(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[78]] <- list(name = "Row 78: OI binomial",
@@ -276,9 +276,9 @@ df79 <- data.frame(y = y_zoib, x = x)
 
 t_nd <- system.time({
   fit_nd <- tryCatch({
-    ratiod(y ~ x, data = df79,
+    tratio(y ~ x, data = df79,
            family = ratiod_zoib(),
-           iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+           control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
   }, error = function(e) NULL)
 })
 
@@ -303,10 +303,10 @@ successes <- rbinom(N, trials, prob)
 df65 <- data.frame(successes = successes, trials = trials, x = x, site = factor(site))
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df65,
+  fit_nd <- tratio(successes | trials ~ x, data = df65,
                    family = ratiod_binomial(),
                    spatial = spatial_car(adj = adj, group_var = "site"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[65]] <- list(name = "Row 65: binomial + ICAR",
@@ -317,10 +317,10 @@ results[[65]] <- list(name = "Row 65: binomial + ICAR",
 cat("\n\n========== ROW 66: binomial + BYM2 ==========\n")
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df65,
+  fit_nd <- tratio(successes | trials ~ x, data = df65,
                    family = ratiod_binomial(),
                    spatial = spatial_bym2(adj = adj, group_var = "site"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[66]] <- list(name = "Row 66: binomial + BYM2",
@@ -337,11 +337,11 @@ df80 <- data.frame(successes = successes, trials = trials, x = x,
                    site = factor(site), time = time)
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df80,
+  fit_nd <- tratio(successes | trials ~ x, data = df80,
                    family = ratiod_binomial(),
                    spatial = spatial_car(adj = adj, group_var = "site"),
                    temporal = temporal_rw1(time_var = "time"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[80]] <- list(name = "Row 80: binomial + ICAR + RW1",
@@ -352,11 +352,11 @@ results[[80]] <- list(name = "Row 80: binomial + ICAR + RW1",
 cat("\n\n========== ROW 81: binomial + BYM2 + RW1 ==========\n")
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df80,
+  fit_nd <- tratio(successes | trials ~ x, data = df80,
                    family = ratiod_binomial(),
                    spatial = spatial_bym2(adj = adj, group_var = "site"),
                    temporal = temporal_rw1(time_var = "time"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[81]] <- list(name = "Row 81: binomial + BYM2 + RW1",
@@ -367,11 +367,11 @@ results[[81]] <- list(name = "Row 81: binomial + BYM2 + RW1",
 cat("\n\n========== ROW 82: binomial + ICAR + AR1 ==========\n")
 
 t_nd <- system.time({
-  fit_nd <- ratiod(successes | trials ~ x, data = df80,
+  fit_nd <- tratio(successes | trials ~ x, data = df80,
                    family = ratiod_binomial(),
                    spatial = spatial_car(adj = adj, group_var = "site"),
                    temporal = temporal_ar1(time_var = "time"),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[82]] <- list(name = "Row 82: binomial + ICAR + AR1",
@@ -389,9 +389,9 @@ y_denom <- rnbinom(N, size = 5, mu = 20)
 df31 <- data.frame(num = y_num, denom = y_denom, x = x)
 
 t_nd <- system.time({
-  fit_nd <- ratiod(num | denom ~ x, data = df31,
+  fit_nd <- tratio(num | denom ~ x, data = df31,
                    family = ratiod_negbin_negbin(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -414,9 +414,9 @@ y_num <- rnbinom(N, size = 5, mu = exp(0.5 + 0.3 * x + re_effect[site]) * 10)
 df32 <- data.frame(num = y_num, denom = y_denom, x = x, site = factor(site))
 
 t_nd <- system.time({
-  fit_nd <- ratiod(num | denom ~ x + (1|site), data = df32,
+  fit_nd <- tratio(num | denom ~ x + (1|site), data = df32,
                    family = ratiod_negbin_negbin(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -438,9 +438,9 @@ df34 <- data.frame(num = y_num, denom = y_denom, x = x,
                    site = factor(site), site2 = factor(site2))
 
 t_nd <- system.time({
-  fit_nd <- ratiod(num | denom ~ x + (1|site) + (1|site2), data = df34,
+  fit_nd <- tratio(num | denom ~ x + (1|site) + (1|site2), data = df34,
                    family = ratiod_negbin_negbin(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 t_brms <- system.time({
@@ -462,9 +462,9 @@ y_num_zi <- ifelse(rbinom(N, 1, zi_prob) == 1, 0, y_num)
 df46 <- data.frame(num = y_num_zi, denom = y_denom, x = x)
 
 t_nd <- system.time({
-  fit_nd <- ratiod(num | denom ~ x, data = df46,
+  fit_nd <- tratio(num | denom ~ x, data = df46,
                    family = ratiod_zinegbin_negbin(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })
 
 results[[46]] <- list(name = "Row 46: ZI negbin",

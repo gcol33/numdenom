@@ -68,7 +68,7 @@ df <- data.frame(
 
 \dontrun{
 # Fit model (not run - hurdle models require specialized backend support)
-fit <- ratiod(
+fit <- tratio(
   count | total ~ habitat + (1 | site),
   data = df,
   family = ratiod_hurdle_negbin(),

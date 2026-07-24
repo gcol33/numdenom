@@ -119,12 +119,11 @@ df_pg_crossed$effort[df_pg_crossed$effort < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site) + (1|site2),
     data = df_pg_crossed,
     family = ratiod_poisson_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -189,12 +188,11 @@ df_nb_crossed$denom[df_nb_crossed$denom == 0] <- 1
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site) + (1|site2),
     data = df_nb_crossed,
     family = ratiod_negbin_negbin(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -260,14 +258,13 @@ df_pg_bym2_rw1$effort[df_pg_bym2_rw1$effort < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_bym2_rw1,
     family = ratiod_poisson_gamma(),
     spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -341,14 +338,13 @@ df_nb_bym2_rw1$denom[df_nb_bym2_rw1$denom == 0] <- 1
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_bym2_rw1,
     family = ratiod_negbin_negbin(),
     spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -420,13 +416,12 @@ df_pg_slopes_icar$effort[df_pg_slopes_icar$effort < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1 + x|site),
     data = df_pg_slopes_icar,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -496,13 +491,12 @@ df_nb_slopes_icar$denom[df_nb_slopes_icar$denom == 0] <- 1
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1 + x|site),
     data = df_nb_slopes_icar,
     family = ratiod_negbin_negbin(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

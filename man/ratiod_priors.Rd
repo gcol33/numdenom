@@ -2,7 +2,7 @@
 % Please edit documentation in R/priors.R
 \name{ratiod_priors}
 \alias{ratiod_priors}
-\title{Prior specification for ratiod models}
+\title{Prior specification for ratio models}
 \usage{
 ratiod_priors(
   beta = NULL,

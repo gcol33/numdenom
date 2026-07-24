@@ -29,7 +29,7 @@ This vignette covers random effects in numdenom, including random intercepts, ra
 
 ```{r}
 # Random intercept for site
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -50,7 +50,7 @@ When observations are classified by multiple independent grouping factors:
 
 ```{r}
 # Crossed random effects: site and year
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site) + (1 | year),
   data = df,
   family = ratiod_poisson_gamma()
@@ -73,7 +73,7 @@ When groups are hierarchically nested (plots within sites):
 
 ```{r}
 # Nested: plots within sites
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site/plot),
   data = df,
   family = ratiod_poisson_gamma()
@@ -84,7 +84,7 @@ This expands to:
 
 ```{r}
 # Equivalent explicit form
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site) + (1 | site:plot),
   data = df,
   family = ratiod_poisson_gamma()
@@ -100,7 +100,7 @@ For deeper hierarchies:
 ```{r}
 # region/site/plot expands to:
 # (1 | region) + (1 | region:site) + (1 | region:site:plot)
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x + (1 | region/site/plot),
   data = df,
   family = ratiod_poisson_gamma()
@@ -117,7 +117,7 @@ Use single `|` for correlated random effects:
 
 ```{r}
 # Intercept and depth effect vary by site, with correlation
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 + depth | site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -138,7 +138,7 @@ Use double `||` for independent random effects:
 
 ```{r}
 # Intercept and depth effect vary by site, independently
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 + depth || site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -151,14 +151,14 @@ This is computationally simpler and appropriate when you don't expect correlatio
 
 ```{r}
 # Multiple correlated slopes
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + temp + (1 + depth + temp | site),
   data = df,
   family = ratiod_poisson_gamma()
 )
 
 # Multiple uncorrelated slopes
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + temp + (1 + depth + temp || site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -173,7 +173,7 @@ numdenom supports lme4-style formula expansion for random slopes.
 
 ```{r}
 # x*z expands to x + z + x:z
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x*z + (1 + x*z | site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -185,14 +185,14 @@ fit <- ratiod(
 
 ```{r}
 # Quadratic random slope
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x + I(x^2) + (1 + x + I(x^2) | site),
   data = df,
   family = ratiod_poisson_gamma()
 )
 
 # Or using poly()
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ poly(x, 2) + (1 + poly(x, 2) | site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -220,7 +220,7 @@ By default, numdenom shares random effects between numerator and denominator whe
 
 ```{r}
 # Site effect shared between catch and effort processes
-fit <- ratiod(
+fit <- tratio(
   catch | effort ~ depth + (1 | site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -242,7 +242,7 @@ Shared effects cancel in the ratio, removing spurious variation from common unme
 
 ```{r}
 # Only site is shared, observer is process-specific
-fit <- ratiod(
+fit <- tratio(
   catch | effort ~ (1 | site) + (1 | observer),
   shared = ~ (1 | site),
   data = df,
@@ -254,7 +254,7 @@ fit <- ratiod(
 
 ```{r}
 # Request independence (triggers warning)
-fit <- ratiod(
+fit <- tratio(
   successes | trials ~ treatment + (1 | block),
   shared = ~ 0,
   data = df,
@@ -285,14 +285,14 @@ numdenom uses penalized complexity (PC) priors that favor simpler models:
 
 ```{r}
 # Default: P(sigma > 1) = 0.01
-fit <- ratiod(..., priors = ratiod_priors())
+fit <- tratio(..., priors = ratiod_priors())
 ```
 
 ## Custom Priors
 
 ```{r}
 # Expect smaller random effects
-fit <- ratiod(
+fit <- tratio(
   ...,
   priors = ratiod_priors(
     sigma_re_scale = 0.5  # Prior scale for RE standard deviations
@@ -308,7 +308,7 @@ When you suspect unmeasured confounders are driving both numerator and denominat
 
 ```{r}
 # Capture shared unmeasured variation
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site),
   data = df,
   family = ratiod_poisson_gamma(),
@@ -331,7 +331,7 @@ where $f_i \sim \text{Normal}(0, 1)$ with sum-to-zero constraint.
 
 ```{r}
 # Multiple independent unmeasured confounders
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -357,7 +357,7 @@ Use latent factors when:
 
 ```{r}
 # Stronger regularization on latent factors
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth,
   data = df,
   family = ratiod_poisson_gamma(),

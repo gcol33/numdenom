@@ -11,9 +11,9 @@ df <- data.frame(y = y, denom = d, x = x, site = site, time_num = time_num)
 cat("PG+GP_t (same data, 5 HMC seeds):\n")
 times <- numeric(5)
 for (s in 1:5) {
-  t <- system.time(fit <- ratiod(y | denom ~ x + (1 | site), data = df,
+  t <- system.time(fit <- tratio(y | denom ~ x + (1 | site), data = df,
     family = ratiod_poisson_gamma(), temporal = temporal_gp("time_num"),
-    iter = 500, warmup = 250, chains = 1, verbose = FALSE, seed = s))[["elapsed"]]
+    control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE, seed = s)))[["elapsed"]]
   times[s] <- t
   cat(sprintf("  seed=%d: %.1fs\n", s, t))
 }

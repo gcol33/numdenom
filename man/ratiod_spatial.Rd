@@ -2,9 +2,9 @@
 % Please edit documentation in R/spatial.R
 \name{ratiod_spatial}
 \alias{ratiod_spatial}
-\title{Spatial structure specifications for ratiod}
+\title{Spatial structure specifications for tulpaRatio}
 \description{
-Functions to specify spatial random effects for ratiod models.
+Functions to specify spatial random effects for ratio models.
 Spatial effects are shared between numerator and denominator by default,
 which helps prevent spurious ratio effects from spatially-structured
 unmeasured confounders.

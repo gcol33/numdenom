@@ -260,10 +260,10 @@ test_that("HMC backend works for poisson_gamma model", {
 })
 
 # ---------------------------------------------------------------------------
-# Additional HMC integration tests with ratiod()
+# Additional HMC integration tests with tratio()
 # ---------------------------------------------------------------------------
 
-test_that("ratiod() fits poisson_gamma model with HMC backend", {
+test_that("tratio() fits poisson_gamma model with HMC backend", {
   skip_on_cran()
 
   set.seed(123)
@@ -274,15 +274,12 @@ test_that("ratiod() fits poisson_gamma model with HMC backend", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -290,7 +287,7 @@ test_that("ratiod() fits poisson_gamma model with HMC backend", {
   expect_true(is.array(fit$draws))
 })
 
-test_that("ratiod() fits binomial model with HMC backend", {
+test_that("tratio() fits binomial model with HMC backend", {
   skip_on_cran()
 
   set.seed(456)
@@ -302,15 +299,12 @@ test_that("ratiod() fits binomial model with HMC backend", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -318,7 +312,7 @@ test_that("ratiod() fits binomial model with HMC backend", {
   expect_true(is.array(fit$draws))
 })
 
-test_that("ratiod() fits negbin_negbin model with HMC backend", {
+test_that("tratio() fits negbin_negbin model with HMC backend", {
   skip_on_cran()
 
   set.seed(789)
@@ -329,22 +323,19 @@ test_that("ratiod() fits negbin_negbin model with HMC backend", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
   expect_equal(fit$backend, "hmc")
 })
 
-test_that("ratiod() with random effects using HMC backend", {
+test_that("tratio() with random effects using HMC backend", {
   skip_on_cran()
 
   set.seed(111)
@@ -359,15 +350,12 @@ test_that("ratiod() with random effects using HMC backend", {
     site = factor(rep(1:n_groups, each = n_per_group))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -395,15 +383,12 @@ test_that("summary.ratiod_fit returns correct structure", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   summ <- summary(fit)
@@ -422,15 +407,12 @@ test_that("print.ratiod_fit works without error", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   output <- capture.output(print(fit))
@@ -448,15 +430,12 @@ test_that("ratio() works with HMC fit", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   r <- ratio(fit)
@@ -478,15 +457,12 @@ test_that("ratio_contrast() works with HMC fit", {
     group = factor(rep(c("A", "B"), each = n/2))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + group,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   # ratio_contrast takes a formula for contrast

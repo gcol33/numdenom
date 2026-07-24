@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_vi.R
 \name{vi_backend}
 \alias{vi_backend}
-\title{Variational Inference Backend for ratiod Models}
+\title{Variational Inference Backend for ratio Models}
 \description{
 Automatic Differentiation Variational Inference (ADVI) backend.
 Provides fast approximate Bayesian inference using three Gaussian

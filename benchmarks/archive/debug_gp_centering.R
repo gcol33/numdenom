@@ -43,12 +43,11 @@ print(gp_effects_true)
 cat("\nMean of true GP effects:", mean(gp_effects_true), "\n")
 
 cat("\nFitting numdenom...\n")
-fit_nd <- ratiod(
+fit_nd <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_negbin_negbin(),
   temporal = temporal_gp(time_var = "time", cov = "exponential"),
-  iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-  verbose = FALSE
+  control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
 )
 
 cat("Fitting Stan...\n")

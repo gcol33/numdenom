@@ -1,13 +1,13 @@
 #' Zero-Inflation and Hurdle Model Specifications
 #'
 #' @description
-#' Functions to specify zero-inflation or hurdle model components for ratiod models.
+#' Functions to specify zero-inflation or hurdle model components for ratio models.
 #' These handle excess zeros in count data where the standard count distribution
 #' (Poisson, negative binomial) doesn't adequately capture the zero proportion.
 #'
 #' **Note on naming convention:** These functions (`zi_poisson()`, `zi_negbin()`,
 #' `hurdle_poisson()`, `hurdle_negbin()`) are **ZI specification** functions for
-#' the `zi` argument in [ratiod()]. They are distinct from the **family functions**
+#' the `zi` argument in [tratio()]. They are distinct from the **family functions**
 #' (`ratiod_zipois()`, `ratiod_zinegbin()`, `ratiod_hurdle_pois()`, `ratiod_hurdle_negbin()`)
 #' which specify the complete model family. Use ZI specifications when you want to
 #' add zero-inflation to an existing family; use ZI family functions when you want
@@ -166,7 +166,7 @@ print.ratiod_zi <- function(x, ...) {
     x$type
   )
 
-  cat("ratiod Zero-Inflation Specification\n")
+  cat("tulpaRatio Zero-Inflation Specification\n")
   cat("==================================\n")
   cat("Type:", type_label, "\n")
 

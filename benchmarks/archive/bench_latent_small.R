@@ -68,16 +68,12 @@ cat("  Mode H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(
+    fit <- tratio(
       count | effort ~ x + (1 | site),
       data = df_pg,
       family = ratiod_poisson_gamma(),
       latent = latent_factor(n_factors = N_FACTORS, shared = TRUE),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H",
-      refresh = 0
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
   cat(round(time, 1), "s\n")
@@ -108,16 +104,12 @@ cat("  Mode H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(
+    fit <- tratio(
       count_num | count_denom ~ x + (1 | site),
       data = df_nb,
       family = ratiod_negbin_negbin(),
       latent = latent_factor(n_factors = N_FACTORS, shared = TRUE),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H",
-      refresh = 0
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
   cat(round(time, 1), "s\n")
@@ -147,16 +139,12 @@ cat("  Mode H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(
+    fit <- tratio(
       successes | trials ~ x + (1 | site),
       data = df_bin,
       family = ratiod_binomial(),
       latent = latent_factor(n_factors = N_FACTORS, shared = TRUE),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H",
-      refresh = 0
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
   cat(round(time, 1), "s\n")

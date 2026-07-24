@@ -44,7 +44,7 @@ df <- data.frame(
 
 \dontrun{
 # Fit model (slow, not run on CRAN)
-fit <- ratiod(
+fit <- tratio(
   catch | effort_hours ~ depth + season + (1 | vessel),
   data = df,
   family = ratiod_poisson_gamma(),

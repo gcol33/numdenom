@@ -22,14 +22,11 @@ cat("=== TESTING GRADIENT CORRECTNESS ===\n\n")
 
 # Fit with VERY SHORT chains to see initial behavior
 cat("Short fit (10 iter) with verbose sampling:\n")
-fit_short <- ratiod(
+fit_short <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 10,
-  warmup = 5,
-  chains = 1,
-  seed = 123
+  control = list(iter = 10, warmup = 5, chains = 1, seed = 123)
 )
 
 draws_short <- as.matrix(fit_short$draws)
@@ -38,15 +35,11 @@ print(draws_short[1:5,])
 
 # Now test with numerical gradients only
 cat("\n=== Testing with NUMERICAL gradients only (mode='N') ===\n")
-fit_numerical <- ratiod(
+fit_numerical <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 1000,
-  warmup = 500,
-  chains = 1,
-  seed = 123,
-  gradient_mode = "N"
+  control = list(iter = 1000, warmup = 500, chains = 1, seed = 123, gradient_mode = "N")
 )
 
 print(summary(fit_numerical))
@@ -60,15 +53,11 @@ cat("  sigma_denom: ", mean(draws_num[, "sigma_denom"]), " (true: 0.3)\n")
 
 # Now test with autodiff
 cat("\n=== Testing with Forward AUTODIFF (mode='A') ===\n")
-fit_autodiff <- ratiod(
+fit_autodiff <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 1000,
-  warmup = 500,
-  chains = 1,
-  seed = 123,
-  gradient_mode = "A"
+  control = list(iter = 1000, warmup = 500, chains = 1, seed = 123, gradient_mode = "A")
 )
 
 print(summary(fit_autodiff))

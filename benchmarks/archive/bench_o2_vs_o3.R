@@ -107,12 +107,12 @@ results <- data.frame(model = character(), time = numeric(), stringsAsFactors = 
 for (cfg in configs) {
   t_elapsed <- tryCatch({
     system.time({
-      fit <- ratiod(cfg$f, data = df,
+      fit <- tratio(cfg$f, data = df,
                     family = get_family(cfg$fam),
                     spatial = get_spatial(cfg$sp),
                     temporal = get_temporal(cfg$temp),
-                    mode = "hmc", iter = 500, warmup = 250, chains = 1,
-                    gradient_mode = "H", verbose = FALSE)
+                    mode = "hmc",
+                    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
     })["elapsed"]
   }, error = function(e) {
     cat(sprintf("%-20s  ERROR: %s\n", cfg$name, e$message))

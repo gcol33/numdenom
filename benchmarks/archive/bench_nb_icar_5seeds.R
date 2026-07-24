@@ -18,9 +18,9 @@ for (i in 1:5) {
     x = x, site = site, spatial_site = site
   )
   times[i] <- system.time({
-    fit <- ratiod(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
+    fit <- tratio(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
                   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   })[["elapsed"]]
   cat(sprintf("seed=%d: %.1fs\n", i, times[i]))
 }

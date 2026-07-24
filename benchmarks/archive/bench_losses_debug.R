@@ -40,7 +40,7 @@ df_bin <- data.frame(y=y_bin, trials=trials, x=x, site=site, time=time,
 
 run <- function(label, ...) {
   cat(sprintf("\n\n====== %s ======\n", label))
-  t <- system.time(fit <- ratiod(..., iter=500, warmup=250, chains=1, verbose=TRUE))["elapsed"]
+  t <- system.time(fit <- tratio(..., control = list(iter=500, warmup=250, chains=1, verbose=TRUE)))["elapsed"]
   cat(sprintf("\n  TIME: %.1fs\n", t))
   invisible(fit)
 }
@@ -67,29 +67,29 @@ run("Bin+GP_t", y | trials ~ x + (1|site), data=df_bin,
 
 # Also test with different metrics
 cat("\n\n====== NB+ICAR metric=dense ======\n")
-t <- system.time(ratiod(y | denom ~ x + (1|site), data=df_nb,
+t <- system.time(tratio(y | denom ~ x + (1|site), data=df_nb,
     family=ratiod_negbin_negbin(),
     spatial=spatial_car(adj_mat, level="group", group_var="spatial_site"),
-    iter=500, warmup=250, chains=1, verbose=TRUE, metric="dense"))["elapsed"]
+    control = list(iter=500, warmup=250, chains=1, verbose=TRUE, metric="dense")))["elapsed"]
 cat(sprintf("\n  TIME: %.1fs\n", t))
 
 cat("\n\n====== NB+HSGP metric=block_diag ======\n")
-t <- system.time(ratiod(y | denom ~ x + (1|site), data=df_nb,
+t <- system.time(tratio(y | denom ~ x + (1|site), data=df_nb,
     family=ratiod_negbin_negbin(),
     spatial=spatial_hsgp(coords = ~ lon + lat),
-    iter=500, warmup=250, chains=1, verbose=TRUE, metric="block_diag"))["elapsed"]
+    control = list(iter=500, warmup=250, chains=1, verbose=TRUE, metric="block_diag")))["elapsed"]
 cat(sprintf("\n  TIME: %.1fs\n", t))
 
 cat("\n\n====== PG+GP_t metric=block_diag ======\n")
-t <- system.time(ratiod(y | denom ~ x + (1|site), data=df_pg,
+t <- system.time(tratio(y | denom ~ x + (1|site), data=df_pg,
     family=ratiod_poisson_gamma(),
     temporal=temporal_gp("time_num"),
-    iter=500, warmup=250, chains=1, verbose=TRUE, metric="block_diag"))["elapsed"]
+    control = list(iter=500, warmup=250, chains=1, verbose=TRUE, metric="block_diag")))["elapsed"]
 cat(sprintf("\n  TIME: %.1fs\n", t))
 
 cat("\n\n====== Bin+GP_t metric=block_diag ======\n")
-t <- system.time(ratiod(y | trials ~ x + (1|site), data=df_bin,
+t <- system.time(tratio(y | trials ~ x + (1|site), data=df_bin,
     family=ratiod_binomial(),
     temporal=temporal_gp("time_num"),
-    iter=500, warmup=250, chains=1, verbose=TRUE, metric="block_diag"))["elapsed"]
+    control = list(iter=500, warmup=250, chains=1, verbose=TRUE, metric="block_diag")))["elapsed"]
 cat(sprintf("\n  TIME: %.1fs\n", t))

@@ -64,9 +64,9 @@ df$denom[df$denom < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x, data = df, family = ratiod_gamma_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -115,9 +115,9 @@ df$denom[df$denom < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site), data = df, family = ratiod_gamma_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -159,9 +159,9 @@ df <- data.frame(
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x, data = df, family = ratiod_lognormal(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -202,9 +202,9 @@ df <- data.frame(
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site), data = df, family = ratiod_lognormal(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

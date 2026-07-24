@@ -49,16 +49,16 @@ bench_mode <- function(label, grad_mode, ...) {
   gc()
   t <- system.time({
     fit <- tryCatch(
-      ratiod(..., mode = "hmc", iter = 500, warmup = 250,
-             chains = 1, seed = SEED, gradient_mode = grad_mode, verbose = FALSE),
+      tratio(..., mode = "hmc",
+             control = list(iter = 500, warmup = 250, chains = 1, seed = SEED, gradient_mode = grad_mode, verbose = FALSE)),
       error = function(e) { cat(sprintf("ERROR: %s\n", conditionMessage(e))); NULL },
       warning = function(w) {
         if (grepl("gradient mismatch|Falling back", conditionMessage(w))) {
           cat("FALLBACK! ")
         }
         suppressWarnings(
-          ratiod(..., mode = "hmc", iter = 500, warmup = 250,
-                 chains = 1, seed = SEED, gradient_mode = grad_mode, verbose = FALSE)
+          tratio(..., mode = "hmc",
+                 control = list(iter = 500, warmup = 250, chains = 1, seed = SEED, gradient_mode = grad_mode, verbose = FALSE))
         )
       }
     )

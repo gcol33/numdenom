@@ -33,15 +33,12 @@ cat(strrep("=", 60), "\n\n")
 cat("Testing gradient_mode = 'H'...\n")
 time_h <- system.time({
   tryCatch({
-    fit_h <- ratiod(
+    fit_h <- tratio(
       y | effort ~ x,
       data = df,
       family = ratiod_poisson_gamma(),
-      iter = N_ITER,
-      chains = N_CHAINS,
-      gradient_mode = "H",
       temporal = temporal_multiscale(time_var = "time"),
-      refresh = 0
+      control = list(iter = N_ITER, chains = N_CHAINS, gradient_mode = "H")
     )
     cat("  SUCCESS\n")
   }, error = function(e) {
@@ -54,15 +51,12 @@ cat(sprintf("  H time: %.1f s\n\n", time_h))
 cat("Testing gradient_mode = 'A' (expect slower)...\n")
 time_a <- system.time({
   tryCatch({
-    fit_a <- ratiod(
+    fit_a <- tratio(
       y | effort ~ x,
       data = df,
       family = ratiod_poisson_gamma(),
-      iter = N_ITER,
-      chains = N_CHAINS,
-      gradient_mode = "A",
       temporal = temporal_multiscale(time_var = "time"),
-      refresh = 0
+      control = list(iter = N_ITER, chains = N_CHAINS, gradient_mode = "A")
     )
     cat("  SUCCESS\n")
   }, error = function(e) {

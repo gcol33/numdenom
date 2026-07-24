@@ -49,9 +49,9 @@ navbar:
 
 reference:
   - title: "Model Fitting"
-    desc: "Main function for fitting ratiod models"
+    desc: "Main function for fitting ratio models"
     contents:
-      - ratiod
+      - tratio
       - ratiod_average
       - ratiod_compare
 

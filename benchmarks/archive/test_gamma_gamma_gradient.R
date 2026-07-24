@@ -30,13 +30,11 @@ cat("=== Testing gamma_gamma gradient modes ===\n\n")
 # Test with H gradient (hand-coded)
 cat("Fitting with H (hand-coded) gradient...\n")
 time_H <- system.time({
-  fit_H <- ratiod(
+  fit_H <- tratio(
     y | denom ~ x,
     data = df,
     family = ratiod_gamma_gamma(),
-    iter = 500, warmup = 250, chains = 1,
-    gradient_mode = "H",
-    verbose = FALSE
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
   )
 })
 cat("H mode time:", time_H["elapsed"], "s\n")
@@ -44,13 +42,11 @@ cat("H mode time:", time_H["elapsed"], "s\n")
 # Test with A (forward autodiff) gradient
 cat("\nFitting with A (forward autodiff) gradient...\n")
 time_A <- system.time({
-  fit_A <- ratiod(
+  fit_A <- tratio(
     y | denom ~ x,
     data = df,
     family = ratiod_gamma_gamma(),
-    iter = 500, warmup = 250, chains = 1,
-    gradient_mode = "A",
-    verbose = FALSE
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = FALSE)
   )
 })
 cat("A mode time:", time_A["elapsed"], "s\n")

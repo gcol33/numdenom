@@ -66,7 +66,7 @@ trawl_data <- data.frame(
 )
 
 # Fit model
-fit <- ratiod(
+fit <- tratio(
   catch | effort ~ depth + season + (1 | site),
   data = trawl_data,
   family = ratiod_poisson_gamma()
@@ -94,7 +94,7 @@ ratio_contrast(fit, ~ season)
 Use `num | denom ~ predictors` when both processes share predictors:
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   catch | effort ~ depth + season + (1 | site),
   data = df,
   family = ratiod_poisson_gamma()
@@ -105,7 +105,7 @@ fit <- ratiod(
 
 Add terms that affect only numerator or denominator:
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   catch | effort ~ (1 | site),           # Shared structure
   formula_num = ~ depth + season,         # Catch-specific
 
@@ -121,23 +121,23 @@ fit <- ratiod(
 
 ```{r}
 # Single grouping factor
-fit <- ratiod(y | n ~ x + (1 | site), ...)
+fit <- tratio(y | n ~ x + (1 | site), ...)
 
 # Multiple (crossed) grouping factors
-fit <- ratiod(y | n ~ x + (1 | site) + (1 | year), ...)
+fit <- tratio(y | n ~ x + (1 | site) + (1 | year), ...)
 
 # Nested grouping factors
-fit <- ratiod(y | n ~ x + (1 | site/plot), ...)
+fit <- tratio(y | n ~ x + (1 | site/plot), ...)
 ```
 
 ### Random Slopes
 
 ```{r}
 # Correlated intercept and slope
-fit <- ratiod(y | n ~ x + (1 + x | site), ...)
+fit <- tratio(y | n ~ x + (1 + x | site), ...)
 
 # Uncorrelated (independent) intercept and slope
-fit <- ratiod(y | n ~ x + (1 + x || site), ...)
+fit <- tratio(y | n ~ x + (1 + x || site), ...)
 ```
 
 ## Model Checking
@@ -151,8 +151,8 @@ loo(fit)
 waic(fit)
 
 # Compare models
-fit1 <- ratiod(y | n ~ x, ...)
-fit2 <- ratiod(y | n ~ x + z, ...)
+fit1 <- tratio(y | n ~ x, ...)
+fit2 <- tratio(y | n ~ x + z, ...)
 ratiod_compare(fit1, fit2)
 ```
 
@@ -160,7 +160,7 @@ ratiod_compare(fit1, fit2)
 
 | Function | Purpose |
 |----------|---------|
-| `ratiod()` | Fit model |
+| `tratio()` | Fit model |
 | `ratio()` | Extract ratio posteriors |
 | `ratio_contrast()` | Compare ratios between groups |
 | `pp_check()` | Posterior predictive checks |

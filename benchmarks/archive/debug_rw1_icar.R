@@ -50,11 +50,11 @@ df$denom[df$denom == 0] <- 1
 
 # Fit numdenom with RW1
 cat("Fitting numdenom (RW1)...\n")
-fit_nd <- ratiod(
+fit_nd <- tratio(
   y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
   temporal = temporal_rw1("time_factor"),
-  iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+  control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
 )
 draws_nd <- as.matrix(fit_nd$draws)
 

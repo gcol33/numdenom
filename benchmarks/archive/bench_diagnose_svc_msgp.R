@@ -83,9 +83,9 @@ cat("Fitting SVC binomial (strong signal)... ")
 flush.console()
 t_svc <- system.time({
   fit_svc <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_svc, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_svc, family = ratiod_binomial(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -158,9 +158,9 @@ cat("Fitting SVC binomial (weak signal)... ")
 flush.console()
 t_svc2 <- system.time({
   fit_svc2 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_svc2, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_svc2, family = ratiod_binomial(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -243,9 +243,9 @@ cat("Fitting MSGP poisson_gamma (grouped, ~10 min)... ")
 flush.console()
 t_grouped <- system.time({
   fit_grouped <- tryCatch({
-    ratiod(count | effort ~ x, data = df_grouped, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_grouped, family = ratiod_poisson_gamma(),
            spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

@@ -45,10 +45,10 @@ results <- list()
 cat("--- Row 1: PG base ---\n")
 t1 <- system.time({
   fit <- tryCatch(
-    ratiod(y_num | y_denom ~ x1, data = df,
+    tratio(y_num | y_denom ~ x1, data = df,
            family = ratiod_poisson_gamma(),
-           mode = "hmc", iter = 500, warmup = 250, chains = 1,
-           gradient_mode = "H", verbose = FALSE),
+           mode = "hmc",
+           control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
 })["elapsed"]
@@ -59,10 +59,10 @@ cat(sprintf("  O3: %.1fs  (O2: %.1fs, Stan: %.1fs)\n\n", t1, prev$pg_base$o2, pr
 cat("--- Row 2: PG + RE ---\n")
 t2 <- system.time({
   fit <- tryCatch(
-    ratiod(y_num | y_denom ~ x1 + (1 | site), data = df,
+    tratio(y_num | y_denom ~ x1 + (1 | site), data = df,
            family = ratiod_poisson_gamma(),
-           mode = "hmc", iter = 500, warmup = 250, chains = 1,
-           gradient_mode = "H", verbose = FALSE),
+           mode = "hmc",
+           control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
 })["elapsed"]
@@ -73,10 +73,10 @@ cat(sprintf("  O3: %.1fs  (O2: %.1fs, Stan: %.1fs)\n\n", t2, prev$pg_re$o2, prev
 cat("--- Row 4: PG + crossed ---\n")
 t3 <- system.time({
   fit <- tryCatch(
-    ratiod(y_num | y_denom ~ x1 + (1 | site) + (1 | region), data = df,
+    tratio(y_num | y_denom ~ x1 + (1 | site) + (1 | region), data = df,
            family = ratiod_poisson_gamma(),
-           mode = "hmc", iter = 500, warmup = 250, chains = 1,
-           gradient_mode = "H", verbose = FALSE),
+           mode = "hmc",
+           control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
 })["elapsed"]
@@ -87,10 +87,10 @@ cat(sprintf("  O3: %.1fs  (O2: %.1fs, Stan: %.1fs)\n\n", t3, prev$pg_crossed$o2,
 cat("--- Row 31: NB base ---\n")
 t4 <- system.time({
   fit <- tryCatch(
-    ratiod(y_num | y_denom ~ x1, data = df,
+    tratio(y_num | y_denom ~ x1, data = df,
            family = ratiod_negbin_negbin(),
-           mode = "hmc", iter = 500, warmup = 250, chains = 1,
-           gradient_mode = "H", verbose = FALSE),
+           mode = "hmc",
+           control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
 })["elapsed"]
@@ -101,10 +101,10 @@ cat(sprintf("  O3: %.1fs  (O2: %.1fs, Stan: %.1fs)\n\n", t4, prev$nb_base$o2, pr
 cat("--- Row 32: NB + RE ---\n")
 t5 <- system.time({
   fit <- tryCatch(
-    ratiod(y_num | y_denom ~ x1 + (1 | site), data = df,
+    tratio(y_num | y_denom ~ x1 + (1 | site), data = df,
            family = ratiod_negbin_negbin(),
-           mode = "hmc", iter = 500, warmup = 250, chains = 1,
-           gradient_mode = "H", verbose = FALSE),
+           mode = "hmc",
+           control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
 })["elapsed"]
@@ -115,10 +115,10 @@ cat(sprintf("  O3: %.1fs  (O2: %.1fs, Stan: %.1fs)\n\n", t5, prev$nb_re$o2, prev
 cat("--- Row 34: NB + crossed ---\n")
 t6 <- system.time({
   fit <- tryCatch(
-    ratiod(y_num | y_denom ~ x1 + (1 | site) + (1 | region), data = df,
+    tratio(y_num | y_denom ~ x1 + (1 | site) + (1 | region), data = df,
            family = ratiod_negbin_negbin(),
-           mode = "hmc", iter = 500, warmup = 250, chains = 1,
-           gradient_mode = "H", verbose = FALSE),
+           mode = "hmc",
+           control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
 })["elapsed"]

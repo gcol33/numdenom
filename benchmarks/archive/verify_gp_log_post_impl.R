@@ -117,14 +117,12 @@ for (mode in modes) {
   cat(sprintf("  Fitting with gradient_mode = '%s'...", mode))
   time <- system.time({
     fit <- tryCatch(
-      ratiod(
+      tratio(
         y_num | y_denom ~ x,
         data = df_gp,
         family = ratiod_negbin_negbin(),
         spatial = spatial_gp(coords = c("coord_x", "coord_y"), cov = "exponential"),
-        iter = ITER, warmup = WARMUP, chains = CHAINS,
-        verbose = FALSE,
-        gradient_mode = mode
+        control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = mode)
       ),
       error = function(e) {
         cat(sprintf(" ERROR: %s\n", e$message))
@@ -164,14 +162,12 @@ for (mode in modes) {
   cat(sprintf("  Fitting with gradient_mode = '%s'...", mode))
   time <- system.time({
     fit <- tryCatch(
-      ratiod(
+      tratio(
         y_num | y_denom ~ x,
         data = df_gp,
         family = ratiod_negbin_negbin(),
         spatial = spatial_multiscale(coords = c("coord_x", "coord_y"), cov = "exponential"),
-        iter = ITER, warmup = WARMUP, chains = CHAINS,
-        verbose = FALSE,
-        gradient_mode = mode
+        control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = mode)
       ),
       error = function(e) {
         cat(sprintf(" ERROR: %s\n", e$message))

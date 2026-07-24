@@ -88,9 +88,9 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_7 <- system.time({
   fit_7 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_7, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_7, family = ratiod_poisson_gamma(),
            spatial = spatial_gp(coords = c("coord_x", "coord_y"), cov = "exponential"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -121,9 +121,9 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_37 <- system.time({
   fit_37 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_37, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_37, family = ratiod_negbin_negbin(),
            spatial = spatial_gp(coords = c("coord_x", "coord_y"), cov = "exponential"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -152,9 +152,9 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_67 <- system.time({
   fit_67 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_67, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_67, family = ratiod_binomial(),
            spatial = spatial_gp(coords = c("coord_x", "coord_y"), cov = "exponential"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -189,10 +189,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_21 <- system.time({
   fit_21 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_21, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_21, family = ratiod_poisson_gamma(),
            spatial = spatial_gp(coords = c("coord_x", "coord_y"), cov = "exponential"),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -219,10 +219,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_51 <- system.time({
   fit_51 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_51, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_51, family = ratiod_negbin_negbin(),
            spatial = spatial_gp(coords = c("coord_x", "coord_y"), cov = "exponential"),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -250,10 +250,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_83 <- system.time({
   fit_83 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_83, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_83, family = ratiod_binomial(),
            spatial = spatial_gp(coords = c("coord_x", "coord_y"), cov = "exponential"),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

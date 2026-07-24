@@ -76,13 +76,13 @@ df <- data.frame(
 )
 
 # Fit zero-inflated binomial
-fit_zi <- ratiod(
+fit_zi <- tratio(
   detected | trials ~ habitat + (1 | site),
   zi = ~ habitat,  # Predictors for zero-inflation
 
   data = df,
   family = ratiod_zibinomial(),
-  iter = 2000, chains = 2
+  control = list(iter = 2000, chains = 2)
 )
 
 summary(fit_zi)
@@ -115,12 +115,11 @@ df <- data.frame(
 )
 
 # Fit one-inflated binomial
-fit_oi <- ratiod(
+fit_oi <- tratio(
   completed | total_items ~ age_group + education,
-  oi = ~ age_group,  # Predictors for one-inflation
   data = df,
   family = ratiod_oibinomial(),
-  iter = 2000, chains = 2
+  control = list(iter = 2000, chains = 2)
 )
 
 summary(fit_oi)
@@ -157,13 +156,13 @@ df <- data.frame(
 )
 
 # Fit ZOIB model
-fit_zoib <- ratiod(
+fit_zoib <- tratio(
   cover_points | total_points ~ elevation + aspect,
   zi = ~ elevation,    # Zero-inflation predictors
   oi = ~ elevation,    # One-inflation predictors
   data = df,
   family = ratiod_zoibinomial(),
-  iter = 2000, chains = 2
+  control = list(iter = 2000, chains = 2)
 )
 
 summary(fit_zoib)
@@ -193,12 +192,12 @@ df <- data.frame(
 )
 
 # Fit hurdle binomial
-fit_hurdle <- ratiod(
+fit_hurdle <- tratio(
   detections | visits ~ habitat_quality + (1 | site),
   zi = ~ habitat_quality,  # Predictors for hurdle (presence)
   data = df,
   family = ratiod_hurdle_binomial(),
-  iter = 2000, chains = 2
+  control = list(iter = 2000, chains = 2)
 )
 
 summary(fit_hurdle)
@@ -228,12 +227,12 @@ df <- data.frame(
 )
 
 # Zero-inflated negative binomial with gamma denominator
-fit_zi_cpue <- ratiod(
+fit_zi_cpue <- tratio(
   catch | effort ~ depth + season + (1 | vessel),
   zi = ~ season,
   data = df,
   family = ratiod_zinegbin(denom_family = "gamma"),
-  iter = 2000, chains = 2
+  control = list(iter = 2000, chains = 2)
 )
 
 summary(fit_zi_cpue)
@@ -259,20 +258,20 @@ Compare ZI and non-ZI models using LOO-CV:
 
 ```{r}
 # Fit standard model
-fit_standard <- ratiod(
+fit_standard <- tratio(
   detected | trials ~ habitat + (1 | site),
   data = df,
   family = ratiod_binomial(),
-  iter = 2000, chains = 2
+  control = list(iter = 2000, chains = 2)
 )
 
 # Fit zero-inflated model
-fit_zi <- ratiod(
+fit_zi <- tratio(
   detected | trials ~ habitat + (1 | site),
   zi = ~ 1,
   data = df,
   family = ratiod_zibinomial(),
-  iter = 2000, chains = 2
+  control = list(iter = 2000, chains = 2)
 )
 
 # Compare

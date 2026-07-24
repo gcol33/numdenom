@@ -1,7 +1,7 @@
-#' Spatial structure specifications for ratiod
+#' Spatial structure specifications for tulpaRatio
 #'
 #' @description
-#' Functions to specify spatial random effects for ratiod models.
+#' Functions to specify spatial random effects for ratio models.
 #' Spatial effects are shared between numerator and denominator by default,
 #' which helps prevent spurious ratio effects from spatially-structured
 #' unmeasured confounders.
@@ -96,7 +96,7 @@ NULL
 #' )
 #'
 #' # ICAR model (standard disease mapping approach)
-#' fit_icar <- ratiod(
+#' fit_icar <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -108,7 +108,7 @@ NULL
 #' )
 #'
 #' # Proper CAR model (estimate spatial autocorrelation)
-#' fit_car <- ratiod(
+#' fit_car <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -300,7 +300,7 @@ compute_car_rho_bounds <- function(adjacency) {
 #' )
 #'
 #' # Disease mapping with BYM2 spatial smoothing
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   cases | population ~ age,
 #'   spatial = spatial_bym2(adj, level = "group", group_var = "region"),
 #'   data = epi_data,
@@ -410,7 +410,7 @@ compute_bym2_scale <- function(adjacency) {
 #'
 #' @export
 print.ratiod_spatial <- function(x, ...) {
-  cat("ratiod spatial specification\n")
+  cat("tulpaRatio spatial specification\n")
   cat("===========================\n\n")
 
   # Format type name
@@ -573,7 +573,7 @@ is_connected <- function(adjacency) {
 #' )
 #'
 #' # Continuous spatial effect with exponential covariance
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + temp,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -586,7 +586,7 @@ is_connected <- function(adjacency) {
 #' summary(fit)
 #'
 #' # Smoother spatial field with Matern covariance
-#' fit2 <- ratiod(
+#' fit2 <- tratio(
 #'   count | effort ~ depth + temp,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -711,7 +711,7 @@ if (solver == "gpu" && !gpu_available()) {
 #'
 #' @export
 print.ratiod_gp <- function(x, ...) {
-  cat("ratiod Gaussian Process spatial specification\n")
+  cat("tulpaRatio Gaussian Process spatial specification\n")
   cat("=============================================\n\n")
 
   cat("Coordinates:", paste(x$coord_vars, collapse = ", "), "\n")
@@ -812,7 +812,7 @@ print.ratiod_gp <- function(x, ...) {
 #' )
 #'
 #' # Fast spatial effect with HSGP (much faster than spatial_gp)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -898,7 +898,7 @@ spatial_hsgp <- function(coords,
 #'
 #' @export
 print.ratiod_hsgp <- function(x, ...) {
-  cat("ratiod Hilbert Space GP (HSGP) spatial specification\n")
+  cat("tulpaRatio Hilbert Space GP (HSGP) spatial specification\n")
   cat("=====================================================\n\n")
 
   cat("Coordinates:", paste(x$coord_vars, collapse = ", "), "\n")
@@ -1045,7 +1045,7 @@ validate_hsgp_multiscale <- function(spatial, data) {
 #' )
 #'
 #' # Multi-scale spatial with local and regional components
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + temp,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -1166,7 +1166,7 @@ spatial_multiscale <- function(coords,
 #'
 #' @export
 print.ratiod_multiscale <- function(x, ...) {
-  cat("ratiod Multi-Scale spatial specification\n")
+  cat("tulpaRatio Multi-Scale spatial specification\n")
   cat("========================================\n\n")
 
   cat("Coordinates:", paste(x$coord_vars, collapse = ", "), "\n")
@@ -1276,7 +1276,7 @@ validate_gp <- function(gp, data) {
 #' Spatially-Varying Coefficients (SVC)
 #'
 #' @description
-#' Specify spatially-varying coefficients for ratiod models. SVCs allow
+#' Specify spatially-varying coefficients for ratio models. SVCs allow
 #' regression coefficients to vary smoothly across space using a Gaussian
 #' process prior. This captures local effects that may differ from global
 #' relationships.
@@ -1356,7 +1356,7 @@ validate_gp <- function(gp, data) {
 #' )
 #'
 #' # Spatially-varying intercept (random spatial field)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -1481,7 +1481,7 @@ spatial_svc <- function(coords,
 #'
 #' @export
 print.ratiod_svc <- function(x, ...) {
-  cat("ratiod spatially-varying coefficients\n")
+  cat("tulpaRatio spatially-varying coefficients\n")
   cat("=====================================\n\n")
 
   cat("Coordinates:", paste(x$coord_vars, collapse = ", "), "\n")
@@ -1715,7 +1715,7 @@ compute_nngp_neighbors <- function(coords, k) {
 #'
 #' @description
 #' Extract posterior distributions of spatially-varying coefficients (SVCs)
-#' from a fitted ratiod model with SVC specification.
+#' from a fitted ratio model with SVC specification.
 #'
 #' @param object A `ratiod_fit` object fitted with `svc` argument
 #' @param terms Which SVC terms to extract. If NULL (default), extracts all.
@@ -1743,7 +1743,7 @@ compute_nngp_neighbors <- function(coords, k) {
 #' )
 #'
 #' # Fit model with SVC
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -1773,7 +1773,7 @@ svc.ratiod_fit <- function(object, terms = NULL, summary = FALSE,
   # Check if model has SVCs
   if (is.null(object$svc) || !inherits(object$svc, "ratiod_svc")) {
     stop("Model was not fitted with spatially-varying coefficients.\n",
-         "Use `svc` argument in ratiod() to specify SVCs.", call. = FALSE)
+         "Use `svc` argument in tratio() to specify SVCs.", call. = FALSE)
   }
 
   svc_info <- object$svc
@@ -2096,7 +2096,7 @@ validate_spatial <- function(spatial, data) {
 #' )
 #'
 #' # Standard GP (may have spatial confounding)
-#' fit1 <- ratiod(
+#' fit1 <- tratio(
 #'   count | effort ~ depth + temp,
 #'   data = df,
 #'   spatial = spatial_gp(~ lon + lat),
@@ -2107,7 +2107,7 @@ validate_spatial <- function(spatial, data) {
 #' )
 #'
 #' # RSR to protect depth and temp coefficients
-#' fit2 <- ratiod(
+#' fit2 <- tratio(
 #'   count | effort ~ depth + temp,
 #'   data = df,
 #'   spatial = spatial_rsr(
@@ -2140,7 +2140,7 @@ validate_spatial <- function(spatial, data) {
 spatial_rsr <- function(spatial, restrict_to) {
 
   if (!inherits(spatial, "ratiod_spatial")) {
-    stop("`spatial` must be a ratiod spatial specification", call. = FALSE)
+    stop("`spatial` must be a tulpaRatio spatial specification", call. = FALSE)
   }
 
   if (!inherits(restrict_to, "formula")) {

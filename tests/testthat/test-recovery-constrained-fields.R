@@ -31,8 +31,8 @@ grid_adj <- function(S) {
 }
 
 fit_one <- function(df, ...) {
-  f <- ratiod(y | trials ~ x, data = df, family = ratiod_binomial(),
-              iter = 1000, warmup = 500, chains = 4, verbose = FALSE, ...)
+  f <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(), ...,
+              control = list(iter = 1000, warmup = 500, chains = 4, verbose = FALSE))
   dr <- as.matrix(f$draws)
   per <- nrow(dr) / f$chains
   summarise <- function(v) {
@@ -90,10 +90,10 @@ test_that("a spatial-only model reaches a sampler that reports its chains", {
   # and expose the spatial field so the convergence diagnostics above apply to
   # them too.
   df <- sim_data(11)
-  f <- ratiod(y | trials ~ x, data = df, family = ratiod_binomial(),
+  f <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
               spatial = spatial_car(grid_adj(50), level = "group",
                                     group_var = "spatial_site"),
-              iter = 1000, warmup = 500, chains = 4, verbose = FALSE)
+              control = list(iter = 1000, warmup = 500, chains = 4, verbose = FALSE))
   expect_identical(as.integer(f$chains), 4L)
   expect_true(any(grepl("^phi_spatial\\[", colnames(as.matrix(f$draws)))))
 })

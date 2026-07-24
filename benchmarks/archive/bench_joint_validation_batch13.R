@@ -96,13 +96,12 @@ df_nb_gp$denom[df_nb_gp$denom == 0] <- 1
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x,
     data = df_nb_gp,
     family = ratiod_negbin_negbin(),
     temporal = temporal_gp("time", cov = "exponential"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd))
@@ -181,13 +180,12 @@ df_pg_gp$denom[df_pg_gp$denom < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd_pg <- system.time({
-  fit_nd_pg <- ratiod(
+  fit_nd_pg <- tratio(
     y | denom ~ x,
     data = df_pg_gp,
     family = ratiod_poisson_gamma(),
     temporal = temporal_gp("time", cov = "exponential"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd_pg))
@@ -257,13 +255,12 @@ df_nb_hsgp$denom[df_nb_hsgp$denom == 0] <- 1
 
 cat("Fitting numdenom (HSGP)... ")
 t_nd_hsgp <- system.time({
-  fit_nd_hsgp <- ratiod(
+  fit_nd_hsgp <- tratio(
     y | denom ~ x,
     data = df_nb_hsgp,
     family = ratiod_negbin_negbin(),
     spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd_hsgp))
@@ -333,13 +330,12 @@ df_pg_hsgp$denom[df_pg_hsgp$denom < 0.01] <- 0.01
 
 cat("Fitting numdenom (HSGP)... ")
 t_nd_pg_hsgp <- system.time({
-  fit_nd_pg_hsgp <- ratiod(
+  fit_nd_pg_hsgp <- tratio(
     y | denom ~ x,
     data = df_pg_hsgp,
     family = ratiod_poisson_gamma(),
     spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd_pg_hsgp))

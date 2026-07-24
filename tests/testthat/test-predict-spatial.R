@@ -13,11 +13,11 @@ test_that("predict works for basic model (no spatial)", {
     site = factor(rep(1:5, each = 6))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | n_trials ~ x + (1 | site),
     data = df,
     family = ratiod_binomial(),
-    iter = 100, warmup = 50, chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   # Basic prediction
@@ -56,12 +56,12 @@ test_that("predict works with ICAR spatial (lookup)",
     region = factor(rep(LETTERS[1:n_sites], length.out = n))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | n_trials ~ x,
     data = df,
     family = ratiod_binomial(),
     spatial = spatial_car(adjacency = adj, group_var = "region"),
-    iter = 100, warmup = 50, chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   # Predict for existing regions
@@ -93,12 +93,12 @@ test_that("predict works with return_spatial = TRUE", {
     region = factor(rep(LETTERS[1:n_sites], length.out = n))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | n_trials ~ x,
     data = df,
     family = ratiod_binomial(),
     spatial = spatial_car(adjacency = adj, group_var = "region"),
-    iter = 100, warmup = 50, chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   new_df <- data.frame(x = c(0, 0.5, 1), region = factor(c("A", "B", "C")))
@@ -126,12 +126,12 @@ test_that("predict errors when coords.0 missing for GP", {
 
   # Skip if GP fitting fails
   fit <- tryCatch(
-    ratiod(
+    tratio(
       y | n_trials ~ x,
       data = df,
       family = ratiod_binomial(),
       spatial = spatial_gp(coords = c("lon", "lat"), nn = 5),
-      iter = 50, warmup = 25, chains = 1
+      control = list(iter = 50, warmup = 25, chains = 1)
     ),
     error = function(e) NULL
   )
@@ -220,13 +220,13 @@ test_that("predict works for PG backend with spatial", {
   )
 
   fit <- tryCatch(
-    ratiod(
+    tratio(
       y | n_trials ~ x,
       data = df,
       family = ratiod_binomial(),
       spatial = spatial_car(adjacency = adj, group_var = "region"),
       mode = "pg",
-      iter = 100, warmup = 50, chains = 1
+      control = list(iter = 100, warmup = 50, chains = 1)
     ),
     error = function(e) NULL
   )

@@ -55,8 +55,8 @@ bench <- function(label, ...) {
   gc()
   t <- system.time({
     fit <- tryCatch(
-      ratiod(..., mode = "hmc", iter = N_ITER, warmup = N_WARMUP,
-             chains = N_CHAINS, seed = SEED, verbose = FALSE),
+      tratio(..., mode = "hmc",
+             control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, seed = SEED, verbose = FALSE)),
       error = function(e) { cat("ERROR:", conditionMessage(e), "\n"); NULL }
     )
   })["elapsed"]

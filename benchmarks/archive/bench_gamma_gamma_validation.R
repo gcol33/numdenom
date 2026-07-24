@@ -115,12 +115,11 @@ df_gg_base$denom[df_gg_base$denom <= 0] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x,
     data = df_gg_base,
     family = ratiod_gamma_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -181,12 +180,11 @@ df_gg_re$denom[df_gg_re$denom <= 0] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_gg_re,
     family = ratiod_gamma_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -250,13 +248,12 @@ df_gg_icar$denom[df_gg_icar$denom <= 0] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_gg_icar,
     family = ratiod_gamma_gamma(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -327,13 +324,12 @@ df_gg_rw1$denom[df_gg_rw1$denom <= 0] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_gg_rw1,
     family = ratiod_gamma_gamma(),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -401,14 +397,13 @@ df_gg_icar_rw1$denom[df_gg_icar_rw1$denom <= 0] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_gg_icar_rw1,
     family = ratiod_gamma_gamma(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

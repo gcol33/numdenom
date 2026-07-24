@@ -52,7 +52,7 @@ bench_all_modes <- function(name, row, ...) {
     flush.console()
     tryCatch({
       time <- system.time({
-        fit <- ratiod(..., iter=500, warmup=250, chains=1, verbose=FALSE, gradient_mode=mode)
+        fit <- tratio(..., control = list(iter=500, warmup=250, chains=1, verbose=FALSE, gradient_mode=mode))
       })["elapsed"]
       cat(sprintf("%.1fs\n", time))
       results[[mode]] <- time

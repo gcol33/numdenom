@@ -24,9 +24,9 @@ cat("--- Test 1: Lognormal + RE (2000 iter, 4 chains) ---\n")
 tryCatch({
   t1 <- system.time({
     set.seed(123)
-    fit_ln <- ratiod(y_num | y_denom ~ x + (1|site), data = df,
+    fit_ln <- tratio(y_num | y_denom ~ x + (1|site), data = df,
       family = ratiod_lognormal(),
-      iter = 2000, warmup = 1000, chains = 4, verbose = FALSE)
+      control = list(iter = 2000, warmup = 1000, chains = 4, verbose = FALSE))
   })["elapsed"]
 
   draws <- fit_ln$draws
@@ -66,9 +66,9 @@ tryCatch({
 
   t2 <- system.time({
     set.seed(123)
-    fit_nb <- ratiod(y_num | y_denom ~ x + (1|site), data = df2,
+    fit_nb <- tratio(y_num | y_denom ~ x + (1|site), data = df2,
       family = ratiod_negbin_negbin(),
-      iter = 2000, warmup = 1000, chains = 4, verbose = FALSE)
+      control = list(iter = 2000, warmup = 1000, chains = 4, verbose = FALSE))
   })["elapsed"]
 
   draws2 <- fit_nb$draws

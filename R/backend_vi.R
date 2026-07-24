@@ -1,4 +1,4 @@
-#' Variational Inference Backend for ratiod Models
+#' Variational Inference Backend for ratio Models
 #'
 #' @description
 #' Automatic Differentiation Variational Inference (ADVI) backend.
@@ -37,7 +37,7 @@
 NULL
 
 
-#' Fit ratiod model using Variational Inference
+#' Fit ratio model using Variational Inference
 #'
 #' @param formula A ratiod_formula object
 #' @param data Data frame

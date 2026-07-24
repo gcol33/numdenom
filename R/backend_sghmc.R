@@ -1,4 +1,4 @@
-#' Stochastic Gradient MCMC Backends for ratiod Models
+#' Stochastic Gradient MCMC Backends for ratio Models
 #'
 #' @description
 #' Stochastic gradient MCMC methods enable Tier 1 (Exact) inference on
@@ -29,7 +29,7 @@
 NULL
 
 
-#' Fit ratiod model using Stochastic Gradient HMC
+#' Fit ratio model using Stochastic Gradient HMC
 #'
 #' @param formula A ratiod_formula object
 #' @param data Data frame
@@ -255,7 +255,7 @@ fit_sghmc <- function(formula,
 }
 
 
-#' Fit ratiod model using Stochastic Gradient Langevin Dynamics
+#' Fit ratio model using Stochastic Gradient Langevin Dynamics
 #'
 #' @param formula A ratiod_formula object
 #' @param data Data frame

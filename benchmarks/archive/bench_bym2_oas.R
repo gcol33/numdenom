@@ -36,19 +36,13 @@ cat(sprintf("N=%d, S=%d, iter=%d, warmup=%d\n\n", N_OBS, N_SITES, N_ITER, N_WARM
 
 # Fit BYM2 model with verbose to see dense mass + shrinkage info
 t0 <- proc.time()["elapsed"]
-fit <- ratiod(
+fit <- tratio(
   y_num | y_denom ~ x + (1 | site),
   data = df,
   family = ratiod_negbin_negbin(),
   spatial = spatial_bym2(adj = adj, group_var = "site"),
   mode = "hmc",
-  iter = N_ITER,
-  warmup = N_WARMUP,
-  chains = 1,
-  seed = 123,
-  verbose = TRUE,
-  metric = "dense",
-  gradient_mode = "H"
+  control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, seed = 123, verbose = TRUE, metric = "dense", gradient_mode = "H")
 )
 elapsed <- proc.time()["elapsed"] - t0
 

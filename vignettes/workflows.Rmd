@@ -55,13 +55,11 @@ head(fisheries)
 ### Model Fitting
 
 ```{r}
-fit_cpue <- ratiod(
+fit_cpue <- tratio(
   catch | effort_hours ~ depth + season + (1 | site),
   data = fisheries,
   family = ratiod_poisson_gamma(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 4
+  control = list(iter = 2000, warmup = 1000, chains = 4)
 )
 
 summary(fit_cpue)
@@ -123,12 +121,11 @@ abundance$target_count <- pmin(abundance$target_count, abundance$total_count)
 ### Model
 
 ```{r}
-fit_abundance <- ratiod(
+fit_abundance <- tratio(
   target_count | total_count ~ habitat + (1 | plot) + (1 | observer),
   data = abundance,
   family = ratiod_negbin_negbin(),
-  iter = 2000,
-  chains = 4
+  control = list(iter = 2000, chains = 4)
 )
 
 summary(fit_abundance)
@@ -186,13 +183,12 @@ camera_data$detections <- pmin(camera_data$detections, camera_data$nights_active
 ### Spatial Model
 
 ```{r}
-fit_detection <- ratiod(
+fit_detection <- tratio(
   detections | nights_active ~ vegetation + (1 | camera),
   spatial = spatial_car(adj, level = "group", group_var = "camera"),
   data = camera_data,
   family = ratiod_binomial(),
-  iter = 2000,
-  chains = 4
+  control = list(iter = 2000, chains = 4)
 )
 
 summary(fit_detection)
@@ -235,13 +231,12 @@ trend_data$effort <- rgamma(nrow(trend_data), shape = 5, rate = 1)
 ### Model with Temporal Structure
 
 ```{r}
-fit_trend <- ratiod(
+fit_trend <- tratio(
   count | effort ~ (1 | site),
   temporal = temporal_rw(time_var = "year", order = 1),
   data = trend_data,
   family = ratiod_poisson_gamma(),
-  iter = 2000,
-  chains = 4
+  control = list(iter = 2000, chains = 4)
 )
 
 summary(fit_trend)

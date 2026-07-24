@@ -93,13 +93,13 @@ df_nb_gp$denom[df_nb_gp$denom == 0] <- 1
 
 cat("Fitting numdenom (no site RE, to match Stan model)... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x,  # No site RE - Stan model doesn't have it
     data = df_nb_gp,
     family = ratiod_negbin_negbin(),
     temporal = temporal_gp("time", cov = "exponential"),  # Use numeric time, not factor
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    iter = N_ITER,
+    control = list(warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -179,13 +179,13 @@ df_pg_gp$denom[df_pg_gp$denom < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd_pg <- system.time({
-  fit_nd_pg <- ratiod(
+  fit_nd_pg <- tratio(
     y | denom ~ x + (1|site),
     data = df_pg_gp,
     family = ratiod_poisson_gamma(),
     temporal = temporal_gp("time", cov = "exponential"),  # Use numeric time, not factor
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    iter = N_ITER,
+    control = list(warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd_pg))

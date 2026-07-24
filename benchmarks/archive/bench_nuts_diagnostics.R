@@ -15,9 +15,9 @@ set.seed(42)
 run_numdenom <- function(formula, data, family, label, ...) {
   cat("\n=== numdenom:", label, "===\n")
   t0 <- proc.time()["elapsed"]
-  fit <- ratiod(formula, data = data, family = family,
-                mode = "hmc", iter = 500, warmup = 250, chains = 1,
-                verbose = FALSE, ...)
+  fit <- tratio(formula, data = data, family = family,
+                mode = "hmc", ...,
+                control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   elapsed <- proc.time()["elapsed"] - t0
 
   # Extract diagnostics from the fit object

@@ -19,16 +19,13 @@ test_that("spatial_gp fits with HMC backend", {
   )
 
   # Minimal GP fit - coords as formula
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_gp(coords = ~ lon + lat, cov = "exponential", nn = 5),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -64,16 +61,13 @@ test_that("spatiotemporal Type I fits with HMC backend", {
     type = "I"
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     spatiotemporal = st,
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -104,16 +98,13 @@ test_that("spatiotemporal Type IV fits with HMC backend", {
     type = "IV"
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     spatiotemporal = st,
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -144,16 +135,13 @@ test_that("spatial_svc fits with HMC backend", {
     nn = 5
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ covar,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = svc,
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -175,16 +163,13 @@ test_that("latent_factor fits with HMC backend", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 1),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -202,16 +187,13 @@ test_that("latent_factor with 2 factors fits", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 2),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -238,16 +220,13 @@ test_that("proper CAR fits with HMC backend", {
     site = factor(rep(1:n_sites, each = n_per_site))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1 + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(adj, level = "group", group_var = "site", proper = TRUE),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -274,16 +253,13 @@ test_that("BYM2 spatial fits with HMC backend", {
     site = factor(rep(1:n_sites, each = n_per_site))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1 + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_bym2(adj, level = "group", group_var = "site"),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -307,16 +283,13 @@ test_that("temporal RW2 fits with HMC backend", {
     time = rep(1:n_times, each = n_per_time)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw2("time"),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -340,16 +313,13 @@ test_that("temporal AR1 fits with HMC backend", {
     time = rep(1:n_times, each = n_per_time)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_ar1("time"),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -373,16 +343,13 @@ test_that("cyclic temporal RW1 fits with HMC backend", {
     month = rep(1:n_times, each = n_per_time)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("month", cyclic = TRUE),
     mode = "hmc",
-    iter = 50,
-    warmup = 25,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")

@@ -52,15 +52,12 @@ message("True phi_gp: ", true_phi_gp)
 # Fit with numdenom
 message("\n=== Fitting numdenom temporal_gp ===")
 t_numdenom <- system.time({
-  fit_numdenom <- ratiod(
+  fit_numdenom <- tratio(
     num | denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     temporal = temporal_gp(time_var = "time", cov = "exponential"),
-    iter = 1000,
-    warmup = 500,
-    chains = 2,
-    verbose = FALSE
+    control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
   )
 })
 message("Time: ", round(t_numdenom["elapsed"], 1), "s")

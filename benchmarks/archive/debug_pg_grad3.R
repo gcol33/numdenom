@@ -17,9 +17,8 @@ cat("Number of zero effort:", sum(eff == 0), "\n")
 # This should work now (no zeros)
 cat("\n=== PG base (no zeros), H mode ===\n")
 fit <- tryCatch({
-  ratiod(y | effort ~ x, data = df,
+  tratio(y | effort ~ x, data = df,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit)) cat(fit, "\n") else cat("SUCCESS\n")

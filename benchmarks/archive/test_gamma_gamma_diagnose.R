@@ -90,13 +90,11 @@ cat("shape_denom: mean =", mean(draws_stan$shape_denom), ", true =", shape_denom
 
 # Now try numdenom
 cat("\n=== Fitting numdenom ===\n")
-fit <- ratiod(
+fit <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 2000, warmup = 1000, chains = 2,
-  gradient_mode = "H",
-  seed = 42
+  control = list(iter = 2000, warmup = 1000, chains = 2, gradient_mode = "H", seed = 42)
 )
 
 draws <- as.matrix(fit$draws)

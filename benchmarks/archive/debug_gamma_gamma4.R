@@ -37,14 +37,11 @@ cat("  log(y_denom) mean:", mean(log(y_denom)), " (expected ~", beta_denom_int, 
 
 # Fit model
 cat("\n=== Fitting intercept-only model ===\n")
-fit <- ratiod(
+fit <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_gamma_gamma(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 2,
-  seed = 123
+  control = list(iter = 2000, warmup = 1000, chains = 2, seed = 123)
 )
 
 print(summary(fit))

@@ -32,12 +32,11 @@ cat("  shape_denom =", shape_denom, "\n")
 
 # Fit with numdenom
 cat("\nFitting numdenom...\n")
-fit <- ratiod(
+fit <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 1000, warmup = 500, chains = 1,
-  verbose = TRUE
+  control = list(iter = 1000, warmup = 500, chains = 1, verbose = TRUE)
 )
 
 cat("\n\nNumdenom estimates:\n")

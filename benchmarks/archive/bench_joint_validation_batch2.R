@@ -140,13 +140,12 @@ df_pg_spatial$effort[df_pg_spatial$effort < 0.01] <- 0.01
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_spatial,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(spatial_info$adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -224,13 +223,12 @@ df_pg_temporal$effort[df_pg_temporal$effort < 0.01] <- 0.01
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_temporal,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -295,13 +293,12 @@ df_nb_spatial <- data.frame(
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_spatial,
     family = ratiod_negbin_negbin(),
     spatial = spatial_car(spatial_info$adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -371,13 +368,12 @@ df_nb_temporal <- data.frame(
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_temporal,
     family = ratiod_negbin_negbin(),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

@@ -97,13 +97,12 @@ df_bin_hsgp <- data.frame(
 
 cat("Fitting numdenom (HSGP)... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | trials ~ x + (1|site),
     data = df_bin_hsgp,
     family = ratiod_binomial(),
     spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

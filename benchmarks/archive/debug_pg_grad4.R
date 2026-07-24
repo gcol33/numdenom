@@ -33,18 +33,16 @@ cat("log(mean(eff[eff>0])):", log(mean(eff[eff > 0])), "\n")
 # Now let's test with A_r mode (arena autodiff) to get a third opinion
 cat("\n=== PG base with zeros, A_r mode ===\n")
 fit_ar <- tryCatch({
-  ratiod(y | effort ~ x, data = df,
+  tratio(y | effort ~ x, data = df,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "A", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "A", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit_ar)) cat(fit_ar, "\n") else cat("A mode: SUCCESS\n")
 
 cat("\n=== PG base with zeros, N mode ===\n")
 fit_n <- tryCatch({
-  ratiod(y | effort ~ x, data = df,
+  tratio(y | effort ~ x, data = df,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "N", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "N", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit_n)) cat(fit_n, "\n") else cat("N mode: SUCCESS\n")

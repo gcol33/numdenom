@@ -7,7 +7,7 @@
 can_use_pg_backend(family)
 }
 \arguments{
-\item{family}{A ratiod family object}
+\item{family}{A tulpaRatio family object}
 }
 \value{
 Logical indicating if PG backend can be used

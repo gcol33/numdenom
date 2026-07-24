@@ -40,9 +40,9 @@ cat("True parameters: intercept =", true_intercept, ", slope =", true_slope, "\n
 
 # Test HSGP
 cat("===== HSGP =====\n")
-fit_hsgp <- ratiod(successes | trials ~ x, data = df, family = ratiod_binomial(),
+fit_hsgp <- tratio(successes | trials ~ x, data = df, family = ratiod_binomial(),
                     spatial = spatial_hsgp(coords = c("coord_x", "coord_y"), m = 5),
-                    iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                    control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 
 draws_hsgp <- as.matrix(fit_hsgp$draws)
 cat("Column names:", head(colnames(draws_hsgp), 10), "\n")
@@ -51,9 +51,9 @@ cat("beta_num[2] (slope):", sprintf("%.3f (SD %.3f)", mean(draws_hsgp[,2]), sd(d
 
 # Test GP (NNGP)
 cat("\n===== GP (NNGP) =====\n")
-fit_gp <- ratiod(successes | trials ~ x, data = df, family = ratiod_binomial(),
+fit_gp <- tratio(successes | trials ~ x, data = df, family = ratiod_binomial(),
                   spatial = spatial_gp(coords = c("coord_x", "coord_y"), nn = 10),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 
 draws_gp <- as.matrix(fit_gp$draws)
 cat("Column names:", head(colnames(draws_gp), 10), "\n")

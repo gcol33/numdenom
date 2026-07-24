@@ -18,12 +18,10 @@ df <- data.frame(
 
 # Fit one iteration just to get data structures set up correctly
 cat("Fitting with A-mode to get initial params...\n")
-fit_A <- ratiod(
+fit_A <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 10, warmup = 5, chains = 1,
-  gradient_mode = "A",
-  verbose = FALSE
+  control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "A", verbose = FALSE)
 )
 
 # Get the final state from A-mode
@@ -34,12 +32,10 @@ print(final_row)
 
 # Now fit with H-mode starting from same initialization
 cat("\nFitting with H-mode...\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 10, warmup = 5, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 
 draws_H <- as.matrix(fit_H$draws)
@@ -60,22 +56,20 @@ cat("H-mode beta_num[1]:", draws_H[1:5, "beta_num[1]"], "\n")
 cat("\n=== Checking gradient mode dispatch ===\n")
 
 # Run with explicit modes to ensure we're testing what we think
-fit_A2 <- ratiod(
+fit_A2 <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 50, warmup = 25, chains = 1,
-  gradient_mode = "A",
-  verbose = TRUE  # This should show which gradient mode is used
+  # verbose = TRUE should show which gradient mode is used
+  control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "A",
+                 verbose = TRUE)
 )
 
 cat("\n")
 
-fit_H2 <- ratiod(
+fit_H2 <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 50, warmup = 25, chains = 1,
-  gradient_mode = "H",
-  verbose = TRUE
+  control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "H", verbose = TRUE)
 )
 
 # Compare posteriors

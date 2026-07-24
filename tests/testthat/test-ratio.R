@@ -13,14 +13,12 @@ make_test_fit <- function() {
     site = factor(rep(1:n_groups, each = n / n_groups))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
   fit
 }
@@ -134,14 +132,12 @@ test_that("ratio_contrast computes differences", {
     season = factor(rep(c("summer", "winter"), each = n / 2))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   contrast <- ratio_contrast(fit, ~ season)
@@ -164,14 +160,12 @@ test_that("ratio_contrast computes ratio of ratios", {
     season = factor(rep(c("summer", "winter"), each = n / 2))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   contrast <- ratio_contrast(fit, ~ season, type = "ratio")
@@ -216,14 +210,12 @@ test_that("print.ratiod_contrast works", {
     season = factor(rep(c("summer", "winter"), each = n / 2))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   contrast <- ratio_contrast(fit, ~ season)
@@ -423,15 +415,12 @@ test_that("ratio with logit scale warns for non-proportion ratios", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   # Should warn since ratios will be > 1
@@ -472,15 +461,12 @@ test_that("print.ratiod_ratio_summary with many rows", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   r <- ratio(fit, summary = TRUE)

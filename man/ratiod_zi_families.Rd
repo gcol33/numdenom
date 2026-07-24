@@ -2,7 +2,7 @@
 % Please edit documentation in R/family_zi.R
 \name{ratiod_zi_families}
 \alias{ratiod_zi_families}
-\title{Zero-inflated model families for ratiod}
+\title{Zero-inflated model families for tulpaRatio}
 \description{
 Distribution families for handling excess zeros in count data.
 Zero-inflation occurs when there are more zeros than expected

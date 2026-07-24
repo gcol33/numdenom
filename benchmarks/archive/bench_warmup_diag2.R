@@ -11,9 +11,9 @@ df$effort <- pmax(rgamma(N, shape = 5, rate = 5 / exp(eta + 0.5)), 0.01)
 
 cat("\n=== NB+RE ===\n")
 t1 <- system.time({
-  fit_nb <- ratiod(y_num | y_denom ~ x + (1 | site), data = df,
-    family = ratiod_negbin_negbin(), iter = 500, warmup = 250,
-    chains = 1, gradient_mode = "H", verbose = FALSE)
+  fit_nb <- tratio(y_num | y_denom ~ x + (1 | site), data = df,
+    family = ratiod_negbin_negbin(),
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 })["elapsed"]
 
 # Check what diagnostics are available
@@ -36,9 +36,9 @@ cat(sprintf("  True ms/kLF: %.2f\n", 1000 * t1 / total_lf_nb))
 
 cat("\n=== PG+RE ===\n")
 t2 <- system.time({
-  fit_pg <- ratiod(y_num | effort ~ x + (1 | site), data = df,
-    family = ratiod_poisson_gamma(), iter = 500, warmup = 250,
-    chains = 1, gradient_mode = "H", verbose = FALSE)
+  fit_pg <- tratio(y_num | effort ~ x + (1 | site), data = df,
+    family = ratiod_poisson_gamma(),
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 })["elapsed"]
 n_lf2 <- fit_pg$diagnostics$n_leapfrog
 if (is.list(n_lf2)) n_lf2 <- n_lf2[[1]]

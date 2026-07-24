@@ -87,12 +87,11 @@ cat("========== Row 74: binomial + temporal GP ==========\n")
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | trials ~ x, data = df,
     family = ratiod_binomial(),
     temporal = temporal_gp(time_var = "time", cov = "exponential"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd))

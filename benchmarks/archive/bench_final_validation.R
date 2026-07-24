@@ -79,10 +79,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_84 <- system.time({
   fit_84 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_84, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_84, family = ratiod_binomial(),
            spatial = spatial_hsgp(coords = c("coord_x", "coord_y"), m = 5),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -143,9 +143,9 @@ cat(sprintf("True: mean_slope=%.2f (varies by site)\n", true_slope))
 cat("Fitting... (SVC is slow ~700s) ")
 t_26 <- system.time({
   fit_26 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_26, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_26, family = ratiod_poisson_gamma(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -187,9 +187,9 @@ cat(sprintf("True: mean_slope=%.2f (varies by site)\n", true_slope))
 cat("Fitting... (SVC is slow ~700s) ")
 t_56 <- system.time({
   fit_56 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_56, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_56, family = ratiod_negbin_negbin(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -230,9 +230,9 @@ cat(sprintf("True: mean_slope=%.2f (varies by site)\n", true_slope))
 cat("Fitting... (SVC is slow ~700s) ")
 t_88 <- system.time({
   fit_88 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_88, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_88, family = ratiod_binomial(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

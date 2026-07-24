@@ -104,13 +104,13 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_28 <- system.time({
   fit_28 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_28, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_28, family = ratiod_poisson_gamma(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(adj_matrix, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "I"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -141,13 +141,13 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_29 <- system.time({
   fit_29 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_29, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_29, family = ratiod_poisson_gamma(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(adj_matrix, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "IV"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -178,13 +178,13 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_58 <- system.time({
   fit_58 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_58, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_58, family = ratiod_negbin_negbin(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(adj_matrix, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "I"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -212,13 +212,13 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_59 <- system.time({
   fit_59 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_59, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_59, family = ratiod_negbin_negbin(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(adj_matrix, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "IV"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -247,13 +247,13 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_90 <- system.time({
   fit_90 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_90, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_90, family = ratiod_binomial(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(adj_matrix, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "I"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -281,13 +281,13 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_91 <- system.time({
   fit_91 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_91, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_91, family = ratiod_binomial(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(adj_matrix, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "IV"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

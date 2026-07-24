@@ -384,16 +384,13 @@ test_that("negbin_negbin with MSGP runs correctly (row 44)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1,
       data = as.data.frame(df),
       spatial = ms,
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -419,16 +416,13 @@ test_that("binomial with MSGP runs correctly (row 45)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1,
       data = as.data.frame(df),
       spatial = ms,
       family = ratiod_binomial(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -504,17 +498,14 @@ test_that("negbin_negbin with GP + RW1 runs correctly (row 46)", {
   df <- generate_gp_temporal_data(n_spatial = 25, n_times = 5, seed = 4601, family = "negbin_negbin")
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1,
       data = as.data.frame(df),
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_rw1("time"),
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -530,17 +521,14 @@ test_that("binomial with GP + RW1 runs correctly (row 47)", {
   df <- generate_gp_temporal_data(n_spatial = 25, n_times = 5, seed = 4701, family = "binomial")
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1,
       data = as.data.frame(df),
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_rw1("time"),
       family = ratiod_binomial(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -556,17 +544,14 @@ test_that("poisson_gamma with GP + RW2 runs correctly (row 48)", {
   df <- generate_gp_temporal_data(n_spatial = 25, n_times = 6, seed = 4801, family = "poisson_gamma")
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1,
       data = as.data.frame(df),
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_rw2("time"),
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -582,17 +567,14 @@ test_that("poisson_gamma with GP + AR1 runs correctly (row 49)", {
   df <- generate_gp_temporal_data(n_spatial = 25, n_times = 6, seed = 4901, family = "poisson_gamma")
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1,
       data = as.data.frame(df),
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_ar1("time"),
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -608,17 +590,14 @@ test_that("negbin_negbin with GP + AR1 runs correctly (row 50)", {
   df <- generate_gp_temporal_data(n_spatial = 25, n_times = 6, seed = 5001, family = "negbin_negbin")
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1,
       data = as.data.frame(df),
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_ar1("time"),
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -634,17 +613,14 @@ test_that("binomial with GP + AR1 runs correctly (row 51)", {
   df <- generate_gp_temporal_data(n_spatial = 25, n_times = 6, seed = 5101, family = "binomial")
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1,
       data = as.data.frame(df),
       spatial = spatial_gp(~ x + y, nn = 8),
       temporal = temporal_ar1("time"),
       family = ratiod_binomial(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -753,17 +729,14 @@ test_that("poisson_gamma with BYM2 + ZI runs correctly (row 52)", {
   }
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1 + (1 | site),
       data = as.data.frame(df),
       spatial = spatial_bym2(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -779,17 +752,14 @@ test_that("poisson_gamma with GP + ZI runs correctly (row 53)", {
   df <- generate_spatial_zi_data(n_sites = 30, seed = 5301, family = "poisson_gamma")
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1,
       data = as.data.frame(df),
       spatial = spatial_gp(~ x + y, nn = 8),
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -813,17 +783,14 @@ test_that("negbin_negbin with ICAR + ZI runs correctly (row 54)", {
   }
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1 + (1 | site),
       data = as.data.frame(df),
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -881,16 +848,13 @@ test_that("poisson_gamma with crossed RE + ICAR runs correctly (row 57)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1 + (1 | site) + (1 | species),
       data = df,
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -938,16 +902,13 @@ test_that("poisson_gamma with random slopes + RW1 runs correctly (row 60)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ x + (x | site),
       data = df,
       temporal = temporal_rw1("time"),
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1013,7 +974,7 @@ test_that("poisson_gamma with ICAR + RW1 + ZI runs correctly (row 64)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1 + (1 | site),
       data = df,
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
@@ -1021,10 +982,7 @@ test_that("poisson_gamma with ICAR + RW1 + ZI runs correctly (row 64)", {
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1052,17 +1010,14 @@ test_that("negbin_negbin with BYM2 + ZI runs correctly (row 55)", {
   }
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1 + (1 | site),
       data = as.data.frame(df),
       spatial = spatial_bym2(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1086,17 +1041,14 @@ test_that("binomial with ICAR + ZI runs correctly (row 56)", {
   }
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1 + (1 | site),
       data = as.data.frame(df),
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       zi = ~ 1,
       family = ratiod_binomial(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1150,16 +1102,13 @@ test_that("poisson_gamma with crossed RE + BYM2 runs correctly (row 58)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1 + (1 | site) + (1 | species),
       data = df,
       spatial = spatial_bym2(adj_mat, level = "group", group_var = "site"),
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1214,16 +1163,13 @@ test_that("negbin_negbin with crossed RE + ICAR runs correctly (row 59)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1 + (1 | site) + (1 | species),
       data = df,
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1271,16 +1217,13 @@ test_that("poisson_gamma with random slopes + AR1 runs correctly (row 61)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ x + (x | site),
       data = df,
       temporal = temporal_ar1("time"),
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1325,16 +1268,13 @@ test_that("negbin_negbin with random slopes + RW1 runs correctly (row 62)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ x + (x | site),
       data = df,
       temporal = temporal_rw1("time"),
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1382,16 +1322,13 @@ test_that("binomial with random slopes + AR1 runs correctly (row 63)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ x + (x | site),
       data = df,
       temporal = temporal_ar1("time"),
       family = ratiod_binomial(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1453,7 +1390,7 @@ test_that("poisson_gamma with BYM2 + RW1 + ZI runs correctly (row 65)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom_cont ~ 1 + (1 | site),
       data = df,
       spatial = spatial_bym2(adj_mat, level = "group", group_var = "site"),
@@ -1461,10 +1398,7 @@ test_that("poisson_gamma with BYM2 + RW1 + ZI runs correctly (row 65)", {
       zi = ~ 1,
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 
@@ -1526,7 +1460,7 @@ test_that("negbin_negbin with ICAR + RW1 + ZI runs correctly (row 66)", {
   )
 
   fit <- suppressWarnings(
-    ratiod(
+    tratio(
       y_num | y_denom ~ 1 + (1 | site),
       data = df,
       spatial = spatial_icar(adj_mat, level = "group", group_var = "site"),
@@ -1534,10 +1468,7 @@ test_that("negbin_negbin with ICAR + RW1 + ZI runs correctly (row 66)", {
       zi = ~ 1,
       family = ratiod_negbin_negbin(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 75,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 75, verbose = FALSE)
     )
   )
 

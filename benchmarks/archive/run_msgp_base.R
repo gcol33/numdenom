@@ -54,9 +54,9 @@ df_9 <- data.frame(count = count_9, effort = effort_9, x = x,
 cat("Fitting... ")
 t_9 <- system.time({
   fit_9 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_9, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_9, family = ratiod_poisson_gamma(),
            spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_9)) {
@@ -81,9 +81,9 @@ df_39 <- data.frame(num = num_39, denom = denom_39, x = x,
 cat("Fitting... ")
 t_39 <- system.time({
   fit_39 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_39, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_39, family = ratiod_negbin_negbin(),
            spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_39)) {
@@ -107,9 +107,9 @@ df_69 <- data.frame(successes = successes_69, trials = trials_69, x = x,
 cat("Fitting... ")
 t_69 <- system.time({
   fit_69 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_69, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_69, family = ratiod_binomial(),
            spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_69)) {

@@ -18,39 +18,33 @@ df_gg <- data.frame(y = y_num, denom = y_denom, x = x)
 
 # Test all gradient modes
 cat("\nGAMMA_GAMMA - Numerical (N):\n")
-fit_N <- ratiod(
+fit_N <- tratio(
   y | denom ~ x,
   data = df_gg,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "N",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "N", verbose = FALSE)
 )
 draws_N <- as.matrix(fit_N$draws)
 cat("  beta_num[1]:", mean(draws_N[,"beta_num[1]"]), "+/-", sd(draws_N[,"beta_num[1]"]), "(true: 2)\n")
 cat("  beta_num[2]:", mean(draws_N[,"beta_num[2]"]), "+/-", sd(draws_N[,"beta_num[2]"]), "(true: 0.3)\n")
 
 cat("\nGAMMA_GAMMA - Forward AD (A):\n")
-fit_A <- ratiod(
+fit_A <- tratio(
   y | denom ~ x,
   data = df_gg,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "A",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = FALSE)
 )
 draws_A <- as.matrix(fit_A$draws)
 cat("  beta_num[1]:", mean(draws_A[,"beta_num[1]"]), "+/-", sd(draws_A[,"beta_num[1]"]), "(true: 2)\n")
 cat("  beta_num[2]:", mean(draws_A[,"beta_num[2]"]), "+/-", sd(draws_A[,"beta_num[2]"]), "(true: 0.3)\n")
 
 cat("\nGAMMA_GAMMA - Hand-coded (H):\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ x,
   data = df_gg,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 draws_H <- as.matrix(fit_H$draws)
 cat("  beta_num[1]:", mean(draws_H[,"beta_num[1]"]), "+/-", sd(draws_H[,"beta_num[1]"]), "(true: 2)\n")
@@ -67,39 +61,33 @@ y_denom_ln <- rlnorm(N, meanlog = 3 + 0.2 * x, sdlog = 0.4)
 df_ln <- data.frame(y = y_num_ln, denom = y_denom_ln, x = x)
 
 cat("\nLOGNORMAL - Numerical (N):\n")
-fit_N <- ratiod(
+fit_N <- tratio(
   y | denom ~ x,
   data = df_ln,
   family = ratiod_lognormal(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "N",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "N", verbose = FALSE)
 )
 draws_N <- as.matrix(fit_N$draws)
 cat("  beta_num[1]:", mean(draws_N[,"beta_num[1]"]), "+/-", sd(draws_N[,"beta_num[1]"]), "(true: 2)\n")
 cat("  beta_num[2]:", mean(draws_N[,"beta_num[2]"]), "+/-", sd(draws_N[,"beta_num[2]"]), "(true: 0.3)\n")
 
 cat("\nLOGNORMAL - Forward AD (A):\n")
-fit_A <- ratiod(
+fit_A <- tratio(
   y | denom ~ x,
   data = df_ln,
   family = ratiod_lognormal(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "A",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = FALSE)
 )
 draws_A <- as.matrix(fit_A$draws)
 cat("  beta_num[1]:", mean(draws_A[,"beta_num[1]"]), "+/-", sd(draws_A[,"beta_num[1]"]), "(true: 2)\n")
 cat("  beta_num[2]:", mean(draws_A[,"beta_num[2]"]), "+/-", sd(draws_A[,"beta_num[2]"]), "(true: 0.3)\n")
 
 cat("\nLOGNORMAL - Hand-coded (H):\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ x,
   data = df_ln,
   family = ratiod_lognormal(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 draws_H <- as.matrix(fit_H$draws)
 cat("  beta_num[1]:", mean(draws_H[,"beta_num[1]"]), "+/-", sd(draws_H[,"beta_num[1]"]), "(true: 2)\n")
@@ -123,39 +111,33 @@ y_bb <- rbinom(N, n_trials, rbeta(N, alpha, beta_param))
 df_bb <- data.frame(y = y_bb, n = n_trials, x = x)
 
 cat("\nBETA_BINOMIAL - Numerical (N):\n")
-fit_N <- ratiod(
+fit_N <- tratio(
   y | n ~ x,
   data = df_bb,
   family = ratiod_beta_binomial(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "N",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "N", verbose = FALSE)
 )
 draws_N <- as.matrix(fit_N$draws)
 cat("  beta_num[1]:", mean(draws_N[,"beta_num[1]"]), "+/-", sd(draws_N[,"beta_num[1]"]), "(true: 0.5)\n")
 cat("  beta_num[2]:", mean(draws_N[,"beta_num[2]"]), "+/-", sd(draws_N[,"beta_num[2]"]), "(true: 0.8)\n")
 
 cat("\nBETA_BINOMIAL - Forward AD (A):\n")
-fit_A <- ratiod(
+fit_A <- tratio(
   y | n ~ x,
   data = df_bb,
   family = ratiod_beta_binomial(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "A",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = FALSE)
 )
 draws_A <- as.matrix(fit_A$draws)
 cat("  beta_num[1]:", mean(draws_A[,"beta_num[1]"]), "+/-", sd(draws_A[,"beta_num[1]"]), "(true: 0.5)\n")
 cat("  beta_num[2]:", mean(draws_A[,"beta_num[2]"]), "+/-", sd(draws_A[,"beta_num[2]"]), "(true: 0.8)\n")
 
 cat("\nBETA_BINOMIAL - Hand-coded (H):\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | n ~ x,
   data = df_bb,
   family = ratiod_beta_binomial(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 draws_H <- as.matrix(fit_H$draws)
 cat("  beta_num[1]:", mean(draws_H[,"beta_num[1]"]), "+/-", sd(draws_H[,"beta_num[1]"]), "(true: 0.5)\n")

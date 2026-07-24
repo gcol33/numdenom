@@ -24,22 +24,18 @@ if (exists("cpp_test_gradient_comparison", where = "package:numdenom")) {
   
   # Run 1 iteration with each mode and print verbose output
   cat("\n=== Single iteration with N mode ===\n")
-  fit_N <- ratiod(
+  fit_N <- tratio(
     y | denom ~ x,
     data = df,
     family = ratiod_gamma_gamma(),
-    iter = 2, warmup = 1, chains = 1,
-    gradient_mode = "N",
-    verbose = TRUE
+    control = list(iter = 2, warmup = 1, chains = 1, gradient_mode = "N", verbose = TRUE)
   )
   
   cat("\n=== Single iteration with A mode ===\n")
-  fit_A <- ratiod(
+  fit_A <- tratio(
     y | denom ~ x,
     data = df,
     family = ratiod_gamma_gamma(),
-    iter = 2, warmup = 1, chains = 1,
-    gradient_mode = "A",
-    verbose = TRUE
+    control = list(iter = 2, warmup = 1, chains = 1, gradient_mode = "A", verbose = TRUE)
   )
 }

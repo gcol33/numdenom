@@ -38,10 +38,9 @@ cat(sprintf("  Ones:  %d (%.1f%%)\n", sum(successes == trials), 100 * mean(succe
 
 # Fit a short run and extract the log-posterior values
 cat("\n\nFitting ZOIB model (short run) with A_t mode...\n")
-fit <- ratiod(successes | trials ~ x + (1 | site), data = df,
+fit <- tratio(successes | trials ~ x + (1 | site), data = df,
          family = ratiod_zoibinomial(),
-         iter = 100, warmup = 50, chains = 1, verbose = FALSE,
-         gradient_mode = "A_t")
+         control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE, gradient_mode = "A_t"))
 
 draws <- as.matrix(fit$draws)
 cat("\nParameter names:\n")

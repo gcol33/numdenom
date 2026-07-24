@@ -17,20 +17,18 @@ df <- data.frame(y = y, effort = eff, x = x, spatial_site = site)
 cat("=== PG+slopes+ICAR: N=500, S=50 ===\n")
 cat("Testing with N mode first...\n")
 fit_n <- tryCatch({
-  ratiod(y | effort ~ x + (x | spatial_site), data = df,
+  tratio(y | effort ~ x + (x | spatial_site), data = df,
          family = ratiod_poisson_gamma(),
          spatial = spatial_car(W, level = "group", group_var = "spatial_site"),
-         iter = 10, warmup = 5, chains = 1,
-         gradient_mode = "N", verbose = TRUE)
+         control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "N", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit_n)) cat(fit_n, "\n") else cat("N mode: SUCCESS\n")
 
 cat("\nTesting with H mode...\n")
 fit_h <- tryCatch({
-  ratiod(y | effort ~ x + (x | spatial_site), data = df,
+  tratio(y | effort ~ x + (x | spatial_site), data = df,
          family = ratiod_poisson_gamma(),
          spatial = spatial_car(W, level = "group", group_var = "spatial_site"),
-         iter = 10, warmup = 5, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit_h)) cat(fit_h, "\n") else cat("H mode: SUCCESS\n")

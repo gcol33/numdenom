@@ -47,60 +47,60 @@ results <- list()
 cat("\n========== SLOPES + ICAR ==========\n")
 
 results[[length(results) + 1]] <- run_bench("PG+slopes+ICAR", {
-  ratiod(y | effort ~ (x | site), data = df_pg,
+  tratio(y | effort ~ (x | site), data = df_pg,
          spatial = spatial_car(W, group_var = "site"),
          family = ratiod_poisson_gamma(),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 results[[length(results) + 1]] <- run_bench("NB+slopes+ICAR", {
-  ratiod(y | denom ~ (x | site), data = df_nb,
+  tratio(y | denom ~ (x | site), data = df_nb,
          spatial = spatial_car(W, group_var = "site"),
          family = ratiod_negbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 results[[length(results) + 1]] <- run_bench("Bin+slopes+ICAR", {
-  ratiod(y | n ~ (x | site), data = df_bin,
+  tratio(y | n ~ (x | site), data = df_bin,
          spatial = spatial_car(W, group_var = "site"),
          family = ratiod_binomial(),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 # ============= Spatiotemporal Type IV =============
 cat("\n========== ST TYPE IV ==========\n")
 
 results[[length(results) + 1]] <- run_bench("PG+ST_IV", {
-  ratiod(y | effort ~ x, data = df_pg,
+  tratio(y | effort ~ x, data = df_pg,
          spatial = spatial_car(W, group_var = "site"),
          spatiotemporal = spatiotemporal(
            spatial = spatial_car(W, group_var = "site"),
            temporal = temporal_rw1("time"),
            type = "IV"),
          family = ratiod_poisson_gamma(),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 results[[length(results) + 1]] <- run_bench("NB+ST_IV", {
-  ratiod(y | denom ~ x, data = df_nb,
+  tratio(y | denom ~ x, data = df_nb,
          spatial = spatial_car(W, group_var = "site"),
          spatiotemporal = spatiotemporal(
            spatial = spatial_car(W, group_var = "site"),
            temporal = temporal_rw1("time"),
            type = "IV"),
          family = ratiod_negbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 results[[length(results) + 1]] <- run_bench("Bin+ST_IV", {
-  ratiod(y | n ~ x, data = df_bin,
+  tratio(y | n ~ x, data = df_bin,
          spatial = spatial_car(W, group_var = "site"),
          spatiotemporal = spatiotemporal(
            spatial = spatial_car(W, group_var = "site"),
            temporal = temporal_rw1("time"),
            type = "IV"),
          family = ratiod_binomial(),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 # ============= Summary =============

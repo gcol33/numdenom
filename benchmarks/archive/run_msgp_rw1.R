@@ -65,10 +65,10 @@ df_23 <- data.frame(count = count_23, effort = effort_23, x = x,
 cat("Fitting... ")
 t_23 <- system.time({
   fit_23 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_23, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_23, family = ratiod_poisson_gamma(),
            spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_23)) {
@@ -93,10 +93,10 @@ df_53 <- data.frame(num = num_53, denom = denom_53, x = x,
 cat("Fitting... ")
 t_53 <- system.time({
   fit_53 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_53, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_53, family = ratiod_negbin_negbin(),
            spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_53)) {
@@ -120,10 +120,10 @@ df_85 <- data.frame(successes = successes_85, trials = trials_85, x = x,
 cat("Fitting... ")
 t_85 <- system.time({
   fit_85 <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_85, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_85, family = ratiod_binomial(),
            spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
            temporal = temporal_rw1(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_85)) {

@@ -35,9 +35,8 @@ for (nm in names(models)) {
     set.seed(100 + r)
     times[r] <- system.time({
       tryCatch(
-        ratiod(m$f, data = df, family = m$fam, mode = "hmc",
-               iter = 500, warmup = 250, chains = 1,
-               gradient_mode = "H", verbose = FALSE),
+        tratio(m$f, data = df, family = m$fam, mode = "hmc",
+               control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)),
         error = function(e) { cat("ERROR:", nm, e$message, "\n"); NULL }
       )
     })["elapsed"]

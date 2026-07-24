@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_sghmc.R
 \name{sghmc_backend}
 \alias{sghmc_backend}
-\title{Stochastic Gradient MCMC Backends for ratiod Models}
+\title{Stochastic Gradient MCMC Backends for ratio Models}
 \description{
 Stochastic gradient MCMC methods enable Tier 1 (Exact) inference on
 large datasets by using minibatch gradients.

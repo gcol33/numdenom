@@ -58,14 +58,11 @@ cat("  sigma_denom MLE: ", sd(log(y_denom)) * sqrt((N-1)/N), "\n")
 
 # Now fit with numdenom
 cat("\n=== Fitting numdenom (lognormal) ===\n")
-nd_fit <- ratiod(
+nd_fit <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 1,
-  seed = 123
+  control = list(iter = 2000, warmup = 1000, chains = 1, seed = 123)
 )
 
 print(summary(nd_fit))

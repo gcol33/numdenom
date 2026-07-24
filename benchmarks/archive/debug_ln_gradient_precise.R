@@ -185,21 +185,17 @@ cat("This looks correct!\n")
 cat("\n=== Testing with numdenom package ===\n")
 
 # Fit with A-mode (should be correct)
-fit_A <- ratiod(
+fit_A <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 10, warmup = 5, chains = 1,
-  gradient_mode = "A",
-  verbose = FALSE
+  control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "A", verbose = FALSE)
 )
 
 # Fit with H-mode
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 10, warmup = 5, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 
 draws_A <- as.matrix(fit_A$draws)

@@ -2,7 +2,7 @@
 % Please edit documentation in R/benchmark.R
 \name{ratiod_benchmark}
 \alias{ratiod_benchmark}
-\title{Benchmark ratiod performance}
+\title{Benchmark tulpaRatio performance}
 \usage{
 ratiod_benchmark(
   N = 500,
@@ -39,7 +39,7 @@ ratiod_benchmark(
 A list with timing and diagnostic information
 }
 \description{
-Utilities for benchmarking ratiod model fitting performance across
+Utilities for benchmarking ratio model fitting performance across
 different dataset sizes and configurations.
 
 Fits a model on simulated data and reports timing and performance metrics.

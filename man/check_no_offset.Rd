@@ -12,7 +12,7 @@ check_no_offset(f, name)
 \item{name}{Name for error messages}
 }
 \description{
-The ratiod philosophy explicitly forbids offset terms. Offsets encode
+The tulpaRatio philosophy explicitly forbids offset terms. Offsets encode
 the assumption that the ratio is the quantity of interest, which is
 exactly the modelling approach this package rejects.
 }

@@ -25,7 +25,7 @@ Extract latent factor posteriors from fit
 \examples{
 \dontrun{
 # After fitting with latent factors
-fit <- ratiod(
+fit <- tratio(
   count | total ~ x,
   data = df,
   family = ratiod_negbin_negbin(),

@@ -108,15 +108,13 @@ cat("\n")
 # Now try to fit the model
 cat("=== Attempting to fit model... ===\n")
 tryCatch({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y_num | y_denom ~ x,
     data = dat,
     family = ratiod_negbin_negbin(),
-    spatial = spatial_gp(~ lon + lat, cov = 'exponential'),
-    iter = 10,  # Just a few iterations
+    spatial = spatial_gp(~ lon + lat, cov = 'exponential'),  # Just a few iterations
     warmup = 5,
-    chains = 1,
-    seed = 123
+    control = list(iter = 10, chains = 1, seed = 123)
   )
   cat("SUCCESS!\n")
 }, error = function(e) {

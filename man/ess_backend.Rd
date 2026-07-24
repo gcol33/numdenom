@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_ess.R
 \name{ess_backend}
 \alias{ess_backend}
-\title{Elliptical Slice Sampling Backend for ratiod Models}
+\title{Elliptical Slice Sampling Backend for ratio Models}
 \description{
 Elliptical Slice Sampling (ESS) backend for models with Gaussian priors.
 ESS is particularly efficient for:

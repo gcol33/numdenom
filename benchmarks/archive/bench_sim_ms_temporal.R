@@ -79,10 +79,10 @@ cat("Fitting... ")
 
 t_75 <- system.time({
   fit_75 <- tryCatch({
-    ratiod(successes | trials ~ x + (1 | site), data = df_75,
+    tratio(successes | trials ~ x + (1 | site), data = df_75,
            family = ratiod_binomial(),
            temporal = temporal_multiscale(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

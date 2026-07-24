@@ -154,15 +154,12 @@ test_that("HMC fits model with nested RE", {
     plot = factor(rep(1:4, 25))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | n ~ x + (1 | site/plot),
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -199,15 +196,12 @@ test_that("HMC fits deeply nested model", {
     plot = factor(rep(1:10, 20))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | n ~ x + (1 | region/site/plot),
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -233,15 +227,12 @@ test_that("mixed nested and crossed RE fits", {
     year = factor(rep(1:5, 20))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | n ~ x + (1 | site/plot) + (1 | year),
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")

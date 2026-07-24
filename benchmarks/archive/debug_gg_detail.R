@@ -85,12 +85,11 @@ cat("  Expected log_lik =", log_lik_gamma(y1, shape, mu1), "\n")
 
 # Fit the model and print detailed diagnostics
 cat("\n=== Fitting Model ===\n")
-fit <- ratiod(
+fit <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE)
 )
 
 # Check what parameters were stored

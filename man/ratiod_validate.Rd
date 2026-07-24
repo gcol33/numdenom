@@ -2,7 +2,7 @@
 % Please edit documentation in R/validate.R
 \name{ratiod_validate}
 \alias{ratiod_validate}
-\title{Posterior predictive checks for ratiod models}
+\title{Posterior predictive checks for ratio models}
 \description{
 Visual and numerical checks comparing observed data to posterior
 predictive distributions. Essential for assessing model fit.

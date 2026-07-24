@@ -48,8 +48,8 @@ check_model <- function(label, ...) {
     w <- tryCatch({
       withCallingHandlers(
         {
-          fit <- ratiod(..., mode = "hmc", iter = 20, warmup = 10,
-                        chains = 1, gradient_mode = mode, verbose = FALSE)
+          fit <- tratio(..., mode = "hmc",
+                        control = list(iter = 20, warmup = 10, chains = 1, gradient_mode = mode, verbose = FALSE))
           "OK"
         },
         warning = function(w) {

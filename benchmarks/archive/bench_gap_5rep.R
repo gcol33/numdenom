@@ -24,8 +24,8 @@ run5 <- function(label, ...) {
   times <- numeric(5)
   for (i in 1:5) {
     gc(FALSE)
-    times[i] <- system.time(ratiod(..., iter = 500, warmup = 250, chains = 1,
-                                    gradient_mode = "H", verbose = FALSE))["elapsed"]
+    times[i] <- system.time(tratio(...,
+                                    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)))["elapsed"]
   }
   cat(sprintf("%-20s  runs: %s  median: %.2fs\n", label,
       paste(sprintf("%.2f", times), collapse = ", "), median(times)))

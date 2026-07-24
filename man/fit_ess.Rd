@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_ess.R
 \name{fit_ess}
 \alias{fit_ess}
-\title{Fit ratiod model using Elliptical Slice Sampling}
+\title{Fit ratio model using Elliptical Slice Sampling}
 \usage{
 fit_ess(
   formula,
@@ -51,6 +51,6 @@ fit_ess(
 A ratiod_fit object with class "ratiod_ess"
 }
 \description{
-Fit ratiod model using Elliptical Slice Sampling
+Fit ratio model using Elliptical Slice Sampling
 }
 \keyword{internal}

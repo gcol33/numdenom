@@ -87,7 +87,7 @@ df <- data.frame(
 )
 
 # Fast spatial effect with HSGP (much faster than spatial_gp)
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),

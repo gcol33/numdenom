@@ -29,7 +29,7 @@ Use cases:
 \details{
 The gamma distribution is appropriate for positive continuous data
 with right skew. The ratio of two gamma random variables does not
-have a simple closed form, which is why ratiod models them jointly.
+have a simple closed form, which is why ratio models them jointly.
 
 Shape parameters are estimated for both numerator and denominator,
 allowing different amounts of variability in each process.
@@ -51,7 +51,7 @@ df <- data.frame(
 
 \dontrun{
 # Fit model (slow, not run on CRAN)
-fit <- ratiod(
+fit <- tratio(
   species_biomass | total_biomass ~ habitat + (1 | site),
   data = df,
   family = ratiod_gamma_gamma(),

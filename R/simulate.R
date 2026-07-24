@@ -1,7 +1,7 @@
 #' @importFrom stats rbinom rpois rgamma rexp terms
 NULL
 
-#' Simulate data from ratiod models
+#' Simulate data from ratio models
 #'
 #' @description
 #' Generate simulated datasets from prior or posterior predictive distributions.
@@ -9,7 +9,7 @@ NULL
 #' understanding model behavior.
 #'
 #' @param n Number of observations to simulate.
-#' @param family A ratiod family object specifying the distributions.
+#' @param family A tulpaRatio family object specifying the distributions.
 #' @param formula Optional formula for generating covariates and structure.
 #'   If NULL, generates intercept-only data.
 #' @param beta_num Numeric vector of true numerator coefficients.
@@ -33,7 +33,7 @@ NULL
 #' }
 #'
 #' @details
-#' The simulation generates data according to the ratiod model structure:
+#' The simulation generates data according to the ratio model structure:
 #'
 #' For **negbin_negbin**:
 #' - `y_num ~ NegBin(mu_num, phi_num)`
@@ -79,7 +79,7 @@ NULL
 #'
 #' \donttest{
 #' # Fit model to simulated data (slow, not run on CRAN)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   y_num | y_denom ~ x1 + (1 | group),
 #'   data = sim$data,
 #'   family = ratiod_poisson_gamma(),
@@ -90,7 +90,7 @@ NULL
 #' # sim$true_params
 #' }
 #'
-#' @seealso [ratiod()] for model fitting, [prior_predict()] for prior checks
+#' @seealso [tratio()] for model fitting, [prior_predict()] for prior checks
 #'
 #' @export
 sim_ratiod <- function(n = 100,
@@ -269,7 +269,7 @@ sim_ratiod <- function(n = 100,
 #'
 #' @export
 print.ratiod_simdata <- function(x, ...) {
-  cat("Simulated ratiod data\n")
+  cat("Simulated tulpaRatio data\n")
   cat("====================\n\n")
 
   cat("Family:", x$family$name, "\n")
@@ -306,7 +306,7 @@ print.ratiod_simdata <- function(x, ...) {
 #'
 #' @param n_sims Number of simulations to run.
 #' @param n Number of observations per simulation.
-#' @param family A ratiod family object.
+#' @param family A tulpaRatio family object.
 #' @param priors Prior specification for parameter generation.
 #' @param n_groups Number of random effect groups.
 #' @param seed Random seed.
@@ -326,7 +326,7 @@ print.ratiod_simdata <- function(x, ...) {
 #' \donttest{
 #' # Fit model to each simulation (slow, not run on CRAN)
 #' # ranks <- lapply(sims, function(sim) {
-#' #   fit <- ratiod(y_num | y_denom ~ x1 + (1 | group),
+#' #   fit <- tratio(y_num | y_denom ~ x1 + (1 | group),
 #' #                data = sim$data,
 #' #                family = ratiod_negbin_negbin(),
 #' #                iter = 200, warmup = 100, chains = 1)
@@ -401,7 +401,7 @@ sim_ratiod_sbc <- function(n_sims = 100,
 #'
 #' @export
 print.ratiod_sbc_sims <- function(x, ...) {
-  cat("ratiod SBC simulations\n")
+  cat("tulpaRatio SBC simulations\n")
   cat("=====================\n\n")
 
   cat("Simulations:", attr(x, "n_sims"), "\n")

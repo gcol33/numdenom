@@ -98,7 +98,7 @@ df     <- data.frame(y = y_bin, trials = trials, x = x, site = site,
 df_zi  <- df; df_zi$y <- ifelse(runif(N) < 0.3, 0, df_zi$y)
 
 # ---- the fit must be the fit that was requested ------------------------------
-# ratiod() routes some structures to backends that do not accept every argument
+# tratio() routes some structures to backends that do not accept every argument
 # (the Gibbs spatial path drops `chains` and returns unnamed draws, tulpaRatio#5).
 # Such a fit is not comparable to a 4-chain NUTS run, so the row is refused
 # rather than timed: a benchmark that silently accepts less sampling than it
@@ -230,10 +230,10 @@ brmf <- function(f, family, data = quote(df))
              seed = .(SEED), data2 = list(adj_mat = adj_mat),
              silent = 2, refresh = 0))
 ndf <- function(extra)
-  bquote(ratiod(.(extra$formula), data = .(extra$data %||% quote(df)),
+  bquote(tratio(.(extra$formula), data = .(extra$data %||% quote(df)),
                 family = .(extra$family), spatial = .(extra$spatial),
-                temporal = .(extra$temporal), iter = .(ITER), warmup = .(WARMUP),
-                chains = .(CHAINS), seed = .(SEED), verbose = FALSE))
+                temporal = .(extra$temporal),
+                control = list(iter = .(ITER), warmup = .(WARMUP), chains = .(CHAINS), seed = .(SEED), verbose = FALSE)))
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 rows <- list(

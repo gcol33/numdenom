@@ -149,8 +149,8 @@ cat("For poisson_gamma and negbin_negbin, see bench_joint_validation.R\n")
 
 # Row 61: binomial base
 results[["61"]] <- bench_validated("bin_base", 61,
-  nd_call = quote(ratiod(y | trials ~ x, data = df_bin, family = ratiod_binomial(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | trials ~ x, data = df_bin, family = ratiod_binomial(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x, data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -158,8 +158,8 @@ results[["61"]] <- bench_validated("bin_base", 61,
 
 # Row 62: binomial + RE
 results[["62"]] <- bench_validated("bin_re", 62,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site), data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -167,9 +167,9 @@ results[["62"]] <- bench_validated("bin_re", 62,
 
 # Row 65: binomial + ICAR
 results[["65"]] <- bench_validated("bin_icar", 65,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site),
                         data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -178,9 +178,9 @@ results[["65"]] <- bench_validated("bin_icar", 65,
 
 # Row 66: binomial + BYM2
 results[["66"]] <- bench_validated("bin_bym2", 66,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site),
                         data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -189,9 +189,9 @@ results[["66"]] <- bench_validated("bin_bym2", 66,
 
 # Row 71: binomial + RW1 temporal
 results[["71"]] <- bench_validated("bin_rw1", 71,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          temporal = temporal_rw1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|time),
                         data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -200,8 +200,8 @@ results[["71"]] <- bench_validated("bin_rw1", 71,
 
 # Row 76: binomial + ZI
 results[["76"]] <- bench_validated("bin_zi", 76,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin_zi, family = ratiod_zibinomial(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin_zi, family = ratiod_zibinomial(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site),
                         data = df_bin_zi, family = zero_inflated_binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -210,10 +210,10 @@ results[["76"]] <- bench_validated("bin_zi", 76,
 
 # Row 80: binomial + ICAR + RW1
 results[["80"]] <- bench_validated("bin_icar_rw1", 80,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site) + (1|time),
                         data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,

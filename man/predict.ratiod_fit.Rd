@@ -2,7 +2,7 @@
 % Please edit documentation in R/ratio.R
 \name{predict.ratiod_fit}
 \alias{predict.ratiod_fit}
-\title{Predict method for ratiod models}
+\title{Predict method for ratio models}
 \usage{
 \method{predict}{ratiod_fit}(
   object,
@@ -66,7 +66,7 @@ If \code{summary = FALSE}, a matrix of posterior draws (rows = draws, cols = obs
 If \code{return_spatial = TRUE}, returns a list with \code{predictions} and \code{w.0.samples}.
 }
 \description{
-Compute posterior predictions for new data from a fitted ratiod model.
+Compute posterior predictions for new data from a fitted ratio model.
 }
 \examples{
 \dontrun{
@@ -81,7 +81,7 @@ df <- data.frame(
 )
 
 # Fit model
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + season,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -103,7 +103,7 @@ predict(fit, newdata = new_df, summary = FALSE)
 # Fit model with GP spatial effects
 df$x <- runif(n)
 df$y <- runif(n)
-fit_gp <- ratiod(
+fit_gp <- tratio(
   count | effort ~ depth,
   data = df,
   spatial = spatial_gp(coords = c("x", "y")),

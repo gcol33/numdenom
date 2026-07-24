@@ -34,7 +34,7 @@ factors only affect the numerator.}
 to have unit variance before applying sigma.}
 }
 \value{
-A \code{ratiod_latent} object for use in \code{\link[=ratiod]{ratiod()}}.
+A \code{ratiod_latent} object for use in \code{\link[=tratio]{tratio()}}.
 }
 \description{
 Define latent factors for capturing unmeasured shared structure between
@@ -118,7 +118,7 @@ latent_factor(n_factors = 1, shared = FALSE)
 
 \dontrun{
 # Use in model fitting
-fit <- ratiod(
+fit <- tratio(
   species_count | total_count ~ habitat + (1 | site),
   data = df,
   family = ratiod_negbin_negbin(),
@@ -128,5 +128,5 @@ fit <- ratiod(
 
 }
 \seealso{
-\code{\link[=ratiod]{ratiod()}} for model fitting, \code{\link[=prior_pc]{prior_pc()}} for prior specification
+\code{\link[=tratio]{tratio()}} for model fitting, \code{\link[=prior_pc]{prior_pc()}} for prior specification
 }

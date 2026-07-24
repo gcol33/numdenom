@@ -18,7 +18,7 @@ as_draws(x, ...)
 A \code{draws_df} object from the posterior package.
 }
 \description{
-Convert a fitted ratiod model to a format compatible with the
+Convert a fitted ratio model to a format compatible with the
 posterior and tidybayes packages. Returns draws in a tidy format
 suitable for further analysis and visualization.
 }
@@ -46,7 +46,7 @@ df <- data.frame(
 )
 
 # Fit model
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site),
   data = df,
   family = ratiod_poisson_gamma(),

@@ -27,23 +27,23 @@ t <- system.time({
     df <- data.frame(y = rnbinom(N, mu = exp(2 + 0.3*x), size = 5),
                      denom = pmax(rnbinom(N, mu = 100, size = 10), 1L),
                      x = x, site = site, lon = coords$lon, lat = coords$lat)
-    fit <- ratiod(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
+    fit <- tratio(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
                   spatial = spatial_hsgp(coords = c("lon", "lat")),
-                  iter = iter, warmup = warmup, chains = 1, verbose = FALSE)
+                  control = list(iter = iter, warmup = warmup, chains = 1, verbose = FALSE))
   } else if (model == "NB_ICAR") {
     df <- data.frame(y = rnbinom(N, mu = exp(2 + 0.3*x), size = 5),
                      denom = pmax(rnbinom(N, mu = 100, size = 10), 1L),
                      x = x, site = site, spatial_site = site)
-    fit <- ratiod(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
+    fit <- tratio(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
                   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                  iter = iter, warmup = warmup, chains = 1, verbose = FALSE)
+                  control = list(iter = iter, warmup = warmup, chains = 1, verbose = FALSE))
   } else if (model == "Bin_slopes_ICAR") {
     trials <- sample(10:50, N, replace = TRUE)
     df <- data.frame(y = rbinom(N, trials, plogis(0.5 + 0.3*x)),
                      trials = trials, x = x, site = site, spatial_site = site)
-    fit <- ratiod(y | trials ~ x + (x|site), data = df, family = ratiod_binomial(),
+    fit <- tratio(y | trials ~ x + (x|site), data = df, family = ratiod_binomial(),
                   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                  iter = iter, warmup = warmup, chains = 1, verbose = FALSE)
+                  control = list(iter = iter, warmup = warmup, chains = 1, verbose = FALSE))
   }
 })[["elapsed"]]
 cat(sprintf("%s w=%d seed=%d: %.1fs\n", model, warmup, seed, t))

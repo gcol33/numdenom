@@ -412,18 +412,18 @@ inference_mode_info <- function() {
   cat("  Contract: 'Use the most reliable method expected to finish.'\n\n")
 
   cat("Usage (by tier):\n")
-  cat("  ratiod(..., mode = 'auto')       # Tier 1 or 2 (default)\n")
-  cat("  ratiod(..., mode = 'exact')      # Tier 1\n")
-  cat("  ratiod(..., mode = 'structured') # Tier 2\n")
-  cat("  ratiod(..., mode = 'optimized')  # Tier 3 (explicit opt-in)\n\n")
+  cat("  tratio(..., mode = 'auto')       # Tier 1 or 2 (default)\n")
+  cat("  tratio(..., mode = 'exact')      # Tier 1\n")
+  cat("  tratio(..., mode = 'structured') # Tier 2\n")
+  cat("  tratio(..., mode = 'optimized')  # Tier 3 (explicit opt-in)\n\n")
 
   cat("Usage (by backend):\n")
-  cat("  ratiod(..., mode = 'hmc')        # HMC/NUTS (Tier 1)\n")
-  cat("  ratiod(..., mode = 'ess')        # Elliptical Slice Sampling (Tier 1)\n")
-  cat("  ratiod(..., mode = 'sghmc')      # Stochastic Gradient HMC (Tier 1, large N)\n")
-  cat("  ratiod(..., mode = 'sgld')       # Stochastic Gradient Langevin (Tier 1, large N)\n")
-  cat("  ratiod(..., mode = 'laplace')    # Laplace approximation (Tier 2)\n")
-  cat("  ratiod(..., mode = 'vi')         # Variational Inference (Tier 3)\n")
+  cat("  tratio(..., mode = 'hmc')        # HMC/NUTS (Tier 1)\n")
+  cat("  tratio(..., mode = 'ess')        # Elliptical Slice Sampling (Tier 1)\n")
+  cat("  tratio(..., mode = 'sghmc')      # Stochastic Gradient HMC (Tier 1, large N)\n")
+  cat("  tratio(..., mode = 'sgld')       # Stochastic Gradient Langevin (Tier 1, large N)\n")
+  cat("  tratio(..., mode = 'laplace')    # Laplace approximation (Tier 2)\n")
+  cat("  tratio(..., mode = 'vi')         # Variational Inference (Tier 3)\n")
 
   invisible(NULL)
 }

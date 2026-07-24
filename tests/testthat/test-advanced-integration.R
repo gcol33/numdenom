@@ -25,16 +25,13 @@ test_that("GP spatial model fits with exponential covariance", {
     y_coord = coords$y[1:n]
   )
 
- fit <- ratiod(
+ fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_gp(~ x_coord + y_coord, cov = "exponential", nn = 5),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -55,16 +52,13 @@ test_that("GP spatial model fits with matern covariance", {
     lat = runif(n, 0, 10)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_gp(~ lon + lat, cov = "matern", nu = 1.5, nn = 5),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -87,16 +81,13 @@ test_that("latent factor model fits with 1 factor", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 1),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -116,16 +107,13 @@ test_that("latent factor model fits with 2 factors", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 2),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -158,7 +146,7 @@ test_that("spatiotemporal Type I model fits", {
     effort = rgamma(n, shape = 4, rate = 1)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
@@ -168,10 +156,7 @@ test_that("spatiotemporal Type I model fits", {
       type = "I"
     ),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -199,7 +184,7 @@ test_that("spatiotemporal Type IV model fits", {
     effort = rgamma(n, shape = 4, rate = 1)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ 1,
     data = df,
     family = ratiod_poisson_gamma(),
@@ -209,10 +194,7 @@ test_that("spatiotemporal Type IV model fits", {
       type = "IV"
     ),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -238,16 +220,13 @@ test_that("SVC model fits with single varying coefficient", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_svc(~ lon + lat, terms = 1, nn = 5),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -270,12 +249,12 @@ test_that("Laplace backend fits binomial model", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -295,12 +274,12 @@ test_that("Laplace backend fits negbin model", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | total ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -320,12 +299,12 @@ test_that("Laplace backend fits poisson_gamma model", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -348,12 +327,12 @@ test_that("Laplace backend fits model with random effects", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x + (1 | site),
     data = df,
     family = ratiod_binomial(),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -382,13 +361,13 @@ test_that("Laplace backend fits model with spatial CAR", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     spatial = spatial_car(adj, level = "group", group_var = "site"),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -412,15 +391,12 @@ test_that("PG backend fits binomial model", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     mode = "pg",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -443,15 +419,12 @@ test_that("PG backend fits binomial model with random effects", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x + (1 | site),
     data = df,
     family = ratiod_binomial(),
     mode = "pg",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -485,16 +458,13 @@ test_that("PG backend fits binomial model with spatial CAR", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     spatial = spatial_car(adj, level = "group", group_var = "site"),
     mode = "pg",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -527,26 +497,20 @@ test_that("ratiod_compare handles model comparison setup", {
     x2 = rnorm(n)
   )
 
-  fit1 <- ratiod(
+  fit1 <- tratio(
     count | effort ~ x1,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
-  fit2 <- ratiod(
+  fit2 <- tratio(
     count | effort ~ x1 + x2,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   # Test that models can be compared (may fail gracefully if loo not available)
@@ -581,16 +545,13 @@ test_that("GP spatial with random effects fits", {
     y_coord = runif(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_gp(~ x_coord + y_coord, nn = 4),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -612,16 +573,13 @@ test_that("Latent factor with random effects fits", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     latent = latent_factor(n_factors = 1),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")

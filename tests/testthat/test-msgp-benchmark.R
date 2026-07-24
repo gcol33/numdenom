@@ -66,16 +66,13 @@ test_that("all MSGP sampler options run without error", {
 
     # Fit model with minimal iterations (just test it runs)
     fit <- suppressWarnings(
-      ratiod(
+      tratio(
         num | denom ~ 1,
         data = df,
         spatial = ms,
         family = ratiod_poisson_gamma(),
         mode = "hmc",
-        chains = 1,
-        iter = 100,
-        warmup = 50,
-        verbose = FALSE
+        control = list(chains = 1, iter = 100, warmup = 50, verbose = FALSE)
       )
     )
 
@@ -98,16 +95,13 @@ test_that("MSGP samplers have acceptable divergence rates", {
   ms_nc <- spatial_multiscale(~ x + y, nn_local = 5, nn_regional = 10, sampler = "noncentered")
 
   fit_nc <- suppressWarnings(
-    ratiod(
+    tratio(
       num | denom ~ 1,
       data = df,
       spatial = ms_nc,
       family = ratiod_poisson_gamma(),
       mode = "hmc",
-      chains = 1,
-      iter = 150,
-      warmup = 250,
-      verbose = FALSE
+      control = list(chains = 1, iter = 150, warmup = 250, verbose = FALSE)
     )
   )
 
@@ -138,16 +132,13 @@ test_that("MSGP sampler speed comparison", {
     start_time <- Sys.time()
 
     fit <- suppressWarnings(
-      ratiod(
+      tratio(
         num | denom ~ 1,
         data = df,
         spatial = ms,
         family = ratiod_poisson_gamma(),
         mode = "hmc",
-        chains = 1,
-        iter = 150,
-        warmup = 150,
-        verbose = FALSE
+        control = list(chains = 1, iter = 150, warmup = 150, verbose = FALSE)
       )
     )
 
@@ -195,16 +186,13 @@ test_that("MSGP non-centered is robust across seeds", {
 
     fit <- tryCatch({
       suppressWarnings(
-        ratiod(
+        tratio(
           num | denom ~ 1,
           data = df,
           spatial = ms,
           family = ratiod_poisson_gamma(),
           mode = "hmc",
-          chains = 1,
-          iter = 200,
-          warmup = 100,
-          verbose = FALSE
+          control = list(chains = 1, iter = 200, warmup = 100, verbose = FALSE)
         )
       )
     }, error = function(e) {

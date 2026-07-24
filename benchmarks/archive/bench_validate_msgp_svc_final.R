@@ -216,9 +216,9 @@ df_9 <- data.frame(count = count_9, effort = effort_msgp, x = x_msgp,
                    coord_x = coord_x_msgp, coord_y = coord_y_msgp)
 
 results$row_9 <- fit_and_check(9, function() {
-  ratiod(count | effort ~ x, data = df_9, family = ratiod_poisson_gamma(),
+  tratio(count | effort ~ x, data = df_9, family = ratiod_poisson_gamma(),
          spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "poisson_gamma + MSGP (30 sites x 10 obs)")
 
 # Save intermediate results after each model
@@ -234,9 +234,9 @@ df_39 <- data.frame(num = num_39, denom = denom_39, x = x_msgp,
                     coord_x = coord_x_msgp, coord_y = coord_y_msgp)
 
 results$row_39 <- fit_and_check(39, function() {
-  ratiod(num | denom ~ x, data = df_39, family = ratiod_negbin_negbin(),
+  tratio(num | denom ~ x, data = df_39, family = ratiod_negbin_negbin(),
          spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "negbin_negbin + MSGP (30 sites x 10 obs)")
 
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")
@@ -249,9 +249,9 @@ df_69 <- data.frame(successes = successes_69, trials = trials_msgp, x = x_msgp,
                     coord_x = coord_x_msgp, coord_y = coord_y_msgp)
 
 results$row_69 <- fit_and_check(69, function() {
-  ratiod(successes | trials ~ x, data = df_69, family = ratiod_binomial(),
+  tratio(successes | trials ~ x, data = df_69, family = ratiod_binomial(),
          spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "binomial + MSGP (30 sites x 10 obs)")
 
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")
@@ -268,10 +268,10 @@ df_23 <- data.frame(count = count_23, effort = effort_msgp, x = x_msgp,
                     time = time_idx_msgp)
 
 results$row_23 <- fit_and_check(23, function() {
-  ratiod(count | effort ~ x, data = df_23, family = ratiod_poisson_gamma(),
+  tratio(count | effort ~ x, data = df_23, family = ratiod_poisson_gamma(),
          spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "poisson_gamma + MSGP + RW1 (30 sites x 10 obs)")
 
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")
@@ -287,10 +287,10 @@ df_53 <- data.frame(num = num_53, denom = denom_53, x = x_msgp,
                     time = time_idx_msgp)
 
 results$row_53 <- fit_and_check(53, function() {
-  ratiod(num | denom ~ x, data = df_53, family = ratiod_negbin_negbin(),
+  tratio(num | denom ~ x, data = df_53, family = ratiod_negbin_negbin(),
          spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "negbin_negbin + MSGP + RW1 (30 sites x 10 obs)")
 
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")
@@ -304,10 +304,10 @@ df_85 <- data.frame(successes = successes_85, trials = trials_msgp, x = x_msgp,
                     time = time_idx_msgp)
 
 results$row_85 <- fit_and_check(85, function() {
-  ratiod(successes | trials ~ x, data = df_85, family = ratiod_binomial(),
+  tratio(successes | trials ~ x, data = df_85, family = ratiod_binomial(),
          spatial = spatial_multiscale(coords = c("coord_x", "coord_y")),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "binomial + MSGP + RW1 (30 sites x 10 obs)")
 
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")
@@ -347,9 +347,9 @@ df_26 <- data.frame(count = count_26, effort = effort_svc, x = x_svc,
                     coord_x = coord_x_svc, coord_y = coord_y_svc)
 
 results$row_26 <- fit_and_check(26, function() {
-  ratiod(count | effort ~ x, data = df_26, family = ratiod_poisson_gamma(),
+  tratio(count | effort ~ x, data = df_26, family = ratiod_poisson_gamma(),
          spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 2),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "poisson_gamma + SVC (terms=2, varying slope, N=100)")
 
 # Fallback to terms=1 if terms=2 errors
@@ -361,9 +361,9 @@ if (!is.null(results$row_26$error) && results$row_26$error) {
   df_26b <- data.frame(count = count_26b, effort = effort_svc, x = x_svc,
                        coord_x = coord_x_svc, coord_y = coord_y_svc)
   results$row_26 <- fit_and_check(26, function() {
-    ratiod(count | effort ~ x, data = df_26b, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_26b, family = ratiod_poisson_gamma(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, "poisson_gamma + SVC (terms=1, varying intercept FALLBACK)")
 }
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")
@@ -378,9 +378,9 @@ df_56 <- data.frame(num = num_56, denom = denom_56, x = x_svc,
                     coord_x = coord_x_svc, coord_y = coord_y_svc)
 
 results$row_56 <- fit_and_check(56, function() {
-  ratiod(num | denom ~ x, data = df_56, family = ratiod_negbin_negbin(),
+  tratio(num | denom ~ x, data = df_56, family = ratiod_negbin_negbin(),
          spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 2),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "negbin_negbin + SVC (terms=2, varying slope, N=100)")
 
 if (!is.null(results$row_56$error) && results$row_56$error) {
@@ -391,9 +391,9 @@ if (!is.null(results$row_56$error) && results$row_56$error) {
   df_56b <- data.frame(num = num_56b, denom = denom_56, x = x_svc,
                        coord_x = coord_x_svc, coord_y = coord_y_svc)
   results$row_56 <- fit_and_check(56, function() {
-    ratiod(num | denom ~ x, data = df_56b, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_56b, family = ratiod_negbin_negbin(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, "negbin_negbin + SVC (terms=1, varying intercept FALLBACK)")
 }
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")
@@ -406,9 +406,9 @@ df_88 <- data.frame(successes = successes_88, trials = trials_svc, x = x_svc,
                     coord_x = coord_x_svc, coord_y = coord_y_svc)
 
 results$row_88 <- fit_and_check(88, function() {
-  ratiod(successes | trials ~ x, data = df_88, family = ratiod_binomial(),
+  tratio(successes | trials ~ x, data = df_88, family = ratiod_binomial(),
          spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 2),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 }, "binomial + SVC (terms=2, varying slope, N=100)")
 
 if (!is.null(results$row_88$error) && results$row_88$error) {
@@ -420,9 +420,9 @@ if (!is.null(results$row_88$error) && results$row_88$error) {
   df_88b <- data.frame(successes = successes_88b, trials = trials_svc, x = x_svc,
                        coord_x = coord_x_svc, coord_y = coord_y_svc)
   results$row_88 <- fit_and_check(88, function() {
-    ratiod(successes | trials ~ x, data = df_88b, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_88b, family = ratiod_binomial(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, "binomial + SVC (terms=1, varying intercept FALLBACK)")
 }
 saveRDS(results, "benchmarks/results_msgp_svc_final.rds")

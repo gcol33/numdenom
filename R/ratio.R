@@ -2,10 +2,10 @@
 #' @importFrom grDevices colorRampPalette
 NULL
 
-#' Extract ratio posteriors from a ratiod model
+#' Extract ratio posteriors from a ratio model
 #'
 #' @description
-#' Compute posterior distributions of ratios from a fitted ratiod model.
+#' Compute posterior distributions of ratios from a fitted ratio model.
 #' Ratios are derived quantities: E\[numerator\] / E\[denominator\], computed
 #' in Stan's generated quantities block with full uncertainty propagation.
 #'
@@ -37,7 +37,7 @@ NULL
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -206,7 +206,7 @@ summary.ratiod_ratio <- function(object, probs = c(0.025, 0.5, 0.975), ...) {
 #'
 #' @export
 print.ratiod_ratio <- function(x, ...) {
-  cat("ratiod ratio posterior\n")
+  cat("tulpaRatio ratio posterior\n")
   cat("=====================\n\n")
   cat("Scale:", x$type, "\n")
   cat("Observations:", x$n_obs, "\n")
@@ -227,7 +227,7 @@ print.ratiod_ratio <- function(x, ...) {
 #'
 #' @export
 print.ratiod_ratio_summary <- function(x, n = 10, ...) {
-  cat("ratiod ratio summary (", attr(x, "type"), " scale)\n", sep = "")
+  cat("tulpaRatio ratio summary (", attr(x, "type"), " scale)\n", sep = "")
   cat("===========================================\n\n")
 
   if (nrow(x) > n) {
@@ -266,7 +266,7 @@ print.ratiod_ratio_summary <- function(x, n = 10, ...) {
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ season,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -368,7 +368,7 @@ ratio_contrast <- function(object, contrast, type = c("difference", "ratio"),
 #'
 #' @export
 print.ratiod_contrast <- function(x, ...) {
-  cat("ratiod ratio contrasts\n")
+  cat("tulpaRatio ratio contrasts\n")
   cat("=====================\n\n")
   cat("Type:", attr(x, "type"), "\n")
   cat("Variable:", attr(x, "contrast_var"), "\n")
@@ -378,11 +378,11 @@ print.ratiod_contrast <- function(x, ...) {
 }
 
 
-#' Extract fitted values from a ratiod model
+#' Extract fitted values from a ratio model
 #'
 #' @description
 #' Compute posterior distributions of fitted values (expected values) for both
-#' the numerator and denominator processes from a fitted ratiod model.
+#' the numerator and denominator processes from a fitted ratio model.
 #'
 #' @param object A `ratiod_fit` object
 #' @param component Which component to return: "numerator", "denominator",
@@ -407,7 +407,7 @@ print.ratiod_contrast <- function(x, ...) {
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -673,10 +673,10 @@ compute_fitted_laplace <- function(object) {
 }
 
 
-#' Predict method for ratiod models
+#' Predict method for ratio models
 #'
 #' @description
-#' Compute posterior predictions for new data from a fitted ratiod model.
+#' Compute posterior predictions for new data from a fitted ratio model.
 #'
 #' @param object A `ratiod_fit` object
 #' @param newdata Data frame with new observations. Must contain all
@@ -723,7 +723,7 @@ compute_fitted_laplace <- function(object) {
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + season,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -745,7 +745,7 @@ compute_fitted_laplace <- function(object) {
 #' # Fit model with GP spatial effects
 #' df$x <- runif(n)
 #' df$y <- runif(n)
-#' fit_gp <- ratiod(
+#' fit_gp <- tratio(
 #'   count | effort ~ depth,
 #'   data = df,
 #'   spatial = spatial_gp(coords = c("x", "y")),
@@ -1924,7 +1924,7 @@ compute_predictions_hmc <- function(object, pred_data, type) {
 #'
 #' @export
 print.ratiod_fitted <- function(x, n = 10, ...) {
-  cat("ratiod fitted values\n")
+  cat("tulpaRatio fitted values\n")
   cat("===================\n\n")
   cat("Posterior draws:", attr(x, "n_draws"), "\n\n")
 
@@ -1946,7 +1946,7 @@ print.ratiod_fitted <- function(x, n = 10, ...) {
 #'
 #' @export
 print.ratiod_prediction <- function(x, n = 10, ...) {
-  cat("ratiod predictions\n")
+  cat("tulpaRatio predictions\n")
   cat("=================\n\n")
   cat("Posterior draws:", attr(x, "n_draws"), "\n")
   cat("New observations:", nrow(attr(x, "newdata")), "\n\n")
@@ -1968,7 +1968,7 @@ print.ratiod_prediction <- function(x, n = 10, ...) {
 #' Convert ratiod_fit to posterior draws format
 #'
 #' @description
-#' Convert a fitted ratiod model to a format compatible with the
+#' Convert a fitted ratio model to a format compatible with the
 #' posterior and tidybayes packages. Returns draws in a tidy format
 #' suitable for further analysis and visualization.
 #'
@@ -1999,7 +1999,7 @@ print.ratiod_prediction <- function(x, n = 10, ...) {
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -2089,7 +2089,7 @@ as_draws.ratiod_fit <- function(x, ...) {
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -2199,7 +2199,7 @@ spread_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -2285,7 +2285,7 @@ gather_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 #' )
 #'
 #' # Fit model
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),

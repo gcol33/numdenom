@@ -170,7 +170,7 @@ results <- list()
 
 # ----- Row 64: binomial + crossed RE -----
 results[["64"]] <- run_bench(64, "bin_crossed",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site) + (1|site2), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site) + (1|site2), data = df_bin,
                          family = ratiod_binomial())),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|site2), data = df_bin,
                         family = binomial(), iter = 1000, warmup = 500, chains = 2,
@@ -179,7 +179,7 @@ results[["64"]] <- run_bench(64, "bin_crossed",
 
 # ----- Row 66: binomial + BYM2 -----
 results[["66"]] <- run_bench(66, "bin_bym2",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site), data = df_bin,
@@ -189,7 +189,7 @@ results[["66"]] <- run_bench(66, "bin_bym2",
 
 # ----- Row 70: binomial + pCAR -----
 results[["70"]] <- run_bench(70, "bin_pcar",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          spatial = spatial_car(adj_mat, proper = TRUE,
                                                level = "group", group_var = "spatial_site"))),
@@ -201,7 +201,7 @@ results[["70"]] <- run_bench(70, "bin_pcar",
 # ----- Row 78: binomial + OI (one-inflated) -----
 # OI doesn't have brms equivalent - skip Stan validation
 results[["78"]] <- run_bench(78, "bin_oi",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_oibinomial())),
   skip_stan = TRUE
 )
@@ -209,7 +209,7 @@ results[["78"]] <- run_bench(78, "bin_oi",
 # ----- Row 79: binomial + ZOIB (zero-one inflated) -----
 # ZOIB doesn't have brms equivalent - skip Stan validation
 results[["79"]] <- run_bench(79, "bin_zoib",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_zoibinomial())),
   skip_stan = TRUE
 )
@@ -218,7 +218,7 @@ results[["79"]] <- run_bench(79, "bin_zoib",
 # TVC validation uses brms with time random intercepts as proxy
 # (brms doesn't support true TVC, so we validate fixed effect only)
 results[["89"]] <- run_bench(89, "bin_tvc",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          temporal = temporal_tvc("time_factor", ~ x))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (x|time_factor), data = df_bin,

@@ -151,8 +151,8 @@ results <- list()
 
 # Row 3: poisson_gamma + random slopes
 results[["3"]] <- bench_validated("pg_slopes", 3,
-  nd_call = quote(ratiod(y | effort ~ x + (x|site), data = df_pg, family = ratiod_poisson_gamma(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | effort ~ x + (x|site), data = df_pg, family = ratiod_poisson_gamma(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (x|site) + offset(log(effort)), data = df_pg, family = poisson(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -160,8 +160,8 @@ results[["3"]] <- bench_validated("pg_slopes", 3,
 
 # Row 4: poisson_gamma + crossed RE
 results[["4"]] <- bench_validated("pg_crossed", 4,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site) + (1|time), data = df_pg, family = ratiod_poisson_gamma(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | effort ~ x + (1|site) + (1|time), data = df_pg, family = ratiod_poisson_gamma(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|time) + offset(log(effort)), data = df_pg, family = poisson(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -169,8 +169,8 @@ results[["4"]] <- bench_validated("pg_crossed", 4,
 
 # Row 33: negbin_negbin + random slopes
 results[["33"]] <- bench_validated("nb_slopes", 33,
-  nd_call = quote(ratiod(y | denom ~ x + (x|site), data = df_nb, family = ratiod_negbin_negbin(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | denom ~ x + (x|site), data = df_nb, family = ratiod_negbin_negbin(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (x|site) + offset(log(denom)), data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -178,8 +178,8 @@ results[["33"]] <- bench_validated("nb_slopes", 33,
 
 # Row 34: negbin_negbin + crossed RE
 results[["34"]] <- bench_validated("nb_crossed", 34,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site) + (1|time), data = df_nb, family = ratiod_negbin_negbin(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | denom ~ x + (1|site) + (1|time), data = df_nb, family = ratiod_negbin_negbin(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|time) + offset(log(denom)), data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -187,8 +187,8 @@ results[["34"]] <- bench_validated("nb_crossed", 34,
 
 # Row 63: binomial + random slopes
 results[["63"]] <- bench_validated("bin_slopes", 63,
-  nd_call = quote(ratiod(y | trials ~ x + (x|site), data = df_bin, family = ratiod_binomial(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | trials ~ x + (x|site), data = df_bin, family = ratiod_binomial(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (x|site), data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -196,8 +196,8 @@ results[["63"]] <- bench_validated("bin_slopes", 63,
 
 # Row 64: binomial + crossed RE
 results[["64"]] <- bench_validated("bin_crossed", 64,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site) + (1|time), data = df_bin, family = ratiod_binomial(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+  nd_call = quote(tratio(y | trials ~ x + (1|site) + (1|time), data = df_bin, family = ratiod_binomial(),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|time), data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -209,9 +209,9 @@ results[["64"]] <- bench_validated("bin_crossed", 64,
 
 # Row 7: poisson_gamma + GP
 results[["7"]] <- bench_validated("pg_gp", 7,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  nd_call = quote(tratio(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
                          spatial = spatial_gp(coords = cbind(lon, lat), level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + gp(lon, lat) + offset(log(effort)), data = df_pg, family = poisson(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -219,9 +219,9 @@ results[["7"]] <- bench_validated("pg_gp", 7,
 
 # Row 37: negbin_negbin + GP
 results[["37"]] <- bench_validated("nb_gp", 37,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
                          spatial = spatial_gp(coords = cbind(lon, lat), level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + gp(lon, lat) + offset(log(denom)), data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -229,9 +229,9 @@ results[["37"]] <- bench_validated("nb_gp", 37,
 
 # Row 67: binomial + GP
 results[["67"]] <- bench_validated("bin_gp", 67,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_gp(coords = cbind(lon, lat), level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + gp(lon, lat), data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -243,9 +243,9 @@ results[["67"]] <- bench_validated("bin_gp", 67,
 
 # Row 42: negbin_negbin + RW2
 results[["42"]] <- bench_validated("nb_rw2", 42,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
                          temporal = temporal_rw2("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|time) + offset(log(denom)), data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -253,9 +253,9 @@ results[["42"]] <- bench_validated("nb_rw2", 42,
 
 # Row 43: negbin_negbin + AR1
 results[["43"]] <- bench_validated("nb_ar1", 43,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
                          temporal = temporal_ar1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|time) + offset(log(denom)), data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -263,9 +263,9 @@ results[["43"]] <- bench_validated("nb_ar1", 43,
 
 # Row 72: binomial + RW2
 results[["72"]] <- bench_validated("bin_rw2", 72,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          temporal = temporal_rw2("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|time), data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -273,9 +273,9 @@ results[["72"]] <- bench_validated("bin_rw2", 72,
 
 # Row 73: binomial + AR1
 results[["73"]] <- bench_validated("bin_ar1", 73,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          temporal = temporal_ar1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|time), data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
                         backend = "cmdstanr", silent = 2, refresh = 0))
@@ -287,10 +287,10 @@ results[["73"]] <- bench_validated("bin_ar1", 73,
 
 # Row 19: poisson_gamma + BYM2 + RW1
 results[["19"]] <- bench_validated("pg_bym2_rw1", 19,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  nd_call = quote(tratio(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|spatial_site) + (1|time) + offset(log(effort)),
                         data = df_pg, family = poisson(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -299,10 +299,10 @@ results[["19"]] <- bench_validated("pg_bym2_rw1", 19,
 
 # Row 20: poisson_gamma + ICAR + AR1
 results[["20"]] <- bench_validated("pg_icar_ar1", 20,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  nd_call = quote(tratio(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_ar1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|spatial_site) + (1|time) + offset(log(effort)),
                         data = df_pg, family = poisson(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -311,10 +311,10 @@ results[["20"]] <- bench_validated("pg_icar_ar1", 20,
 
 # Row 49: negbin_negbin + BYM2 + RW1
 results[["49"]] <- bench_validated("nb_bym2_rw1", 49,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|spatial_site) + (1|time) + offset(log(denom)),
                         data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -323,10 +323,10 @@ results[["49"]] <- bench_validated("nb_bym2_rw1", 49,
 
 # Row 50: negbin_negbin + ICAR + AR1
 results[["50"]] <- bench_validated("nb_icar_ar1", 50,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_ar1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|spatial_site) + (1|time) + offset(log(denom)),
                         data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -335,10 +335,10 @@ results[["50"]] <- bench_validated("nb_icar_ar1", 50,
 
 # Row 81: binomial + BYM2 + RW1
 results[["81"]] <- bench_validated("bin_bym2_rw1", 81,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site) + (1|time),
                         data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -347,10 +347,10 @@ results[["81"]] <- bench_validated("bin_bym2_rw1", 81,
 
 # Row 82: binomial + ICAR + AR1
 results[["82"]] <- bench_validated("bin_icar_ar1", 82,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_ar1("time"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site) + (1|time),
                         data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -363,10 +363,10 @@ results[["82"]] <- bench_validated("bin_icar_ar1", 82,
 
 # Row 24: poisson_gamma + ICAR + ZI
 results[["24"]] <- bench_validated("pg_icar_zi", 24,
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg_zi, family = ratiod_poisson_gamma(),
+  nd_call = quote(tratio(y | effort ~ x + (1|site), data = df_pg_zi, family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          zi = numdenom::zi_poisson(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|spatial_site) + offset(log(effort)),
                         data = df_pg_zi, family = zero_inflated_poisson(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -375,10 +375,10 @@ results[["24"]] <- bench_validated("pg_icar_zi", 24,
 
 # Row 54: negbin_negbin + ICAR + ZI
 results[["54"]] <- bench_validated("nb_icar_zi", 54,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb_zi, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb_zi, family = ratiod_negbin_negbin(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          zi = numdenom::zi_negbin(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|spatial_site) + offset(log(denom)),
                         data = df_nb_zi, family = zero_inflated_negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -387,9 +387,9 @@ results[["54"]] <- bench_validated("nb_icar_zi", 54,
 
 # Row 86: binomial + ICAR + ZI
 results[["86"]] <- bench_validated("bin_icar_zi", 86,
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin_zi, family = ratiod_zibinomial(),
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin_zi, family = ratiod_zibinomial(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site),
                         data = df_bin_zi, family = zero_inflated_binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -402,9 +402,9 @@ results[["86"]] <- bench_validated("bin_icar_zi", 86,
 
 # Row 25: poisson_gamma + slopes + ICAR
 results[["25"]] <- bench_validated("pg_slopes_icar", 25,
-  nd_call = quote(ratiod(y | effort ~ x + (x|site), data = df_pg, family = ratiod_poisson_gamma(),
+  nd_call = quote(tratio(y | effort ~ x + (x|site), data = df_pg, family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (x|site) + (1|spatial_site) + offset(log(effort)),
                         data = df_pg, family = poisson(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -413,9 +413,9 @@ results[["25"]] <- bench_validated("pg_slopes_icar", 25,
 
 # Row 55: negbin_negbin + slopes + ICAR
 results[["55"]] <- bench_validated("nb_slopes_icar", 55,
-  nd_call = quote(ratiod(y | denom ~ x + (x|site), data = df_nb, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (x|site), data = df_nb, family = ratiod_negbin_negbin(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (x|site) + (1|spatial_site) + offset(log(denom)),
                         data = df_nb, family = negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -424,9 +424,9 @@ results[["55"]] <- bench_validated("nb_slopes_icar", 55,
 
 # Row 87: binomial + slopes + ICAR
 results[["87"]] <- bench_validated("bin_slopes_icar", 87,
-  nd_call = quote(ratiod(y | trials ~ x + (x|site), data = df_bin, family = ratiod_binomial(),
+  nd_call = quote(tratio(y | trials ~ x + (x|site), data = df_bin, family = ratiod_binomial(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y | trials(trials) ~ x + (x|site) + (1|spatial_site),
                         data = df_bin, family = binomial(),
                         iter = 1000, warmup = 500, chains = 2,
@@ -439,9 +439,9 @@ results[["87"]] <- bench_validated("bin_slopes_icar", 87,
 
 # Row 47: negbin_negbin + Hurdle
 results[["47"]] <- bench_validated("nb_hurdle", 47,
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb_zi, family = ratiod_negbin_negbin(),
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb_zi, family = ratiod_negbin_negbin(),
                          zi = numdenom::hurdle_negbin(),
-                         iter = 1000, warmup = 500, chains = 2, verbose = FALSE)),
+                         control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))),
   brms_call = quote(brm(y ~ x + (1|site) + offset(log(denom)),
                         data = df_nb_zi, family = brms::hurdle_negbinomial(),
                         iter = 1000, warmup = 500, chains = 2,

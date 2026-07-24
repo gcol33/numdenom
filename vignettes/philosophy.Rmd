@@ -181,9 +181,8 @@ There are cases where shared structure is not needed:
 In these cases, use `shared = ~ 0`:
 
 ```r
-fit <- ratiod(
-  numerator = successes ~ treatment,
-  denominator = trials ~ 1,
+fit <- tratio(
+  successes | trials ~ treatment,
   shared = ~ 0,  # Explicit independence (triggers warning)
   family = ratiod_binomial(),
   data = experiment_data

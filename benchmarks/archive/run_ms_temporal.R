@@ -54,10 +54,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_15 <- system.time({
   fit_15 <- tryCatch({
-    ratiod(count | effort ~ x + (1 | site), data = df_15,
+    tratio(count | effort ~ x + (1 | site), data = df_15,
            family = ratiod_poisson_gamma(),
            temporal = temporal_multiscale(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_15)) {
@@ -84,10 +84,10 @@ cat(sprintf("True: slope=%.2f\n", true_slope))
 cat("Fitting... ")
 t_45 <- system.time({
   fit_45 <- tryCatch({
-    ratiod(num | denom ~ x + (1 | site), data = df_45,
+    tratio(num | denom ~ x + (1 | site), data = df_45,
            family = ratiod_negbin_negbin(),
            temporal = temporal_multiscale(time_var = "time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 if (!is.null(fit_45)) {

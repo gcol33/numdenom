@@ -36,11 +36,11 @@ simulate_spatial_binomial <- function(n_units = 8L, reps = 16L) {
 
 fit_one_spatial <- function(sim, use_specs, seed_val, spatial_struct) {
   op <- options(tulpaRatio.use_specs = use_specs); on.exit(options(op), add = TRUE)
-  fit <- tulpaRatio::ratiod(
+  fit <- tulpaRatio::tratio(
     formula = sim$formula, data = sim$data, family = sim$family,
     spatial = spatial_struct,
-    mode = "hmc", iter = 3000L, warmup = 1000L, chains = 1L,
-    seed = seed_val, verbose = FALSE, gradient_mode = "A_r"
+    mode = "hmc",
+    control = list(iter = 3000L, warmup = 1000L, chains = 1L, seed = seed_val, verbose = FALSE, gradient_mode = "A_r")
   )
   colMeans(fit$draws)
 }

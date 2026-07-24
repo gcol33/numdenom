@@ -79,115 +79,115 @@ validate <- function(row, name, nd_call, brms_call) {
 
 # Row 61: basic
 results[[61]] <- validate(61, "bin_basic",
-  quote(ratiod(y | trials ~ x, data = df, family = ratiod_binomial(),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+  quote(tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x, data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 62: RE
 results[[62]] <- validate(62, "bin_re",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 63: slopes
 results[[63]] <- validate(63, "bin_slopes",
-  quote(ratiod(y | trials ~ x + (x|site), data = df, family = ratiod_binomial(),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+  quote(tratio(y | trials ~ x + (x|site), data = df, family = ratiod_binomial(),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (x|site), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 65: ICAR
 results[[65]] <- validate(65, "bin_icar",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 66: BYM2
 results[[66]] <- validate(66, "bin_bym2",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 71: RW1
 results[[71]] <- validate(71, "bin_rw1",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                temporal = temporal_rw1("time"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|time), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 72: RW2
 results[[72]] <- validate(72, "bin_rw2",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                temporal = temporal_rw2("time"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|time), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 73: AR1
 results[[73]] <- validate(73, "bin_ar1",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                temporal = temporal_ar1("time"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|time), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 76: ZI
 results[[76]] <- validate(76, "bin_zi",
-  quote(ratiod(y | trials ~ x + (1|site), data = df_zi, family = ratiod_zibinomial(),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+  quote(tratio(y | trials ~ x + (1|site), data = df_zi, family = ratiod_zibinomial(),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site), data = df_zi, family = zero_inflated_binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 77: Hurdle
 results[[77]] <- validate(77, "bin_hurdle",
-  quote(ratiod(y | trials ~ x + (1|site), data = df_zi, family = ratiod_hurdle_binomial(),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+  quote(tratio(y | trials ~ x + (1|site), data = df_zi, family = ratiod_hurdle_binomial(),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site), data = df_zi, family = hurdle_cumulative(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 80: ICAR + RW1
 results[[80]] <- validate(80, "bin_icar_rw1",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                temporal = temporal_rw1("time"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site) + (1|time), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 81: BYM2 + RW1
 results[[81]] <- validate(81, "bin_bym2_rw1",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
                temporal = temporal_rw1("time"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site) + (1|time), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )
 
 # Row 82: ICAR + AR1
 results[[82]] <- validate(82, "bin_icar_ar1",
-  quote(ratiod(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
+  quote(tratio(y | trials ~ x + (1|site), data = df, family = ratiod_binomial(),
                spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                temporal = temporal_ar1("time"),
-               iter = 500, warmup = 250, chains = 1, verbose = FALSE)),
+               control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))),
   quote(brm(y | trials(trials) ~ x + (1|site) + (1|spatial_site) + (1|time), data = df, family = binomial(),
             iter = 500, warmup = 250, chains = 1, backend = "cmdstanr", silent = 2, refresh = 0))
 )

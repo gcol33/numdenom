@@ -33,8 +33,9 @@ run_model <- function(name, f, fam, sp = NULL, temp = NULL, seed) {
                                            bym2=spatial_bym2(adj=adj_mat, group_var="site")) else NULL
   temporal <- if (!is.null(temp)) switch(temp, rw1=temporal_rw1(time_var="time")) else NULL
   system.time({
-    ratiod(f, data=df, family=family, spatial=spatial, temporal=temporal,
-           mode="hmc", iter=500, warmup=250, chains=1, gradient_mode="H", verbose=FALSE)
+    tratio(f, data=df, family=family, spatial=spatial, temporal=temporal,
+           mode="hmc",
+           control = list(iter=500, warmup=250, chains=1, gradient_mode="H", verbose=FALSE))
   })["elapsed"]
 }
 

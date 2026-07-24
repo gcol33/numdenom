@@ -47,8 +47,8 @@ run_bench <- function(label, grad_mode, ...) {
   t <- system.time({
     fit <- tryCatch(
       suppressWarnings(
-        ratiod(..., mode = "hmc", iter = 500, warmup = 250,
-               chains = 1, seed = SEED, gradient_mode = grad_mode, verbose = FALSE)
+        tratio(..., mode = "hmc",
+               control = list(iter = 500, warmup = 250, chains = 1, seed = SEED, gradient_mode = grad_mode, verbose = FALSE))
       ),
       error = function(e) { cat(sprintf("ERROR: %s", conditionMessage(e))); NULL }
     )

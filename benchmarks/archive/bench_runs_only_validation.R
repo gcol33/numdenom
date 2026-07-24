@@ -80,14 +80,11 @@ tryCatch({
 
   # Fit numdenom
   time_nd <- system.time({
-    fit78 <- ratiod(
+    fit78 <- tratio(
       y | trials ~ x + (1 | site),
       data = df78,
       family = ratiod_oibinomial(),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -147,14 +144,11 @@ tryCatch({
 
   # Fit numdenom
   time_nd <- system.time({
-    fit79 <- ratiod(
+    fit79 <- tratio(
       y | trials ~ x + (1 | site),
       data = df79,
       family = ratiod_zoibinomial(),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -213,16 +207,13 @@ tryCatch({
   df22$y_denom <- pmax(df22$y_denom, 0.1)
 
   time_nd <- system.time({
-    fit22 <- ratiod(
+    fit22 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df22,
       family = ratiod_poisson_gamma(),
       spatial = spatial_hsgp(coords = ~ x_coord + y_coord),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -259,16 +250,13 @@ tryCatch({
   df52$y_denom <- pmax(df52$y_denom, 1)
 
   time_nd <- system.time({
-    fit52 <- ratiod(
+    fit52 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df52,
       family = ratiod_negbin_negbin(),
       spatial = spatial_hsgp(coords = ~ x_coord + y_coord),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -309,7 +297,7 @@ tryCatch({
   df90$trials <- trials90
 
   time_nd <- system.time({
-    fit90 <- ratiod(
+    fit90 <- tratio(
       y | trials ~ x + (1 | site),
       data = df90,
       family = ratiod_binomial(),
@@ -318,10 +306,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "I"
       ),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -341,7 +326,7 @@ tryCatch({
   df91 <- df90  # Reuse data
 
   time_nd <- system.time({
-    fit91 <- ratiod(
+    fit91 <- tratio(
       y | trials ~ x + (1 | site),
       data = df91,
       family = ratiod_binomial(),
@@ -350,10 +335,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "IV"
       ),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -396,7 +378,7 @@ tryCatch({
   df28$y_denom <- pmax(df28$y_denom, 0.1)
 
   time_nd <- system.time({
-    fit28 <- ratiod(
+    fit28 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df28,
       family = ratiod_poisson_gamma(),
@@ -405,10 +387,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "I"
       ),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -426,7 +405,7 @@ message("\n>>> Row 29: poisson_gamma + ICAR + RW1 + ST-IV <<<")
 
 tryCatch({
   time_nd <- system.time({
-    fit29 <- ratiod(
+    fit29 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df28,  # Reuse data
       family = ratiod_poisson_gamma(),
@@ -435,10 +414,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "IV"
       ),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -481,7 +457,7 @@ tryCatch({
   df58$y_denom <- pmax(df58$y_denom, 1)
 
   time_nd <- system.time({
-    fit58 <- ratiod(
+    fit58 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df58,
       family = ratiod_negbin_negbin(),
@@ -490,10 +466,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "I"
       ),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -511,7 +484,7 @@ message("\n>>> Row 59: negbin_negbin + ICAR + RW1 + ST-IV <<<")
 
 tryCatch({
   time_nd <- system.time({
-    fit59 <- ratiod(
+    fit59 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df58,  # Reuse data
       family = ratiod_negbin_negbin(),
@@ -520,10 +493,7 @@ tryCatch({
         temporal = temporal_rw1(time_var = "time"),
         type = "IV"
       ),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 

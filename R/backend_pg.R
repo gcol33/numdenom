@@ -585,7 +585,7 @@ convert_pg_to_ratiod_fit <- function(fit_raw, formula, data, family,
 
 #' Check if PG backend is appropriate
 #'
-#' @param family A ratiod family object
+#' @param family A tulpaRatio family object
 #' @return Logical indicating if PG backend can be used
 #' @keywords internal
 can_use_pg_backend <- function(family) {

@@ -15,13 +15,11 @@ cat("  mean(log(y_denom)):", mean(log(y_denom)), " (true: 3)\n")
 cat("  sd(log(y_num)):", sd(log(y_num)), " (true: 0.5)\n")
 
 cat("\n=== A_t mode ===\n")
-fit_At <- ratiod(
+fit_At <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_lognormal(),
-  iter = 200, warmup = 100, chains = 1,
-  gradient_mode = "A_t",
-  verbose = FALSE
+  control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "A_t", verbose = FALSE)
 )
 draws_At <- as.matrix(fit_At$draws)
 cat("  beta_num[1]:", mean(draws_At[,"beta_num[1]"]), "+/-", sd(draws_At[,"beta_num[1]"]), "\n")
@@ -29,13 +27,11 @@ cat("  beta_num[1] range:", range(draws_At[,"beta_num[1]"]), "\n")
 cat("  sigma_num:", mean(draws_At[,"sigma_num"]), "+/-", sd(draws_At[,"sigma_num"]), "\n")
 
 cat("\n=== H mode ===\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_lognormal(),
-  iter = 200, warmup = 100, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 draws_H <- as.matrix(fit_H$draws)
 cat("  beta_num[1]:", mean(draws_H[,"beta_num[1]"]), "+/-", sd(draws_H[,"beta_num[1]"]), "\n")

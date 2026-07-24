@@ -76,13 +76,12 @@ cat("Note: MS_t is slow (~700s in benchmark). Testing with shorter chains...\n")
 cat("Fitting numdenom (MS_t)... ")
 t_nd_75 <- system.time({
   fit_nd_75 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df,
       family = ratiod_binomial(),
       temporal = temporal_multiscale("time", trend = "rw2", short_term = "ar1"),
-      iter = 500, warmup = 250, chains = 1,
-      verbose = FALSE
+      control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -110,13 +109,12 @@ my_temporal <- temporal_rw1("time")
 cat("Fitting numdenom (ST-I)... ")
 t_nd_90 <- system.time({
   fit_nd_90 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df,
       family = ratiod_binomial(),
       spatiotemporal = spatiotemporal(spatial = my_spatial, temporal = my_temporal, type = "I"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -163,7 +161,7 @@ cat("\n========== Row 91: binomial + ST-IV (Spatiotemporal Type IV) ==========\n
 cat("Fitting numdenom (ST-IV)... ")
 t_nd_91 <- system.time({
   fit_nd_91 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df,
       family = ratiod_binomial(),
@@ -172,8 +170,7 @@ t_nd_91 <- system.time({
         temporal = temporal_rw1("time"),
         type = "IV"
       ),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

@@ -17,8 +17,8 @@ for (f in families) {
                     sigma_re=0.5, phi_num=f$phi_num, phi_denom=f$phi_denom,
                     n_groups=10, seed=42)
   cat("  A_r mode (watch for gradient mismatch warning):\n")
-  fit <- ratiod(y_num | y_denom ~ x1 + (1|group), data=sim$data,
-                family=f$fam, iter=10, warmup=5, chains=1,
-                gradient_mode="A_r", verbose=FALSE)
+  fit <- tratio(y_num | y_denom ~ x1 + (1|group), data=sim$data,
+                family=f$fam,
+                control = list(iter=10, warmup=5, chains=1, gradient_mode="A_r", verbose=FALSE))
   cat("\n")
 }

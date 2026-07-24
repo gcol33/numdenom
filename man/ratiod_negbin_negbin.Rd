@@ -43,7 +43,7 @@ df <- data.frame(
 
 \dontrun{
 # Fit model (slow, not run on CRAN)
-fit <- ratiod(
+fit <- tratio(
   sp_count | total_count ~ habitat + (1 | site),
   data = df,
   family = ratiod_negbin_negbin(),

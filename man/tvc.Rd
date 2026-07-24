@@ -31,7 +31,7 @@ A \code{ratiod_tvc_posterior} object containing:
 }
 \description{
 Extract posterior distributions of temporally-varying coefficients (TVCs)
-from a fitted ratiod model with TVC specification.
+from a fitted ratio model with TVC specification.
 }
 \examples{
 \dontrun{
@@ -45,7 +45,7 @@ df <- data.frame(
 )
 
 # Fit model with TVC
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),

@@ -115,6 +115,17 @@ Rcpp::List cpp_gibbs_spatial(Rcpp::List data_list) {
     d.bym2_scale = data_list.containsElementNamed("bym2_scale") ?
                    Rcpp::as<double>(data_list["bym2_scale"]) : 1.0;
 
+    // Priors. The R side resolves these from the same defaults the HMC
+    // backend uses, so the two agree on the model for a given call.
+    auto prior_or = [&](const char* nm, double fallback) {
+        return data_list.containsElementNamed(nm) ?
+               Rcpp::as<double>(data_list[nm]) : fallback;
+    };
+    d.sigma_beta = prior_or("sigma_beta", 10.0);
+    d.sigma_re_scale = prior_or("sigma_re_scale", 2.5);
+    d.tau_spatial_shape = prior_or("tau_spatial_shape", 1.0);
+    d.tau_spatial_rate = prior_or("tau_spatial_rate", 0.01);
+
     // Convert spatial_group from 1-based to 0-based
     std::vector<int> sg(N);
     for (int i = 0; i < N; i++) sg[i] = spatial_group_r[i] - 1;

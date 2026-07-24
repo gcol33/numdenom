@@ -35,62 +35,54 @@ run_fit <- function(desc, expr) {
 
 # NB + RW1: diag vs dense
 run_fit("NB + RW1 (diag)", quote(
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "diag", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "diag", verbose = TRUE))
 ))
 
 run_fit("NB + RW1 (dense)", quote(
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "dense", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "dense", verbose = TRUE))
 ))
 
 # NB + AR1: diag vs dense
 run_fit("NB + AR1 (diag)", quote(
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_ar1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "diag", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "diag", verbose = TRUE))
 ))
 
 run_fit("NB + AR1 (dense)", quote(
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_ar1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "dense", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "dense", verbose = TRUE))
 ))
 
 # PG + RW1: diag vs dense
 run_fit("PG + RW1 (diag)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "diag", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "diag", verbose = TRUE))
 ))
 
 run_fit("PG + RW1 (dense)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "dense", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "dense", verbose = TRUE))
 ))
 
 # NB + RE + RW1: diag vs dense
 run_fit("NB + RE + RW1 (diag)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "diag", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "diag", verbose = TRUE))
 ))
 
 run_fit("NB + RE + RW1 (dense)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H",
-         metric = "dense", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", metric = "dense", verbose = TRUE))
 ))
 
 cat("Done.\n")

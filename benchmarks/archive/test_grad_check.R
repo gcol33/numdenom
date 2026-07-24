@@ -57,11 +57,10 @@ df_pg <- data.frame(
   lat = runif(N, 0, 10)
 )
 check_grad("PG+HSGP H", quote(
-  ratiod(y | denom ~ x, data = df_pg,
+  tratio(y | denom ~ x, data = df_pg,
          family = ratiod_poisson_gamma(),
          spatial = spatial_hsgp(~ lon + lat),
-         iter = 100, warmup = 50, chains = 1,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # 2. PG+temporal_gp (was 0.4s, should be ~40s)
@@ -76,31 +75,28 @@ df_gpt <- data.frame(
   lat = rep(runif(20, 0, 10), each = 4)
 )
 check_grad("PG+GP_t H", quote(
-  ratiod(y | denom ~ x + (1 | site), data = df_gpt,
+  tratio(y | denom ~ x + (1 | site), data = df_gpt,
          family = ratiod_poisson_gamma(),
          temporal = temporal_gp(time_var = "time"),
-         iter = 100, warmup = 50, chains = 1,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # 3. Compare PG+GP_t N mode vs H mode
 cat("\n=== PG+GP_t: Compare H vs N mode draws ===\n")
 set.seed(123)
 fit_n <- tryCatch(
-  ratiod(y | denom ~ x + (1 | site), data = df_gpt,
+  tratio(y | denom ~ x + (1 | site), data = df_gpt,
          family = ratiod_poisson_gamma(),
          temporal = temporal_gp(time_var = "time"),
-         iter = 100, warmup = 50, chains = 1,
-         gradient_mode = "N", verbose = FALSE),
+         control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "N", verbose = FALSE)),
   error = function(e) { cat(sprintf("N ERROR: %s\n", e$message)); NULL }
 )
 set.seed(123)
 fit_h <- tryCatch(
-  ratiod(y | denom ~ x + (1 | site), data = df_gpt,
+  tratio(y | denom ~ x + (1 | site), data = df_gpt,
          family = ratiod_poisson_gamma(),
          temporal = temporal_gp(time_var = "time"),
-         iter = 100, warmup = 50, chains = 1,
-         gradient_mode = "H", verbose = FALSE),
+         control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE)),
   error = function(e) { cat(sprintf("H ERROR: %s\n", e$message)); NULL }
 )
 

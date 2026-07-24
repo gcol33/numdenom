@@ -38,7 +38,7 @@ bench <- function(name, row, ...) {
   flush.console()
   tryCatch({
     time <- system.time({
-      fit <- ratiod(..., iter=500, warmup=250, chains=1, verbose=FALSE, gradient_mode="H")
+      fit <- tratio(..., control = list(iter=500, warmup=250, chains=1, verbose=FALSE, gradient_mode="H"))
     })["elapsed"]
     cat(sprintf("%.1fs\n", time))
     time

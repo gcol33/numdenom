@@ -36,14 +36,11 @@ cat("  shape_denom: ", shape_denom, "\n\n")
 # Test 1: Default (forward autodiff fallback)
 # ============================================
 cat("=== Test 1: Default gradient mode ===\n")
-fit_default <- ratiod(
+fit_default <- tratio(
   y_num | y_denom ~ x,
   data = dat,
   family = ratiod_gamma_gamma(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 1,
-  seed = 123
+  control = list(iter = 2000, warmup = 1000, chains = 1, seed = 123)
 )
 draws_default <- as.matrix(fit_default$draws)
 cat("beta_num[1]:", mean(draws_default[,"beta_num[1]"]), "\n")
@@ -53,15 +50,11 @@ cat("beta_num[2]:", mean(draws_default[,"beta_num[2]"]), "\n")
 # Test 2: Force numerical gradients
 # ============================================
 cat("\n=== Test 2: Numerical gradients (gradient_mode='N') ===\n")
-fit_numerical <- ratiod(
+fit_numerical <- tratio(
   y_num | y_denom ~ x,
   data = dat,
   family = ratiod_gamma_gamma(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 1,
-  seed = 123,
-  gradient_mode = "N"
+  control = list(iter = 2000, warmup = 1000, chains = 1, seed = 123, gradient_mode = "N")
 )
 draws_numerical <- as.matrix(fit_numerical$draws)
 cat("beta_num[1]:", mean(draws_numerical[,"beta_num[1]"]), "\n")
@@ -71,15 +64,11 @@ cat("beta_num[2]:", mean(draws_numerical[,"beta_num[2]"]), "\n")
 # Test 3: Force tape autodiff
 # ============================================
 cat("\n=== Test 3: Tape autodiff (gradient_mode='A_t') ===\n")
-fit_tape <- ratiod(
+fit_tape <- tratio(
   y_num | y_denom ~ x,
   data = dat,
   family = ratiod_gamma_gamma(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 1,
-  seed = 123,
-  gradient_mode = "A_t"
+  control = list(iter = 2000, warmup = 1000, chains = 1, seed = 123, gradient_mode = "A_t")
 )
 draws_tape <- as.matrix(fit_tape$draws)
 cat("beta_num[1]:", mean(draws_tape[,"beta_num[1]"]), "\n")

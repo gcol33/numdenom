@@ -136,13 +136,12 @@ cat(sprintf("Spatial effect range: [%.3f, %.3f]\n",
 cat("Fitting numdenom... ")
 t_nd_105 <- system.time({
   fit_105 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x,
       data = df_105,
       family = ratiod_beta_binomial(),
       spatial = spatial_car(adj_matrix, group_var = "site"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -227,14 +226,13 @@ cat(sprintf("Temporal effect range: [%.3f, %.3f]\n",
 cat("Fitting numdenom... ")
 t_nd_107 <- system.time({
   fit_107 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x,
       data = df_107,
       family = ratiod_beta_binomial(),
       spatial = spatial_car(adj_matrix, group_var = "site"),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

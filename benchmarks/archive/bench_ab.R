@@ -8,9 +8,9 @@ bench <- function(label, family_fn, data, formula_str, reps = 3) {
   for (i in 1:reps) {
     set.seed(100 + i)  # Different seeds to average NUTS randomness
     times[i] <- system.time({
-      ratiod(as.formula(formula_str), data = data,
+      tratio(as.formula(formula_str), data = data,
              family = family_fn(),
-             iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+             control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
     })["elapsed"]
   }
   cat(sprintf("%-12s  median=%.2fs  [%s]\n", label,

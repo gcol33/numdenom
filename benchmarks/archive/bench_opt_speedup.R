@@ -35,8 +35,8 @@ run_bench <- function(label, ...) {
   cat(sprintf("\n>>> %s <<<\n", label))
   gc()
   time <- system.time({
-    fit <- ratiod(..., iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                  gradient_mode = "H", verbose = FALSE)
+    fit <- tratio(...,
+                  control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE))
   })["elapsed"]
 
   # Extract tree depth diagnostics

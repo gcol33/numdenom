@@ -91,9 +91,8 @@ nd_gp_t    <- temporal_gp("time_num")
 run_nd <- function(family_call, formula, data, ...) {
   tryCatch({
     t <- system.time({
-      fit <- ratiod(formula, data = data, family = family_call,
-                    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                    gradient_mode = "H", seed = SEED, verbose = FALSE, ...)
+      fit <- tratio(formula, data = data, family = family_call, ...,
+                    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", seed = SEED, verbose = FALSE))
     })["elapsed"]
     t
   }, error = function(e) {

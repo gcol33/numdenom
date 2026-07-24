@@ -42,12 +42,11 @@ df_nb_gp <- data.frame(
 df_nb_gp$denom[df_nb_gp$denom == 0] <- 1
 
 cat("Fitting numdenom...\n")
-fit_nd <- ratiod(
+fit_nd <- tratio(
   y | denom ~ x, data = df_nb_gp,
   family = ratiod_negbin_negbin(),
   temporal = temporal_gp(time_var = "time", cov = "exponential"),
-  iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-  verbose = FALSE
+  control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
 )
 
 cat("Fitting Stan...\n")

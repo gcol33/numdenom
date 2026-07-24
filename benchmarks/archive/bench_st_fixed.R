@@ -61,12 +61,12 @@ cat("  H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(y | effort ~ x + (1 | site), data=df_pg, family=ratiod_poisson_gamma(),
+    fit <- tratio(y | effort ~ x + (1 | site), data=df_pg, family=ratiod_poisson_gamma(),
                   spatiotemporal=spatiotemporal(
                     spatial=spatial_car(adj_mat, level="group", group_var="spatial_site"),
                     temporal=temporal_rw1("time"),
                     type="I"),
-                  iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H")
+                  control = list(iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H"))
   })["elapsed"]
   cat(sprintf("%.1fs\n", time))
   results[["28"]] <- list(row=28, name="pg_st1", H=time)
@@ -81,12 +81,12 @@ cat("  H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(y | effort ~ x + (1 | site), data=df_pg, family=ratiod_poisson_gamma(),
+    fit <- tratio(y | effort ~ x + (1 | site), data=df_pg, family=ratiod_poisson_gamma(),
                   spatiotemporal=spatiotemporal(
                     spatial=spatial_car(adj_mat, level="group", group_var="spatial_site"),
                     temporal=temporal_rw1("time"),
                     type="IV"),
-                  iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H")
+                  control = list(iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H"))
   })["elapsed"]
   cat(sprintf("%.1fs\n", time))
   results[["29"]] <- list(row=29, name="pg_st4", H=time)
@@ -101,12 +101,12 @@ cat("  H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(y | denom ~ x + (1 | site), data=df_nb, family=ratiod_negbin_negbin(),
+    fit <- tratio(y | denom ~ x + (1 | site), data=df_nb, family=ratiod_negbin_negbin(),
                   spatiotemporal=spatiotemporal(
                     spatial=spatial_car(adj_mat, level="group", group_var="spatial_site"),
                     temporal=temporal_rw1("time"),
                     type="I"),
-                  iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H")
+                  control = list(iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H"))
   })["elapsed"]
   cat(sprintf("%.1fs\n", time))
   results[["58"]] <- list(row=58, name="nb_st1", H=time)
@@ -121,12 +121,12 @@ cat("  H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(y | denom ~ x + (1 | site), data=df_nb, family=ratiod_negbin_negbin(),
+    fit <- tratio(y | denom ~ x + (1 | site), data=df_nb, family=ratiod_negbin_negbin(),
                   spatiotemporal=spatiotemporal(
                     spatial=spatial_car(adj_mat, level="group", group_var="spatial_site"),
                     temporal=temporal_rw1("time"),
                     type="IV"),
-                  iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H")
+                  control = list(iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H"))
   })["elapsed"]
   cat(sprintf("%.1fs\n", time))
   results[["59"]] <- list(row=59, name="nb_st4", H=time)
@@ -141,12 +141,12 @@ cat("  H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(y | trials ~ x + (1 | site), data=df_bin, family=ratiod_binomial(),
+    fit <- tratio(y | trials ~ x + (1 | site), data=df_bin, family=ratiod_binomial(),
                   spatiotemporal=spatiotemporal(
                     spatial=spatial_car(adj_mat, level="group", group_var="spatial_site"),
                     temporal=temporal_rw1("time"),
                     type="I"),
-                  iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H")
+                  control = list(iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H"))
   })["elapsed"]
   cat(sprintf("%.1fs\n", time))
   results[["90"]] <- list(row=90, name="bin_st1", H=time)
@@ -161,12 +161,12 @@ cat("  H: ")
 flush.console()
 tryCatch({
   time <- system.time({
-    fit <- ratiod(y | trials ~ x + (1 | site), data=df_bin, family=ratiod_binomial(),
+    fit <- tratio(y | trials ~ x + (1 | site), data=df_bin, family=ratiod_binomial(),
                   spatiotemporal=spatiotemporal(
                     spatial=spatial_car(adj_mat, level="group", group_var="spatial_site"),
                     temporal=temporal_rw1("time"),
                     type="IV"),
-                  iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H")
+                  control = list(iter=ITER, warmup=WARMUP, chains=CHAINS, verbose=FALSE, gradient_mode="H"))
   })["elapsed"]
   cat(sprintf("%.1fs\n", time))
   results[["91"]] <- list(row=91, name="bin_st4", H=time)

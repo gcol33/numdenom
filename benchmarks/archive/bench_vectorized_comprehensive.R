@@ -48,18 +48,18 @@ results <- list()
 cat("--- FUSED single-pass (p<=4) ---\n")
 
 results$nb_base <- timed("NB base", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$pg_base <- timed("PG base", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$bin_base <- timed("Bin base", quote(
-  ratiod(y | n ~ x, data = df_bin, family = ratiod_binomial(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y | n ~ x, data = df_bin, family = ratiod_binomial(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =====================================================
@@ -68,18 +68,18 @@ results$bin_base <- timed("Bin base", quote(
 cat("\n--- VECTORIZED 3-pass (+RE) ---\n")
 
 results$nb_re <- timed("NB + RE", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$pg_re <- timed("PG + RE", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$bin_re <- timed("Bin + RE", quote(
-  ratiod(y | n ~ x + (1 | site), data = df_bin, family = ratiod_binomial(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y | n ~ x + (1 | site), data = df_bin, family = ratiod_binomial(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =====================================================
@@ -88,15 +88,15 @@ results$bin_re <- timed("Bin + RE", quote(
 cat("\n--- VECTORIZED 3-pass (+ICAR) ---\n")
 
 results$nb_icar <- timed("NB + ICAR", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_car(adj, group_var = "site"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$pg_icar <- timed("PG + ICAR", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
          spatial = spatial_car(adj, group_var = "site"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =====================================================
@@ -105,9 +105,9 @@ results$pg_icar <- timed("PG + ICAR", quote(
 cat("\n--- VECTORIZED 3-pass (+BYM2) ---\n")
 
 results$nb_bym2 <- timed("NB + BYM2", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_bym2(adj, group_var = "site"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =====================================================
@@ -116,21 +116,21 @@ results$nb_bym2 <- timed("NB + BYM2", quote(
 cat("\n--- VECTORIZED 3-pass (+temporal) ---\n")
 
 results$nb_rw1 <- timed("NB + RW1", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$pg_rw1 <- timed("PG + RW1", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$nb_ar1 <- timed("NB + AR1", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
          temporal = temporal_ar1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =====================================================
@@ -139,9 +139,9 @@ results$nb_ar1 <- timed("NB + AR1", quote(
 cat("\n--- VECTORIZED 3-pass (+RE+temporal) ---\n")
 
 results$nb_re_rw1 <- timed("NB + RE + RW1", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =====================================================
@@ -150,8 +150,8 @@ results$nb_re_rw1 <- timed("NB + RE + RW1", quote(
 cat("\n--- SCALAR fallback (ZI, slopes) ---\n")
 
 results$nb_zi <- timed("NB + ZI", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_zinegbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_zinegbin_negbin(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =====================================================

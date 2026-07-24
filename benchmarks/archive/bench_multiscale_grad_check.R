@@ -29,15 +29,12 @@ cat(strrep("=", 60), "\n\n")
 # Test with A_t mode (which had 0 divergent)
 cat("Testing gradient_mode = 'A_t' (0 divergent in benchmark)...\n")
 tryCatch({
-  fit_at <- ratiod(
+  fit_at <- tratio(
     y | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    iter = 100,
-    chains = 1,
-    gradient_mode = "A_t",
     temporal = temporal_multiscale(time_var = "time"),
-    refresh = 0
+    control = list(iter = 100, chains = 1, gradient_mode = "A_t")
   )
   cat(sprintf("  Divergent: %d\n", fit_at$divergent_count))
 }, error = function(e) {
@@ -49,15 +46,12 @@ cat("\n")
 # Test with H mode
 cat("Testing gradient_mode = 'H'...\n")
 tryCatch({
-  fit_h <- ratiod(
+  fit_h <- tratio(
     y | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    iter = 100,
-    chains = 1,
-    gradient_mode = "H",
     temporal = temporal_multiscale(time_var = "time"),
-    refresh = 0
+    control = list(iter = 100, chains = 1, gradient_mode = "H")
   )
   cat(sprintf("  Divergent: %d\n", fit_h$divergent_count))
 }, error = function(e) {

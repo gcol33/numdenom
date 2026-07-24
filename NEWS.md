@@ -1,5 +1,25 @@
 # tulpaRatio (development)
 
+## 1.4.0
+
+* `tratio()` replaces `ratiod()` as the package's front door, joining the
+  `tulpa*` family of fitting verbs alongside `tulpa::tulpa()` and
+  `tulpaObs::tobs()`. The `ratiod_*` family constructors, the `ratiod_fit`
+  class, and every other `ratiod_`-prefixed name are unchanged.
+
+* `tratio()` carries statistical arguments in its signature and every perf,
+  numerical, and tuning knob in a single `control = list()`, matching the
+  convention the engine and tulpaObs already follow. Moved into `control`:
+  `chains`, `iter`, `warmup`, `thin`, `cores`, `seed`, `verbose`,
+  `adapt_delta`, `max_treedepth`, `metric`, `riemannian`, `gradient_mode`,
+  `re_param`, `vi_variant`, and the stochastic-gradient knobs (`batch_size`,
+  `epsilon`, `alpha`, `schedule_*`, `use_schedule`) that previously arrived
+  through `...`. An unrecognised knob is now an error rather than a silent
+  no-op, and a `warmup` that would leave no post-warmup draws is rejected.
+
+* `refresh` is removed. It was a documented argument that no backend ever
+  read, so passing it changed nothing.
+
 ## 1.3.1
 
 * `diagnostics()` replaces `mcmc_diagnostics()`, following the engine rename in

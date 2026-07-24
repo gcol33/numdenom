@@ -45,7 +45,7 @@ df <- data.frame(
 
 \dontrun{
 # Fit model (slow, not run on CRAN)
-fit <- ratiod(
+fit <- tratio(
   catch | effort_hours ~ depth + (1 | vessel),
   data = df,
   family = ratiod_negbin_gamma(),

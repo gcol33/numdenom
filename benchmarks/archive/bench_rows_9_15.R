@@ -68,16 +68,12 @@ run_bench <- function(row_num, desc, ...) {
 
   tryCatch({
     time_h <- system.time({
-      fit <- ratiod(
+      fit <- tratio(
         y | effort ~ x + (1 | site),
         data = df,
         family = ratiod_poisson_gamma(),
-        iter = N_ITER,
-        warmup = N_WARMUP,
-        chains = N_CHAINS,
-        gradient_mode = "H",
-        refresh = 0,
-        ...
+        ...,
+        control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
       )
     })["elapsed"]
 

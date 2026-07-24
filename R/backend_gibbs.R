@@ -25,12 +25,13 @@
 NULL
 
 
-#' Fit ratiod model using Gibbs sampling
+#' Fit ratio model using Gibbs sampling
 #'
 #' @param formula A ratiod_formula object
 #' @param data Data frame
 #' @param family Model family
 #' @param spatial Spatial structure from spatial_car()
+#' @param priors Prior specification. See [ratiod_priors()].
 #' @param iter Total iterations
 #' @param warmup Warmup iterations
 #' @param thin Thinning interval
@@ -46,6 +47,7 @@ fit_gibbs <- function(formula,
                       family,
                       spatial,
                       temporal = NULL,
+                      priors = NULL,
                       iter = 2000,
                       warmup = floor(iter / 2),
                       thin = 1,
@@ -155,7 +157,13 @@ fit_gibbs <- function(formula,
     thin = as.integer(thin),
     seed = as.integer(seed %% .Machine$integer.max),
     verbose = verbose,
-    family = family_str
+    family = family_str,
+    # Same names and same defaults the HMC backend reads, so the spatial model
+    # is the one compute_log_post() scores regardless of which backend runs.
+    sigma_beta = priors$sigma_beta %||% 10.0,
+    sigma_re_scale = priors$sigma_re_scale %||% 2.5,
+    tau_spatial_shape = priors$tau_spatial_shape %||% 1.0,
+    tau_spatial_rate = priors$tau_spatial_rate %||% 0.01
   )
 
   # Add denominator data

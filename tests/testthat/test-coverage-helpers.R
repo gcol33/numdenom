@@ -73,14 +73,11 @@ test_that("mcmc_diagnostics returns list with diagnostic info", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | total ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    refresh = 0
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   diag <- diagnostics(fit)
@@ -236,11 +233,11 @@ test_that("ratio handles invalid type", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | total ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    iter = 50, warmup = 25, chains = 1, refresh = 0
+    control = list(iter = 50, warmup = 25, chains = 1)
   )
 
   expect_error(ratio(fit, type = "invalid_type"))
@@ -262,11 +259,11 @@ test_that("compute_loo requires loo package", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | total ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    iter = 100, warmup = 50, chains = 1, refresh = 0
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   # This should work or throw informative error
@@ -291,11 +288,11 @@ test_that("compute_waic requires loo package", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | total ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
-    iter = 100, warmup = 50, chains = 1, refresh = 0
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   tryCatch({

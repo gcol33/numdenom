@@ -33,9 +33,9 @@ df <- data.frame(y_num = y_num, y_denom = y_denom, x = x, site = factor(site))
 df$lon <- coords[as.integer(site), 1]
 df$lat <- coords[as.integer(site), 2]
 run_bench("PG+HSGP", function(m) {
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_poisson_gamma(),
          spatial = spatial_hsgp(coords = ~ lon + lat, m = 6),
-         iter = 500, warmup = 250, chains = 1, verbose = FALSE, metric = m)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE, metric = m))
 })
 
 # --- BYM2 ---
@@ -51,10 +51,10 @@ ii <- c(); jj <- c()
 for (i in 1:N_s) { j <- i %% N_s + 1; ii <- c(ii, i, j); jj <- c(jj, j, i) }
 adj <- Matrix::sparseMatrix(i = ii, j = jj, x = 1, dims = c(N_s, N_s))
 run_bench("NB+BYM2", function(m) {
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df2,
+  tratio(y_num | y_denom ~ x + (1 | site), data = df2,
          family = ratiod_negbin_negbin(),
          spatial = spatial_bym2(adj = adj, group_var = "site"),
-         iter = 500, warmup = 250, chains = 1, verbose = FALSE, metric = m)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE, metric = m))
 })
 
 # --- GP spatial ---
@@ -70,7 +70,7 @@ df3 <- data.frame(y_num = y_num, y_denom = y_denom, x = x, site = factor(site))
 df3$lon <- coords[as.integer(site), 1]
 df3$lat <- coords[as.integer(site), 2]
 run_bench("PG+GP", function(m) {
-  ratiod(y_num | y_denom ~ x, data = df3, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x, data = df3, family = ratiod_poisson_gamma(),
          spatial = spatial_gp(coords = ~ lon + lat),
-         iter = 500, warmup = 250, chains = 1, verbose = FALSE, metric = m)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE, metric = m))
 })

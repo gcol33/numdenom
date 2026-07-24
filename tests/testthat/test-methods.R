@@ -11,14 +11,12 @@ test_that("plot.ratiod_fit works with base graphics", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   # Should not error
@@ -38,14 +36,12 @@ test_that("plot.ratiod_fit respects pars argument", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   # Should not error with specific parameters
@@ -65,14 +61,12 @@ test_that("plot.ratiod_fit errors with no matching parameters", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   expect_error(
@@ -181,14 +175,12 @@ test_that("as.data.frame.ratiod_fit works", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   # The as.data.frame method requires fit$fit which may not exist for HMC backend
@@ -207,14 +199,12 @@ test_that("compute_fitted_values dispatches correctly", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   result <- tulpaRatio:::compute_fitted_values(fit)
@@ -236,14 +226,12 @@ test_that("compute_fitted_hmc works", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   result <- tulpaRatio:::compute_fitted_hmc(fit)
@@ -271,14 +259,12 @@ test_that("predict.ratiod_fit works with newdata", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   newdata <- data.frame(x = c(-1, 0, 1))
@@ -301,14 +287,12 @@ test_that("predict.ratiod_fit returns draws when summary=FALSE", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   newdata <- data.frame(x = c(-1, 0, 1))
@@ -331,14 +315,12 @@ test_that("predict.ratiod_fit returns fitted when no newdata", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   pred <- predict(fit)
@@ -379,14 +361,12 @@ test_that("build_prediction_data works", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   newdata <- data.frame(x = c(-1, 0, 1))
@@ -413,14 +393,12 @@ test_that("compute_predictions_hmc works", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   newdata <- data.frame(x = c(-1, 0, 1))
@@ -449,14 +427,12 @@ test_that("compute_predictions_hmc works with link scale", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 80,
-    warmup = 40,
-    chains = 1
+    control = list(iter = 80, warmup = 40, chains = 1)
   )
 
   newdata <- data.frame(x = c(-1, 0, 1))

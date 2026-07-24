@@ -36,11 +36,11 @@ simulate_temporal_binomial <- function(n_times = 16L, reps = 12L, type = "rw1") 
 
 fit_one_temporal <- function(sim, use_specs, seed_val, temporal_struct) {
   op <- options(tulpaRatio.use_specs = use_specs); on.exit(options(op), add = TRUE)
-  fit <- tulpaRatio::ratiod(
+  fit <- tulpaRatio::tratio(
     formula = sim$formula, data = sim$data, family = sim$family,
     temporal = temporal_struct,
-    mode = "hmc", iter = 3000L, warmup = 1000L, chains = 1L,
-    seed = seed_val, verbose = FALSE, gradient_mode = "A_r"
+    mode = "hmc",
+    control = list(iter = 3000L, warmup = 1000L, chains = 1L, seed = seed_val, verbose = FALSE, gradient_mode = "A_r")
   )
   colMeans(fit$draws)
 }

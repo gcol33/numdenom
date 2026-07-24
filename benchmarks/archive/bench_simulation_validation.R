@@ -143,13 +143,12 @@ df_95$denom[df_95$denom <= 0] <- 0.01
 
 cat("Fitting numdenom... ")
 t_95 <- system.time({
-  fit_95 <- ratiod(
+  fit_95 <- tratio(
     y | denom ~ x + (1|site),
     data = df_95,
     family = ratiod_gamma_gamma(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_95))
@@ -186,13 +185,12 @@ df_96$denom[df_96$denom <= 0] <- 0.01
 
 cat("Fitting numdenom... ")
 t_96 <- system.time({
-  fit_96 <- ratiod(
+  fit_96 <- tratio(
     y | denom ~ x + (1|site),
     data = df_96,
     family = ratiod_gamma_gamma(),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_96))
@@ -223,12 +221,11 @@ df_99 <- data.frame(
 
 cat("Fitting numdenom... ")
 t_99 <- system.time({
-  fit_99 <- ratiod(
+  fit_99 <- tratio(
     y | denom ~ x + (1|site),
     data = df_99,
     family = ratiod_lognormal(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_99))
@@ -262,13 +259,12 @@ df_100 <- data.frame(
 
 cat("Fitting numdenom... ")
 t_100 <- system.time({
-  fit_100 <- ratiod(
+  fit_100 <- tratio(
     y | denom ~ x + (1|site),
     data = df_100,
     family = ratiod_lognormal(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_100))
@@ -303,13 +299,12 @@ df_101 <- data.frame(
 
 cat("Fitting numdenom... ")
 t_101 <- system.time({
-  fit_101 <- ratiod(
+  fit_101 <- tratio(
     y | denom ~ x + (1|site),
     data = df_101,
     family = ratiod_lognormal(),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_101))
@@ -345,14 +340,13 @@ df_102 <- data.frame(
 
 cat("Fitting numdenom... ")
 t_102 <- system.time({
-  fit_102 <- ratiod(
+  fit_102 <- tratio(
     y | denom ~ x + (1|site),
     data = df_102,
     family = ratiod_lognormal(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_102))

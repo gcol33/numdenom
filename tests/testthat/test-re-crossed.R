@@ -135,14 +135,12 @@ test_that("random slopes work in HMC backend", {
   )
 
   # Random slopes should now work
-  fit <- ratiod(
+  fit <- tratio(
     y | n ~ x + (1 + x | site),
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -229,15 +227,12 @@ test_that("HMC fits model with crossed RE terms", {
   )
 
   # Should run without error
-  fit <- ratiod(
+  fit <- tratio(
     y | n ~ x + (1 | site) + (1 | year),
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -269,15 +264,12 @@ test_that("HMC with three crossed RE terms runs", {
     observer = factor(rep(1:4, 50))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | n ~ x + (1 | site) + (1 | year) + (1 | observer),
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")

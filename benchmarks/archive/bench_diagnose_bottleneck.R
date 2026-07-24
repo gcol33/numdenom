@@ -84,13 +84,12 @@ models <- list()
 cat(">>> PG + HSGP ...\n")
 tryCatch({
   t0 <- proc.time()
-  fit <- ratiod(
+  fit <- tratio(
     y_pg_num | y_pg_denom ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_hsgp(coords = cbind(df$lon, df$lat), m = 6, c = 1.5),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
   models[["PG+HSGP"]] <- extract_diag(fit)
 }, error = function(e) cat("  ERROR:", e$message, "\n"))
@@ -98,13 +97,12 @@ tryCatch({
 # 2. PG + BYM2 (row 6-equivalent)
 cat("\n>>> PG + BYM2 ...\n")
 tryCatch({
-  fit <- ratiod(
+  fit <- tratio(
     y_pg_num | y_pg_denom ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_bym2(adj = adj_mat, group = site_int),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
   models[["PG+BYM2"]] <- extract_diag(fit)
 }, error = function(e) cat("  ERROR:", e$message, "\n"))
@@ -112,12 +110,11 @@ tryCatch({
 # 3. PG + correlated slopes (row 33-equivalent)
 cat("\n>>> PG + correlated slopes ...\n")
 tryCatch({
-  fit <- ratiod(
+  fit <- tratio(
     y_pg_num | y_pg_denom ~ x + (x | site),
     data = df,
     family = ratiod_poisson_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
   models[["PG+slopes"]] <- extract_diag(fit)
 }, error = function(e) cat("  ERROR:", e$message, "\n"))
@@ -125,13 +122,12 @@ tryCatch({
 # 4. PG + temporal_gp (row 14-equivalent)
 cat("\n>>> PG + temporal_gp ...\n")
 tryCatch({
-  fit <- ratiod(
+  fit <- tratio(
     y_pg_num | y_pg_denom ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_gp(time = time, group = site_int),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
   models[["PG+GP_t"]] <- extract_diag(fit)
 }, error = function(e) cat("  ERROR:", e$message, "\n"))
@@ -139,13 +135,12 @@ tryCatch({
 # 5. Bin + AR1 (row 73-equivalent)
 cat("\n>>> Bin + AR1 ...\n")
 tryCatch({
-  fit <- ratiod(
+  fit <- tratio(
     y_bin_num | y_bin_denom ~ x,
     data = df,
     family = ratiod_binomial(),
     temporal = temporal_ar1(time = time, group = site_int),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
   models[["Bin+AR1"]] <- extract_diag(fit)
 }, error = function(e) cat("  ERROR:", e$message, "\n"))
@@ -157,13 +152,12 @@ tryCatch({
   y_nb_denom <- rnbinom(N_OBS, mu = exp(3 + 0.3 * x), size = 8)
   df$y_nb_num <- y_nb_num
   df$y_nb_denom <- y_nb_denom
-  fit <- ratiod(
+  fit <- tratio(
     y_nb_num | y_nb_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     temporal = temporal_ar1(time = time, group = site_int),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
   models[["NB+AR1"]] <- extract_diag(fit)
 }, error = function(e) cat("  ERROR:", e$message, "\n"))

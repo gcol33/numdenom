@@ -2,7 +2,7 @@
 % Please edit documentation in R/ratio.R
 \name{ratio}
 \alias{ratio}
-\title{Extract ratio posteriors from a ratiod model}
+\title{Extract ratio posteriors from a ratio model}
 \usage{
 ratio(
   object,
@@ -35,7 +35,7 @@ of full posterior draws.}
 A \code{ratiod_ratio} object containing posterior draws or summaries.
 }
 \description{
-Compute posterior distributions of ratios from a fitted ratiod model.
+Compute posterior distributions of ratios from a fitted ratio model.
 Ratios are derived quantities: E[numerator] / E[denominator], computed
 in Stan's generated quantities block with full uncertainty propagation.
 }
@@ -55,7 +55,7 @@ df <- data.frame(
 )
 
 # Fit model
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + (1 | site),
   data = df,
   family = ratiod_poisson_gamma(),

@@ -2,7 +2,7 @@
 % Please edit documentation in R/ratio.R
 \name{fitted.ratiod_fit}
 \alias{fitted.ratiod_fit}
-\title{Extract fitted values from a ratiod model}
+\title{Extract fitted values from a ratio model}
 \usage{
 \method{fitted}{ratiod_fit}(
   object,
@@ -31,7 +31,7 @@ If \code{summary = FALSE}, a list with matrices of posterior draws.
 }
 \description{
 Compute posterior distributions of fitted values (expected values) for both
-the numerator and denominator processes from a fitted ratiod model.
+the numerator and denominator processes from a fitted ratio model.
 }
 \examples{
 \donttest{
@@ -45,7 +45,7 @@ df <- data.frame(
 )
 
 # Fit model
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth,
   data = df,
   family = ratiod_poisson_gamma(),

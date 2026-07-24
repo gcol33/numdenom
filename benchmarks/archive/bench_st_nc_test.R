@@ -32,7 +32,7 @@ cat(sprintf("Setup: %d sites x %d times = %d obs, %d ST params\n\n",
 # --- Test 1: H vs N gradient agreement with NC (default for Type IV) ---
 cat("--- Test 1: Gradient Check (H vs N) ---\n")
 tryCatch({
-  fit_h <- ratiod(y | denom ~ x,
+  fit_h <- tratio(y | denom ~ x,
                   data = df, family = ratiod_poisson_gamma(),
                   spatial = spatial_car(adj, group_var = "site"),
                   temporal = temporal_rw1(time_var = "time"),
@@ -41,8 +41,8 @@ tryCatch({
                     temporal = temporal_rw1(time_var = "time"),
                     type = "IV"
                   ),
-                  mode = "hmc", gradient_mode = "H",
-                  iter = 50, warmup = 25, chains = 1, verbose = FALSE)
+                  mode = "hmc",
+                  control = list(gradient_mode = "H", iter = 50, warmup = 25, chains = 1, verbose = FALSE))
   cat("  H mode: OK\n")
   cat(sprintf("    Metric: %s, eps: %.4f, avg td: %.1f\n",
               if (!is.null(fit_h$diagnostics$metric)) fit_h$diagnostics$metric else "?",
@@ -53,7 +53,7 @@ tryCatch({
 })
 
 tryCatch({
-  fit_n <- ratiod(y | denom ~ x,
+  fit_n <- tratio(y | denom ~ x,
                   data = df, family = ratiod_poisson_gamma(),
                   spatial = spatial_car(adj, group_var = "site"),
                   temporal = temporal_rw1(time_var = "time"),
@@ -62,8 +62,8 @@ tryCatch({
                     temporal = temporal_rw1(time_var = "time"),
                     type = "IV"
                   ),
-                  mode = "hmc", gradient_mode = "N",
-                  iter = 50, warmup = 25, chains = 1, verbose = FALSE)
+                  mode = "hmc",
+                  control = list(gradient_mode = "N", iter = 50, warmup = 25, chains = 1, verbose = FALSE))
   cat("  N mode: OK\n")
 }, error = function(e) {
   cat(sprintf("  N mode FAILED: %s\n", conditionMessage(e)))
@@ -88,7 +88,7 @@ if (exists("fit_h") && exists("fit_n")) {
 cat("\n--- Test 2: Timing (500 iter, H mode) ---\n")
 
 t_nc <- system.time({
-  fit_nc <- ratiod(y | denom ~ x,
+  fit_nc <- tratio(y | denom ~ x,
                    data = df, family = ratiod_poisson_gamma(),
                    spatial = spatial_car(adj, group_var = "site"),
                    temporal = temporal_rw1(time_var = "time"),
@@ -97,8 +97,8 @@ t_nc <- system.time({
                      temporal = temporal_rw1(time_var = "time"),
                      type = "IV"
                    ),
-                   mode = "hmc", gradient_mode = "H",
-                   iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                   mode = "hmc",
+                   control = list(gradient_mode = "H", iter = 500, warmup = 250, chains = 1, verbose = FALSE))
 })["elapsed"]
 
 cat(sprintf("  NC (default): %.1fs\n", t_nc))

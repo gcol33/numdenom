@@ -24,7 +24,7 @@ A list with class \code{ratiod_diagnostic_summary} containing:
 }
 }
 \description{
-Provides a comprehensive diagnostic report for a ratiod model, combining
+Provides a comprehensive diagnostic report for a ratio model, combining
 convergence metrics, divergence information, and actionable recommendations.
 }
 \examples{

@@ -122,12 +122,11 @@ cat(sprintf("True RE: sigma_int=%.2f, sigma_slope=%.2f, rho=%.2f\n",
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y_num | y_denom ~ x + (1 + x|site),
     data = df_nb_slopes,
     family = ratiod_negbin_negbin(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd))

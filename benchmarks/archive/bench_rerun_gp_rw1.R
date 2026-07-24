@@ -132,12 +132,11 @@ flush.console()
 
 t_51 <- system.time({
   fit_51 <- tryCatch({
-    ratiod(y | denom ~ x + (1 | site), data = df_51,
+    tratio(y | denom ~ x + (1 | site), data = df_51,
            family = ratiod_negbin_negbin(),
            spatial = spatial_gp(coords = ~ lon + lat),
            temporal = temporal_rw1("time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-           gradient_mode = "H", verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE))
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", conditionMessage(e)))
     NULL
@@ -209,12 +208,11 @@ flush.console()
 
 t_83 <- system.time({
   fit_83 <- tryCatch({
-    ratiod(y | trials ~ x + (1 | site), data = df_83,
+    tratio(y | trials ~ x + (1 | site), data = df_83,
            family = ratiod_binomial(),
            spatial = spatial_gp(coords = ~ lon + lat),
            temporal = temporal_rw1("time"),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-           gradient_mode = "H", verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE))
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", conditionMessage(e)))
     NULL

@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_sghmc.R
 \name{fit_sghmc}
 \alias{fit_sghmc}
-\title{Fit ratiod model using Stochastic Gradient HMC}
+\title{Fit ratio model using Stochastic Gradient HMC}
 \usage{
 fit_sghmc(
   formula,
@@ -57,6 +57,6 @@ fit_sghmc(
 A ratiod_fit object with class "ratiod_sghmc"
 }
 \description{
-Fit ratiod model using Stochastic Gradient HMC
+Fit ratio model using Stochastic Gradient HMC
 }
 \keyword{internal}

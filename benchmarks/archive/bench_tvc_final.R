@@ -30,10 +30,9 @@ run_tvc <- function(label, formula, family, pre_fix_time) {
   cat(sprintf("\n=== %s (pre-fix: %.1fs) ===\n", label, pre_fix_time))
   t0 <- proc.time()
   fit <- tryCatch(
-    ratiod(formula, data = df, family = family,
-           tvc = temporal_tvc("time", terms = 2, structure = "rw1"),
-           iter = N_ITER, warmup = N_WARMUP, chains = 1,
-           gradient_mode = "H", verbose = TRUE),
+    tratio(formula, data = df, family = family,
+           temporal = temporal_tvc("time", terms = 2, structure = "rw1"),
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, gradient_mode = "H", verbose = TRUE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
   elapsed <- (proc.time() - t0)[3]

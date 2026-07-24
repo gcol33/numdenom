@@ -36,10 +36,10 @@ stan_ref <- c("NB+ICAR" = 3.5, "NB+HSGP_noRE" = 2.9,
 cat("\n=== 1. NB+ICAR (FAIR: both have RE + ICAR) ===\n")
 df1 <- data.frame(y = y_nb_num, denom = y_nb_denom, x = x,
                    site = site, spatial_site = site)
-t1 <- system.time(fit1 <- ratiod(
+t1 <- system.time(fit1 <- tratio(
   y | denom ~ x + (1 | site), data = df1, family = ratiod_negbin_negbin(),
   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-  iter = 500, warmup = 250, chains = 1, verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE)
 ))["elapsed"]
 cat(sprintf("  numdenom: %.1fs (%d params), Stan: %.1fs => %.1fx\n",
             t1, ncol(fit1$fit_raw$samples[[1]]), 3.5, 3.5 / t1))
@@ -47,10 +47,10 @@ cat(sprintf("  numdenom: %.1fs (%d params), Stan: %.1fs => %.1fx\n",
 cat("\n=== 2. NB+HSGP (FAIR: no RE, matching Stan) ===\n")
 df2 <- data.frame(y = y_nb_num, denom = y_nb_denom, x = x,
                    lon = lon, lat = lat)
-t2 <- system.time(fit2 <- ratiod(
+t2 <- system.time(fit2 <- tratio(
   y | denom ~ x, data = df2, family = ratiod_negbin_negbin(),
   spatial = spatial_hsgp(coords = ~ lon + lat),
-  iter = 500, warmup = 250, chains = 1, verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE)
 ))["elapsed"]
 cat(sprintf("  numdenom: %.1fs (%d params), Stan: %.1fs => %.1fx\n",
             t2, ncol(fit2$fit_raw$samples[[1]]), 2.9, 2.9 / t2))
@@ -58,10 +58,10 @@ cat(sprintf("  numdenom: %.1fs (%d params), Stan: %.1fs => %.1fx\n",
 cat("\n=== 3. PG+GP_t (FAIR: no RE, matching Stan) ===\n")
 df3 <- data.frame(y = y_pg_num, denom = y_pg_denom, x = x,
                    time_num = time_num)
-t3 <- system.time(fit3 <- ratiod(
+t3 <- system.time(fit3 <- tratio(
   y | denom ~ x, data = df3, family = ratiod_poisson_gamma(),
   temporal = temporal_gp("time_num"),
-  iter = 500, warmup = 250, chains = 1, verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE)
 ))["elapsed"]
 cat(sprintf("  numdenom: %.1fs (%d params), Stan: %.1fs => %.1fx\n",
             t3, ncol(fit3$fit_raw$samples[[1]]), 10.0, 10.0 / t3))
@@ -69,10 +69,10 @@ cat(sprintf("  numdenom: %.1fs (%d params), Stan: %.1fs => %.1fx\n",
 cat("\n=== 4. Bin+GP_t (FAIR: no RE, matching Stan) ===\n")
 df4 <- data.frame(y = y_bin, trials = trials, x = x,
                    time_num = time_num)
-t4 <- system.time(fit4 <- ratiod(
+t4 <- system.time(fit4 <- tratio(
   y | trials ~ x, data = df4, family = ratiod_binomial(),
   temporal = temporal_gp("time_num"),
-  iter = 500, warmup = 250, chains = 1, verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE)
 ))["elapsed"]
 cat(sprintf("  numdenom: %.1fs (%d params), Stan: %.1fs => %.1fx\n",
             t4, ncol(fit4$fit_raw$samples[[1]]), 3.3, 3.3 / t4))

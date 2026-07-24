@@ -44,10 +44,9 @@ df1$effort[df1$effort < 0.01] <- 0.01
 
 cat("numdenom NUTS... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | effort ~ x, data = df1,
+  fit_nd <- tratio(y | effort ~ x, data = df1,
                    family = ratiod_poisson_gamma(),
-                   iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                   verbose = FALSE)
+                   control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 })["elapsed"]
 diag <- fit_nd$diagnostics
 cat(sprintf("%.2fs (treedepth=%.1f, leapfrog=%.1f)\n", t_nd,
@@ -85,10 +84,9 @@ df2$effort[df2$effort < 0.01] <- 0.01
 
 cat("numdenom NUTS... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | effort ~ x + (1|site), data = df2,
+  fit_nd <- tratio(y | effort ~ x + (1|site), data = df2,
                    family = ratiod_poisson_gamma(),
-                   iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                   verbose = FALSE)
+                   control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 })["elapsed"]
 diag <- fit_nd$diagnostics
 cat(sprintf("%.2fs (treedepth=%.1f, leapfrog=%.1f)\n", t_nd,
@@ -129,10 +127,9 @@ df4$effort[df4$effort < 0.01] <- 0.01
 
 cat("numdenom NUTS... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | effort ~ x + (1|site) + (1|site2), data = df4,
+  fit_nd <- tratio(y | effort ~ x + (1|site) + (1|site2), data = df4,
                    family = ratiod_poisson_gamma(),
-                   iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                   verbose = FALSE)
+                   control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 })["elapsed"]
 diag <- fit_nd$diagnostics
 cat(sprintf("%.2fs (treedepth=%.1f, leapfrog=%.1f)\n", t_nd,
@@ -170,10 +167,9 @@ df31 <- data.frame(
 
 cat("numdenom NUTS... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | denom ~ x, data = df31,
+  fit_nd <- tratio(y | denom ~ x, data = df31,
                    family = ratiod_negbin_negbin(),
-                   iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                   verbose = FALSE)
+                   control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 })["elapsed"]
 diag <- fit_nd$diagnostics
 cat(sprintf("%.2fs (treedepth=%.1f, leapfrog=%.1f)\n", t_nd,
@@ -210,10 +206,9 @@ df32 <- data.frame(
 
 cat("numdenom NUTS... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | denom ~ x + (1|site), data = df32,
+  fit_nd <- tratio(y | denom ~ x + (1|site), data = df32,
                    family = ratiod_negbin_negbin(),
-                   iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                   verbose = FALSE)
+                   control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 })["elapsed"]
 diag <- fit_nd$diagnostics
 cat(sprintf("%.2fs (treedepth=%.1f, leapfrog=%.1f)\n", t_nd,
@@ -251,10 +246,9 @@ df34 <- data.frame(
 
 cat("numdenom NUTS... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | denom ~ x + (1|site) + (1|site2), data = df34,
+  fit_nd <- tratio(y | denom ~ x + (1|site) + (1|site2), data = df34,
                    family = ratiod_negbin_negbin(),
-                   iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                   verbose = FALSE)
+                   control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 })["elapsed"]
 diag <- fit_nd$diagnostics
 cat(sprintf("%.2fs (treedepth=%.1f, leapfrog=%.1f)\n", t_nd,
@@ -308,10 +302,9 @@ df77 <- data.frame(y = y77, trials = trials, x = x, site = site)
 
 cat("numdenom NUTS... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | trials ~ x + (1|site), data = df77,
+  fit_nd <- tratio(y | trials ~ x + (1|site), data = df77,
                    family = ratiod_hurdle_binomial(),
-                   iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                   verbose = FALSE)
+                   control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
 })["elapsed"]
 diag <- fit_nd$diagnostics
 cat(sprintf("%.2fs (treedepth=%.1f, leapfrog=%.1f)\n", t_nd,

@@ -96,18 +96,18 @@ results <- list()
 cat("--- Group 1: Base models (already fused, find_reasonable_epsilon only) ---\n")
 
 results[["Row 1: PG base"]] <- time_fit("Row 1: PG base (old: 9.1s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Row 31: NB base"]] <- time_fit("Row 31: NB base (old: 17.1s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Row 61: Bin base"]] <- time_fit("Row 61: Bin base (old: 12.7s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+  tratio(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ============================================================
@@ -117,21 +117,21 @@ results[["Row 61: Bin base"]] <- time_fit("Row 61: Bin base (old: 12.7s)", quote
 cat("\n--- Group 2: HSGP models (newly fused) ---\n")
 
 results[["Row 8: PG+HSGP"]] <- time_fit("Row 8: PG+HSGP (old: 9.5s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
          spatial = spatial_hsgp(coords = ~ lon + lat, m = 5, group_var = "site"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Row 38: NB+HSGP"]] <- time_fit("Row 38: NB+HSGP (old: 12.9s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_hsgp(coords = ~ lon + lat, m = 5, group_var = "site"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Row 68: Bin+HSGP"]] <- time_fit("Row 68: Bin+HSGP (old: 3.9s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_bin, family = ratiod_binomial(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_hsgp(coords = ~ lon + lat, m = 5, group_var = "site"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ============================================================
@@ -141,21 +141,21 @@ results[["Row 68: Bin+HSGP"]] <- time_fit("Row 68: Bin+HSGP (old: 3.9s)", quote(
 cat("\n--- Group 3: TVC models (newly fused) ---\n")
 
 results[["Row 27: PG+TVC"]] <- time_fit("Row 27: PG+TVC (old: 6.6s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
          temporal = temporal_tvc(time_var = "time", terms = 1),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Row 57: NB+TVC"]] <- time_fit("Row 57: NB+TVC (old: 15.0s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
          temporal = temporal_tvc(time_var = "time", terms = 1),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Row 89: Bin+TVC"]] <- time_fit("Row 89: Bin+TVC (old: 3.9s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_bin, family = ratiod_binomial(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_bin, family = ratiod_binomial(),
          temporal = temporal_tvc(time_var = "time", terms = 1),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ============================================================
@@ -174,9 +174,9 @@ df_lat_bin <- data.frame(
 )
 
 results[["Row 92: Bin+Latent"]] <- time_fit("Row 92: Bin+Latent (old: 0.1s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_lat_bin, family = ratiod_binomial(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_lat_bin, family = ratiod_binomial(),
          latent = latent_factor(n_factors = 1),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ============================================================
@@ -186,15 +186,15 @@ results[["Row 92: Bin+Latent"]] <- time_fit("Row 92: Bin+Latent (old: 0.1s)", qu
 cat("\n--- Group 5: RE + temporal (already fused) ---\n")
 
 results[["Row 11: PG+RW1"]] <- time_fit("Row 11: PG+RW1 (old: 10.2s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Row 41: NB+RW1"]] <- time_fit("Row 41: NB+RW1 (old: 8.2s)", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ============================================================

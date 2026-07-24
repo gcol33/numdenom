@@ -23,13 +23,11 @@ y_denom <- rgamma(N, shape = shape_denom, rate = shape_denom / mu_denom)
 df <- data.frame(y = y_num, denom = y_denom, x = x)
 
 cat("=== Testing with gradient_mode = 'N' (numerical - reference) ===\n")
-fit_num <- ratiod(
+fit_num <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "N",
-  verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "N", verbose = TRUE)
 )
 
 draws_num <- as.matrix(fit_num$draws)
@@ -38,13 +36,11 @@ cat("beta_num[2]:", mean(draws_num[,"beta_num[2]"]), "(true: 0.3)\n")
 cat("shape_num:", mean(draws_num[,"shape_num"]), "(true: 5)\n")
 
 cat("\n=== Testing with gradient_mode = 'A' (forward autodiff) ===\n")
-fit_fwd <- ratiod(
+fit_fwd <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "A",
-  verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = TRUE)
 )
 
 draws_fwd <- as.matrix(fit_fwd$draws)
@@ -53,13 +49,11 @@ cat("beta_num[2]:", mean(draws_fwd[,"beta_num[2]"]), "(true: 0.3)\n")
 cat("shape_num:", mean(draws_fwd[,"shape_num"]), "(true: 5)\n")
 
 cat("\n=== Testing with gradient_mode = 'A_t' (tape autodiff) ===\n")
-fit_tape <- ratiod(
+fit_tape <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "A_t",
-  verbose = TRUE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A_t", verbose = TRUE)
 )
 
 draws_tape <- as.matrix(fit_tape$draws)

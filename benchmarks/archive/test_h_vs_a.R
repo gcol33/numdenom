@@ -34,10 +34,10 @@ y_num_gg <- rgamma(N, shape = 5, rate = 5 / exp(2 + 0.3 * x))
 y_denom_gg <- rgamma(N, shape = 8, rate = 8 / exp(3 + 0.2 * x))
 df_gg <- data.frame(y = y_num_gg, denom = y_denom_gg, x = x)
 
-fit_A_gg <- ratiod(y | denom ~ x, data = df_gg, family = ratiod_gamma_gamma(),
-                   iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE)
-fit_H_gg <- ratiod(y | denom ~ x, data = df_gg, family = ratiod_gamma_gamma(),
-                   iter = 1000, warmup = 500, chains = 1, gradient_mode = "H", verbose = FALSE)
+fit_A_gg <- tratio(y | denom ~ x, data = df_gg, family = ratiod_gamma_gamma(),
+                   control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE))
+fit_H_gg <- tratio(y | denom ~ x, data = df_gg, family = ratiod_gamma_gamma(),
+                   control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "H", verbose = FALSE))
 
 compare_modes(fit_A_gg, fit_H_gg,
               list("beta_num[1]" = 2, "beta_num[2]" = 0.3, "shape_num" = 5),
@@ -50,10 +50,10 @@ y_num_ln <- rlnorm(N, meanlog = 2 + 0.3 * x, sdlog = 0.5)
 y_denom_ln <- rlnorm(N, meanlog = 3 + 0.2 * x, sdlog = 0.4)
 df_ln <- data.frame(y = y_num_ln, denom = y_denom_ln, x = x)
 
-fit_A_ln <- ratiod(y | denom ~ x, data = df_ln, family = ratiod_lognormal(),
-                   iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE)
-fit_H_ln <- ratiod(y | denom ~ x, data = df_ln, family = ratiod_lognormal(),
-                   iter = 1000, warmup = 500, chains = 1, gradient_mode = "H", verbose = FALSE)
+fit_A_ln <- tratio(y | denom ~ x, data = df_ln, family = ratiod_lognormal(),
+                   control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE))
+fit_H_ln <- tratio(y | denom ~ x, data = df_ln, family = ratiod_lognormal(),
+                   control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "H", verbose = FALSE))
 
 compare_modes(fit_A_ln, fit_H_ln,
               list("beta_num[1]" = 2, "beta_num[2]" = 0.3, "sigma_num" = 0.5),
@@ -70,10 +70,10 @@ beta_bb <- (1 - prob) * phi_bb
 y_bb <- rbinom(N, n_trials, rbeta(N, alpha_bb, beta_bb))
 df_bb <- data.frame(y = y_bb, n = n_trials, x = x)
 
-fit_A_bb <- ratiod(y | n ~ x, data = df_bb, family = ratiod_beta_binomial(),
-                   iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE)
-fit_H_bb <- ratiod(y | n ~ x, data = df_bb, family = ratiod_beta_binomial(),
-                   iter = 1000, warmup = 500, chains = 1, gradient_mode = "H", verbose = FALSE)
+fit_A_bb <- tratio(y | n ~ x, data = df_bb, family = ratiod_beta_binomial(),
+                   control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE))
+fit_H_bb <- tratio(y | n ~ x, data = df_bb, family = ratiod_beta_binomial(),
+                   control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "H", verbose = FALSE))
 
 compare_modes(fit_A_bb, fit_H_bb,
               list("beta_num[1]" = 0.5, "beta_num[2]" = 0.8, "phi_num" = 10),

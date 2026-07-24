@@ -175,7 +175,7 @@ results <- list()
 
 # Row 63: binomial + slopes (if not already validated)
 results[["63"]] <- run_bench(63, "bin_slopes",
-  nd_call = quote(ratiod(y | trials ~ x + (x|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (x|site), data = df_bin,
                          family = ratiod_binomial())),
   brms_call = quote(brm(y | trials(trials) ~ x + (x|site), data = df_bin,
                         family = binomial(), iter = 1000, warmup = 500, chains = 2,
@@ -184,7 +184,7 @@ results[["63"]] <- run_bench(63, "bin_slopes",
 
 # Row 72: binomial + RW2
 results[["72"]] <- run_bench(72, "bin_rw2",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          temporal = temporal_rw2("time_factor"))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|time_factor), data = df_bin,
@@ -194,7 +194,7 @@ results[["72"]] <- run_bench(72, "bin_rw2",
 
 # Row 73: binomial + AR1
 results[["73"]] <- run_bench(73, "bin_ar1",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          temporal = temporal_ar1("time_factor"))),
   brms_call = quote(brm(y | trials(trials) ~ x + (1|site) + (1|time_factor), data = df_bin,
@@ -204,7 +204,7 @@ results[["73"]] <- run_bench(73, "bin_ar1",
 
 # Row 81: binomial + BYM2 + RW1
 results[["81"]] <- run_bench(81, "bin_bym2_rw1",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time_factor"))),
@@ -215,7 +215,7 @@ results[["81"]] <- run_bench(81, "bin_bym2_rw1",
 
 # Row 82: binomial + ICAR + AR1
 results[["82"]] <- run_bench(82, "bin_icar_ar1",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_ar1("time_factor"))),
@@ -228,7 +228,7 @@ results[["82"]] <- run_bench(82, "bin_icar_ar1",
 
 # Row 34: negbin + crossed RE
 results[["34"]] <- run_bench(34, "nb_crossed",
-  nd_call = quote(ratiod(y | denom ~ x + (1|site) + (1|site2), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1|site) + (1|site2), data = df_nb,
                          family = ratiod_negbin_negbin())),
   brms_call = quote(brm(y ~ x + (1|site) + (1|site2) + offset(log(denom)), data = df_nb,
                         family = negbinomial(), iter = 1000, warmup = 500, chains = 2,
@@ -237,7 +237,7 @@ results[["34"]] <- run_bench(34, "nb_crossed",
 
 # Row 55: negbin + slopes + ICAR
 results[["55"]] <- run_bench(55, "nb_slopes_icar",
-  nd_call = quote(ratiod(y | denom ~ x + (x|site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (x|site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"))),
   brms_call = quote(brm(y ~ x + (x|site) + (1|spatial_site) + offset(log(denom)), data = df_nb,
@@ -247,7 +247,7 @@ results[["55"]] <- run_bench(55, "nb_slopes_icar",
 
 # Row 57: negbin + TVC
 results[["57"]] <- run_bench(57, "nb_tvc",
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          temporal = temporal_tvc("time_factor", ~ x))),
   brms_call = quote(brm(y ~ x + (1|site) + (1|time_factor) + offset(log(denom)), data = df_nb,
@@ -259,7 +259,7 @@ results[["57"]] <- run_bench(57, "nb_tvc",
 
 # Row 18: pg + ICAR + RW1 (verify it's validated)
 results[["18"]] <- run_bench(18, "pg_icar_rw1",
-  nd_call = quote(ratiod(y | effort ~ x + (1|site), data = df_pg,
+  nd_call = quote(tratio(y | effort ~ x + (1|site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
                          temporal = temporal_rw1("time_factor"))),

@@ -32,37 +32,37 @@ run_diag <- function(desc, expr) {
 
 # Reference: base models
 run_diag("NB base (reference)", quote(
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE)
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE))
 ))
 
 # NB + RW1 (the slow one: ~45s)
 run_diag("NB + RW1", quote(
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE))
 ))
 
 # NB + RE + RW1 (paradoxically faster: ~16s)
 run_diag("NB + RE + RW1", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE))
 ))
 
 # NB + AR1 (also slow: ~48s)
 run_diag("NB + AR1", quote(
-  ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
          temporal = temporal_ar1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE))
 ))
 
 # PG + RW1
 run_diag("PG + RW1", quote(
-  ratiod(y_num | y_denom ~ x, data = df[, c("y_num", "y_denom", "x", "time")],
+  tratio(y_num | y_denom ~ x, data = df[, c("y_num", "y_denom", "x", "time")],
          family = ratiod_poisson_gamma(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE))
 ))
 
 cat("Done.\n")

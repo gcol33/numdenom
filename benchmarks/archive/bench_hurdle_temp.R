@@ -42,10 +42,10 @@ cat("\n========== Row 17: pg_hurdle ==========\n")
 
 cat("Running numdenom... ")
 t_nd_17 <- system.time({
-  fit_nd_17 <- ratiod(y | effort ~ x + (1|site), data = df_pg_zi,
+  fit_nd_17 <- tratio(y | effort ~ x + (1|site), data = df_pg_zi,
                       family = ratiod_poisson_gamma(),
                       zi = numdenom::hurdle_poisson(),
-                      iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                      control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("%.1fs (div: %d)\n", t_nd_17, fit_nd_17$diagnostics$divergent))
 
@@ -70,9 +70,9 @@ cat("\n========== Row 77: bin_hurdle ==========\n")
 
 cat("Running numdenom... ")
 t_nd_77 <- system.time({
-  fit_nd_77 <- ratiod(y | trials ~ x + (1|site), data = df_bin_zi,
+  fit_nd_77 <- tratio(y | trials ~ x + (1|site), data = df_bin_zi,
                       family = ratiod_hurdle_binomial(),
-                      iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                      control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("%.1fs (div: %d)\n", t_nd_77, fit_nd_77$diagnostics$divergent))
 

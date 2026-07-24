@@ -1,10 +1,10 @@
-#' Parse and validate ratiod formulas
+#' Parse and validate tulpaRatio formulas
 #'
 #' @description
-#' Internal functions for parsing ratiod formulas into a structured
+#' Internal functions for parsing tulpaRatio formulas into a structured
 #' specification for Stan model building.
 #'
-#' ratiod supports a combined formula syntax:
+#' tulpaRatio supports a combined formula syntax:
 #' - `num | denom ~ x + (1|group)` for shared predictors
 #' - Separate `formula_num` and `formula_denom` for different predictors
 #'
@@ -12,7 +12,7 @@
 #' @keywords internal
 NULL
 
-#' Parse a ratiod formula
+#' Parse a tulpaRatio formula
 #'
 #' @description
 #' Parses the main formula and optional process-specific formulas into
@@ -269,7 +269,7 @@ parse_formula_components <- function(f, data) {
 #' Check formula does not contain offset()
 #'
 #' @description
-#' The ratiod philosophy explicitly forbids offset terms. Offsets encode
+#' The tulpaRatio philosophy explicitly forbids offset terms. Offsets encode
 #' the assumption that the ratio is the quantity of interest, which is
 #' exactly the modelling approach this package rejects.
 #'
@@ -283,7 +283,7 @@ check_no_offset <- function(f, name) {
   if (grepl("\\boffset\\s*\\(", f_text, ignore.case = TRUE)) {
     stop(
       sprintf("offset() is not allowed in the %s formula.\n\n", name),
-      "ratiod does not model ratios directly. Instead, it jointly models the\n",
+      "tulpaRatio does not model ratios directly. Instead, it jointly models the\n",
       "numerator and denominator processes with shared latent structure.\n",
       "Offsets encode the assumption that the ratio is the quantity of interest,\n",
       "which is exactly the modelling approach this package rejects.\n\n",
@@ -911,7 +911,7 @@ warn_independence <- function() {
 #' @export
 #' @keywords internal
 print.ratiod_formula <- function(x, ...) {
-  cat("ratiod formula specification\n")
+  cat("tulpaRatio formula specification\n")
   cat("===========================\n\n")
 
   cat("Numerator:", x$numerator$response_var, "\n")

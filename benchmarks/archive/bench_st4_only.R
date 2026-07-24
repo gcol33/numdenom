@@ -35,11 +35,11 @@ tp <- temporal_rw1("time")
 cat("=== PG+ST_IV ===\n")
 t1 <- system.time({
   fit1 <- tryCatch({
-    ratiod(y | effort ~ x, data = df_pg,
+    tratio(y | effort ~ x, data = df_pg,
            spatial = sp,
            spatiotemporal = spatiotemporal(spatial = sp, temporal = tp, type = "IV"),
            family = ratiod_poisson_gamma(),
-           iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+           control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
     "OK"
   }, error = function(e) paste0("FAIL: ", e$message))
 })["elapsed"]
@@ -48,11 +48,11 @@ cat(fit1, sprintf("(%.1fs)\n", t1))
 cat("\n=== NB+ST_IV ===\n")
 t2 <- system.time({
   fit2 <- tryCatch({
-    ratiod(y | denom ~ x, data = df_nb,
+    tratio(y | denom ~ x, data = df_nb,
            spatial = sp,
            spatiotemporal = spatiotemporal(spatial = sp, temporal = tp, type = "IV"),
            family = ratiod_negbin_negbin(),
-           iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+           control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
     "OK"
   }, error = function(e) paste0("FAIL: ", e$message))
 })["elapsed"]
@@ -61,11 +61,11 @@ cat(fit2, sprintf("(%.1fs)\n", t2))
 cat("\n=== Bin+ST_IV ===\n")
 t3 <- system.time({
   fit3 <- tryCatch({
-    ratiod(y | n ~ x, data = df_bin,
+    tratio(y | n ~ x, data = df_bin,
            spatial = sp,
            spatiotemporal = spatiotemporal(spatial = sp, temporal = tp, type = "IV"),
            family = ratiod_binomial(),
-           iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+           control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
     "OK"
   }, error = function(e) paste0("FAIL: ", e$message))
 })["elapsed"]

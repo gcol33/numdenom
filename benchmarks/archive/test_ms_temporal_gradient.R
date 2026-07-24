@@ -21,15 +21,15 @@ cat("=== Multiscale Temporal Gradient Verification ===\n\n")
 cat("--- Test 1: Full multiscale (RW1 trend + seasonal + AR1 short) ---\n")
 tryCatch({
   set.seed(123)
-  fit_A <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_A <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-    iter = 20, warmup = 10, chains = 1, gradient_mode = "A", verbose = FALSE)
+    control = list(iter = 20, warmup = 10, chains = 1, gradient_mode = "A", verbose = FALSE))
   cat("  A mode: OK (no NaN)\n")
 
   set.seed(123)
-  fit_H <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_H <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-    iter = 20, warmup = 10, chains = 1, gradient_mode = "H", verbose = FALSE)
+    control = list(iter = 20, warmup = 10, chains = 1, gradient_mode = "H", verbose = FALSE))
   cat("  H mode: OK (no NaN)\n")
 
   draws_A <- as.matrix(fit_A$draws)
@@ -50,15 +50,15 @@ tryCatch({
 cat("\n--- Test 2: Trend only (RW1) ---\n")
 tryCatch({
   set.seed(123)
-  fit_A2 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_A2 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", short_term = "none"),
-    iter = 20, warmup = 10, chains = 1, gradient_mode = "A", verbose = FALSE)
+    control = list(iter = 20, warmup = 10, chains = 1, gradient_mode = "A", verbose = FALSE))
   cat("  A mode: OK\n")
 
   set.seed(123)
-  fit_H2 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_H2 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw1", short_term = "none"),
-    iter = 20, warmup = 10, chains = 1, gradient_mode = "H", verbose = FALSE)
+    control = list(iter = 20, warmup = 10, chains = 1, gradient_mode = "H", verbose = FALSE))
   cat("  H mode: OK\n")
 
   draws_A2 <- as.matrix(fit_A2$draws)
@@ -76,15 +76,15 @@ tryCatch({
 cat("\n--- Test 3: RW2 trend + IID short ---\n")
 tryCatch({
   set.seed(123)
-  fit_A3 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_A3 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw2", short_term = "iid"),
-    iter = 20, warmup = 10, chains = 1, gradient_mode = "A", verbose = FALSE)
+    control = list(iter = 20, warmup = 10, chains = 1, gradient_mode = "A", verbose = FALSE))
   cat("  A mode: OK\n")
 
   set.seed(123)
-  fit_H3 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_H3 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     temporal = temporal_multiscale("time", trend = "rw2", short_term = "iid"),
-    iter = 20, warmup = 10, chains = 1, gradient_mode = "H", verbose = FALSE)
+    control = list(iter = 20, warmup = 10, chains = 1, gradient_mode = "H", verbose = FALSE))
   cat("  H mode: OK\n")
 
   draws_A3 <- as.matrix(fit_A3$draws)
@@ -103,16 +103,16 @@ cat("\n--- Test 4: Timing (500 iter, full multiscale) ---\n")
 tryCatch({
   t_A <- system.time({
     set.seed(42)
-    ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+    tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
       temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-      iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = FALSE)
+      control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = FALSE))
   })["elapsed"]
 
   t_H <- system.time({
     set.seed(42)
-    ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+    tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
       temporal = temporal_multiscale("time", trend = "rw1", seasonal = 12, short_term = "ar1"),
-      iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+      control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
   })["elapsed"]
 
   cat(sprintf("  A mode: %.1fs\n  H mode: %.1fs\n  Speedup: %.1fx\n", t_A, t_H, t_A / t_H))

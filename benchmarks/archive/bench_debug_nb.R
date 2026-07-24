@@ -32,12 +32,11 @@ df <- data.frame(y_num = y_num, y_denom = y_denom, x = x)
 
 # Fit numdenom
 cat("Fitting numdenom... ")
-fit_nd <- ratiod(
+fit_nd <- tratio(
   y_num | y_denom ~ x,
   data = df,
   family = ratiod_negbin_negbin(),
-  iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-  verbose = FALSE
+  control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
 )
 cat("done\n")
 

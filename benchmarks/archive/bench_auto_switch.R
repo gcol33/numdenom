@@ -76,10 +76,10 @@ bm <- function(name, formula, data, family, spatial = NULL, temporal = NULL,
 
   result <- tryCatch({
     t <- system.time({
-      fit <- ratiod(formula, data = data, family = family,
+      fit <- tratio(formula, data = data, family = family,
                     spatial = spatial, temporal = temporal, zi = zi,
-                    mode = "hmc", iter = ITER, warmup = WARMUP,
-                    chains = CHAINS, verbose = FALSE, ...)
+                    mode = "hmc", ...,
+                    control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE))
     })
     td <- fit$diagnostics$treedepth
     maxd_pct <- round(sum(td >= 10) / length(td) * 100)

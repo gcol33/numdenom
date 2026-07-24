@@ -70,13 +70,12 @@ df_44 <- data.frame(y = y_num, denom = y_denom, x = x, time = time_idx)
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd_44 <- system.time({
-  fit_nd_44 <- ratiod(
+  fit_nd_44 <- tratio(
     y | denom ~ x,
     data = df_44,
     family = ratiod_negbin_negbin(),
     temporal = temporal_gp("time"),
-    iter = N_ITER, warmup = N_WARMUP, chains = 1,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd_44))
@@ -152,13 +151,12 @@ df_14 <- data.frame(y = y_num_pg, denom = y_denom_pg, x = x, time = time_idx)
 
 cat("Fitting numdenom... ")
 t_nd_14 <- system.time({
-  fit_nd_14 <- ratiod(
+  fit_nd_14 <- tratio(
     y | denom ~ x,
     data = df_14,
     family = ratiod_poisson_gamma(),
     temporal = temporal_gp("time"),
-    iter = N_ITER, warmup = N_WARMUP, chains = 1,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd_14))
@@ -201,13 +199,12 @@ df_68 <- data.frame(
 cat("Fitting numdenom (HSGP)... ")
 t_nd_68 <- system.time({
   fit_nd_68 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x,
       data = df_68,
       family = ratiod_binomial(),
       spatial = spatial_hsgp(~ coord_x + coord_y, m = 10),
-      iter = N_ITER, warmup = N_WARMUP, chains = 1,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -245,13 +242,12 @@ df_38 <- data.frame(
 cat("Fitting numdenom (HSGP)... ")
 t_nd_38 <- system.time({
   fit_nd_38 <- tryCatch({
-    ratiod(
+    tratio(
       y | denom ~ x,
       data = df_38,
       family = ratiod_negbin_negbin(),
       spatial = spatial_hsgp(~ coord_x + coord_y, m = 10),
-      iter = N_ITER, warmup = N_WARMUP, chains = 1,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

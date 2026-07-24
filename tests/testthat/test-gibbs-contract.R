@@ -26,10 +26,9 @@ gibbs_fit <- function(d, chains = 4, seed = 99, spatial = NULL) {
   if (is.null(spatial)) {
     spatial <- spatial_car(d$adj, level = "group", group_var = "spatial_site")
   }
-  ratiod(y | trials ~ x + (1 | site), data = d$df,
+  tratio(y | trials ~ x + (1 | site), data = d$df,
          family = ratiod_binomial(), spatial = spatial,
-         iter = 600, warmup = 300, chains = chains, seed = seed,
-         verbose = FALSE)
+         control = list(iter = 600, warmup = 300, chains = chains, seed = seed, verbose = FALSE))
 }
 
 test_that("Gibbs backend honours the requested number of chains", {
@@ -130,9 +129,9 @@ test_that("the intercept mixes under a spatial field", {
   d <- gibbs_field_data()
 
   intercept_ess <- function(spatial) {
-    fit <- ratiod(y | trials ~ x, data = d$df, family = ratiod_binomial(),
-                  spatial = spatial, iter = 1000, warmup = 500, chains = 4,
-                  seed = 99, verbose = FALSE)
+    fit <- tratio(y | trials ~ x, data = d$df, family = ratiod_binomial(),
+                  spatial = spatial,
+                  control = list(iter = 1000, warmup = 500, chains = 4, seed = 99, verbose = FALSE))
     dr <- as.matrix(fit$draws)
     posterior::ess_bulk(matrix(dr[, "beta_num[1]"],
                                nrow = nrow(dr) / fit$chains, ncol = fit$chains))

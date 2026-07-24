@@ -2,10 +2,10 @@
 % Please edit documentation in R/backend_hmc.R
 \name{hmc_backend}
 \alias{hmc_backend}
-\title{HMC/NUTS Backend for ratiod Models}
+\title{HMC/NUTS Backend for ratio Models}
 \description{
 Custom Hamiltonian Monte Carlo with NUTS (No-U-Turn Sampler) backend.
-Provides full MCMC inference for all ratiod families without external
+Provides full MCMC inference for all tulpaRatio families without external
 dependencies like Stan.
 }
 \details{

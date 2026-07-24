@@ -65,24 +65,21 @@ results <- list()
 cat("\n--- Base models (fused single-pass, p<=4) ---\n")
 
 results$pg_base <- timed_fit("PG base", quote(
-  ratiod(y_num_pg | y_denom_pg ~ x, data = df,
+  tratio(y_num_pg | y_denom_pg ~ x, data = df,
          family = ratiod_poisson_gamma(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$nb_base <- timed_fit("NB base", quote(
-  ratiod(y_num_nb | y_denom_nb ~ x, data = df,
+  tratio(y_num_nb | y_denom_nb ~ x, data = df,
          family = ratiod_negbin_negbin(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$bin_base <- timed_fit("Binomial base", quote(
-  ratiod(y_binom | n_trials ~ x, data = df,
+  tratio(y_binom | n_trials ~ x, data = df,
          family = ratiod_binomial(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =============================================
@@ -91,24 +88,21 @@ results$bin_base <- timed_fit("Binomial base", quote(
 cat("\n--- +RE models (fused with RE scatter) ---\n")
 
 results$pg_re <- timed_fit("PG + RE", quote(
-  ratiod(y_num_pg | y_denom_pg ~ x + (1 | site), data = df,
+  tratio(y_num_pg | y_denom_pg ~ x + (1 | site), data = df,
          family = ratiod_poisson_gamma(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$nb_re <- timed_fit("NB + RE", quote(
-  ratiod(y_num_nb | y_denom_nb ~ x + (1 | site), data = df,
+  tratio(y_num_nb | y_denom_nb ~ x + (1 | site), data = df,
          family = ratiod_negbin_negbin(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$bin_re <- timed_fit("Binomial + RE", quote(
-  ratiod(y_binom | n_trials ~ x + (1 | site), data = df,
+  tratio(y_binom | n_trials ~ x + (1 | site), data = df,
          family = ratiod_binomial(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =============================================
@@ -117,17 +111,15 @@ results$bin_re <- timed_fit("Binomial + RE", quote(
 cat("\n--- Crossed RE models ---\n")
 
 results$pg_crossed <- timed_fit("PG + crossed RE", quote(
-  ratiod(y_num_pg | y_denom_pg ~ x + (1 | site) + (1 | group2), data = df,
+  tratio(y_num_pg | y_denom_pg ~ x + (1 | site) + (1 | group2), data = df,
          family = ratiod_poisson_gamma(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 results$nb_crossed <- timed_fit("NB + crossed RE", quote(
-  ratiod(y_num_nb | y_denom_nb ~ x + (1 | site) + (1 | group2), data = df,
+  tratio(y_num_nb | y_denom_nb ~ x + (1 | site) + (1 | group2), data = df,
          family = ratiod_negbin_negbin(),
-         iter = n_iter, warmup = n_warmup, chains = n_chains,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = n_iter, warmup = n_warmup, chains = n_chains, gradient_mode = "H", verbose = FALSE))
 ))
 
 # =============================================

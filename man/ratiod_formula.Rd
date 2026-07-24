@@ -2,7 +2,7 @@
 % Please edit documentation in R/formula.R
 \name{ratiod_formula}
 \alias{ratiod_formula}
-\title{Parse and validate ratiod formulas}
+\title{Parse and validate tulpaRatio formulas}
 \usage{
 ratiod_formula(
   formula,
@@ -34,10 +34,10 @@ Required if main formula has single response.}
 A \code{ratiod_formula} object
 }
 \description{
-Internal functions for parsing ratiod formulas into a structured
+Internal functions for parsing tulpaRatio formulas into a structured
 specification for Stan model building.
 
-ratiod supports a combined formula syntax:
+tulpaRatio supports a combined formula syntax:
 \itemize{
 \item \code{num | denom ~ x + (1|group)} for shared predictors
 \item Separate \code{formula_num} and \code{formula_denom} for different predictors

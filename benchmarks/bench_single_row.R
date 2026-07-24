@@ -417,7 +417,7 @@ if (st != "none") {
   nd_spatiotemporal <- spatiotemporal(
     spatial = nd_spatial, temporal = nd_temporal, type = st
   )
-  # Keep nd_spatial and nd_temporal for main effects — ratiod() will also
+  # Keep nd_spatial and nd_temporal for main effects — tratio() will also
 
   # auto-extract them from spatiotemporal, but explicit is better
 }

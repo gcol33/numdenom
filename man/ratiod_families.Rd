@@ -2,7 +2,7 @@
 % Please edit documentation in R/family.R
 \name{ratiod_families}
 \alias{ratiod_families}
-\title{Model families for ratiod}
+\title{Model families for tulpaRatio}
 \description{
 Distribution families for the numerator and denominator processes.
 Each family specifies the likelihood structure for joint modelling.

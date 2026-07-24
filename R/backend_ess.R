@@ -1,4 +1,4 @@
-#' Elliptical Slice Sampling Backend for ratiod Models
+#' Elliptical Slice Sampling Backend for ratio Models
 #'
 #' @description
 #' Elliptical Slice Sampling (ESS) backend for models with Gaussian priors.
@@ -31,7 +31,7 @@
 NULL
 
 
-#' Fit ratiod model using Elliptical Slice Sampling
+#' Fit ratio model using Elliptical Slice Sampling
 #'
 #' @param formula A ratiod_formula object
 #' @param data Data frame

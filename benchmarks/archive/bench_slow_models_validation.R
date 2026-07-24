@@ -53,15 +53,12 @@ tryCatch({
   )
 
   t7 <- system.time({
-    fit7 <- ratiod(
+    fit7 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df7,
       family = ratiod_poisson_gamma(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -89,15 +86,12 @@ tryCatch({
   )
 
   t37 <- system.time({
-    fit37 <- ratiod(
+    fit37 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df37,
       family = ratiod_negbin_negbin(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -126,15 +120,12 @@ tryCatch({
   )
 
   t67 <- system.time({
-    fit67 <- ratiod(
+    fit67 <- tratio(
       y | trials ~ x + (1 | site),
       data = df67,
       family = ratiod_binomial(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -163,16 +154,13 @@ tryCatch({
   )
 
   t21 <- system.time({
-    fit21 <- ratiod(
+    fit21 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df21,
       family = ratiod_poisson_gamma(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -201,16 +189,13 @@ tryCatch({
   )
 
   t51 <- system.time({
-    fit51 <- ratiod(
+    fit51 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = df51,
       family = ratiod_negbin_negbin(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -240,16 +225,13 @@ tryCatch({
   )
 
   t83 <- system.time({
-    fit83 <- ratiod(
+    fit83 <- tratio(
       y | trials ~ x + (1 | site),
       data = df83,
       family = ratiod_binomial(),
       spatial = spatial_gp(coords = c("coord_x", "coord_y")),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 

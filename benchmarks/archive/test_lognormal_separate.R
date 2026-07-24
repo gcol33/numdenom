@@ -29,15 +29,13 @@ cat("    slope:", coef(lm_denom)[2], " (true: 0.2)\n")
 
 cat("\n=== numdenom with separate formulas ===\n")
 # Use separate formula_num and formula_denom to get separate slopes
-fit <- ratiod(
+fit <- tratio(
   y | denom ~ 1,  # intercept only in main formula (shared)
   formula_num = ~ x,   # x only affects numerator
   formula_denom = ~ x, # x only affects denominator
   data = df,
   family = ratiod_lognormal(),
-  iter = 1000, warmup = 500, chains = 1,
-  gradient_mode = "A_t",
-  verbose = FALSE
+  control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE)
 )
 
 draws <- as.matrix(fit$draws)
@@ -48,13 +46,11 @@ for (p in colnames(draws)) {
 }
 
 cat("\n=== numdenom with shared formula (y | denom ~ x) ===\n")
-fit2 <- ratiod(
+fit2 <- tratio(
   y | denom ~ x,  # x affects both num and denom
   data = df,
   family = ratiod_lognormal(),
-  iter = 1000, warmup = 500, chains = 1,
-  gradient_mode = "A_t",
-  verbose = FALSE
+  control = list(iter = 1000, warmup = 500, chains = 1, gradient_mode = "A_t", verbose = FALSE)
 )
 
 draws2 <- as.matrix(fit2$draws)

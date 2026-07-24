@@ -68,9 +68,8 @@ cat("Done.\n\n")
 # Timing helpers
 time_nd <- function(formula, data, family, ...) {
   system.time({
-    ratiod(formula, data = data, family = family,
-           iter = N_ITER, warmup = N_WARMUP, chains = 1,
-           gradient_mode = "H", verbose = FALSE, ...)
+    tratio(formula, data = data, family = family, ...,
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, gradient_mode = "H", verbose = FALSE))
   })[3]
 }
 

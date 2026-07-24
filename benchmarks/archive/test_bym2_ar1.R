@@ -123,13 +123,12 @@ df_pg_bym2$effort[df_pg_bym2$effort < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_bym2,
     family = ratiod_poisson_gamma(),
     spatial = spatial_bym2(spatial_info$adj_mat, level = "group", group_var = "spatial_site"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -200,13 +199,12 @@ df_nb_ar1 <- data.frame(
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_ar1,
     family = ratiod_negbin_negbin(),
     temporal = temporal_ar1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

@@ -29,9 +29,9 @@ cat("\n========== Row 77: bin_hurdle (Stan validation) ==========\n")
 # Run numdenom
 cat("Running numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(y | trials ~ x + (1|site), data = df_bin_zi,
+  fit_nd <- tratio(y | trials ~ x + (1|site), data = df_bin_zi,
                    family = ratiod_hurdle_binomial(),
-                   iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+                   control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
 })["elapsed"]
 cat(sprintf("%.1fs (div: %d)\n", t_nd, fit_nd$diagnostics$divergent))
 

@@ -133,7 +133,7 @@ results <- list()
 # ----- Row 45: negbin + MS_t (multi-scale temporal) -----
 # This row has no timing at all
 results[["45"]] <- run_bench(45, "nb_ms_t",
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          temporal = temporal_multiscale("time_factor"))),
   modes = c("H"),
@@ -143,7 +143,7 @@ results[["45"]] <- run_bench(45, "nb_ms_t",
 # ----- Row 75: binomial + MS_t -----
 # This row has no timing at all
 results[["75"]] <- run_bench(75, "bin_ms_t",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          temporal = temporal_multiscale("time_factor"))),
   modes = c("H"),
@@ -152,7 +152,7 @@ results[["75"]] <- run_bench(75, "bin_ms_t",
 
 # ----- Row 8: poisson_gamma + HSGP (get A_t timing) -----
 results[["8"]] <- run_bench(8, "pg_hsgp",
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_pg,
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 8))),
   modes = c("H", "A_t")
@@ -160,7 +160,7 @@ results[["8"]] <- run_bench(8, "pg_hsgp",
 
 # ----- Row 38: negbin + HSGP (verify A_t timing) -----
 results[["38"]] <- run_bench(38, "nb_hsgp",
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 8))),
   modes = c("H", "A_t")
@@ -168,7 +168,7 @@ results[["38"]] <- run_bench(38, "nb_hsgp",
 
 # ----- Row 68: binomial + HSGP (get A_t timing) -----
 results[["68"]] <- run_bench(68, "bin_hsgp",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 8))),
   modes = c("H", "A_t")
@@ -176,7 +176,7 @@ results[["68"]] <- run_bench(68, "bin_hsgp",
 
 # ----- Row 22: pg + HSGP + RW1 (get A_t timing) -----
 results[["22"]] <- run_bench(22, "pg_hsgp_rw1",
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_pg,
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_pg,
                          family = ratiod_poisson_gamma(),
                          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 8),
                          temporal = temporal_rw1("time_factor"))),
@@ -185,7 +185,7 @@ results[["22"]] <- run_bench(22, "pg_hsgp_rw1",
 
 # ----- Row 52: nb + HSGP + RW1 (verify A_t timing) -----
 results[["52"]] <- run_bench(52, "nb_hsgp_rw1",
-  nd_call = quote(ratiod(y | denom ~ x + (1|site), data = df_nb,
+  nd_call = quote(tratio(y | denom ~ x + (1|site), data = df_nb,
                          family = ratiod_negbin_negbin(),
                          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 8),
                          temporal = temporal_rw1("time_factor"))),
@@ -194,7 +194,7 @@ results[["52"]] <- run_bench(52, "nb_hsgp_rw1",
 
 # ----- Row 84: bin + HSGP + RW1 (get A_t timing) -----
 results[["84"]] <- run_bench(84, "bin_hsgp_rw1",
-  nd_call = quote(ratiod(y | trials ~ x + (1|site), data = df_bin,
+  nd_call = quote(tratio(y | trials ~ x + (1|site), data = df_bin,
                          family = ratiod_binomial(),
                          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 8),
                          temporal = temporal_rw1("time_factor"))),

@@ -101,7 +101,7 @@ df <- data.frame(
 )
 
 # Multi-scale spatial with local and regional components
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + temp,
   data = df,
   family = ratiod_poisson_gamma(),

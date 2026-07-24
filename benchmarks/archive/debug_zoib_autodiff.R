@@ -82,10 +82,9 @@ cat(sprintf("  Observed ones:  %d (%.1f%%)\n", sum(successes == trials), 100 * m
 
 cat("\nFitting ZOIB model with AUTODIFF (A_t) mode...\n")
 fit <- tryCatch({
-  ratiod(successes | trials ~ x + (1 | site), data = df,
+  tratio(successes | trials ~ x + (1 | site), data = df,
          family = ratiod_zoibinomial(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = TRUE,
-         gradient_mode = "A_t")
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = TRUE, gradient_mode = "A_t"))
 }, error = function(e) {
   cat(sprintf("ERROR: %s\n", e$message))
   NULL

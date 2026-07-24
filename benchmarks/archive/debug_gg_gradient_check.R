@@ -35,13 +35,11 @@ cat("\n=== Running models to check gradient differences ===\n")
 # Use very short chains to just check the first few iterations
 cat("\nNumerical gradient (N) - 50 iter:\n")
 fit_N <- tryCatch({
-  ratiod(
+  tratio(
     y | denom ~ x,
     data = df,
     family = ratiod_gamma_gamma(),
-    iter = 50, warmup = 25, chains = 1,
-    gradient_mode = "N",
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "N", verbose = FALSE)
   )
 }, error = function(e) {
   cat("Error:", e$message, "\n")
@@ -56,13 +54,11 @@ if (!is.null(fit_N)) {
 
 cat("\nForward autodiff (A) - 50 iter:\n")
 fit_A <- tryCatch({
-  ratiod(
+  tratio(
     y | denom ~ x,
     data = df,
     family = ratiod_gamma_gamma(),
-    iter = 50, warmup = 25, chains = 1,
-    gradient_mode = "A",
-    verbose = FALSE
+    control = list(iter = 50, warmup = 25, chains = 1, gradient_mode = "A", verbose = FALSE)
   )
 }, error = function(e) {
   cat("Error:", e$message, "\n")

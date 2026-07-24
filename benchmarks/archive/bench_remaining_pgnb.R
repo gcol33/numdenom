@@ -78,14 +78,13 @@ df_22 <- data.frame(
 cat("Fitting numdenom (HSGP+RW1)... ")
 t_nd_22 <- system.time({
   fit_nd_22 <- tryCatch({
-    ratiod(
+    tratio(
       y | denom ~ x,
       data = df_22,
       family = ratiod_poisson_gamma(),
       spatial = spatial_hsgp(~ coord_x + coord_y, m = 8),
       temporal = temporal_rw1("time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = 1,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -140,13 +139,12 @@ df_24 <- data.frame(
 cat("Fitting numdenom (ICAR+ZI)... ")
 t_nd_24 <- system.time({
   fit_nd_24 <- tryCatch({
-    ratiod(
+    tratio(
       y | denom ~ x,
       data = df_24,
       family = ratiod_zipois(denom_family = "gamma"),
       spatial = spatial_car(adj_matrix, group_var = "site"),
-      iter = N_ITER, warmup = N_WARMUP, chains = 1,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -185,13 +183,12 @@ df_54 <- data.frame(
 cat("Fitting numdenom (ICAR+ZI)... ")
 t_nd_54 <- system.time({
   fit_nd_54 <- tryCatch({
-    ratiod(
+    tratio(
       y | denom ~ x,
       data = df_54,
       family = ratiod_zinegbin(denom_family = "negbin"),
       spatial = spatial_car(adj_matrix, group_var = "site"),
-      iter = N_ITER, warmup = N_WARMUP, chains = 1,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = 1, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

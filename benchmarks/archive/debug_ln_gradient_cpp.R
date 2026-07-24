@@ -21,21 +21,17 @@ print(df)
 
 # Run just 2 iterations to see initial gradient behavior
 cat("\n=== Running A-mode (2 iter) ===\n")
-fit_A <- ratiod(
+fit_A <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 2, warmup = 1, chains = 1,
-  gradient_mode = "A",
-  verbose = TRUE
+  control = list(iter = 2, warmup = 1, chains = 1, gradient_mode = "A", verbose = TRUE)
 )
 
 cat("\n=== Running H-mode (2 iter) ===\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 2, warmup = 1, chains = 1,
-  gradient_mode = "H",
-  verbose = TRUE
+  control = list(iter = 2, warmup = 1, chains = 1, gradient_mode = "H", verbose = TRUE)
 )
 
 # Compare draws
@@ -54,21 +50,17 @@ cat("\n=== Checking which mode is actually used ===\n")
 # Run with longer chains to see if posteriors converge
 cat("\nRunning 200 iter comparison...\n")
 set.seed(123)
-fit_A_long <- ratiod(
+fit_A_long <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 200, warmup = 100, chains = 1,
-  gradient_mode = "A",
-  verbose = FALSE
+  control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "A", verbose = FALSE)
 )
 
 set.seed(123)  # Same seed
-fit_H_long <- ratiod(
+fit_H_long <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 200, warmup = 100, chains = 1,
-  gradient_mode = "H",
-  verbose = FALSE
+  control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "H", verbose = FALSE)
 )
 
 draws_A_long <- as.matrix(fit_A_long$draws)
@@ -96,12 +88,10 @@ cat("H-mode first row:", draws_H_long[1, ], "\n")
 # Try with numerical gradient as reference
 cat("\n=== Numerical gradient comparison ===\n")
 set.seed(123)
-fit_N <- ratiod(
+fit_N <- tratio(
   y | denom ~ x, data = df,
   family = ratiod_lognormal(),
-  iter = 200, warmup = 100, chains = 1,
-  gradient_mode = "N",
-  verbose = FALSE
+  control = list(iter = 200, warmup = 100, chains = 1, gradient_mode = "N", verbose = FALSE)
 )
 draws_N <- as.matrix(fit_N$draws)
 

@@ -74,12 +74,11 @@ df_78 <- data.frame(
 cat("Fitting numdenom (OI binomial)... ")
 t_nd <- system.time({
   fit_nd <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df_78,
       family = ratiod_oibinomial(),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -150,12 +149,11 @@ df_79 <- data.frame(
 cat("Fitting numdenom (ZOIB binomial)... ")
 t_nd_79 <- system.time({
   fit_nd_79 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df_79,
       family = ratiod_zoibinomial(),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

@@ -19,23 +19,19 @@ cat("  mean(log(y_denom)):", mean(log(y_denom)), "\n")
 cat("\n=== Short runs to compare gradients ===\n")
 
 cat("\nA_t mode (10 iter):\n")
-fit_At <- ratiod(
+fit_At <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_lognormal(),
-  iter = 10, warmup = 1, chains = 1,
-  gradient_mode = "A_t",
-  verbose = TRUE
+  control = list(iter = 10, warmup = 1, chains = 1, gradient_mode = "A_t", verbose = TRUE)
 )
 
 cat("\nH mode (10 iter):\n")
-fit_H <- ratiod(
+fit_H <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_lognormal(),
-  iter = 10, warmup = 1, chains = 1,
-  gradient_mode = "H",
-  verbose = TRUE
+  control = list(iter = 10, warmup = 1, chains = 1, gradient_mode = "H", verbose = TRUE)
 )
 
 # Compare first draws

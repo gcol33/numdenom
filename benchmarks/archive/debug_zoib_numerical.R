@@ -58,10 +58,9 @@ cat(sprintf("  Observed ones:  %d (%.1f%%) [expected: %.1f%%]\n",
 
 cat("\nFitting ZOIB model with NUMERICAL (N) gradient mode...\n")
 fit <- tryCatch({
-  ratiod(successes | trials ~ x + (1 | site), data = df,
+  tratio(successes | trials ~ x + (1 | site), data = df,
          family = ratiod_zoibinomial(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = TRUE,
-         gradient_mode = "N")
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = TRUE, gradient_mode = "N"))
 }, error = function(e) {
   cat(sprintf("ERROR: %s\n", e$message))
   NULL

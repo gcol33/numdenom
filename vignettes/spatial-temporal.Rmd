@@ -78,7 +78,7 @@ $$
 where $j \sim i$ denotes neighbors of region $i$.
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x + (1 | region),
   spatial = spatial_car(
     adj = adj,
@@ -110,7 +110,7 @@ where:
 - $\rho \in [0, 1]$ is the proportion of variance that is spatial
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   cases | population ~ age + (1 | county),
   spatial = spatial_bym2(
     adj = adj,
@@ -166,7 +166,7 @@ $$
 
 ```{r}
 # First-order random walk
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x + (1 | site),
   temporal = temporal_rw(
     time_var = "year",
@@ -177,7 +177,7 @@ fit <- ratiod(
 )
 
 # Second-order for smoother trends
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   temporal = temporal_rw(
     time_var = "year",
@@ -193,7 +193,7 @@ fit <- ratiod(
 For seasonal patterns that wrap around (e.g., month 12 neighbors month 1):
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   temporal = temporal_rw(
     time_var = "month",
@@ -216,7 +216,7 @@ $$
 The correlation parameter $\rho \in (-1, 1)$ controls persistence.
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   temporal = temporal_ar1(
     time_var = "year"
@@ -231,7 +231,7 @@ fit <- ratiod(
 By default, temporal effects are shared across all groups. For group-specific trends:
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ (1 | site),
   temporal = temporal_rw(
     time_var = "year",
@@ -263,7 +263,7 @@ ggplot(temporal_effects, aes(x = year, y = mean)) +
 For spatiotemporal data, include both:
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x + (1 | region),
   spatial = spatial_bym2(adj, level = "group", group_var = "region"),
   temporal = temporal_rw(time_var = "year"),
@@ -298,7 +298,7 @@ $$
 $$
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -321,7 +321,7 @@ $$
 This captures location-specific temporal trends.
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -344,7 +344,7 @@ $$
 This captures time-specific spatial patterns.
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -367,7 +367,7 @@ $$
 This is the most constrained and often most appropriate model.
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -384,7 +384,7 @@ fit <- ratiod(
 For continuous space-time data, use `spatiotemporal_gp()` with non-separable covariance:
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -423,8 +423,8 @@ plot(st_effects, type = "time_series")
 Compare interaction types using LOO-CV:
 
 ```{r}
-fit_type1 <- ratiod(..., spatiotemporal = spatiotemporal(..., type = "I"))
-fit_type4 <- ratiod(..., spatiotemporal = spatiotemporal(..., type = "IV"))
+fit_type1 <- tratio(..., spatiotemporal = spatiotemporal(..., type = "I"))
+fit_type4 <- tratio(..., spatiotemporal = spatiotemporal(..., type = "IV"))
 
 loo_compare(loo(fit_type1), loo(fit_type4))
 ```
@@ -435,7 +435,7 @@ loo_compare(loo(fit_type1), loo(fit_type4))
 ### Spatial Priors
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   ...,
   spatial = spatial_car(adj, level = "group", group_var = "region"),
   priors = ratiod_priors(
@@ -448,7 +448,7 @@ fit <- ratiod(
 ### Temporal Priors
 
 ```{r}
-fit <- ratiod(
+fit <- tratio(
   ...,
   temporal = temporal_rw(time_var = "year"),
   priors = ratiod_priors(

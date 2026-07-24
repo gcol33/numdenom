@@ -18,7 +18,7 @@ sim_ratiod_sbc(
 
 \item{n}{Number of observations per simulation.}
 
-\item{family}{A ratiod family object.}
+\item{family}{A tulpaRatio family object.}
 
 \item{priors}{Prior specification for parameter generation.}
 
@@ -46,7 +46,7 @@ print(sims)
 \donttest{
 # Fit model to each simulation (slow, not run on CRAN)
 # ranks <- lapply(sims, function(sim) {
-#   fit <- ratiod(y_num | y_denom ~ x1 + (1 | group),
+#   fit <- tratio(y_num | y_denom ~ x1 + (1 | group),
 #                data = sim$data,
 #                family = ratiod_negbin_negbin(),
 #                iter = 200, warmup = 100, chains = 1)

@@ -19,13 +19,11 @@ cat("  y_num range:", range(y_num), "\n")
 cat("  y_denom range:", range(y_denom), "\n")
 
 cat("\n=== Test 1: Numerical gradient (N) ===\n")
-fit_N <- ratiod(
+fit_N <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "N",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "N", verbose = FALSE)
 )
 
 draws_N <- as.matrix(fit_N$draws)
@@ -35,13 +33,11 @@ cat("  beta_num[2]:", mean(draws_N[,"beta_num[2]"]), "+/-", sd(draws_N[,"beta_nu
 cat("  shape_num:", mean(draws_N[,"shape_num"]), "+/-", sd(draws_N[,"shape_num"]), "(true: 5)\n")
 
 cat("\n=== Test 2: Forward autodiff (A) ===\n")
-fit_A <- ratiod(
+fit_A <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "A",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A", verbose = FALSE)
 )
 
 draws_A <- as.matrix(fit_A$draws)
@@ -51,13 +47,11 @@ cat("  beta_num[2]:", mean(draws_A[,"beta_num[2]"]), "+/-", sd(draws_A[,"beta_nu
 cat("  shape_num:", mean(draws_A[,"shape_num"]), "+/-", sd(draws_A[,"shape_num"]), "(true: 5)\n")
 
 cat("\n=== Test 3: Tape autodiff (A_t) ===\n")
-fit_At <- ratiod(
+fit_At <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 500, warmup = 250, chains = 1,
-  gradient_mode = "A_t",
-  verbose = FALSE
+  control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "A_t", verbose = FALSE)
 )
 
 draws_At <- as.matrix(fit_At$draws)

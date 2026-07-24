@@ -46,14 +46,12 @@ df_27 <- data.frame(
 
 cat("Fitting numdenom (H gradient, verbose)...\n")
 t_27 <- system.time({
-  fit_27 <- ratiod(
+  fit_27 <- tratio(
     y | effort ~ x + (1 | site),
     data = df_27,
     family = ratiod_poisson_gamma(),
     temporal = temporal_tvc(time_var = "time", terms = "x"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 
@@ -85,14 +83,12 @@ df_57 <- data.frame(
 
 cat("Fitting numdenom (H gradient, verbose)...\n")
 t_57 <- system.time({
-  fit_57 <- ratiod(
+  fit_57 <- tratio(
     y | effort ~ x + (1 | site),
     data = df_57,
     family = ratiod_negbin_negbin(),
     temporal = temporal_tvc(time_var = "time", terms = "x"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 
@@ -134,14 +130,12 @@ df_38 <- data.frame(
 
 cat("Fitting numdenom (H gradient, verbose)...\n")
 t_38 <- system.time({
-  fit_38 <- ratiod(
+  fit_38 <- tratio(
     y | denom ~ x + (1 | site),
     data = df_38,
     family = ratiod_negbin_negbin(),
     spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 
@@ -181,14 +175,12 @@ df_14$effort[df_14$effort < 0.01] <- 0.01
 
 cat("Fitting numdenom (H gradient, verbose)...\n")
 t_14 <- system.time({
-  fit_14 <- ratiod(
+  fit_14 <- tratio(
     y | effort ~ x + (1 | site),
     data = df_14,
     family = ratiod_poisson_gamma(),
     temporal = temporal_gp(time_var = "time", cov = "exponential"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 
@@ -216,13 +208,11 @@ df_2 <- data.frame(
 
 cat("Fitting numdenom (verbose)...\n")
 t_2 <- system.time({
-  fit_2 <- ratiod(
+  fit_2 <- tratio(
     y | effort ~ x + (1 | site),
     data = df_2,
     family = ratiod_poisson_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 

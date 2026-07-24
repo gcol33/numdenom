@@ -1,8 +1,8 @@
-#' HMC/NUTS Backend for ratiod Models
+#' HMC/NUTS Backend for ratio Models
 #'
 #' @description
 #' Custom Hamiltonian Monte Carlo with NUTS (No-U-Turn Sampler) backend.
-#' Provides full MCMC inference for all ratiod families without external
+#' Provides full MCMC inference for all tulpaRatio families without external
 #' dependencies like Stan.
 #'
 #' @details
@@ -40,7 +40,7 @@
 NULL
 
 
-#' Fit ratiod model using HMC/NUTS
+#' Fit ratio model using HMC/NUTS
 #'
 #' @param formula A ratiod_formula object
 #' @param data Data frame
@@ -1929,7 +1929,7 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
     ))
   }
 
-  # Temporal has already been validated by ratiod()
+  # Temporal has already been validated by tratio()
   # Check if it's a TVC specification
   if (inherits(temporal, "ratiod_tvc")) {
     # TVC-specific fields
@@ -2034,7 +2034,7 @@ prepare_tvc_for_hmc <- function(temporal, data, N, X_num) {
     ))
   }
 
-  # TVC has already been validated by ratiod()
+  # TVC has already been validated by tratio()
   # Extract TVC-specific fields
   n_tvc <- temporal$n_tvc
   n_times <- temporal$n_times

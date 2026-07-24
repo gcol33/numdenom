@@ -1,4 +1,4 @@
-#' Posterior predictive checks for ratiod models
+#' Posterior predictive checks for ratio models
 #'
 #' @description
 #' Visual and numerical checks comparing observed data to posterior
@@ -10,7 +10,7 @@ NULL
 #' Posterior predictive check
 #'
 #' @description
-#' Generate posterior predictive checks for a fitted ratiod model.
+#' Generate posterior predictive checks for a fitted ratio model.
 #' Compares observed data to replicated data from the posterior predictive
 #' distribution.
 #'
@@ -25,7 +25,7 @@ NULL
 #'
 #' @examples
 #' # pp_check requires a fitted model with posterior predictive draws
-#' # See ratiod() examples for fitting models
+#' # See tratio() examples for fitting models
 #'
 #' \donttest{
 #' # Simulate data and fit model (slow, not run on CRAN)
@@ -37,7 +37,7 @@ NULL
 #'   x = rnorm(n),
 #'   site = factor(rep(1:10, each = 5))
 #' )
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | total ~ x + (1 | site),
 #'   data = df,
 #'   family = ratiod_negbin_negbin(),
@@ -69,9 +69,10 @@ pp_check.ratiod_fit <- function(object, type = c("dens_overlay", "scatter", "int
 
   # Check if posterior predictive draws are available
   if (is.null(object$draws$y_num_rep) || is.null(object$draws$y_denom_rep)) {
-    stop("Posterior predictive draws not available.\n",
-         "  pp_check requires models fitted with `predict = TRUE`.\n",
-         "  Re-fit with: ratiod(..., predict = TRUE)", call. = FALSE)
+    stop("Posterior predictive draws not available: no backend stores ",
+         "`y_num_rep` / `y_denom_rep` on the fit.\n",
+         "  Draw from the posterior with `predict()` and compare against the ",
+         "response directly.", call. = FALSE)
   }
 
   # Extract posterior predictive draws from HMC backend
@@ -164,7 +165,7 @@ prior_predict <- function(formula, family, data, priors = NULL, n = 100) {
 # WAIC, PSIS-LOO, LOO stacking, and pseudo-BMA all consume the same
 # [n_draws x n_obs] pointwise log-likelihood matrix, so it is reconstructed in
 # one place from the posterior draws, the design matrices, and the family --
-# no backend is required to store it. This is the ratiod analogue of
+# no backend is required to store it. This is the tulpaRatio analogue of
 # tulpaObs::.tobs_pointwise_loglik().
 #
 # The per-observation densities use the mean / shape / precision
@@ -277,7 +278,7 @@ prior_predict <- function(formula, family, data, priors = NULL, n = 100) {
   )
 }
 
-# Pointwise log-likelihood matrix [n_draws x n_obs] for a fitted ratiod model.
+# Pointwise log-likelihood matrix [n_draws x n_obs] for a fitted ratio model.
 #' @keywords internal
 .ratiod_pointwise_loglik <- function(fit) {
   draws <- fit$draws
@@ -428,10 +429,10 @@ waic.ratiod_fit <- function(x, ...) {
   loo::waic(.ratiod_pointwise_loglik(x), ...)
 }
 
-#' Compare ratiod models
+#' Compare ratio models
 #'
 #' @description
-#' Compare multiple ratiod models using LOO-CV or WAIC.
+#' Compare multiple ratio models using LOO-CV or WAIC.
 #'
 #' @param ... Multiple `ratiod_fit` objects to compare
 #' @param criterion Comparison criterion: "loo" (default) or "waic"
@@ -449,10 +450,10 @@ waic.ratiod_fit <- function(x, ...) {
 #'   x = rnorm(n),
 #'   z = rnorm(n)
 #' )
-#' fit1 <- ratiod(y_num | y_denom ~ x, data = df,
+#' fit1 <- tratio(y_num | y_denom ~ x, data = df,
 #'               family = ratiod_negbin_negbin(),
 #'               iter = 200, warmup = 100, chains = 1)
-#' fit2 <- ratiod(y_num | y_denom ~ x + z, data = df,
+#' fit2 <- tratio(y_num | y_denom ~ x + z, data = df,
 #'               family = ratiod_negbin_negbin(),
 #'               iter = 200, warmup = 100, chains = 1)
 #' # Compare (requires loo package)
@@ -495,7 +496,7 @@ ratiod_compare <- function(..., criterion = c("loo", "waic")) {
 }
 
 
-#' Model averaging for ratiod fits
+#' Model averaging for tulpaRatio fits
 #'
 #' @description
 #' Compute model-averaged predictions using stacking or pseudo-BMA weights.
@@ -541,10 +542,10 @@ ratiod_compare <- function(..., criterion = c("loo", "waic")) {
 #'   z = rnorm(n),
 #'   site = factor(rep(1:10, each = 6))
 #' )
-#' fit1 <- ratiod(count | effort ~ x + (1 | site), data = df,
+#' fit1 <- tratio(count | effort ~ x + (1 | site), data = df,
 #'               family = ratiod_poisson_gamma(),
 #'               iter = 200, warmup = 100, chains = 1)
-#' fit2 <- ratiod(count | effort ~ x + z + (1 | site), data = df,
+#' fit2 <- tratio(count | effort ~ x + z + (1 | site), data = df,
 #'               family = ratiod_poisson_gamma(),
 #'               iter = 200, warmup = 100, chains = 1)
 #' # Model averaging (requires loo package)
@@ -805,7 +806,7 @@ average_predictions <- function(predictions, weights, type, summary) {
 #'
 #' @export
 print.ratiod_average <- function(x, digits = 3, ...) {
-  cat("ratiod model averaging\n")
+  cat("ratio model averaging\n")
   cat("=====================\n\n")
   cat("Method:", x$weights_method, "\n")
   cat("Models:", x$n_models, "\n")

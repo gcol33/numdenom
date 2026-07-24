@@ -10,15 +10,12 @@ quick_fit <- function(family = ratiod_poisson_gamma(), n = 20, iter = 100, warmu
     site = factor(rep(1:4, length.out = n))
   )
 
-  ratiod(
+  tratio(
     count | effort ~ x,
     data = df,
     family = family,
     mode = "hmc",
-    iter = iter,
-    warmup = warmup,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = iter, warmup = warmup, chains = 1, verbose = FALSE)
   )
 }
 
@@ -42,15 +39,12 @@ test_that("HMC backend works with negbin_negbin", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -68,15 +62,12 @@ test_that("HMC backend works with binomial", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -94,15 +85,12 @@ test_that("HMC backend works with random effects", {
     site = factor(rep(1:5, each = 6))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -321,15 +309,12 @@ test_that("HMC backend works with multiple chains", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 2,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 2, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -352,15 +337,12 @@ test_that("ratio_contrast computes contrasts", {
     season = factor(rep(c("summer", "winter"), each = n / 2))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   contrast <- ratio_contrast(fit, ~ season)
@@ -380,15 +362,12 @@ test_that("ratio_contrast computes ratio of ratios", {
     season = factor(rep(c("summer", "winter"), each = n / 2))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ season,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   contrast <- ratio_contrast(fit, ~ season, type = "ratio")
@@ -412,12 +391,12 @@ test_that("Laplace backend works with binomial", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -433,12 +412,12 @@ test_that("Laplace backend works with poisson_gamma", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -455,12 +434,12 @@ test_that("Laplace backend works with random effects", {
     site = factor(rep(1:5, each = 8))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "laplace",
-    verbose = FALSE
+    control = list(verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -481,15 +460,12 @@ test_that("PG backend works with binomial", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     mode = "pg",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -507,15 +483,12 @@ test_that("PG backend works with random effects", {
     site = factor(rep(1:5, each = 8))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x + (1 | site),
     data = df,
     family = ratiod_binomial(),
     mode = "pg",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -547,16 +520,13 @@ test_that("PG backend works with spatial CAR", {
   adj[3, 4] <- adj[4, 3] <- 1
   adj[4, 5] <- adj[5, 4] <- 1
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x + (1 | site),
     data = df,
     family = ratiod_binomial(),
     spatial = spatial_car(adj, level = "group", group_var = "site"),
     mode = "pg",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -582,16 +552,13 @@ test_that("HMC backend works with spatial CAR", {
   adj[3, 4] <- adj[4, 3] <- 1
   adj[4, 5] <- adj[5, 4] <- 1
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(adj, level = "group", group_var = "site"),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -615,16 +582,13 @@ test_that("HMC backend works with temporal RW1", {
     site = factor(rep(1:n_sites, each = n_times))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("time"),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -648,16 +612,13 @@ test_that("HMC backend works with temporal AR1", {
     site = factor(rep(1:n_sites, each = n_times))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_ar1("time"),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -681,16 +642,13 @@ test_that("HMC backend works with temporal RW2", {
     site = factor(rep(1:n_sites, each = n_times))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw2("time"),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -712,16 +670,13 @@ test_that("HMC backend works with cyclic RW1", {
     site = factor(rep(1:n_sites, each = n_months))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("month", cyclic = TRUE),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -742,16 +697,12 @@ test_that("HMC backend works with parallel chains", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 2,
-    cores = 2,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 2, cores = 2, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -770,16 +721,13 @@ test_that("HMC backend with 4 chains produces consistent results", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
-    mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 4,
-    cores = 2,  # Test with fewer cores than chains
-    verbose = FALSE
+    mode = "hmc",  # Test with fewer cores than chains
+    verbose = FALSE,
+    control = list(iter = 100, warmup = 50, chains = 4, cores = 2)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -808,17 +756,13 @@ test_that("Temporal model works with multiple chains", {
     site = factor(rep(1:n_sites, each = n_times))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("time"),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 2,
-    cores = 2,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 2, cores = 2, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -841,16 +785,13 @@ test_that("Model handles single time point per site", {
     site = factor(rep(1:4, each = 5))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_rw1("time"),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")

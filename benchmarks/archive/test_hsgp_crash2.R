@@ -13,11 +13,10 @@ df <- data.frame(
 cat("=== PG+HSGP N=500, 500 iter, H mode ===\n")
 t0 <- proc.time()
 fit <- tryCatch({
-  ratiod(y | denom ~ x, data = df,
+  tratio(y | denom ~ x, data = df,
          family = ratiod_poisson_gamma(),
          spatial = spatial_hsgp(~ lon + lat),
-         iter = 500, warmup = 250, chains = 1,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 }, error = function(e) paste0("ERROR: ", e$message))
 elapsed <- (proc.time() - t0)[3]
 if (is.character(fit)) cat(fit, "\n") else cat(sprintf("SUCCESS in %.1fs\n", elapsed))

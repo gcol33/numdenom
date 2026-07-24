@@ -31,7 +31,7 @@ A \code{ratiod_svc_posterior} object containing:
 }
 \description{
 Extract posterior distributions of spatially-varying coefficients (SVCs)
-from a fitted ratiod model with SVC specification.
+from a fitted ratio model with SVC specification.
 }
 \examples{
 \dontrun{
@@ -47,7 +47,7 @@ df <- data.frame(
 )
 
 # Fit model with SVC
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth,
   data = df,
   family = ratiod_poisson_gamma(),

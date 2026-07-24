@@ -75,12 +75,11 @@ cat(sprintf("True params: beta_num=(%s), beta_denom=(%s), phi_num=5, phi_denom=3
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y_num | y_denom ~ x1,
     data = sim$data,
     family = ratiod_negbin_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -156,12 +155,11 @@ cat(sprintf("True params: beta_num=(%s), beta_denom=(%s), sigma_re=0.5, phi_num=
 # Fit numdenom
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd_re <- ratiod(
+  fit_nd_re <- tratio(
     y_num | y_denom ~ x1 + (1|group),
     data = sim_re$data,
     family = ratiod_negbin_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

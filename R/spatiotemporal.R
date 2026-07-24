@@ -1,7 +1,7 @@
-#' Spatiotemporal interaction specifications for ratiod
+#' Spatiotemporal interaction specifications for tulpaRatio
 #'
 #' @description
-#' Functions to specify spatiotemporal interaction effects for ratiod models.
+#' Functions to specify spatiotemporal interaction effects for ratio models.
 #' These capture dependencies that arise when spatial patterns vary over time,
 #' or when temporal trends differ across space.
 #'
@@ -40,7 +40,7 @@ NULL
 #' Spatiotemporal interaction specification
 #'
 #' @description
-#' Specify a spatiotemporal interaction effect for ratiod models.
+#' Specify a spatiotemporal interaction effect for ratio models.
 #' The interaction captures structured or unstructured deviation from
 #' the additive spatial + temporal model.
 #'
@@ -133,7 +133,7 @@ NULL
 #' df$effort <- rgamma(nrow(df), shape = 4, rate = 1)
 #'
 #' # Fit model with spatiotemporal interaction
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -158,13 +158,13 @@ spatiotemporal <- function(spatial,
   # Validate spatial specification
 
   if (!inherits(spatial, c("ratiod_spatial", "ratiod_gp", "ratiod_multiscale"))) {
-    stop("`spatial` must be a ratiod spatial specification ",
+    stop("`spatial` must be a tulpaRatio spatial specification ",
          "(from spatial_car, spatial_bym2, spatial_gp, etc.)", call. = FALSE)
   }
 
   # Validate temporal specification
   if (!inherits(temporal, "ratiod_temporal")) {
-    stop("`temporal` must be a ratiod temporal specification ",
+    stop("`temporal` must be a tulpaRatio temporal specification ",
          "(from temporal_rw1, temporal_rw2, temporal_ar1, temporal_gp, etc.)",
          call. = FALSE)
   }
@@ -234,7 +234,7 @@ spatiotemporal <- function(spatial,
 #'
 #' @export
 print.ratiod_spatiotemporal <- function(x, ...) {
-  cat("ratiod Spatiotemporal Interaction Specification\n")
+  cat("tulpaRatio Spatiotemporal Interaction Specification\n")
   cat("===============================================\n\n")
 
   type_desc <- switch(x$type,
@@ -593,7 +593,7 @@ prepare_temporal_precision <- function(temporal) {
 #'
 #' @description
 #' Extract posterior distributions of spatiotemporal interaction effects
-#' from a fitted ratiod model.
+#' from a fitted ratio model.
 #'
 #' @param object A `ratiod_fit` object fitted with `spatiotemporal` argument
 #' @param format Output format: `"array"` (default, S x T x draws), `"long"`
@@ -631,7 +631,7 @@ spatiotemporal_effects.ratiod_fit <- function(object,
   # Check if model has spatiotemporal effects
   if (is.null(object$spatiotemporal)) {
     stop("Model was not fitted with spatiotemporal interaction.\n",
-         "Use `spatiotemporal` argument in ratiod() to specify interaction.",
+         "Use `spatiotemporal` argument in tratio() to specify interaction.",
          call. = FALSE)
   }
 
@@ -921,7 +921,7 @@ spatiotemporal_gp <- function(coords,
 #'
 #' @export
 print.ratiod_st_gp <- function(x, ...) {
-  cat("ratiod Non-Separable Spatiotemporal GP\n")
+  cat("tulpaRatio Non-Separable Spatiotemporal GP\n")
   cat("======================================\n\n")
 
   cat("Coordinates:", paste(x$coord_vars, collapse = ", "), "\n")

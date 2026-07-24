@@ -26,10 +26,10 @@ simulate_re_binomial <- function(n = 200, n_groups = 8) {
 
 fit_one_re <- function(spec, use_specs, seed_val) {
   op <- options(tulpaRatio.use_specs = use_specs); on.exit(options(op), add = TRUE)
-  fit <- tulpaRatio::ratiod(
+  fit <- tulpaRatio::tratio(
     formula = spec$formula, data = spec$data, family = spec$family,
-    mode = "hmc", iter = 2000L, warmup = 500L, chains = 1L,
-    seed = seed_val, verbose = FALSE, gradient_mode = "A_r"
+    mode = "hmc",
+    control = list(iter = 2000L, warmup = 500L, chains = 1L, seed = seed_val, verbose = FALSE, gradient_mode = "A_r")
   )
   colMeans(fit$draws)
 }

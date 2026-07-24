@@ -1,7 +1,7 @@
-#' Temporal structure specifications for ratiod
+#' Temporal structure specifications for tulpaRatio
 #'
 #' @description
-#' Functions to specify temporal random effects for ratiod models.
+#' Functions to specify temporal random effects for ratio models.
 #' Temporal effects are shared between numerator and denominator by default,
 #' which helps prevent spurious ratio effects from temporally-structured
 #' unmeasured confounders.
@@ -54,7 +54,7 @@ NULL
 #'   effort = rgamma(48, shape = 5, rate = 1)
 #' )
 #'
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -75,7 +75,7 @@ NULL
 #'   effort = rgamma(60, shape = 3, rate = 1)
 #' )
 #'
-#' fit2 <- ratiod(
+#' fit2 <- tratio(
 #'   count | effort ~ x + (1 | site),
 #'   data = df_panel,
 #'   family = ratiod_poisson_gamma(),
@@ -95,7 +95,7 @@ NULL
 #'   effort = rgamma(48, shape = 2, rate = 1)
 #' )
 #'
-#' fit3 <- ratiod(
+#' fit3 <- tratio(
 #'   count | effort ~ x,
 #'   data = df_monthly,
 #'   family = ratiod_poisson_gamma(),
@@ -196,7 +196,7 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'   effort = rgamma(40, shape = 4, rate = 1)
 #' )
 #'
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -303,7 +303,7 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'   effort = rgamma(60, shape = 3.5, rate = 1)
 #' )
 #'
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -324,7 +324,7 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'   effort = rgamma(48, shape = 2.5, rate = 1)
 #' )
 #'
-#' fit2 <- ratiod(
+#' fit2 <- tratio(
 #'   count | effort ~ x,
 #'   data = df_panel,
 #'   family = ratiod_poisson_gamma(),
@@ -390,7 +390,7 @@ temporal_ar1 <- function(time_var, group_var = NULL, shared = TRUE,
 #'
 #' @export
 print.ratiod_temporal <- function(x, ...) {
- cat("ratiod temporal specification\n")
+ cat("tulpaRatio temporal specification\n")
  cat("============================\n\n")
 
  type_name <- switch(x$type,
@@ -715,7 +715,7 @@ build_ar1_precision <- function(T, rho, tau = 1) {
 #'   effort = rgamma(48, shape = 4, rate = 1)
 #' )
 #'
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -807,7 +807,7 @@ temporal_multiscale <- function(time_var,
 #'
 #' @export
 print.ratiod_temporal_multiscale <- function(x, ...) {
-  cat("ratiod Multi-Scale temporal specification\n")
+  cat("tulpaRatio Multi-Scale temporal specification\n")
   cat("=========================================\n\n")
 
   cat("Time variable:", x$time_var, "\n")
@@ -1047,7 +1047,7 @@ validate_temporal_multiscale <- function(temporal, data) {
 #'   effort = rgamma(30, shape = 4, rate = 1)
 #' )
 #'
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -1140,7 +1140,7 @@ temporal_gp <- function(time_var,
 #'
 #' @export
 print.ratiod_temporal_gp <- function(x, ...) {
-  cat("ratiod Gaussian Process temporal specification\n")
+  cat("tulpaRatio Gaussian Process temporal specification\n")
   cat("==============================================\n\n")
 
   cat("Time variable:", x$time_var, "\n")
@@ -1261,7 +1261,7 @@ validate_temporal_gp <- function(temporal, data) {
 #' Temporally-Varying Coefficients (TVC)
 #'
 #' @description
-#' Specify temporally-varying coefficients for ratiod models. TVCs allow
+#' Specify temporally-varying coefficients for ratio models. TVCs allow
 #' regression coefficients to change smoothly over time using a Gaussian
 #' process or random walk prior. This captures how effects evolve temporally.
 #'
@@ -1319,7 +1319,7 @@ validate_temporal_gp <- function(temporal, data) {
 #' )
 #'
 #' # Time-varying intercept (random temporal field)
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -1332,7 +1332,7 @@ validate_temporal_gp <- function(temporal, data) {
 #' summary(fit)
 #'
 #' # Time-varying effect of x
-#' fit2 <- ratiod(
+#' fit2 <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -1422,7 +1422,7 @@ temporal_tvc <- function(time_var,
 #'
 #' @export
 print.ratiod_tvc <- function(x, ...) {
-  cat("ratiod temporally-varying coefficients\n")
+  cat("tulpaRatio temporally-varying coefficients\n")
   cat("======================================\n\n")
 
   cat("Time variable:", x$time_var, "\n")
@@ -1574,7 +1574,7 @@ validate_tvc <- function(tvc, data, X) {
 #'
 #' @description
 #' Extract posterior distributions of temporally-varying coefficients (TVCs)
-#' from a fitted ratiod model with TVC specification.
+#' from a fitted ratio model with TVC specification.
 #'
 #' @param object A `ratiod_fit` object fitted with `tvc` argument
 #' @param terms Which TVC terms to extract. If NULL (default), extracts all.
@@ -1600,7 +1600,7 @@ validate_tvc <- function(tvc, data, X) {
 #' )
 #'
 #' # Fit model with TVC
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -1636,7 +1636,7 @@ tvc.ratiod_fit <- function(object, terms = NULL, summary = FALSE,
   # Check if model has TVCs
   if (is.null(object$tvc) || !inherits(object$tvc, "ratiod_tvc")) {
     stop("Model was not fitted with temporally-varying coefficients.\n",
-         "Use `tvc` argument in ratiod() to specify TVCs.", call. = FALSE)
+         "Use `tvc` argument in tratio() to specify TVCs.", call. = FALSE)
   }
 
   tvc_info <- object$tvc
@@ -1892,7 +1892,7 @@ plot.ratiod_tvc_posterior <- function(x, term = 1, type = "ribbon", ...) {
 #' )
 #'
 #' # Standard RW2 (may have temporal confounding)
-#' fit1 <- ratiod(
+#' fit1 <- tratio(
 #'   count | effort ~ temperature,
 #'   data = df,
 #'   temporal = temporal_rw2("year"),
@@ -1903,7 +1903,7 @@ plot.ratiod_tvc_posterior <- function(x, term = 1, type = "ribbon", ...) {
 #' )
 #'
 #' # RTR to protect temperature coefficient
-#' fit2 <- ratiod(
+#' fit2 <- tratio(
 #'   count | effort ~ temperature,
 #'   data = df,
 #'   temporal = temporal_rtr(
@@ -1933,7 +1933,7 @@ plot.ratiod_tvc_posterior <- function(x, term = 1, type = "ribbon", ...) {
 temporal_rtr <- function(temporal, restrict_to) {
 
   if (!inherits(temporal, "ratiod_temporal")) {
-    stop("`temporal` must be a ratiod temporal specification", call. = FALSE)
+    stop("`temporal` must be a tulpaRatio temporal specification", call. = FALSE)
   }
 
   if (!inherits(restrict_to, "formula")) {
@@ -2055,7 +2055,7 @@ apply_rtr_projection <- function(f, P_perp) {
 #' Extract temporal effects from a fitted model
 #'
 #' @description
-#' Extract posterior distributions of temporal effects from a fitted ratiod
+#' Extract posterior distributions of temporal effects from a fitted tulpaRatio
 #' model with temporal specification.
 #'
 #' @param object A `ratiod_fit` object fitted with `temporal` argument
@@ -2079,7 +2079,7 @@ apply_rtr_projection <- function(f, P_perp) {
 #'   effort = rgamma(40, shape = 4.5, rate = 1)
 #' )
 #'
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
@@ -2109,7 +2109,7 @@ temporal.ratiod_fit <- function(object, component = "all", summary = FALSE,
   # Check if model has temporal effects
   if (is.null(object$temporal)) {
     stop("Model was not fitted with temporal effects.\n",
-         "Use `temporal` argument in ratiod() to specify temporal structure.",
+         "Use `temporal` argument in tratio() to specify temporal structure.",
          call. = FALSE)
   }
 

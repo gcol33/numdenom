@@ -38,15 +38,12 @@ for (mode in c("N", "A_t", "A", "H")) {
 
   time_mode <- system.time({
     tryCatch({
-      fit <- ratiod(
+      fit <- tratio(
         y | effort ~ x,
         data = df,
         family = ratiod_poisson_gamma(),
-        iter = N_ITER,
-        chains = N_CHAINS,
-        gradient_mode = mode,
         temporal = temporal_multiscale(time_var = "time"),
-        refresh = 0
+        control = list(iter = N_ITER, chains = N_CHAINS, gradient_mode = mode)
       )
       cat("  SUCCESS\n")
     }, error = function(e) {

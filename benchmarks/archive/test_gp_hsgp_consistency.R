@@ -23,14 +23,14 @@ df$y_denom <- rnbinom(N, size = 5, mu = exp(eta + 0.3))
 cat("--- Test 1: spatial_gp() — H vs A_r ---\n")
 tryCatch({
   set.seed(123)
-  fit_H <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_H <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_gp(~ coord_x + coord_y),
-    iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE)
+    control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE))
 
   set.seed(123)
-  fit_Ar <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_Ar <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_gp(~ coord_x + coord_y),
-    iter = 100, warmup = 50, chains = 1, gradient_mode = "A_r", verbose = FALSE)
+    control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "A_r", verbose = FALSE))
 
   draws_H <- as.matrix(fit_H$draws)
   draws_Ar <- as.matrix(fit_Ar$draws)
@@ -50,14 +50,14 @@ tryCatch({
 cat("\n--- Test 2: spatial_hsgp() — H vs A_r ---\n")
 tryCatch({
   set.seed(123)
-  fit_H2 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_H2 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_hsgp(~ coord_x + coord_y),
-    iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE)
+    control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE))
 
   set.seed(123)
-  fit_Ar2 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_Ar2 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_hsgp(~ coord_x + coord_y),
-    iter = 100, warmup = 50, chains = 1, gradient_mode = "A_r", verbose = FALSE)
+    control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "A_r", verbose = FALSE))
 
   draws_H2 <- as.matrix(fit_H2$draws)
   draws_Ar2 <- as.matrix(fit_Ar2$draws)
@@ -77,14 +77,14 @@ tryCatch({
 cat("\n--- Test 3: spatial_multiscale() — H vs A_r ---\n")
 tryCatch({
   set.seed(123)
-  fit_H3 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_H3 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_multiscale(~ coord_x + coord_y),
-    iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE)
+    control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE))
 
   set.seed(123)
-  fit_Ar3 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+  fit_Ar3 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_multiscale(~ coord_x + coord_y),
-    iter = 100, warmup = 50, chains = 1, gradient_mode = "A_r", verbose = FALSE)
+    control = list(iter = 100, warmup = 50, chains = 1, gradient_mode = "A_r", verbose = FALSE))
 
   draws_H3 <- as.matrix(fit_H3$draws)
   draws_Ar3 <- as.matrix(fit_Ar3$draws)
@@ -126,9 +126,9 @@ tryCatch({
 
   t4 <- system.time({
     set.seed(123)
-    fit4 <- ratiod(y_num | y_denom ~ x, data = df2, family = ratiod_negbin_negbin(),
+    fit4 <- tratio(y_num | y_denom ~ x, data = df2, family = ratiod_negbin_negbin(),
       spatial = spatial_gp(~ coord_x + coord_y),
-      iter = 1000, warmup = 500, chains = 2, verbose = FALSE)
+      control = list(iter = 1000, warmup = 500, chains = 2, verbose = FALSE))
   })["elapsed"]
 
   draws4 <- fit4$draws

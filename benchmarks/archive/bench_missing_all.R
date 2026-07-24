@@ -89,27 +89,27 @@ run_bench <- function(row, name, expr) {
 # ============================================================
 
 run_bench(37, "nb_gp", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_gp(lon = "lon", lat = "lat", level = "obs"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(38, "nb_hsgp", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_hsgp(lon = "lon", lat = "lat", level = "obs", m = 8),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(39, "nb_msgp", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_multiscale(lon = "lon", lat = "lat", level = "obs"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(40, "nb_pcar", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site", proper = TRUE),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -117,15 +117,15 @@ run_bench(40, "nb_pcar", quote(
 # ============================================================
 
 run_bench(44, "nb_gp_t", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          temporal = temporal_gp("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(45, "nb_ms_t", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          temporal = temporal_multiscale("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -133,24 +133,24 @@ run_bench(45, "nb_ms_t", quote(
 # ============================================================
 
 run_bench(51, "nb_gp_rw1", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_gp(lon = "lon", lat = "lat", level = "obs"),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(52, "nb_hsgp_rw1", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_hsgp(lon = "lon", lat = "lat", level = "obs", m = 8),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(53, "nb_msgp_rw1", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_multiscale(lon = "lon", lat = "lat", level = "obs"),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -158,27 +158,27 @@ run_bench(53, "nb_msgp_rw1", quote(
 # ============================================================
 
 run_bench(67, "bin_gp", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_gp(lon = "lon", lat = "lat", level = "obs"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(68, "bin_hsgp", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_hsgp(lon = "lon", lat = "lat", level = "obs", m = 8),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(69, "bin_msgp", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_multiscale(lon = "lon", lat = "lat", level = "obs"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(70, "bin_pcar", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site", proper = TRUE),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -186,15 +186,15 @@ run_bench(70, "bin_pcar", quote(
 # ============================================================
 
 run_bench(74, "bin_gp_t", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          temporal = temporal_gp("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(75, "bin_ms_t", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          temporal = temporal_multiscale("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -202,24 +202,24 @@ run_bench(75, "bin_ms_t", quote(
 # ============================================================
 
 run_bench(83, "bin_gp_rw1", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_gp(lon = "lon", lat = "lat", level = "obs"),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(84, "bin_hsgp_rw1", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_hsgp(lon = "lon", lat = "lat", level = "obs", m = 8),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(85, "bin_msgp_rw1", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          spatial = spatial_multiscale(lon = "lon", lat = "lat", level = "obs"),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -227,32 +227,32 @@ run_bench(85, "bin_msgp_rw1", quote(
 # ============================================================
 
 run_bench(93, "gamma_base", quote(
-  ratiod(y | denom ~ x, data = df_gamma, family = ratiod_gamma_gamma(),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+  tratio(y | denom ~ x, data = df_gamma, family = ratiod_gamma_gamma(),
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(94, "gamma_re", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+  tratio(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(95, "gamma_icar", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
+  tratio(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(96, "gamma_rw1", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
+  tratio(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(97, "gamma_icar_rw1", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
+  tratio(y | denom ~ x + (1|site), data = df_gamma, family = ratiod_gamma_gamma(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -260,32 +260,32 @@ run_bench(97, "gamma_icar_rw1", quote(
 # ============================================================
 
 run_bench(98, "ln_base", quote(
-  ratiod(y | denom ~ x, data = df_ln, family = ratiod_lognormal(),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+  tratio(y | denom ~ x, data = df_ln, family = ratiod_lognormal(),
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(99, "ln_re", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+  tratio(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(100, "ln_icar", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
+  tratio(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(101, "ln_rw1", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
+  tratio(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(102, "ln_icar_rw1", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
+  tratio(y | denom ~ x + (1|site), data = df_ln, family = ratiod_lognormal(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -293,32 +293,32 @@ run_bench(102, "ln_icar_rw1", quote(
 # ============================================================
 
 run_bench(103, "bb_base", quote(
-  ratiod(y | trials ~ x, data = df_bb, family = ratiod_beta_binomial(),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+  tratio(y | trials ~ x, data = df_bb, family = ratiod_beta_binomial(),
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(104, "bb_re", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+  tratio(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(105, "bb_icar", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(106, "bb_rw1", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(107, "bb_icar_rw1", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bb, family = ratiod_beta_binomial(),
          spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
          temporal = temporal_rw1("time"),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================
@@ -326,21 +326,21 @@ run_bench(107, "bb_icar_rw1", quote(
 # ============================================================
 
 run_bench(30, "pg_latent", quote(
-  ratiod(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y | effort ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
          latent = latent_factor(k = 2),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(60, "nb_latent", quote(
-  ratiod(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df_nb, family = ratiod_negbin_negbin(),
          latent = latent_factor(k = 2),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 run_bench(92, "bin_latent", quote(
-  ratiod(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
+  tratio(y | trials ~ x + (1|site), data = df_bin, family = ratiod_binomial(),
          latent = latent_factor(k = 2),
-         iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H")
+         control = list(iter = ITER, warmup = WARMUP, chains = CHAINS, verbose = FALSE, gradient_mode = "H"))
 ))
 
 # ============================================================

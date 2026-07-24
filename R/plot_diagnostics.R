@@ -1,4 +1,4 @@
-#' Diagnostic Plotting Functions for ratiod Models
+#' Diagnostic Plotting Functions for ratio Models
 #'
 #' @description
 #' Visual diagnostic tools for MCMC convergence assessment. All functions
@@ -48,8 +48,8 @@ theme_ratiod <- function() {
 #' - Red: Rhat >= 1.05 (not converged)
 #'
 #' @examples
-#' # Diagnostic plots require a fitted ratiod model
-#' # See ratiod() examples for fitting models
+#' # Diagnostic plots require a fitted ratio model
+#' # See tratio() examples for fitting models
 #'
 #' \donttest{
 #' # Fit a model (slow, not run on CRAN)
@@ -61,7 +61,7 @@ theme_ratiod <- function() {
 #'   depth = rnorm(n),
 #'   site = factor(rep(1:10, each = 5))
 #' )
-#' fit <- ratiod(count | effort ~ depth + (1|site), data = df,
+#' fit <- tratio(count | effort ~ depth + (1|site), data = df,
 #'              family = ratiod_poisson_gamma(),
 #'              iter = 200, warmup = 100, chains = 1)
 #' # plot_rhat(fit)
@@ -871,7 +871,7 @@ plot_energy_base <- function(energy, energy_diff, e_bfmi, status) {
 #' Comprehensive Diagnostic Summary
 #'
 #' @description
-#' Provides a comprehensive diagnostic report for a ratiod model, combining
+#' Provides a comprehensive diagnostic report for a ratio model, combining
 #' convergence metrics, divergence information, and actionable recommendations.
 #'
 #' @param fit A `ratiod_fit` object.
@@ -1035,7 +1035,7 @@ print.ratiod_diagnostic_summary <- function(x, ...) {
   reset <- "\033[0m"
 
   cat("\n")
-  cat("=== ratiod Diagnostic Summary ===\n")
+  cat("=== tulpaRatio Diagnostic Summary ===\n")
   cat("\n")
   cat("Backend:", x$backend, "\n")
   cat("Status: ", status_color, x$status, reset, "\n", sep = "")
@@ -1181,7 +1181,7 @@ plot_diagnostics <- function(fit, pars = NULL) {
   # Combine with patchwork
   combined <- (p_rhat + p_ess) / (p_trace + p_br) +
     patchwork::plot_annotation(
-      title = "ratiod Model Diagnostics",
+      title = "ratio Model Diagnostics",
       theme = ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14))
     )
 

@@ -35,9 +35,9 @@ results[["NB+ICAR"]] <- run_model("NB+ICAR", function(env) {
   df <- data.frame(y = rnbinom(N, mu = exp(2 + 0.3*env$x), size = 5),
                    denom = pmax(rnbinom(N, mu = 100, size = 10), 1L),
                    x = env$x, site = env$site, spatial_site = env$spatial_site)
-  ratiod(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
          spatial = spatial_car(env$adj_mat, level = "group", group_var = "spatial_site"),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 # PG+GP_t (Stan 10.0s)
@@ -45,9 +45,9 @@ results[["PG+GP_t"]] <- run_model("PG+GP_t", function(env) {
   df <- data.frame(y = rpois(N, exp(2 + 0.5*env$x)),
                    denom = rgamma(N, 10, 1),
                    x = env$x, time_num = env$time_num)
-  ratiod(y | denom ~ x, data = df, family = ratiod_poisson_gamma(),
+  tratio(y | denom ~ x, data = df, family = ratiod_poisson_gamma(),
          temporal = temporal_gp("time_num"),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 # Bin+GP_t (Stan 3.3s)
@@ -55,9 +55,9 @@ results[["Bin+GP_t"]] <- run_model("Bin+GP_t", function(env) {
   trials <- sample(10:50, N, replace = TRUE)
   df <- data.frame(y = rbinom(N, trials, plogis(0.5 + 0.3*env$x)),
                    trials = trials, x = env$x, time_num = env$time_num)
-  ratiod(y | trials ~ x, data = df, family = ratiod_binomial(),
+  tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
          temporal = temporal_gp("time_num"),
-         iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+         control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })
 
 cat("\n\n========== RESULTS ==========\n")

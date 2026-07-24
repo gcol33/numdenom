@@ -85,11 +85,11 @@ df$denom[df$denom == 0] <- 1
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
     spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_ar1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -148,11 +148,11 @@ scale_factor <- numdenom:::compute_scale_factor(adj_mat)
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site), data = df_pg, family = ratiod_poisson_gamma(),
     spatial = spatial_bym2(adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

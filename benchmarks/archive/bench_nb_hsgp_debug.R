@@ -12,8 +12,8 @@ df <- data.frame(
   x = x, site = site, lon = coords$lon, lat = coords$lat
 )
 t <- system.time({
-  fit <- ratiod(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
+  fit <- tratio(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
                 spatial = spatial_hsgp(coords = c("lon", "lat")),
-                iter = 500, warmup = 250, chains = 1, verbose = TRUE)
+                control = list(iter = 500, warmup = 250, chains = 1, verbose = TRUE))
 })[["elapsed"]]
 cat(sprintf("\nTotal: %.1fs\n", t))

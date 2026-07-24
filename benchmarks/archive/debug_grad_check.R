@@ -16,19 +16,17 @@ df <- data.frame(y = y, effort = eff, x = x, spatial_site = site)
 
 cat("=== PG+ICAR with devtools::load_all() ===\n")
 fit <- tryCatch({
-  ratiod(y | effort ~ x + (1 | spatial_site), data = df,
+  tratio(y | effort ~ x + (1 | spatial_site), data = df,
          family = ratiod_poisson_gamma(),
          spatial = spatial_car(W, level = "group", group_var = "spatial_site"),
-         iter = 10, warmup = 5, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit)) cat(fit, "\n") else cat("H mode: SUCCESS\n")
 
 cat("\n=== PG+slopes with devtools::load_all() ===\n")
 fit2 <- tryCatch({
-  ratiod(y | effort ~ x + (x | spatial_site), data = df,
+  tratio(y | effort ~ x + (x | spatial_site), data = df,
          family = ratiod_poisson_gamma(),
-         iter = 10, warmup = 5, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit2)) cat(fit2, "\n") else cat("Slopes H mode: SUCCESS\n")

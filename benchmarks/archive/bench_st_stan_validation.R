@@ -176,14 +176,14 @@ df_28 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_28 <- system.time({
   fit_nd_28 <- tryCatch({
-    ratiod(count | effort ~ x + (1|site), data = df_28,
+    tratio(count | effort ~ x + (1|site), data = df_28,
            family = ratiod_poisson_gamma(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(spatial_info$adj_mat, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "I"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd_28))
@@ -257,14 +257,14 @@ df_29 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_29 <- system.time({
   fit_nd_29 <- tryCatch({
-    ratiod(count | effort ~ x + (1|site), data = df_29,
+    tratio(count | effort ~ x + (1|site), data = df_29,
            family = ratiod_poisson_gamma(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(spatial_info$adj_mat, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "IV"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd_29))
@@ -332,14 +332,14 @@ df_58 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_58 <- system.time({
   fit_nd_58 <- tryCatch({
-    ratiod(num | denom ~ x + (1|site), data = df_58,
+    tratio(num | denom ~ x + (1|site), data = df_58,
            family = ratiod_negbin_negbin(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(spatial_info$adj_mat, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "I"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd_58))
@@ -407,14 +407,14 @@ df_59 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_59 <- system.time({
   fit_nd_59 <- tryCatch({
-    ratiod(num | denom ~ x + (1|site), data = df_59,
+    tratio(num | denom ~ x + (1|site), data = df_59,
            family = ratiod_negbin_negbin(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(spatial_info$adj_mat, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "IV"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd_59))
@@ -484,14 +484,14 @@ df_90 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_90 <- system.time({
   fit_nd_90 <- tryCatch({
-    ratiod(successes | trials ~ x + (1|site), data = df_90,
+    tratio(successes | trials ~ x + (1|site), data = df_90,
            family = ratiod_binomial(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(spatial_info$adj_mat, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "I"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd_90))
@@ -561,14 +561,14 @@ df_91 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_91 <- system.time({
   fit_nd_91 <- tryCatch({
-    ratiod(successes | trials ~ x + (1|site), data = df_91,
+    tratio(successes | trials ~ x + (1|site), data = df_91,
            family = ratiod_binomial(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(spatial_info$adj_mat, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "IV"
            ),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd_91))

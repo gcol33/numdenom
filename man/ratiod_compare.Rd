@@ -2,7 +2,7 @@
 % Please edit documentation in R/validate.R
 \name{ratiod_compare}
 \alias{ratiod_compare}
-\title{Compare ratiod models}
+\title{Compare ratio models}
 \usage{
 ratiod_compare(..., criterion = c("loo", "waic"))
 }
@@ -15,7 +15,7 @@ ratiod_compare(..., criterion = c("loo", "waic"))
 A loo_compare object
 }
 \description{
-Compare multiple ratiod models using LOO-CV or WAIC.
+Compare multiple ratio models using LOO-CV or WAIC.
 }
 \examples{
 \donttest{
@@ -28,10 +28,10 @@ df <- data.frame(
   x = rnorm(n),
   z = rnorm(n)
 )
-fit1 <- ratiod(y_num | y_denom ~ x, data = df,
+fit1 <- tratio(y_num | y_denom ~ x, data = df,
               family = ratiod_negbin_negbin(),
               iter = 200, warmup = 100, chains = 1)
-fit2 <- ratiod(y_num | y_denom ~ x + z, data = df,
+fit2 <- tratio(y_num | y_denom ~ x + z, data = df,
               family = ratiod_negbin_negbin(),
               iter = 200, warmup = 100, chains = 1)
 # Compare (requires loo package)

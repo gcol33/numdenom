@@ -35,7 +35,7 @@ where \eqn{\pi} is the zero-inflation probability and
 }
 \details{
 The zero-inflation probability can have its own linear predictor via the
-\code{zi} argument in \code{ratiod()}. If not specified, a single intercept is estimated.
+\code{zi} argument in \code{tratio()}. If not specified, a single intercept is estimated.
 
 For ecological data, zero-inflation often represents:
 \itemize{
@@ -62,7 +62,7 @@ df <- data.frame(
 
 \dontrun{
 # Fit model (not run - ZI models require specialized backend support)
-fit <- ratiod(
+fit <- tratio(
   count | total ~ habitat + (1 | site),
   data = df,
   family = ratiod_zinegbin(),

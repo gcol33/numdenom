@@ -36,13 +36,11 @@ cat("log(mean(y_denom)) =", log(mean(y_denom)), "(expected:", beta_denom[1], ")\
 
 # Fit with longer chains
 cat("\n=== Fitting with H gradient ===\n")
-fit <- ratiod(
+fit <- tratio(
   y | denom ~ 1,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 2000, warmup = 1000, chains = 2,
-  gradient_mode = "H",
-  seed = 42
+  control = list(iter = 2000, warmup = 1000, chains = 2, gradient_mode = "H", seed = 42)
 )
 
 # Extract draws

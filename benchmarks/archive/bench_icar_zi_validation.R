@@ -128,13 +128,12 @@ cat(sprintf("Data: N=%d, sites=%d, zero rate=%.1f%%\n",
 
 cat("Fitting numdenom... ")
 t_nd_pg <- system.time({
-  fit_nd_pg <- ratiod(
+  fit_nd_pg <- tratio(
     y | denom ~ x, data = df_pg,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(adj = adj_matrix, group_var = "site"),
     zi = zi_poisson(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd_pg))
@@ -245,13 +244,12 @@ cat(sprintf("Data: N=%d, sites=%d, zero rate=%.1f%%\n",
 
 cat("Fitting numdenom... ")
 t_nd_nb <- system.time({
-  fit_nd_nb <- ratiod(
+  fit_nd_nb <- tratio(
     y | denom ~ x, data = df_nb,
     family = ratiod_negbin_negbin(),
     spatial = spatial_car(adj = adj_matrix, group_var = "site"),
     zi = zi_negbin(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })[["elapsed"]]
 cat(sprintf("%.1fs\n", t_nd_nb))

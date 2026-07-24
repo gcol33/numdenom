@@ -108,12 +108,11 @@ cat(sprintf("True RE: sigma_int=%.2f, sigma_slope=%.2f, rho=%.2f\n",
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1 + x|site),
     data = df_pg_slopes,
     family = ratiod_poisson_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

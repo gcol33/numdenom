@@ -12,9 +12,9 @@ df$effort <- pmax(rgamma(N, shape = 5, rate = 5 / exp(eta + 0.5)), 0.01)
 
 cat("\n=== NB+RE: 500 iter (standard) ===\n")
 t1 <- system.time({
-  fit_nb <- ratiod(y_num | y_denom ~ x + (1 | site), data = df,
-    family = ratiod_negbin_negbin(), iter = 500, warmup = 250,
-    chains = 1, gradient_mode = "H", verbose = FALSE)
+  fit_nb <- tratio(y_num | y_denom ~ x + (1 | site), data = df,
+    family = ratiod_negbin_negbin(),
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 })[["elapsed"]]
 n_lf1 <- fit_nb$diagnostics$n_leapfrog
 if (is.list(n_lf1)) n_lf1 <- n_lf1[[1]]
@@ -23,9 +23,9 @@ cat(sprintf("  Time: %.2f s  Total sampling LF: %d  ms/kLF: %.2f\n",
 
 cat("\n=== PG+RE: 500 iter (standard) ===\n")
 t2 <- system.time({
-  fit_pg <- ratiod(y_num | effort ~ x + (1 | site), data = df,
-    family = ratiod_poisson_gamma(), iter = 500, warmup = 250,
-    chains = 1, gradient_mode = "H", verbose = FALSE)
+  fit_pg <- tratio(y_num | effort ~ x + (1 | site), data = df,
+    family = ratiod_poisson_gamma(),
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 })[["elapsed"]]
 n_lf2 <- fit_pg$diagnostics$n_leapfrog
 if (is.list(n_lf2)) n_lf2 <- n_lf2[[1]]
@@ -35,9 +35,9 @@ cat(sprintf("  Time: %.2f s  Total sampling LF: %d  ms/kLF: %.2f\n",
 # Now test with many iterations and very short warmup to isolate gradient cost
 cat("\n=== NB+RE: 1000 iter, 50 warmup (gradient-dominated) ===\n")
 t3 <- system.time({
-  fit_nb2 <- ratiod(y_num | y_denom ~ x + (1 | site), data = df,
-    family = ratiod_negbin_negbin(), iter = 1000, warmup = 50,
-    chains = 1, gradient_mode = "H", verbose = FALSE)
+  fit_nb2 <- tratio(y_num | y_denom ~ x + (1 | site), data = df,
+    family = ratiod_negbin_negbin(),
+    control = list(iter = 1000, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE))
 })[["elapsed"]]
 n_lf3 <- fit_nb2$diagnostics$n_leapfrog
 if (is.list(n_lf3)) n_lf3 <- n_lf3[[1]]
@@ -46,9 +46,9 @@ cat(sprintf("  Time: %.2f s  Total sampling LF: %d  ms/kLF: %.2f\n",
 
 cat("\n=== PG+RE: 1000 iter, 50 warmup (gradient-dominated) ===\n")
 t4 <- system.time({
-  fit_pg2 <- ratiod(y_num | effort ~ x + (1 | site), data = df,
-    family = ratiod_poisson_gamma(), iter = 1000, warmup = 50,
-    chains = 1, gradient_mode = "H", verbose = FALSE)
+  fit_pg2 <- tratio(y_num | effort ~ x + (1 | site), data = df,
+    family = ratiod_poisson_gamma(),
+    control = list(iter = 1000, warmup = 50, chains = 1, gradient_mode = "H", verbose = FALSE))
 })[["elapsed"]]
 n_lf4 <- fit_pg2$diagnostics$n_leapfrog
 if (is.list(n_lf4)) n_lf4 <- n_lf4[[1]]

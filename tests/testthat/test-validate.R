@@ -29,14 +29,12 @@ test_that("ratiod_compare requires at least two models", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_error(
@@ -66,14 +64,12 @@ test_that("ratiod_average requires at least two models", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_error(
@@ -223,15 +219,12 @@ test_that("loo.ratiod_fit works on the HMC backend", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 200, warmup = 100, chains = 1, verbose = FALSE)
   )
 
   l <- suppressWarnings(loo::loo(fit))
@@ -251,15 +244,12 @@ test_that("waic.ratiod_fit works on the HMC backend", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 200,
-    warmup = 100,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 200, warmup = 100, chains = 1, verbose = FALSE)
   )
 
   w <- loo::waic(fit)
@@ -277,12 +267,12 @@ test_that("pointwise log-likelihood matches an independent recomputation", {
     y_denom = rnbinom(n, size = 8, mu = 60),
     x = rnorm(n)
   )
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "hmc",
-    iter = 150, warmup = 75, chains = 1, verbose = FALSE
+    control = list(iter = 150, warmup = 75, chains = 1, verbose = FALSE)
   )
 
   ll <- tulpaRatio:::.ratiod_pointwise_loglik(fit)
@@ -317,12 +307,12 @@ test_that("WAIC / LOO work on the ESS backend (no stored log_lik)", {
     y_denom = rnbinom(n, size = 8, mu = 60),
     x = rnorm(n)
   )
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "ess",
-    iter = 200, warmup = 100, chains = 1, verbose = FALSE
+    control = list(iter = 200, warmup = 100, chains = 1, verbose = FALSE)
   )
 
   expect_true(is.matrix(fit$draws))
@@ -342,12 +332,12 @@ test_that("ratiod_compare ranks two HMC fits", {
     x = rnorm(n),
     z = rnorm(n)
   )
-  fit1 <- ratiod(count | effort ~ x, data = df,
+  fit1 <- tratio(count | effort ~ x, data = df,
                  family = ratiod_poisson_gamma(), mode = "hmc",
-                 iter = 200, warmup = 100, chains = 1, verbose = FALSE)
-  fit2 <- ratiod(count | effort ~ x + z, data = df,
+                 control = list(iter = 200, warmup = 100, chains = 1, verbose = FALSE))
+  fit2 <- tratio(count | effort ~ x + z, data = df,
                  family = ratiod_poisson_gamma(), mode = "hmc",
-                 iter = 200, warmup = 100, chains = 1, verbose = FALSE)
+                 control = list(iter = 200, warmup = 100, chains = 1, verbose = FALSE))
 
   cmp <- suppressWarnings(ratiod_compare(fit1, fit2, criterion = "waic"))
   expect_true(nrow(cmp) == 2)
@@ -368,10 +358,12 @@ test_that("ratiod_average works end-to-end across backends", {
   )
 
   for (m in c("hmc", "ess")) {
-    f1 <- ratiod(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
-                 mode = m, iter = 200, warmup = 100, chains = 1, verbose = FALSE)
-    f2 <- ratiod(y_num | y_denom ~ x + z, data = df, family = ratiod_negbin_negbin(),
-                 mode = m, iter = 200, warmup = 100, chains = 1, verbose = FALSE)
+    f1 <- tratio(y_num | y_denom ~ x, data = df, family = ratiod_negbin_negbin(),
+                 mode = m,
+                 control = list(iter = 200, warmup = 100, chains = 1, verbose = FALSE))
+    f2 <- tratio(y_num | y_denom ~ x + z, data = df, family = ratiod_negbin_negbin(),
+                 mode = m,
+                 control = list(iter = 200, warmup = 100, chains = 1, verbose = FALSE))
 
     avg <- suppressWarnings(ratiod_average(f1, f2))
     expect_s3_class(avg, "ratiod_average")
@@ -392,9 +384,10 @@ test_that("WAIC errors informatively on a backend without a draw matrix", {
     trials = rep(10L, n),
     x = rnorm(n)
   )
-  fit <- suppressWarnings(ratiod(
+  fit <- suppressWarnings(tratio(
     succ | trials ~ x, data = df, family = ratiod_binomial(),
-    mode = "pg", iter = 100, warmup = 50, chains = 1, verbose = FALSE
+    mode = "pg",
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   ))
 
   if (!is.matrix(fit$draws)) {
@@ -415,15 +408,12 @@ test_that("ratio() extracts ratio posterior draws", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   # ratio() should work with HMC fits

@@ -81,11 +81,10 @@ df_2 <- data.frame(
 )
 
 t_2 <- system.time({
-  fit_2 <- ratiod(
+  fit_2 <- tratio(
     y | effort ~ x + (1 | site), data = df_2,
     family = ratiod_poisson_gamma(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 diagnose("Row 2: pg+RE", fit_2, t_2)
@@ -101,12 +100,11 @@ df_27 <- data.frame(
 )
 
 t_27 <- system.time({
-  fit_27 <- ratiod(
+  fit_27 <- tratio(
     y | effort ~ x + (1 | site), data = df_27,
     family = ratiod_poisson_gamma(),
     temporal = temporal_tvc(time_var = "time", terms = "x"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 diagnose("Row 27: pg+RE+TVC", fit_27, t_27)
@@ -135,12 +133,11 @@ df_38 <- data.frame(
 )
 
 t_38 <- system.time({
-  fit_38 <- ratiod(
+  fit_38 <- tratio(
     y | denom ~ x + (1 | site), data = df_38,
     family = ratiod_negbin_negbin(),
     spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 diagnose("Row 38: nb+RE+HSGP", fit_38, t_38)
@@ -167,12 +164,11 @@ df_14 <- data.frame(
 df_14$effort[df_14$effort < 0.01] <- 0.01
 
 t_14 <- system.time({
-  fit_14 <- ratiod(
+  fit_14 <- tratio(
     y | effort ~ x + (1 | site), data = df_14,
     family = ratiod_poisson_gamma(),
     temporal = temporal_gp(time_var = "time", cov = "exponential"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    gradient_mode = "H", verbose = TRUE, refresh = 0
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = TRUE)
   )
 })["elapsed"]
 diagnose("Row 14: pg+RE+temporal GP", fit_14, t_14)

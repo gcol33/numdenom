@@ -115,15 +115,12 @@ tryCatch({
   data39 <- generate_data(has_spatial = TRUE, has_temporal = FALSE)
 
   time39 <- system.time({
-    fit39 <- ratiod(
+    fit39 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = data39,
       family = ratiod_negbin_negbin(),
       spatial = spatial_multiscale(coords = ~ x_coord + y_coord),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -156,16 +153,13 @@ tryCatch({
   data52 <- generate_data(has_spatial = TRUE, has_temporal = TRUE)
 
   time52 <- system.time({
-    fit52 <- ratiod(
+    fit52 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = data52,
       family = ratiod_negbin_negbin(),
       spatial = spatial_hsgp(coords = ~ x_coord + y_coord),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 
@@ -198,16 +192,13 @@ tryCatch({
   data53 <- generate_data(has_spatial = TRUE, has_temporal = TRUE)
 
   time53 <- system.time({
-    fit53 <- ratiod(
+    fit53 <- tratio(
       y_num | y_denom ~ x + (1 | site),
       data = data53,
       family = ratiod_negbin_negbin(),
       spatial = spatial_multiscale(coords = ~ x_coord + y_coord),
       temporal = temporal_rw1(time_var = "time"),
-      iter = N_ITER,
-      warmup = N_WARMUP,
-      chains = N_CHAINS,
-      gradient_mode = "H"
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H")
     )
   })["elapsed"]
 

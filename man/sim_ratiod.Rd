@@ -2,7 +2,7 @@
 % Please edit documentation in R/simulate.R
 \name{sim_ratiod}
 \alias{sim_ratiod}
-\title{Simulate data from ratiod models}
+\title{Simulate data from ratio models}
 \usage{
 sim_ratiod(
   n = 100,
@@ -22,7 +22,7 @@ sim_ratiod(
 \arguments{
 \item{n}{Number of observations to simulate.}
 
-\item{family}{A ratiod family object specifying the distributions.}
+\item{family}{A tulpaRatio family object specifying the distributions.}
 
 \item{formula}{Optional formula for generating covariates and structure.
 If NULL, generates intercept-only data.}
@@ -62,7 +62,7 @@ Useful for prior predictive checks, simulation-based calibration, and
 understanding model behavior.
 }
 \details{
-The simulation generates data according to the ratiod model structure:
+The simulation generates data according to the ratio model structure:
 
 For \strong{negbin_negbin}:
 \itemize{
@@ -114,7 +114,7 @@ sim_binom <- sim_ratiod(
 
 \donttest{
 # Fit model to simulated data (slow, not run on CRAN)
-fit <- ratiod(
+fit <- tratio(
   y_num | y_denom ~ x1 + (1 | group),
   data = sim$data,
   family = ratiod_poisson_gamma(),
@@ -127,5 +127,5 @@ fit <- ratiod(
 
 }
 \seealso{
-\code{\link[=ratiod]{ratiod()}} for model fitting, \code{\link[=prior_predict]{prior_predict()}} for prior checks
+\code{\link[=tratio]{tratio()}} for model fitting, \code{\link[=prior_predict]{prior_predict()}} for prior checks
 }

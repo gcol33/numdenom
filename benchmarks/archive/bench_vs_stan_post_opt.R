@@ -79,53 +79,53 @@ run_bench <- function(label, expr) {
 cat("--- Simple models (Stan was 2-4x faster) ---\n")
 
 results[["PG base"]] <- run_bench("Row 1: PG base", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["NB base"]] <- run_bench("Row 31: NB base", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["NB+RE"]] <- run_bench("Row 32: NB+RE", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb, family = ratiod_negbin_negbin(),
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["NB+crossed"]] <- run_bench("Row 34: NB+crossed", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site) + (1 | site2), data = df_nb,
+  tratio(y_num | y_denom ~ x + (1 | site) + (1 | site2), data = df_nb,
          family = ratiod_negbin_negbin(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Bin base"]] <- run_bench("Row 61: Bin base", quote(
-  ratiod(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+  tratio(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ---- HSGP models (specialized gradient, newly fused) ----
 cat("\n--- HSGP models (newly fused log-post) ---\n")
 
 results[["PG+HSGP"]] <- run_bench("Row 8: PG+HSGP", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg_hsgp,
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg_hsgp,
          family = ratiod_poisson_gamma(),
          spatial = spatial_hsgp(coords = ~ lon + lat, m = 5),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["NB+HSGP"]] <- run_bench("Row 38: NB+HSGP", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_nb_hsgp,
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_nb_hsgp,
          family = ratiod_negbin_negbin(),
          spatial = spatial_hsgp(coords = ~ lon + lat, m = 5),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 results[["Bin+HSGP"]] <- run_bench("Row 68: Bin+HSGP", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_bin_hsgp,
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_bin_hsgp,
          family = ratiod_binomial(),
          spatial = spatial_hsgp(coords = ~ lon + lat, m = 5),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ---- Models where numdenom already beats Stan ----
@@ -136,10 +136,10 @@ W_small <- matrix(0, N_SITES, N_SITES)
 for (i in 1:(N_SITES - 1)) W_small[i, i + 1] <- W_small[i + 1, i] <- 1
 
 results[["PG+ICAR"]] <- run_bench("Row 5: PG+RE+ICAR", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg,
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg,
          family = ratiod_poisson_gamma(),
          spatial = spatial_car(W = W_small, group_var = "site"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # RW1 temporal
@@ -148,10 +148,10 @@ df_pg$time <- factor(time_idx)
 df_nb$time <- factor(time_idx)
 
 results[["PG+RW1"]] <- run_bench("Row 11: PG+RE+RW1", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg,
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg,
          family = ratiod_poisson_gamma(),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # ============================================================

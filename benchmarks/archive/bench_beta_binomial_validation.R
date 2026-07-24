@@ -94,12 +94,11 @@ df_103 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd <- system.time({
   fit_nd <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x,
       data = df_103,
       family = ratiod_beta_binomial(),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -167,12 +166,11 @@ df_104 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_104 <- system.time({
   fit_nd_104 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df_104,
       family = ratiod_beta_binomial(),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

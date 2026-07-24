@@ -95,13 +95,12 @@ cat(sprintf("Zero rate in data: %.1f%%\n", 100 * mean(df_pg_zi$y == 0)))
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_zi,
     family = ratiod_poisson_gamma(),
     zi = zi_poisson(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -175,13 +174,12 @@ cat(sprintf("Zero rate in data: %.1f%%\n", 100 * mean(df_pg_hurdle$y == 0)))
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_hurdle,
     family = ratiod_poisson_gamma(),
     zi = hurdle_poisson(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -250,13 +248,12 @@ cat(sprintf("Zero rate in data: %.1f%%\n", 100 * mean(df_nb_zi$y == 0)))
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_zi,
     family = ratiod_negbin_negbin(),
     zi = zi_negbin(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -327,13 +324,12 @@ cat(sprintf("Zero rate in data: %.1f%%\n", 100 * mean(df_nb_hurdle$y == 0)))
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_hurdle,
     family = ratiod_negbin_negbin(),
     zi = hurdle_negbin(),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

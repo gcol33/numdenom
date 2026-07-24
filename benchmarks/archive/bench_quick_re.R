@@ -25,12 +25,12 @@ timed <- function(desc, expr) {
 
 cat("+RE models (fused with RE scatter):\n")
 timed("NB + RE", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x + (1 | site), data = df, family = ratiod_negbin_negbin(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 timed("PG + RE", quote(
-  ratiod(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
-         iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE)
+  tratio(y_num | y_denom ~ x + (1 | site), data = df_pg, family = ratiod_poisson_gamma(),
+         control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 ))
 
 cat("\nReference: NB+RE 5.18s (Stan 2.9s), PG+RE 3.56s (Stan 2.5s)\n")

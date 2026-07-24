@@ -31,7 +31,7 @@ NULL
 #' @param scale Logical; if TRUE (default), factor loadings are standardized
 #'   to have unit variance before applying sigma.
 #'
-#' @return A `ratiod_latent` object for use in [ratiod()].
+#' @return A `ratiod_latent` object for use in [tratio()].
 #'
 #' @details
 #'
@@ -100,7 +100,7 @@ NULL
 #'
 #' \dontrun{
 #' # Use in model fitting
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   species_count | total_count ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_negbin_negbin(),
@@ -108,7 +108,7 @@ NULL
 #' )
 #' }
 #'
-#' @seealso [ratiod()] for model fitting, [prior_pc()] for prior specification
+#' @seealso [tratio()] for model fitting, [prior_pc()] for prior specification
 #'
 #' @export
 latent_factor <- function(
@@ -334,7 +334,7 @@ initialize_latent_params <- function(latent_info, seed = NULL) {
 #' @examples
 #' \dontrun{
 #' # After fitting with latent factors
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | total ~ x,
 #'   data = df,
 #'   family = ratiod_negbin_negbin(),

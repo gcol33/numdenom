@@ -48,16 +48,12 @@ run_bench <- function(name, expr) {
 # ============================================================================
 cat("\n### Row 26: poisson_gamma + SVC ###\n")
 results$pg_svc <- run_bench("poisson_gamma + SVC", quote({
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x1,
     data = df,
     family = ratiod_poisson_gamma(),
     spatial = spatial_svc(coords = ~ lon + lat, terms = 1, nn = 15),
-    iter = N_ITER,
-    warmup = N_WARMUP,
-    chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE)
   )
 }))
 
@@ -66,16 +62,12 @@ results$pg_svc <- run_bench("poisson_gamma + SVC", quote({
 # ============================================================================
 cat("\n### Row 27: poisson_gamma + TVC ###\n")
 results$pg_tvc <- run_bench("poisson_gamma + TVC", quote({
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x1,
     data = df,
     family = ratiod_poisson_gamma(),
     temporal = temporal_tvc(time_var = "time", terms = 1),
-    iter = N_ITER,
-    warmup = N_WARMUP,
-    chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE)
   )
 }))
 
@@ -84,16 +76,12 @@ results$pg_tvc <- run_bench("poisson_gamma + TVC", quote({
 # ============================================================================
 cat("\n### Row 56: negbin_negbin + SVC ###\n")
 results$nb_svc <- run_bench("negbin_negbin + SVC", quote({
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x1,
     data = df,
     family = ratiod_negbin_negbin(),
     spatial = spatial_svc(coords = ~ lon + lat, terms = 1, nn = 15),
-    iter = N_ITER,
-    warmup = N_WARMUP,
-    chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE)
   )
 }))
 
@@ -102,16 +90,12 @@ results$nb_svc <- run_bench("negbin_negbin + SVC", quote({
 # ============================================================================
 cat("\n### Row 57: negbin_negbin + TVC ###\n")
 results$nb_tvc <- run_bench("negbin_negbin + TVC", quote({
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x1,
     data = df,
     family = ratiod_negbin_negbin(),
     temporal = temporal_tvc(time_var = "time", terms = 1),
-    iter = N_ITER,
-    warmup = N_WARMUP,
-    chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE)
   )
 }))
 
@@ -120,16 +104,12 @@ results$nb_tvc <- run_bench("negbin_negbin + TVC", quote({
 # ============================================================================
 cat("\n### Row 88: binomial + SVC ###\n")
 results$bin_svc <- run_bench("binomial + SVC", quote({
-  fit <- ratiod(
+  fit <- tratio(
     y_num_bin | y_denom_bin ~ x1,
     data = df,
     family = ratiod_binomial(),
     spatial = spatial_svc(coords = ~ lon + lat, terms = 1, nn = 15),
-    iter = N_ITER,
-    warmup = N_WARMUP,
-    chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE)
   )
 }))
 
@@ -138,16 +118,12 @@ results$bin_svc <- run_bench("binomial + SVC", quote({
 # ============================================================================
 cat("\n### Row 89: binomial + TVC ###\n")
 results$bin_tvc <- run_bench("binomial + TVC", quote({
-  fit <- ratiod(
+  fit <- tratio(
     y_num_bin | y_denom_bin ~ x1,
     data = df,
     family = ratiod_binomial(),
     temporal = temporal_tvc(time_var = "time", terms = 1),
-    iter = N_ITER,
-    warmup = N_WARMUP,
-    chains = N_CHAINS,
-    gradient_mode = "H",
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE)
   )
 }))
 

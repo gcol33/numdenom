@@ -259,16 +259,13 @@ test_that("GP model fits with duplicate coordinates", {
     lat = site_y[site_id]
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     spatial = spatial_gp(~ lon + lat, nn = 5),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")

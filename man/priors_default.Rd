@@ -2,12 +2,12 @@
 % Please edit documentation in R/priors.R
 \name{priors_default}
 \alias{priors_default}
-\title{Show default priors for a ratiod family}
+\title{Show default priors for a tulpaRatio family}
 \usage{
 priors_default(family = NULL, spatial = FALSE, temporal = FALSE)
 }
 \arguments{
-\item{family}{A ratiod family object (e.g., \code{ratiod_negbin_negbin()}).
+\item{family}{A tulpaRatio family object (e.g., \code{ratiod_negbin_negbin()}).
 If NULL (default), shows defaults for all families.}
 
 \item{spatial}{Logical; if TRUE, include spatial priors. Default FALSE.}
@@ -24,7 +24,7 @@ Useful for understanding what priors are applied before fitting
 and as a starting point for customization.
 }
 \details{
-Default priors in ratiod follow these principles:
+Default priors in tulpaRatio follow these principles:
 \itemize{
 \item \strong{Fixed effects (beta)}: Normal(0, 2.5) - weakly informative, allows
 coefficients roughly in [-5, 5] on the link scale.

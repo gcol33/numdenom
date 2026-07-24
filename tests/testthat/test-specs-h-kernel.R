@@ -13,10 +13,10 @@ test_that("specs/H == specs/A_r bit-exact for every ratio family", {
   fit_at <- function(formula, data, family, mode) {
     op <- options(tulpaRatio.use_specs = TRUE)
     on.exit(options(op), add = TRUE)
-    fit <- tulpaRatio::ratiod(
+    fit <- tulpaRatio::tratio(
       formula = formula, data = data, family = family,
-      mode = "hmc", iter = 1000L, warmup = 250L, chains = 1L,
-      seed = 42L, verbose = FALSE, gradient_mode = mode
+      mode = "hmc",
+      control = list(iter = 1000L, warmup = 250L, chains = 1L, seed = 42L, verbose = FALSE, gradient_mode = mode)
     )
     colMeans(fit$draws)
   }

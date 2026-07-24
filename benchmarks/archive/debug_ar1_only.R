@@ -31,10 +31,10 @@ df <- data.frame(
 df$denom[df$denom == 0] <- 1
 
 cat("Fitting numdenom (AR1 only)...\n")
-fit_nd <- ratiod(
+fit_nd <- tratio(
   y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
   temporal = temporal_ar1("time_factor"),
-  iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE
+  control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
 )
 draws_nd <- as.matrix(fit_nd$draws)
 

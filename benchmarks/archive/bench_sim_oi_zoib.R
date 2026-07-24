@@ -69,9 +69,9 @@ cat("Fitting... ")
 
 t_78 <- system.time({
   fit_78 <- tryCatch({
-    ratiod(successes | trials ~ x + (1 | site), data = df_78,
+    tratio(successes | trials ~ x + (1 | site), data = df_78,
            family = ratiod_oibinomial(),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -119,9 +119,9 @@ cat("Fitting... ")
 
 t_79 <- system.time({
   fit_79 <- tryCatch({
-    ratiod(successes | trials ~ x + (1 | site), data = df_79,
+    tratio(successes | trials ~ x + (1 | site), data = df_79,
            family = ratiod_zoibinomial(),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

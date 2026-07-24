@@ -155,14 +155,13 @@ df_pg_icar_rw1$effort[df_pg_icar_rw1$effort < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_icar_rw1,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(spatial_info$adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -234,14 +233,13 @@ df_pg_icar_ar1$effort[df_pg_icar_ar1$effort < 0.01] <- 0.01
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | effort ~ x + (1|site),
     data = df_pg_icar_ar1,
     family = ratiod_poisson_gamma(),
     spatial = spatial_car(spatial_info$adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_ar1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -310,14 +308,13 @@ df_nb_icar_rw1 <- data.frame(
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_icar_rw1,
     family = ratiod_negbin_negbin(),
     spatial = spatial_car(spatial_info$adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_rw1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))
@@ -386,14 +383,13 @@ df_nb_icar_ar1 <- data.frame(
 
 cat("Fitting numdenom... ")
 t_nd <- system.time({
-  fit_nd <- ratiod(
+  fit_nd <- tratio(
     y | denom ~ x + (1|site),
     data = df_nb_icar_ar1,
     family = ratiod_negbin_negbin(),
     spatial = spatial_car(spatial_info$adj_mat, level = "group", group_var = "spatial_site"),
     temporal = temporal_ar1("time_factor"),
-    iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-    verbose = FALSE
+    control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
   )
 })["elapsed"]
 cat(sprintf("%.1fs\n", t_nd))

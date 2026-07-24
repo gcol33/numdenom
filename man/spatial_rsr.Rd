@@ -73,7 +73,7 @@ df <- data.frame(
 )
 
 # Standard GP (may have spatial confounding)
-fit1 <- ratiod(
+fit1 <- tratio(
   count | effort ~ depth + temp,
   data = df,
   spatial = spatial_gp(~ lon + lat),
@@ -84,7 +84,7 @@ fit1 <- ratiod(
 )
 
 # RSR to protect depth and temp coefficients
-fit2 <- ratiod(
+fit2 <- tratio(
   count | effort ~ depth + temp,
   data = df,
   spatial = spatial_rsr(

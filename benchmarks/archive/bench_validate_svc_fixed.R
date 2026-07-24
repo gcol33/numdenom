@@ -129,9 +129,9 @@ cat("Fitting binomial + SVC(terms=2)... ")
 flush.console()
 t_A <- system.time({
   fit_A <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_A, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_A, family = ratiod_binomial(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 2),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -173,9 +173,9 @@ cat("Fitting binomial + SVC(terms=1)... ")
 flush.console()
 t_B <- system.time({
   fit_B <- tryCatch({
-    ratiod(successes | trials ~ x, data = df_B, family = ratiod_binomial(),
+    tratio(successes | trials ~ x, data = df_B, family = ratiod_binomial(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 1),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -211,9 +211,9 @@ cat("Fitting... ")
 flush.console()
 t_C1 <- system.time({
   fit_C1 <- tryCatch({
-    ratiod(count | effort ~ x, data = df_C1, family = ratiod_poisson_gamma(),
+    tratio(count | effort ~ x, data = df_C1, family = ratiod_poisson_gamma(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 2),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 
@@ -244,9 +244,9 @@ cat("Fitting... ")
 flush.console()
 t_C2 <- system.time({
   fit_C2 <- tryCatch({
-    ratiod(num | denom ~ x, data = df_C2, family = ratiod_negbin_negbin(),
+    tratio(num | denom ~ x, data = df_C2, family = ratiod_negbin_negbin(),
            spatial = spatial_svc(coords = c("coord_x", "coord_y"), terms = 2),
-           iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
+           control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE))
   }, error = function(e) { cat(sprintf("ERROR: %s\n", e$message)); NULL })
 })[["elapsed"]]
 

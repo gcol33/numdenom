@@ -16,10 +16,9 @@ df <- data.frame(y = y, effort = eff, x = x)
 # Test 1: PG base with zeros in effort
 cat("\n=== PG base (with zeros) ===\n")
 fit1 <- tryCatch({
-  ratiod(y | effort ~ x, data = df,
+  tratio(y | effort ~ x, data = df,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = FALSE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit1)) cat(fit1, "\n") else cat("SUCCESS\n")
 
@@ -30,10 +29,9 @@ df2 <- data.frame(y = y, effort = eff2, x = x)
 
 cat("\n=== PG base (zeros -> 1) ===\n")
 fit2 <- tryCatch({
-  ratiod(y | effort ~ x, data = df2,
+  tratio(y | effort ~ x, data = df2,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = FALSE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit2)) cat(fit2, "\n") else cat("SUCCESS\n")
 
@@ -43,10 +41,9 @@ df3 <- data.frame(y = y[keep], effort = eff[keep], x = x[keep])
 
 cat("\n=== PG base (filtered, N=", sum(keep), ") ===\n")
 fit3 <- tryCatch({
-  ratiod(y | effort ~ x, data = df3,
+  tratio(y | effort ~ x, data = df3,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = FALSE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit3)) cat(fit3, "\n") else cat("SUCCESS\n")
 
@@ -58,9 +55,8 @@ df4 <- data.frame(y = y, effort = eff4, x = x)
 
 cat("\n=== PG base (N=100, guaranteed no zeros) ===\n")
 fit4 <- tryCatch({
-  ratiod(y | effort ~ x, data = df4,
+  tratio(y | effort ~ x, data = df4,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1,
-         gradient_mode = "H", verbose = FALSE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = FALSE))
 }, error = function(e) paste0("ERROR: ", e$message))
 if (is.character(fit4)) cat(fit4, "\n") else cat("SUCCESS\n")

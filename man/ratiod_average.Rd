@@ -2,7 +2,7 @@
 % Please edit documentation in R/validate.R
 \name{ratiod_average}
 \alias{ratiod_average}
-\title{Model averaging for ratiod fits}
+\title{Model averaging for tulpaRatio fits}
 \usage{
 ratiod_average(
   ...,
@@ -65,10 +65,10 @@ df <- data.frame(
   z = rnorm(n),
   site = factor(rep(1:10, each = 6))
 )
-fit1 <- ratiod(count | effort ~ x + (1 | site), data = df,
+fit1 <- tratio(count | effort ~ x + (1 | site), data = df,
               family = ratiod_poisson_gamma(),
               iter = 200, warmup = 100, chains = 1)
-fit2 <- ratiod(count | effort ~ x + z + (1 | site), data = df,
+fit2 <- tratio(count | effort ~ x + z + (1 | site), data = df,
               family = ratiod_poisson_gamma(),
               iter = 200, warmup = 100, chains = 1)
 # Model averaging (requires loo package)

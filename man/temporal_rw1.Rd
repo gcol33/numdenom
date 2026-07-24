@@ -54,7 +54,7 @@ df <- data.frame(
   effort = rgamma(48, shape = 5, rate = 1)
 )
 
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -75,7 +75,7 @@ df_panel <- data.frame(
   effort = rgamma(60, shape = 3, rate = 1)
 )
 
-fit2 <- ratiod(
+fit2 <- tratio(
   count | effort ~ x + (1 | site),
   data = df_panel,
   family = ratiod_poisson_gamma(),
@@ -95,7 +95,7 @@ df_monthly <- data.frame(
   effort = rgamma(48, shape = 2, rate = 1)
 )
 
-fit3 <- ratiod(
+fit3 <- tratio(
   count | effort ~ x,
   data = df_monthly,
   family = ratiod_poisson_gamma(),

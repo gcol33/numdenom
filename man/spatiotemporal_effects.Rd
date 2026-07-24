@@ -34,7 +34,7 @@ Spatiotemporal effects in requested format
 }
 \description{
 Extract posterior distributions of spatiotemporal interaction effects
-from a fitted ratiod model.
+from a fitted ratio model.
 }
 \examples{
 \donttest{

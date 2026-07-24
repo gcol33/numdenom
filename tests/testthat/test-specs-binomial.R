@@ -18,11 +18,10 @@ test_that("B1a LikelihoodSpec PoC matches legacy binomial within MC noise", {
   fit_one <- function(use_specs, seed_val) {
     op <- options(tulpaRatio.use_specs = use_specs)
     on.exit(options(op), add = TRUE)
-    fit <- tulpaRatio::ratiod(
+    fit <- tulpaRatio::tratio(
       formula = y | n_trials ~ x1 + x2, data = dat,
       family = tulpaRatio::ratiod_binomial(), mode = "hmc",
-      iter = 2000L, warmup = 500L, chains = 1L,
-      seed = seed_val, verbose = FALSE, gradient_mode = "A_r"
+      control = list(iter = 2000L, warmup = 500L, chains = 1L, seed = seed_val, verbose = FALSE, gradient_mode = "A_r")
     )
     draws <- fit$draws
     if (is.matrix(draws)) colMeans(draws) else stop("unexpected draws shape")

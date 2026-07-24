@@ -36,10 +36,9 @@ cat(paste(rep("=", 60), collapse=""), "\n\n")
 
 bench_model <- function(name, formula, data, family, gradient_mode = "H") {
   t <- system.time({
-    fit <- ratiod(formula, data = data, family = family,
-                  mode = "hmc", gradient_mode = gradient_mode,
-                  iter = 500, warmup = 250, chains = 1,
-                  refresh = 0)
+    fit <- tratio(formula, data = data, family = family,
+                  mode = "hmc",
+                  control = list(gradient_mode = gradient_mode, iter = 500, warmup = 250, chains = 1))
   })["elapsed"]
   div <- sum(fit$diagnostics$divergent)
   td <- mean(fit$diagnostics$treedepth)

@@ -65,14 +65,11 @@ cat("True eta_denom stats: mean =", mean(eta_denom), "sd =", sd(eta_denom), "\n"
 
 # Try running with longer chains and check convergence
 cat("\n=== Running with longer chains ===\n")
-nd_fit <- ratiod(
+nd_fit <- tratio(
   y_num | y_denom ~ x,
   data = dat,
   family = ratiod_gamma_gamma(),
-  iter = 4000,
-  warmup = 2000,
-  chains = 2,
-  seed = 123
+  control = list(iter = 4000, warmup = 2000, chains = 2, seed = 123)
 )
 
 nd_summary <- summary(nd_fit)

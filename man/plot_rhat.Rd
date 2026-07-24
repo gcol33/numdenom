@@ -31,8 +31,8 @@ Color coding:
 }
 }
 \examples{
-# Diagnostic plots require a fitted ratiod model
-# See ratiod() examples for fitting models
+# Diagnostic plots require a fitted ratio model
+# See tratio() examples for fitting models
 
 \donttest{
 # Fit a model (slow, not run on CRAN)
@@ -44,7 +44,7 @@ df <- data.frame(
   depth = rnorm(n),
   site = factor(rep(1:10, each = 5))
 )
-fit <- ratiod(count | effort ~ depth + (1|site), data = df,
+fit <- tratio(count | effort ~ depth + (1|site), data = df,
              family = ratiod_poisson_gamma(),
              iter = 200, warmup = 100, chains = 1)
 # plot_rhat(fit)

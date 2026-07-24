@@ -29,14 +29,11 @@ cat("  sd(log(y_denom)):", sd(log(y_denom)), "\n\n")
 
 # Fit model
 devtools::load_all()
-fit <- ratiod(
+fit <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 1,
-  seed = 123
+  control = list(iter = 2000, warmup = 1000, chains = 1, seed = 123)
 )
 
 print(summary(fit))

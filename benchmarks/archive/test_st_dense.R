@@ -38,14 +38,14 @@ df <- data.frame(y = y, trials = trials, x = x,
 cat("Test 1: Bin+ST-I, 1 chain, 200 iter (quick test)...\n")
 t1 <- system.time({
   fit1 <- tryCatch(
-    ratiod(y | trials ~ x + (1|site), data = df,
+    tratio(y | trials ~ x + (1|site), data = df,
            family = ratiod_binomial(),
            spatiotemporal = spatiotemporal(
              spatial = spatial_car(adj, group_var = "site"),
              temporal = temporal_rw1(time_var = "time"),
              type = "I"
            ),
-           iter = 200, warmup = 100, chains = 1, verbose = TRUE),
+           control = list(iter = 200, warmup = 100, chains = 1, verbose = TRUE)),
     error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
   )
 })["elapsed"]
@@ -56,14 +56,14 @@ if (!is.null(fit1)) {
   cat("Test 2: Bin+ST-I, 2 chains, 1000 iter...\n")
   t2 <- system.time({
     fit2 <- tryCatch(
-      ratiod(y | trials ~ x + (1|site), data = df,
+      tratio(y | trials ~ x + (1|site), data = df,
              family = ratiod_binomial(),
              spatiotemporal = spatiotemporal(
                spatial = spatial_car(adj, group_var = "site"),
                temporal = temporal_rw1(time_var = "time"),
                type = "I"
              ),
-             iter = 1000, warmup = 500, chains = 2, verbose = TRUE),
+             control = list(iter = 1000, warmup = 500, chains = 2, verbose = TRUE)),
       error = function(e) { cat("ERROR:", e$message, "\n"); NULL }
     )
   })["elapsed"]

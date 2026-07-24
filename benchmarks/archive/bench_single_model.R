@@ -23,9 +23,9 @@ t <- system.time({
       denom = pmax(rnbinom(N, mu = 100, size = 10), 1L),
       x = x, site = site, spatial_site = site
     )
-    fit <- ratiod(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
+    fit <- tratio(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
                   spatial = spatial_car(adj_mat, level = "group", group_var = "spatial_site"),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   } else if (model == "NB_HSGP") {
     coords <- grid[as.integer(site), ]
     df <- data.frame(
@@ -33,27 +33,27 @@ t <- system.time({
       denom = pmax(rnbinom(N, mu = 100, size = 10), 1L),
       x = x, site = site, lon = coords$lon, lat = coords$lat
     )
-    fit <- ratiod(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
+    fit <- tratio(y | denom ~ x + (1|site), data = df, family = ratiod_negbin_negbin(),
                   spatial = spatial_hsgp(coords = c("lon", "lat")),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   } else if (model == "PG_GPt") {
     df <- data.frame(
       y = rpois(N, exp(2 + 0.5*x)),
       denom = rgamma(N, 10, 1),
       x = x, time_num = time_num
     )
-    fit <- ratiod(y | denom ~ x, data = df, family = ratiod_poisson_gamma(),
+    fit <- tratio(y | denom ~ x, data = df, family = ratiod_poisson_gamma(),
                   temporal = temporal_gp("time_num"),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   } else if (model == "Bin_GPt") {
     trials <- sample(10:50, N, replace = TRUE)
     df <- data.frame(
       y = rbinom(N, trials, plogis(0.5 + 0.3*x)),
       trials = trials, x = x, time_num = time_num
     )
-    fit <- ratiod(y | trials ~ x, data = df, family = ratiod_binomial(),
+    fit <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
                   temporal = temporal_gp("time_num"),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   } else if (model == "PG_ST_IV") {
     df <- data.frame(
       y = rpois(N, exp(2 + 0.5*x)),
@@ -62,10 +62,10 @@ t <- system.time({
     )
     sp <- spatial_car(adj_mat, level = "group", group_var = "spatial_site")
     tp <- temporal_rw1("time_num")
-    fit <- ratiod(y | denom ~ x, data = df, family = ratiod_poisson_gamma(),
+    fit <- tratio(y | denom ~ x, data = df, family = ratiod_poisson_gamma(),
                   spatial = sp, temporal = tp,
                   spatiotemporal = spatiotemporal(spatial = sp, temporal = tp, type = "IV"),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   } else if (model == "Bin_ST_IV") {
     trials <- sample(10:50, N, replace = TRUE)
     df <- data.frame(
@@ -74,10 +74,10 @@ t <- system.time({
     )
     sp <- spatial_car(adj_mat, level = "group", group_var = "spatial_site")
     tp <- temporal_rw1("time_num")
-    fit <- ratiod(y | trials ~ x, data = df, family = ratiod_binomial(),
+    fit <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
                   spatial = sp, temporal = tp,
                   spatiotemporal = spatiotemporal(spatial = sp, temporal = tp, type = "IV"),
-                  iter = 500, warmup = 250, chains = 1, verbose = FALSE)
+                  control = list(iter = 500, warmup = 250, chains = 1, verbose = FALSE))
   }
 })[["elapsed"]]
 cat(sprintf("%s seed=%d: %.1fs\n", model, seed, t))

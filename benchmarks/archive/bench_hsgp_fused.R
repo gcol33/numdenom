@@ -61,21 +61,21 @@ run_bench <- function(label, expr) {
 cat("--- HSGP models ---\n")
 
 t8 <- run_bench("Row 8: PG+HSGP (old: 9.5s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 t38 <- run_bench("Row 38: NB+HSGP (old: 12.9s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
+  tratio(y_num | y_denom ~ x, data = df_nb, family = ratiod_negbin_negbin(),
          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 t68 <- run_bench("Row 68: Bin+HSGP (old: 3.9s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
+  tratio(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 # Also test HSGP+RW1 combination
@@ -86,17 +86,17 @@ df_pg$time <- factor(time_idx)
 df_bin$time <- factor(time_idx)
 
 t22 <- run_bench("Row 22: PG+HSGP+RW1 (old: 4.6s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
+  tratio(y_num | y_denom ~ x, data = df_pg, family = ratiod_poisson_gamma(),
          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 t84 <- run_bench("Row 84: Bin+HSGP+RW1 (old: 3.6s)", quote(
-  ratiod(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
+  tratio(y_num | y_denom ~ x, data = df_bin, family = ratiod_binomial(),
          spatial = spatial_hsgp(coords = c("lon", "lat"), m = 6),
          temporal = temporal_rw1(time_var = "time"),
-         iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, refresh = 0)
+         control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS))
 ))
 
 cat("\n=== SUMMARY ===\n")

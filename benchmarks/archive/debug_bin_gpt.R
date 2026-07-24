@@ -27,11 +27,10 @@ df <- data.frame(
 # Try H mode with verbose to see gradient check
 cat("=== Bin+GP_t: gradient_mode=H with verbose ===\n")
 fit <- tryCatch({
-  ratiod(y | trials ~ x + (1 | site), data = df,
+  tratio(y | trials ~ x + (1 | site), data = df,
          family = ratiod_binomial(),
          temporal = temporal_gp(time_var = "time"),
-         iter = 10, warmup = 5, chains = 1,
-         gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 10, warmup = 5, chains = 1, gradient_mode = "H", verbose = TRUE))
 }, error = function(e) paste0("ERROR: ", e$message))
 
 if (is.character(fit)) {

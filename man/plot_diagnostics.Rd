@@ -2,7 +2,7 @@
 % Please edit documentation in R/plot_diagnostics.R
 \name{plot_diagnostics}
 \alias{plot_diagnostics}
-\title{Diagnostic Plotting Functions for ratiod Models}
+\title{Diagnostic Plotting Functions for ratio Models}
 \usage{
 plot_diagnostics(fit, pars = NULL)
 }

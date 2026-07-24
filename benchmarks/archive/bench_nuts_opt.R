@@ -70,9 +70,8 @@ results <- data.frame(
 # Helper: time a numdenom fit
 time_nd <- function(formula, data, family, ...) {
   system.time({
-    fit <- ratiod(formula, data = data, family = family,
-                  iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-                  gradient_mode = "H", verbose = FALSE, ...)
+    fit <- tratio(formula, data = data, family = family, ...,
+                  control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, gradient_mode = "H", verbose = FALSE))
   })[3]
 }
 

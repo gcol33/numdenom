@@ -1,7 +1,7 @@
 #' Plot spatial predictions as a map
 #'
 #' @description
-#' Create publication-ready maps from ratiod spatial predictions. Supports
+#' Create publication-ready maps from tulpaRatio spatial predictions. Supports
 #' plotting ratio estimates, uncertainty (credible interval width), and
 #' individual process predictions (numerator/denominator).
 #'
@@ -32,7 +32,7 @@
 #'
 #' @details
 #' This function provides a streamlined workflow for visualizing spatial
-#' predictions from ratiod models. It handles:
+#' predictions from ratio models. It handles:
 #'
 #' - Extracting predictions from ratiod_fit objects
 
@@ -51,7 +51,7 @@
 #' ```
 #'
 #' @examples
-#' # plot_map requires a fitted spatial ratiod model
+#' # plot_map requires a fitted spatial ratio model
 #' # See spatial_car() examples for fitting spatial models
 #'
 #' \dontrun{
@@ -70,7 +70,7 @@
 #' # Create simple adjacency matrix
 #' adj <- matrix(0, n_sites, n_sites)
 #' for (i in 1:(n_sites-1)) adj[i, i+1] <- adj[i+1, i] <- 1
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ elevation + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),

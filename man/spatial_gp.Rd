@@ -122,7 +122,7 @@ df <- data.frame(
 )
 
 # Continuous spatial effect with exponential covariance
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ depth + temp,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -135,7 +135,7 @@ fit <- ratiod(
 summary(fit)
 
 # Smoother spatial field with Matern covariance
-fit2 <- ratiod(
+fit2 <- tratio(
   count | effort ~ depth + temp,
   data = df,
   family = ratiod_poisson_gamma(),

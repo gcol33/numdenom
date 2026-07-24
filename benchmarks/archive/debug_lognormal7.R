@@ -17,14 +17,11 @@ dat <- data.frame(y_num = y_num, y_denom = y_denom)
 
 # Fit with very short chain and check trace
 cat("=== Fitting with verbose sampling ===\n")
-fit <- ratiod(
+fit <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 50,
-  warmup = 25,
-  chains = 1,
-  seed = 123
+  control = list(iter = 50, warmup = 25, chains = 1, seed = 123)
 )
 
 # Look at actual draws
@@ -46,15 +43,11 @@ cat("  Acceptance rate:", fit$diagnostics$accept_rate, "\n")
 
 # Try with very different step size
 cat("\n=== Testing with custom step size ===\n")
-fit2 <- ratiod(
+fit2 <- tratio(
   y_num | y_denom ~ 1,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 50,
-  warmup = 25,
-  chains = 1,
-  seed = 123,
-  step_size = 0.01  # Much smaller step size
+  control = list(iter = 50, warmup = 25, chains = 1, seed = 123)
 )
 
 draws2 <- as.matrix(fit2$draws)

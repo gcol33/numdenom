@@ -11,9 +11,8 @@ y <- rbinom(N, n_trials, p)
 df <- data.frame(y = y, n = n_trials, x = x)
 
 cat("=== Binomial base: checking NUTS tree depth ===\n")
-fit <- ratiod(y | n ~ x, data = df, family = ratiod_binomial(),
-              iter = 500, warmup = 250, chains = 1,
-              gradient_mode = "H", verbose = FALSE)
+fit <- tratio(y | n ~ x, data = df, family = ratiod_binomial(),
+              control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = FALSE))
 
 # Check tree depths
 td <- fit$diagnostics$treedepth

@@ -19,7 +19,7 @@ df_pg <- data.frame(y_num = y_num_pg, y_denom = y_denom_pg, x1, time_id)
 
 run_bench <- function(label, ...) {
   cat(sprintf("=== %s ===\n", label))
-  t <- system.time({ fit <- ratiod(...) })[3]
+  t <- system.time({ fit <- tratio(...) })[3]
   d <- fit$diagnostics
   n_div <- if (!is.null(d$n_divergent)) sum(d$n_divergent) else 0
   avg_acc <- if (!is.null(d$avg_accept_prob)) mean(d$avg_accept_prob) else NA

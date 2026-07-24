@@ -19,23 +19,19 @@ cat("  y_denom range:", range(y_denom), "\n")
 
 # Very short run - just 5 iterations to compare behavior
 cat("\n=== Numerical gradient (N) - 5 iterations ===\n")
-fit_N <- ratiod(
+fit_N <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 5, warmup = 1, chains = 1,
-  gradient_mode = "N",
-  verbose = TRUE
+  control = list(iter = 5, warmup = 1, chains = 1, gradient_mode = "N", verbose = TRUE)
 )
 
 cat("\n=== Forward autodiff (A) - 5 iterations ===\n")
-fit_A <- ratiod(
+fit_A <- tratio(
   y | denom ~ x,
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 5, warmup = 1, chains = 1,
-  gradient_mode = "A",
-  verbose = TRUE
+  control = list(iter = 5, warmup = 1, chains = 1, gradient_mode = "A", verbose = TRUE)
 )
 
 # Compare final parameter values

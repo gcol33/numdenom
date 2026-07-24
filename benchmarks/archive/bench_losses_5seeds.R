@@ -43,9 +43,9 @@ results[[1]] <- run_seeds("NB+ICAR", function(env) {
   df <- data.frame(y=rnbinom(N, mu=exp(2+0.3*env$x), size=5),
                    denom={d<-rnbinom(N, mu=100, size=10); d[d==0]<-1L; d},
                    x=env$x, site=env$site, spatial_site=env$spatial_site)
-  ratiod(y | denom ~ x + (1|site), data=df, family=ratiod_negbin_negbin(),
+  tratio(y | denom ~ x + (1|site), data=df, family=ratiod_negbin_negbin(),
          spatial=spatial_car(env$adj_mat, level="group", group_var="spatial_site"),
-         iter=500, warmup=250, chains=1, verbose=FALSE)
+         control = list(iter=500, warmup=250, chains=1, verbose=FALSE))
 })
 
 # 2. NB+HSGP (no RE — matching Stan which has no RE)
@@ -53,9 +53,9 @@ results[[2]] <- run_seeds("NB+HSGP", function(env) {
   df <- data.frame(y=rnbinom(N, mu=exp(2+0.3*env$x), size=5),
                    denom={d<-rnbinom(N, mu=100, size=10); d[d==0]<-1L; d},
                    x=env$x, lon=env$lon, lat=env$lat)
-  ratiod(y | denom ~ x, data=df, family=ratiod_negbin_negbin(),
+  tratio(y | denom ~ x, data=df, family=ratiod_negbin_negbin(),
          spatial=spatial_hsgp(coords = ~ lon + lat),
-         iter=500, warmup=250, chains=1, verbose=FALSE)
+         control = list(iter=500, warmup=250, chains=1, verbose=FALSE))
 })
 
 # 3. PG+GP_t (no RE — matching Stan which has no RE)
@@ -63,9 +63,9 @@ results[[3]] <- run_seeds("PG+GP_t", function(env) {
   df <- data.frame(y=rpois(N, exp(2+0.5*env$x)),
                    denom=rgamma(N, 10, 1),
                    x=env$x, time_num=env$time_num)
-  ratiod(y | denom ~ x, data=df, family=ratiod_poisson_gamma(),
+  tratio(y | denom ~ x, data=df, family=ratiod_poisson_gamma(),
          temporal=temporal_gp("time_num"),
-         iter=500, warmup=250, chains=1, verbose=FALSE)
+         control = list(iter=500, warmup=250, chains=1, verbose=FALSE))
 })
 
 # 4. Bin+GP_t (no RE — matching Stan which has no RE)
@@ -73,9 +73,9 @@ results[[4]] <- run_seeds("Bin+GP_t", function(env) {
   trials <- sample(10:50, N, replace=TRUE)
   df <- data.frame(y=rbinom(N, trials, plogis(0.5+0.3*env$x)),
                    trials=trials, x=env$x, time_num=env$time_num)
-  ratiod(y | trials ~ x, data=df, family=ratiod_binomial(),
+  tratio(y | trials ~ x, data=df, family=ratiod_binomial(),
          temporal=temporal_gp("time_num"),
-         iter=500, warmup=250, chains=1, verbose=FALSE)
+         control = list(iter=500, warmup=250, chains=1, verbose=FALSE))
 })
 
 cat("\n\n========== SUMMARY ==========\n")

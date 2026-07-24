@@ -41,7 +41,7 @@ numerator and denominator. Set to FALSE for process-specific TVCs
 A \code{ratiod_tvc} object
 }
 \description{
-Specify temporally-varying coefficients for ratiod models. TVCs allow
+Specify temporally-varying coefficients for ratio models. TVCs allow
 regression coefficients to change smoothly over time using a Gaussian
 process or random walk prior. This captures how effects evolve temporally.
 }
@@ -83,7 +83,7 @@ df <- data.frame(
 )
 
 # Time-varying intercept (random temporal field)
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
@@ -96,7 +96,7 @@ fit <- ratiod(
 summary(fit)
 
 # Time-varying effect of x
-fit2 <- ratiod(
+fit2 <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),

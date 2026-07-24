@@ -2,7 +2,7 @@
 % Please edit documentation in R/backend_hmc.R
 \name{fit_hmc}
 \alias{fit_hmc}
-\title{Fit ratiod model using HMC/NUTS}
+\title{Fit ratio model using HMC/NUTS}
 \usage{
 fit_hmc(
   formula,
@@ -70,6 +70,6 @@ fit_hmc(
 A ratiod_fit object
 }
 \description{
-Fit ratiod model using HMC/NUTS
+Fit ratio model using HMC/NUTS
 }
 \keyword{internal}

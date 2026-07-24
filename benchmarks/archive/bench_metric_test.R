@@ -31,14 +31,12 @@ cat("=== GP_t (NB, ~row 44) DENSE vs DIAG ===\n")
 for (met in c("dense", "diag")) {
   t0 <- proc.time()["elapsed"]
   fit <- tryCatch(
-    ratiod(y | d ~ x + (1|site),
+    tratio(y | d ~ x + (1|site),
            data = df,
            family = ratiod_negbin_negbin(),
            temporal = temporal_gp("time_num"),
-           mode = "hmc", gradient_mode = "H",
-           metric = met,
-           iter = 500L, warmup = 250L, chains = 1L,
-           verbose = FALSE),
+           mode = "hmc",
+           control = list(gradient_mode = "H", metric = met, iter = 500L, warmup = 250L, chains = 1L, verbose = FALSE)),
     error = function(e) paste("ERROR:", e$message)
   )
   t1 <- proc.time()["elapsed"]
@@ -53,14 +51,12 @@ cat("\n=== slopes+ICAR (NB, ~row 55) DENSE vs DIAG ===\n")
 for (met in c("dense", "diag")) {
   t0 <- proc.time()["elapsed"]
   fit <- tryCatch(
-    ratiod(y | d ~ x + (1 + z | site),
+    tratio(y | d ~ x + (1 + z | site),
            data = df,
            family = ratiod_negbin_negbin(),
            spatial = spatial_car(adj, level = "group", group_var = "spatial_site"),
-           mode = "hmc", gradient_mode = "H",
-           metric = met,
-           iter = 500L, warmup = 250L, chains = 1L,
-           verbose = FALSE),
+           mode = "hmc",
+           control = list(gradient_mode = "H", metric = met, iter = 500L, warmup = 250L, chains = 1L, verbose = FALSE)),
     error = function(e) paste("ERROR:", e$message)
   )
   t1 <- proc.time()["elapsed"]

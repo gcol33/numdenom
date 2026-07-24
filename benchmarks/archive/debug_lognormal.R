@@ -35,14 +35,11 @@ cat("  sigma_denom: ", sigma_denom, "\n\n")
 # Fit with numdenom
 # ============================================
 cat("=== Fitting numdenom (lognormal) ===\n")
-nd_fit <- ratiod(
+nd_fit <- tratio(
   y_num | y_denom ~ x,
   data = dat,
   family = ratiod_lognormal(),
-  iter = 2000,
-  warmup = 1000,
-  chains = 2,
-  seed = 123
+  control = list(iter = 2000, warmup = 1000, chains = 2, seed = 123)
 )
 
 print(summary(nd_fit))

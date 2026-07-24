@@ -11,8 +11,8 @@ df$effort <- pmax(rgamma(N, shape = 5, rate = 5 / exp(eta + 0.5)), 0.01)
 
 cat("\n=== PG+RE verbose ===\n")
 t1 <- system.time({
-  fit <- ratiod(y_num | effort ~ x + (1 | site), data = df,
-    family = ratiod_poisson_gamma(), iter = 500, warmup = 250,
-    chains = 1, gradient_mode = "H", verbose = TRUE)
+  fit <- tratio(y_num | effort ~ x + (1 | site), data = df,
+    family = ratiod_poisson_gamma(),
+    control = list(iter = 500, warmup = 250, chains = 1, gradient_mode = "H", verbose = TRUE))
 })["elapsed"]
 cat(sprintf("\nTotal time: %.2f s\n", t1))

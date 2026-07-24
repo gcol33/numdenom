@@ -76,7 +76,7 @@ epi_data <- data.frame(
 )
 
 # Disease mapping with BYM2 spatial smoothing
-fit <- ratiod(
+fit <- tratio(
   cases | population ~ age,
   spatial = spatial_bym2(adj, level = "group", group_var = "region"),
   data = epi_data,

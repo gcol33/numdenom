@@ -101,7 +101,7 @@ df <- data.frame(
   effort = rgamma(30, shape = 4, rate = 1)
 )
 
-fit <- ratiod(
+fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),

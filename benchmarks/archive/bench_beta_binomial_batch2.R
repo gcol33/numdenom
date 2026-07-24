@@ -79,13 +79,12 @@ df_105 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd <- system.time({
   fit_nd <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df_105,
       family = ratiod_beta_binomial(),
       spatial = spatial_car(adj_matrix, group_var = "site"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -145,13 +144,12 @@ df_106 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_106 <- system.time({
   fit_nd_106 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df_106,
       family = ratiod_beta_binomial(),
       temporal = temporal_rw1("time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))
@@ -208,14 +206,13 @@ df_107 <- data.frame(
 cat("Fitting numdenom... ")
 t_nd_107 <- system.time({
   fit_nd_107 <- tryCatch({
-    ratiod(
+    tratio(
       successes | trials ~ x + (1 | site),
       data = df_107,
       family = ratiod_beta_binomial(),
       spatial = spatial_car(adj_matrix, group_var = "site"),
       temporal = temporal_rw1("time"),
-      iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS,
-      verbose = FALSE
+      control = list(iter = N_ITER, warmup = N_WARMUP, chains = N_CHAINS, verbose = FALSE)
     )
   }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message))

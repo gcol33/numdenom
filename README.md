@@ -1,4 +1,4 @@
-# tulpaRatio
+﻿# tulpaRatio
 
 *a ratio with its uncertainty kept*
 
@@ -21,7 +21,7 @@ mis-states the uncertainty.
 library(tulpaRatio)
 
 # catch-per-unit-effort: model catch and effort, derive CPUE
-fit <- ratiod(
+fit <- tratio(
   catch | effort ~ depth + season + (1 | site),
   data   = trawl_data,
   family = ratiod_poisson_gamma()
@@ -46,7 +46,7 @@ from the joint posterior.
 glm(catch ~ depth + season + offset(log(effort)), family = poisson, data = df)
 
 # tulpaRatio models both processes, derives the ratio post hoc
-ratiod(catch | effort ~ depth + season + (1 | site),
+tratio(catch | effort ~ depth + season + (1 | site),
        data = df, family = ratiod_poisson_gamma())
 ```
 
@@ -100,7 +100,7 @@ LOO and WAIC are provided for model comparison. See
 The numerator and denominator can take different predictors:
 
 ```r
-fit <- ratiod(
+fit <- tratio(
   species_count | total_count ~ (1 | site),
   formula_num   = ~ depth + temperature,   # numerator process
   formula_denom = ~ sampling_effort,        # denominator process

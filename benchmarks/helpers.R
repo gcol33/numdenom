@@ -145,13 +145,12 @@ benchmark_config <- function(row, family, re, spatial, temporal, zi, grad,
   # Benchmark numdenom
   nd_time <- tryCatch({
     t <- system.time({
-      fit <- ratiod(nd_formula, data = data,
+      fit <- tratio(nd_formula, data = data,
                     family = nd_family,
                     spatial = nd_spatial,
                     temporal = nd_temporal,
                     zi = nd_zi,
-                    iter = n_iter, warmup = n_warmup,
-                    chains = 1, refresh = 0)
+                    control = list(iter = n_iter, warmup = n_warmup, chains = 1))
     })
     t["elapsed"]
   }, error = function(e) {

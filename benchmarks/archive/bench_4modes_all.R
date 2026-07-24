@@ -395,7 +395,7 @@ for (cfg in ROW_CONFIGS) {
 }
 
 # =============================================================================
-# Build ratiod() arguments from config
+# Build tratio() arguments from config
 # =============================================================================
 
 build_ratiod_args <- function(cfg) {

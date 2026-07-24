@@ -19,27 +19,27 @@ df <- data.frame(y = y, effort = eff, x = x, site = factor(site))
 
 cat("\n=== PG+ICAR ===\n")
 fit1 <- tryCatch({
-  ratiod(y | effort ~ x, data = df, spatial = spatial_car(W, group_var = "site"),
+  tratio(y | effort ~ x, data = df, spatial = spatial_car(W, group_var = "site"),
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE))
   "SUCCESS"
 }, error = function(e) paste0("ERROR: ", e$message))
 cat(fit1, "\n")
 
 cat("\n=== PG+slopes ===\n")
 fit2 <- tryCatch({
-  ratiod(y | effort ~ (x | site), data = df,
+  tratio(y | effort ~ (x | site), data = df,
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE))
   "SUCCESS"
 }, error = function(e) paste0("ERROR: ", e$message))
 cat(fit2, "\n")
 
 cat("\n=== PG+slopes+ICAR ===\n")
 fit3 <- tryCatch({
-  ratiod(y | effort ~ (x | site), data = df, spatial = spatial_car(W, group_var = "site"),
+  tratio(y | effort ~ (x | site), data = df, spatial = spatial_car(W, group_var = "site"),
          family = ratiod_poisson_gamma(),
-         iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE))
   "SUCCESS"
 }, error = function(e) paste0("ERROR: ", e$message))
 cat(fit3, "\n")
@@ -52,9 +52,9 @@ df2 <- data.frame(y = y_num, denom = y_den, x = x, site = factor(site))
 
 cat("\n=== NB+slopes+ICAR ===\n")
 fit4 <- tryCatch({
-  ratiod(y | denom ~ (x | site), data = df2, spatial = spatial_car(W, group_var = "site"),
+  tratio(y | denom ~ (x | site), data = df2, spatial = spatial_car(W, group_var = "site"),
          family = ratiod_negbin_negbin(),
-         iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE)
+         control = list(iter = 5, warmup = 2, chains = 1, gradient_mode = "H", verbose = TRUE))
   "SUCCESS"
 }, error = function(e) paste0("ERROR: ", e$message))
 cat(fit4, "\n")

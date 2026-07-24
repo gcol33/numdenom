@@ -233,14 +233,12 @@ test_that("random slopes model compiles and runs without error", {
 
   # Fit model with uncorrelated random slopes (simpler, faster)
   # Use very short chain for testing
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x + (1 + x || site),
     data = df,
     family = ratiod_negbin_negbin(),
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    mode = "hmc"
+    mode = "hmc",
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -298,14 +296,12 @@ test_that("correlated random slopes model runs without error", {
   )
 
   # Fit with correlated slopes (single bar)
-  fit <- ratiod(
+  fit <- tratio(
     y | trials ~ x + (1 + x | site),
     data = df,
     family = ratiod_binomial(),
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    mode = "hmc"
+    mode = "hmc",
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
