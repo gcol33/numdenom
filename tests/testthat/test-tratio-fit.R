@@ -1,4 +1,4 @@
-# Tests for main ratiod() fitting function (R/ratiod.R)
+# Tests for main tratio() fitting function (R/tratio.R)
 
 test_that("ratiod fits poisson_gamma model", {
   skip_on_cran()
@@ -12,14 +12,12 @@ test_that("ratiod fits poisson_gamma model", {
     site = factor(rep(1:4, each = 10))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -40,14 +38,12 @@ test_that("ratiod fits negbin_negbin model", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     y_num | y_denom ~ x,
     data = df,
     family = ratiod_negbin_negbin(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -67,14 +63,12 @@ test_that("ratiod fits negbin_gamma model", {
     site = factor(rep(1:4, each = 10))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     catch | effort ~ x + (1 | site),
     data = df,
     family = ratiod_negbin_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -96,14 +90,12 @@ test_that("ratiod fits binomial model", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     successes | trials ~ x,
     data = df,
     family = ratiod_binomial(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -123,15 +115,12 @@ test_that("ratiod auto-selects HMC backend", {
   )
 
   # mode = "auto" silently selects the best backend (HMC by default)
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "auto",  # Use mode instead of backend
-    iter = 100,
-    warmup = 50,
-    chains = 1,
-    verbose = FALSE
+    control = list(iter = 100, warmup = 50, chains = 1, verbose = FALSE)
   )
 
   expect_equal(fit$backend, "hmc")
@@ -140,23 +129,23 @@ test_that("ratiod auto-selects HMC backend", {
 test_that("ratiod validates inputs", {
   # Missing formula
   expect_error(
-    ratiod(data = data.frame(y = 1:10)),
+    tratio(data = data.frame(y = 1:10)),
     "formula"
   )
 
   # Missing data
   expect_error(
-    ratiod(formula = y | x ~ z),
+    tratio(formula = y | x ~ z),
     "data"
   )
 
   # Non-dataframe data - needs to use a backend that doesn't call nrow before validation
   # We can't easily test this without fixing the function's validation order
-  # Skip this test as it requires refactoring ratiod()
+  # Skip this test as it requires refactoring tratio()
 
   # Invalid family - validation happens after select_backend in current implementation
   # The test below would fail with a different error since select_backend() is called first
-  # Skipping this test as it requires refactoring ratiod() validation order
+  # Skipping this test as it requires refactoring tratio() validation order
 })
 
 test_that("ratiod handles formula_num and formula_denom", {
@@ -172,16 +161,14 @@ test_that("ratiod handles formula_num and formula_denom", {
     site = factor(rep(1:3, each = 10))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ (1 | site),
     formula_num = ~ depth,
     formula_denom = ~ temp,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   expect_s3_class(fit, "ratiod_fit")
@@ -201,19 +188,17 @@ test_that("print.ratiod_fit works", {
     site = factor(rep(1:5, each = 5))
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x + (1 | site),
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   output <- capture.output(print(fit))
 
-  expect_true(any(grepl("ratiod model fit", output)))
+  expect_true(any(grepl("ratio model fit", output)))
   expect_true(any(grepl("Family:", output)))
   expect_true(any(grepl("Observations:", output)))
   expect_true(any(grepl("Numerator:", output)))
@@ -231,19 +216,17 @@ test_that("summary.ratiod_fit works", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   output <- capture.output(summary(fit))
 
-  expect_true(any(grepl("ratiod model summary", output)))
+  expect_true(any(grepl("ratio model summary", output)))
   expect_true(any(grepl("Inference:.*hmc", output)))  # Shows "Inference: Exact (Tier 1) via hmc"
   expect_true(any(grepl("Fixed effects", output)))
   expect_true(any(grepl("Diagnostics:", output)))
@@ -260,14 +243,12 @@ test_that("summary.ratiod_fit respects prob argument", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   # This should not error with different prob values
@@ -286,14 +267,12 @@ test_that("mcmc_diagnostics works", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   diag <- diagnostics(fit)
@@ -317,14 +296,12 @@ test_that("mcmc_diagnostics filters parameters", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   diag <- diagnostics(fit, pars = "beta_num")
@@ -343,14 +320,12 @@ test_that("check_diagnostics works", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   result <- check_diagnostics(fit, quiet = TRUE)
@@ -373,14 +348,12 @@ test_that("check_diagnostics prints output", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   output <- capture.output(check_diagnostics(fit, quiet = FALSE))
@@ -398,14 +371,12 @@ test_that("n_divergent returns count", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   n_div <- n_divergent(fit)
@@ -525,14 +496,12 @@ test_that("get_draws_array returns correct structure", {
     x = rnorm(n)
   )
 
-  fit <- ratiod(
+  fit <- tratio(
     count | effort ~ x,
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",
-    iter = 100,
-    warmup = 50,
-    chains = 1
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
 
   draws_info <- tulpaRatio:::get_draws_array(fit)

@@ -1,9 +1,13 @@
-#' Fit a ratiod model
+#' Fit a ratio, rate, or proportion model
 #'
 #' @description
 #' Fit a Bayesian hierarchical model for ratios, rates, or proportions.
 #' The model jointly estimates the numerator and denominator processes
 #' with optional shared latent structure.
+#'
+#' `tratio()` is tulpaRatio's front door, the ratio-model member of the
+#' `tulpa*` family of fitting verbs ([tulpa::tulpa()] for the engine,
+#' `tulpaObs::tobs()` for observation processes).
 #'
 #' **Core principle:** Ratios are derived quantities, computed post hoc
 #' from the posterior of the joint model. The ratio is never modelled directly.
@@ -13,7 +17,7 @@
 #'   where both processes share the same predictors and random effects;
 #'   **Separate** `num ~ predictors` with the `formula_denom` argument.
 #' @param data Data frame containing all variables.
-#' @param family A ratiod family object specifying the distributions:
+#' @param family A tulpaRatio family object specifying the distributions:
 #'   [ratiod_negbin_negbin()] for both count processes (default),
 #'   [ratiod_binomial()] for successes/trials,
 #'   [ratiod_poisson_gamma()] for count/continuous effort (CPUE).
@@ -36,12 +40,6 @@
 #' @param latent Optional latent factor specification for unmeasured confounders.
 #'   See [latent_factor()].
 #' @param priors Prior specification. See [ratiod_priors()].
-#' @param chains Number of MCMC chains (default 4).
-#' @param iter Total iterations per chain (default 2000).
-#' @param warmup Warmup iterations per chain (default `iter/2`).
-#' @param thin Thinning interval (default 1).
-#' @param cores Number of cores for parallel chains (default: chains).
-#' @param seed Random seed for reproducibility.
 #' @param mode Inference mode or backend. Accepts either:
 #'
 #'   **Tier names** (epistemic guarantees):
@@ -65,48 +63,60 @@
 #'   - `"vi"` (Tier 3): Variational Inference
 #'
 #'   See [inference_mode_info()] for details on the tier system.
-#' @param vi_variant VI approximation type (only used when `backend = "vi"`):
-#'   `"auto"` (default) selects based on number of parameters;
-#'   `"meanfield"` diagonal covariance (fastest);
-#'   `"lowrank"` low-rank plus diagonal covariance (balanced);
-#'   `"fullrank"` full Cholesky covariance (best quality for small models).
-#' @param refresh Progress update frequency (default: iter/10).
-#' @param gradient_mode Gradient computation method for HMC backend:
-#'   `"auto"` (default) selects fastest available;
-#'   `"H"` hand-coded analytical gradients (fastest);
-#'   `"A_r"` arena-based reverse-mode autodiff (fast, O(N));
-#'   `"A"` forward-mode autodiff (O(p*N), thread-safe);
-#'   `"A_t"` tape-based reverse-mode autodiff (slow, legacy);
-#'   `"N"` numerical finite differences (slowest, always works).
-#' @param adapt_delta Target average acceptance probability for NUTS step size
-#'   adaptation. Higher values produce smaller step sizes, reducing divergences
-#'   but slowing sampling. `NULL` (default) selects automatically based on model
-#'   complexity: 0.80 for simple models, 0.85 for ICAR, 0.90 for BYM2 and
-#'   correlated random slopes. Manual range: 0.80--0.99.
-#' @param riemannian Logical or NULL. Enable per-trajectory SoftAbs metric
-#'   retry for divergent transitions. When a NUTS trajectory diverges,
-#'   computes a local Hessian-based metric and retries the trajectory.
-#'   `NULL` (default) enables automatically for BYM2 and ICAR spatial models
-#'   with dense mass matrix. `TRUE` forces on, `FALSE` forces off.
-#'   Cost: ~(p+1) gradient evaluations per divergent trajectory only.
-#' @param metric Mass matrix type for NUTS:
-#'   `"auto"` (default) selects automatically based on model complexity;
-#'   `"dense"` full dense mass matrix with Ledoit-Wolf shrinkage
-#'   (handles correlated posteriors: random slopes, BYM2, HSGP, TVC models);
-#'   `"diag"` diagonal mass matrix (faster per step but may require deeper trees);
-#'   `"block_diag"` block-diagonal mass matrix (separate blocks per parameter group).
-#'   Auto-falls back to diagonal when p > 2000.
-#' @param verbose Logical; if TRUE (default), print progress messages during
-#'   model fitting.
-#' @param max_treedepth Maximum tree depth for NUTS. `NULL` (default) uses 10.
-#'   Increase if you see many max-treedepth warnings. Higher values allow
-#'   deeper exploration but increase computation per iteration.
-#' @param re_param Random effects parameterization:
-#'   `"noncentered"` (default) stores z ~ N(0,1) and computes re = σ*z (or re = diag(σ)*L*z for correlated).
-#'     Better for weakly-informed random effects or small group sizes.
-#'   `"centered"` stores re directly with re ~ N(0,σ²) prior.
-#'     Better for strongly-informed random effects or large group sizes.
-#' @param ... Additional arguments passed to the sampler.
+#' @param control Named list of perf / numerical / tuning knobs. Statistical
+#'   arguments stay in the signature above; everything that tunes *how* the
+#'   fit runs lives here. Unknown names are an error, not a silent no-op.
+#'
+#'   Sampling budget (all backends):
+#'   - `chains`: number of MCMC chains (default 4).
+#'   - `iter`: total iterations per chain (default 2000).
+#'   - `warmup`: warmup iterations per chain (default `floor(iter / 2)`).
+#'   - `thin`: thinning interval (default 1).
+#'   - `cores`: cores for parallel chains (default `getOption("mc.cores", chains)`).
+#'   - `seed`: random seed for reproducibility.
+#'   - `verbose`: print progress messages during fitting (default `TRUE`).
+#'
+#'   NUTS / HMC (`mode = "hmc"`):
+#'   - `adapt_delta`: target average acceptance probability for step-size
+#'     adaptation. Higher values give smaller steps, reducing divergences but
+#'     slowing sampling. `NULL` (default) selects on model complexity: 0.80
+#'     simple, 0.85 ICAR, 0.90 BYM2 and correlated random slopes. Range
+#'     0.80--0.99.
+#'   - `max_treedepth`: maximum NUTS tree depth. `NULL` (default) uses 10.
+#'     Raise if you see many max-treedepth warnings; costs computation per
+#'     iteration.
+#'   - `metric`: mass matrix. `"auto"` (default) picks on model complexity;
+#'     `"dense"` full matrix with Ledoit-Wolf shrinkage (correlated posteriors:
+#'     random slopes, BYM2, HSGP, TVC); `"diag"` diagonal (faster per step, may
+#'     need deeper trees); `"block_diag"` per parameter group. Auto falls back
+#'     to diagonal when p > 2000.
+#'   - `riemannian`: enable per-trajectory SoftAbs metric retry on divergence,
+#'     computing a local Hessian-based metric and retrying. `NULL` (default)
+#'     enables for BYM2 and ICAR with a dense mass matrix. Costs about (p+1)
+#'     gradient evaluations per divergent trajectory only.
+#'   - `gradient_mode`: `"auto"` (default) selects the fastest available;
+#'     `"H"` hand-coded analytical (fastest); `"A_r"` arena reverse-mode
+#'     autodiff (fast, O(N)); `"A"` forward-mode (O(p*N), thread-safe);
+#'     `"A_t"` tape-based reverse-mode (slow, legacy); `"N"` numerical finite
+#'     differences (slowest, always works).
+#'   - `re_param`: random-effect parameterization. `"noncentered"` (default)
+#'     stores z ~ N(0, 1) and computes re = sigma * z (or diag(sigma) * L * z
+#'     when correlated), suiting weakly-informed effects or small groups;
+#'     `"centered"` stores re directly under re ~ N(0, sigma^2), suiting
+#'     strongly-informed effects or large groups.
+#'   - `L`: fixed leapfrog steps. Default 0 leaves NUTS to choose.
+#'
+#'   Variational inference (`mode = "vi"`):
+#'   - `vi_variant`: `"auto"` (default) selects on parameter count;
+#'     `"meanfield"` diagonal covariance (fastest); `"lowrank"` low-rank plus
+#'     diagonal (balanced); `"fullrank"` full Cholesky (best for small models).
+#'
+#'   Stochastic gradient backends (`mode = "sghmc"` / `"sgld"`):
+#'   - `batch_size`: minibatch size (default `ceiling(sqrt(n))`).
+#'   - `epsilon`: step size.
+#'   - `alpha`: friction coefficient (`"sghmc"` only).
+#'   - `schedule_a`, `schedule_b`, `schedule_gamma`, `use_schedule`: step-size
+#'     decay schedule (`"sgld"` only).
 #'
 #' @return A `ratiod_fit` object containing:
 #' \describe{
@@ -131,21 +141,21 @@
 #'
 #' \donttest{
 #' # CPUE example with combined formula
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   catch | effort ~ depth + season + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Different predictors for each process
-#' fit2 <- ratiod(
+#' fit2 <- tratio(
 #'   catch | effort ~ (1 | site),
 #'   formula_num = ~ depth + season,
 #'   formula_denom = ~ season,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract ratio posteriors
@@ -163,71 +173,48 @@
 #' - [loo::loo()] and [loo::waic()] for model comparison
 #'
 #' @export
-ratiod <- function(formula,
-                  data,
-                  family = ratiod_negbin_negbin(),
-                  formula_num = NULL,
-                  formula_denom = NULL,
-                  shared = NULL,
-                  spatial = NULL,
-                  temporal = NULL,
-                  spatiotemporal = NULL,
-                  zi = NULL,
-                  latent = NULL,
-                  priors = NULL,
-                  chains = 4,
-                  iter = 2000,
-                  warmup = floor(iter / 2),
-                  thin = 1,
-                  cores = getOption("mc.cores", chains),
-                  seed = NULL,
-                  mode = c("auto", "exact", "structured", "optimized",
-                           "hmc", "ess", "pg", "gibbs", "sghmc", "sgld", "laplace", "vi"),
-                  vi_variant = c("auto", "meanfield", "lowrank", "fullrank"),
-                  refresh = NULL,
-                  verbose = TRUE,
-                  gradient_mode = c("auto", "N", "A", "A_r", "A_t", "H"),
-                  re_param = c("noncentered", "centered"),
-                  adapt_delta = NULL,
-                  max_treedepth = NULL,
-                  metric = c("auto", "dense", "diag", "block_diag"),
-                  riemannian = NULL,
-                  ...) {
+tratio <- function(formula,
+                   data,
+                   family = ratiod_negbin_negbin(),
+                   formula_num = NULL,
+                   formula_denom = NULL,
+                   shared = NULL,
+                   spatial = NULL,
+                   temporal = NULL,
+                   spatiotemporal = NULL,
+                   zi = NULL,
+                   latent = NULL,
+                   priors = NULL,
+                   mode = c("auto", "exact", "structured", "optimized",
+                            "hmc", "ess", "pg", "gibbs", "sghmc", "sgld",
+                            "laplace", "vi"),
+                   control = list()) {
 
   mode <- match.arg(mode)
-  vi_variant <- match.arg(vi_variant)
-  gradient_mode <- match.arg(gradient_mode)
-  re_param <- match.arg(re_param)
-  metric <- match.arg(metric)
+  ctrl <- .tratio_control(control)
 
-  # Suppress verbose output during testing to prevent output buffer overflow
-  if (isTRUE(getOption("tulpaRatio.test_mode")) && missing(verbose)) {
+  chains        <- ctrl$chains
+  iter          <- ctrl$iter
+  warmup        <- ctrl$warmup
+  thin          <- ctrl$thin
+  cores         <- ctrl$cores
+  seed          <- ctrl$seed
+  verbose       <- ctrl$verbose
+  vi_variant    <- ctrl$vi_variant
+  gradient_mode <- ctrl$gradient_mode
+  re_param      <- ctrl$re_param
+  metric        <- ctrl$metric
+  adapt_delta   <- ctrl$adapt_delta
+  max_treedepth <- ctrl$max_treedepth
+  riemannian    <- ctrl$riemannian
+  L             <- as.integer(ctrl$L %||% 0L)
+
+  # Test suites silence fit chatter to keep it out of the output buffer; an
+  # explicit control$verbose still wins.
+  if (isTRUE(getOption("tulpaRatio.test_mode")) &&
+      !("verbose" %in% names(control))) {
     verbose <- FALSE
   }
-
-  # Validate adapt_delta
-  if (!is.null(adapt_delta)) {
-    if (!is.numeric(adapt_delta) || length(adapt_delta) != 1 ||
-        adapt_delta < 0.5 || adapt_delta > 0.99) {
-      stop("adapt_delta must be a single number between 0.5 and 0.99, got ",
-           deparse(adapt_delta), call. = FALSE)
-    }
-  }
-
-  # Validate riemannian
-  if (!is.null(riemannian)) {
-    if (!is.logical(riemannian) || length(riemannian) != 1 || is.na(riemannian)) {
-      stop("riemannian must be TRUE, FALSE, or NULL, got ",
-           deparse(riemannian), call. = FALSE)
-    }
-  }
-
-  # Handle verbose and L from ... for backwards compatibility
-  extra_args <- list(...)
-  if ("verbose" %in% names(extra_args)) {
-    verbose <- extra_args$verbose
-  }
-  L <- if ("L" %in% names(extra_args)) as.integer(extra_args$L) else 0L
 
   # Validate temporal specification
   if (!is.null(temporal)) {
@@ -403,7 +390,7 @@ ratiod <- function(formula,
 
   # Common message elements
   if (verbose) {
-    message(sprintf("Fitting ratiod model..."))
+    message(sprintf("Fitting ratio model..."))
     message(sprintf("  Family: %s", family$name))
     message(sprintf("  Observations: %d", nrow(data)))
   }
@@ -431,6 +418,7 @@ ratiod <- function(formula,
       family = family,
       spatial = spatial,
       temporal = temporal,
+      priors = priors,
       iter = iter,
       warmup = warmup,
       thin = thin,
@@ -633,10 +621,8 @@ ratiod <- function(formula,
   # -------------------------------------------------------------------------
   if (selected_backend == "sghmc") {
     # Default batch size: sqrt(n) for good variance/speed tradeoff
-    extra_args <- list(...)
-    batch_size <- extra_args$batch_size %||% ceiling(sqrt(nrow(data)))
-    # Remove batch_size from extra_args to avoid passing it twice
-    extra_args$batch_size <- NULL
+    batch_size <- ctrl$batch_size %||% ceiling(sqrt(nrow(data)))
+    extra_args <- .tratio_sg_args(ctrl, "sghmc")
 
     if (verbose) {
       message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
@@ -682,10 +668,8 @@ ratiod <- function(formula,
   # -------------------------------------------------------------------------
   if (selected_backend == "sgld") {
     # Default batch size: sqrt(n) for good variance/speed tradeoff
-    extra_args <- list(...)
-    batch_size <- extra_args$batch_size %||% ceiling(sqrt(nrow(data)))
-    # Remove batch_size from extra_args to avoid passing it twice
-    extra_args$batch_size <- NULL
+    batch_size <- ctrl$batch_size %||% ceiling(sqrt(nrow(data)))
+    extra_args <- .tratio_sg_args(ctrl, "sgld")
 
     if (verbose) {
       message(sprintf("  Iterations: %d (warmup: %d)", iter, warmup))
@@ -739,7 +723,7 @@ ratiod <- function(formula,
 #' Suggest alternative modes based on data characteristics
 #'
 #' @param n_obs Number of observations
-#' @param family ratiod family object
+#' @param family tulpaRatio family object
 #' @param spatial Spatial specification (or NULL)
 #' @param temporal Temporal specification (or NULL)
 #' @param current_mode Currently selected mode
@@ -816,7 +800,7 @@ cli_rule <- function(title = NULL) {
 #' Automatically chooses the best backend for a given model based on
 #' the family, data size, and presence of spatial/temporal effects.
 #'
-#' @param family ratiod family object
+#' @param family tulpaRatio family object
 #' @param n_obs Number of observations
 #' @param has_spatial Whether spatial effects are specified
 #' @param has_temporal Whether temporal effects are specified
@@ -861,7 +845,7 @@ select_backend <- function(family, n_obs, has_spatial = FALSE, has_temporal = FA
 #' @param ... Ignored
 #' @export
 print.ratiod_fit <- function(x, ...) {
-  cat("ratiod model fit\n")
+  cat("ratio model fit\n")
   cat("===============\n\n")
 
   # Inference mode information (always visible)
@@ -929,7 +913,7 @@ print.ratiod_fit <- function(x, ...) {
 #' @param ... Ignored
 #' @export
 summary.ratiod_fit <- function(object, prob = 0.95, ...) {
-  cat("ratiod model summary\n")
+  cat("ratio model summary\n")
   cat("===================\n\n")
 
   # Inference mode information
@@ -1144,7 +1128,7 @@ as.data.frame.ratiod_fit <- function(x, ...) {
 #' Plot method for ratiod_fit
 #'
 #' @description
-#' Creates diagnostic plots for ratiod model fits including trace plots
+#' Creates diagnostic plots for ratio model fits including trace plots
 #' and optional density plots. Works with all backends (HMC, PG, Laplace).
 #'
 #' @param x A ratiod_fit object
@@ -1167,11 +1151,11 @@ as.data.frame.ratiod_fit <- function(x, ...) {
 #' )
 #'
 #' \donttest{
-#' fit <- ratiod(
+#' fit <- tratio(
 #'   count | effort ~ depth + (1|site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   iter = 200, warmup = 100, chains = 2
+#'   control = list(iter = 200, warmup = 100, chains = 2)
 #' )
 #' plot(fit)
 #' plot(fit, pars = "beta_num", type = "both")
@@ -1394,7 +1378,7 @@ plot_with_base <- function(draws_array, type, n_chains, n_col = NULL) {
     }
   }
 
-  backend_label <- "ratiod MCMC diagnostics"
+  backend_label <- "ratio model MCMC diagnostics"
   graphics::mtext(backend_label, outer = TRUE, cex = 1.1)
 }
 
