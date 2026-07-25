@@ -88,10 +88,8 @@ fit <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   tvc = temporal_tvc("year", terms = 1),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 summary(fit)
 
@@ -101,10 +99,8 @@ fit2 <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   tvc = temporal_tvc("year", terms = c("(Intercept)", "x"), structure = "rw2"),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Extract and plot the time-varying coefficients

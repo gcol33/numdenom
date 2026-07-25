@@ -103,7 +103,7 @@ test_that("print.ratiod_fit works", {
   fit <- quick_fit()
 
   output <- capture.output(print(fit))
-  expect_true(any(grepl("ratiod", output)))
+  expect_true(any(grepl("ratio model fit", output)))
   expect_true(any(grepl("Family", output)))
   expect_true(any(grepl("Observations", output)))
 })
@@ -726,8 +726,7 @@ test_that("HMC backend with 4 chains produces consistent results", {
     data = df,
     family = ratiod_poisson_gamma(),
     mode = "hmc",  # Test with fewer cores than chains
-    verbose = FALSE,
-    control = list(iter = 100, warmup = 50, chains = 4, cores = 2)
+    control = list(iter = 100, warmup = 50, chains = 4, cores = 2, verbose = FALSE)
   )
 
   expect_s3_class(fit, "ratiod_fit")

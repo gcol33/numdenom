@@ -41,8 +41,8 @@ NULL
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract all observation-level ratios
@@ -270,8 +270,8 @@ print.ratiod_ratio_summary <- function(x, n = 10, ...) {
 #'   count | effort ~ season,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Compare CPUE between seasons
@@ -411,8 +411,8 @@ print.ratiod_contrast <- function(x, ...) {
 #'   count | effort ~ depth,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Get fitted value summaries
@@ -727,8 +727,8 @@ compute_fitted_laplace <- function(object) {
 #'   count | effort ~ depth + season,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Predict for new data
@@ -750,7 +750,7 @@ compute_fitted_laplace <- function(object) {
 #'   data = df,
 #'   spatial = spatial_gp(coords = c("x", "y")),
 #'   family = ratiod_poisson_gamma(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Predict at new locations (kriging)
@@ -2003,8 +2003,8 @@ print.ratiod_prediction <- function(x, n = 10, ...) {
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Convert to draws format
@@ -2093,8 +2093,8 @@ as_draws.ratiod_fit <- function(x, ...) {
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract fixed effects
@@ -2203,8 +2203,8 @@ spread_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Gather all fixed effects
@@ -2289,8 +2289,8 @@ gather_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 #'   count | effort ~ depth + (1 | site),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   backend = "hmc",
-#'   iter = 200, warmup = 100, chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Get point estimates and 95% intervals

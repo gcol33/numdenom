@@ -115,7 +115,7 @@ fit <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   svc = spatial_svc(~ lon + lat, terms = 1),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 summary(fit)
 

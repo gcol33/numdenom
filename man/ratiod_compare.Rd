@@ -30,10 +30,10 @@ df <- data.frame(
 )
 fit1 <- tratio(y_num | y_denom ~ x, data = df,
               family = ratiod_negbin_negbin(),
-              iter = 200, warmup = 100, chains = 1)
+              control = list(iter = 200, warmup = 100, chains = 1))
 fit2 <- tratio(y_num | y_denom ~ x + z, data = df,
               family = ratiod_negbin_negbin(),
-              iter = 200, warmup = 100, chains = 1)
+              control = list(iter = 200, warmup = 100, chains = 1))
 # Compare (requires loo package)
 # ratiod_compare(fit1, fit2)
 }

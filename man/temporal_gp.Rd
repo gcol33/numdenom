@@ -106,7 +106,7 @@ fit <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   temporal = temporal_gp("time"),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

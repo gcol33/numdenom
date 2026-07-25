@@ -118,7 +118,7 @@ fit <- tratio(
   y_num | y_denom ~ x1 + (1 | group),
   data = sim$data,
   family = ratiod_poisson_gamma(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 # Compare estimated vs. true parameters
 # summary(fit)

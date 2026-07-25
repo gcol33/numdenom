@@ -81,7 +81,7 @@ fit <- tratio(
   spatial = spatial_bym2(adj, level = "group", group_var = "region"),
   data = epi_data,
   family = ratiod_binomial(),
-  backend = "laplace"
+  mode = "laplace"
 )
 summary(fit)
 }

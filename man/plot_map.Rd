@@ -113,7 +113,7 @@ fit <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   spatial = spatial_car(adj, group_var = "site"),
-  backend = "laplace"
+  mode = "laplace"
 )
 # plot_map(fit)  # requires ggplot2
 }

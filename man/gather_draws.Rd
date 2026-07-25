@@ -43,8 +43,8 @@ fit <- tratio(
   count | effort ~ depth + (1 | site),
   data = df,
   family = ratiod_poisson_gamma(),
-  backend = "hmc",
-  iter = 200, warmup = 100, chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Gather all fixed effects

@@ -55,7 +55,7 @@ fit <- tratio(
   species_biomass | total_biomass ~ habitat + (1 | site),
   data = df,
   family = ratiod_gamma_gamma(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

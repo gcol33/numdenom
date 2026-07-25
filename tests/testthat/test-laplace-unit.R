@@ -559,7 +559,7 @@ test_that("print.ratiod_average works", {
   class(avg_obj) <- "ratiod_average"
 
   output <- capture.output(print(avg_obj))
-  expect_true(any(grepl("ratiod model averaging", output)))
+  expect_true(any(grepl("ratio model averaging", output)))
   expect_true(any(grepl("Model weights", output)))
   expect_true(any(grepl("m1", output)))
 })

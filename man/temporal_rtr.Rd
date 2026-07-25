@@ -76,10 +76,8 @@ fit1 <- tratio(
   count | effort ~ temperature,
   data = df,
   temporal = temporal_rw2("year"),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # RTR to protect temperature coefficient
@@ -90,10 +88,8 @@ fit2 <- tratio(
     temporal_rw2("year"),
     restrict_to = ~ temperature
   ),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Compare coefficient estimates

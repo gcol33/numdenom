@@ -63,7 +63,7 @@ NULL
 #'   count | total ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_zinegbin(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -148,7 +148,7 @@ ratiod_zinegbin <- function(link_num = "log", link_denom = "log",
 #'   catch | effort ~ depth + (1 | vessel),
 #'   data = df,
 #'   family = ratiod_zipois(denom_family = "gamma"),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -248,7 +248,7 @@ ratiod_zipois <- function(link_num = "log", link_denom = "log",
 #'   count | total ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_hurdle_negbin(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'

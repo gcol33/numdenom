@@ -25,7 +25,7 @@ test_that("ratiod_priors accepts custom values", {
 test_that("print.ratiod_priors works", {
   priors <- ratiod_priors()
   output <- capture.output(print(priors))
-  expect_true(any(grepl("ratiod prior specification", output)))
+  expect_true(any(grepl("tulpaRatio prior specification", output)))
 })
 
 # -----------------------------------------------------------------------------

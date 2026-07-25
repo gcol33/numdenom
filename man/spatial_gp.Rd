@@ -127,10 +127,8 @@ fit <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   spatial = spatial_gp(~ lon + lat),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 summary(fit)
 
@@ -140,10 +138,8 @@ fit2 <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   spatial = spatial_gp(~ lon + lat, cov = "matern", nu = 1.5),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

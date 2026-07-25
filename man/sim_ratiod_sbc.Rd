@@ -49,7 +49,7 @@ print(sims)
 #   fit <- tratio(y_num | y_denom ~ x1 + (1 | group),
 #                data = sim$data,
 #                family = ratiod_negbin_negbin(),
-#                iter = 200, warmup = 100, chains = 1)
+#                control = list(iter = 200, warmup = 100, chains = 1))
 #   sum(as.matrix(fit$draws)[, "beta_num[1]"] < sim$true_params$beta_num[1])
 # })
 }

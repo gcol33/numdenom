@@ -942,7 +942,7 @@ inline GibbsResult run_gibbs_bym2(
         // Sum-to-zero constraint on the structured component. The field reaches
         // eta as sigma_s * scale_factor * phi, so that product of the mean is
         // what the intercept takes on and eta is unchanged across the shift.
-        if (recentre) {
+        if (constrain) {
             double phi_mean = 0.0;
             for (int s = 0; s < S; s++) phi_mean += phi[s];
             phi_mean /= S;
@@ -981,7 +981,7 @@ inline GibbsResult run_gibbs_bym2(
         // and the per-site theta updates only reach it by agreeing S times over.
         // Translating the whole of theta at once walks that direction in one
         // step, at eta held fixed, so the acceptance ratio is the priors alone.
-        if (recentre) {
+        if (constrain) {
             const double sigma_u = sigma_total * std::sqrt(1.0 - rho);
             const double c = level_scale * rnorm(rng);
             const double shift = sigma_u * c;

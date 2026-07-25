@@ -53,10 +53,8 @@ fit <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   temporal = temporal_rw2("year"),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

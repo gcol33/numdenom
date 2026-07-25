@@ -110,7 +110,7 @@ fit <- tratio(
     range_local = c(0.1, 0.5),
     range_regional = c(1, 5)
   ),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 summary(fit)
 }

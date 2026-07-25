@@ -54,7 +54,7 @@ test_that("spatiotemporal validates spatial specification", {
       temporal = temporal_rw1("year"),
       type = "I"
     ),
-    "ratiod spatial specification"
+    "tulpaRatio spatial specification"
   )
 })
 
@@ -69,7 +69,7 @@ test_that("spatiotemporal validates temporal specification", {
       temporal = list(type = "invalid"),
       type = "I"
     ),
-    "ratiod temporal specification"
+    "tulpaRatio temporal specification"
   )
 })
 

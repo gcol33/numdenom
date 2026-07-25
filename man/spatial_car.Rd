@@ -28,7 +28,7 @@ Requires \code{group_var} to be specified.
 \code{level = "group"}).}
 
 \item{proper}{Logical; if FALSE (default), uses Intrinsic CAR (ICAR) with
-ρ = 1 fixed. If TRUE, uses proper CAR with ρ estimated. See Details.}
+rho = 1 fixed. If TRUE, uses proper CAR with rho estimated. See Details.}
 
 \item{shared}{Logical; if TRUE (default), spatial effect enters both
 numerator and denominator linear predictors identically.}
@@ -61,7 +61,7 @@ matrix.
 
 \strong{ICAR (proper = FALSE, default)}
 \itemize{
-\item Sets ρ = 1 (fixed)
+\item Sets rho = 1 (fixed)
 \item Improper prior (rank-deficient Q)
 \item Requires sum-to-zero constraint for identifiability
 \item Simpler: one fewer parameter to estimate
@@ -71,13 +71,13 @@ matrix.
 
 \strong{Proper CAR (proper = TRUE)}
 \itemize{
-\item Estimates ρ ∈ (0, 1) from data
+\item Estimates rho in (0, 1) from data
 \item Proper prior (integrates to 1)
-\item ρ measures spatial autocorrelation strength
-\item ρ → 0: approaches independence (IID)
-\item ρ → 1: approaches ICAR
+\item rho measures spatial autocorrelation strength
+\item rho -> 0: approaches independence (IID)
+\item rho -> 1: approaches ICAR
 \item More flexible but additional parameter to estimate
-\item Prior: ρ ~ Beta(1, 1) (uniform on (0, 1))
+\item Prior: rho ~ Beta(1, 1) (uniform on (0, 1))
 }
 }
 \examples{
@@ -87,11 +87,11 @@ for (i in 1:9) {
   adj[i, i+1] <- adj[i+1, i] <- 1
 }
 
-# ICAR (default, ρ = 1 fixed)
+# ICAR (default, rho = 1 fixed)
 icar <- spatial_car(adj, level = "group", group_var = "site")
 print(icar)
 
-# Proper CAR (ρ estimated)
+# Proper CAR (rho estimated)
 proper_car <- spatial_car(adj, level = "group", group_var = "site",
                           proper = TRUE)
 print(proper_car)
@@ -114,10 +114,8 @@ fit_icar <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   spatial = spatial_car(adj, level = "group", group_var = "site"),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Proper CAR model (estimate spatial autocorrelation)
@@ -127,13 +125,11 @@ fit_car <- tratio(
   family = ratiod_poisson_gamma(),
   spatial = spatial_car(adj, level = "group", group_var = "site",
                         proper = TRUE),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
-# Extract ρ from proper CAR
+# Extract rho from proper CAR
 summary(fit_car)  # Shows rho_spatial parameter
 }
 

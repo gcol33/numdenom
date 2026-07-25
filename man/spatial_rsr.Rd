@@ -77,10 +77,8 @@ fit1 <- tratio(
   count | effort ~ depth + temp,
   data = df,
   spatial = spatial_gp(~ lon + lat),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # RSR to protect depth and temp coefficients
@@ -91,10 +89,8 @@ fit2 <- tratio(
     spatial_gp(~ lon + lat),
     restrict_to = ~ depth + temp
   ),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Compare coefficient estimates

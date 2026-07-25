@@ -46,8 +46,8 @@ fit <- tratio(
   count | effort ~ season,
   data = df,
   family = ratiod_poisson_gamma(),
-  backend = "hmc",
-  iter = 200, warmup = 100, chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Compare CPUE between seasons

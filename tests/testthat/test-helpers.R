@@ -87,7 +87,7 @@ test_that("print.ratiod_ratio works with mock object", {
   )
 
   output <- capture.output(print(mock_ratio))
-  expect_true(any(grepl("ratiod ratio posterior", output)))
+  expect_true(any(grepl("tulpaRatio ratio posterior", output)))
   expect_true(any(grepl("Scale: response", output)))
   expect_true(any(grepl("Observations: 10", output)))
   expect_true(any(grepl("Posterior draws: 10", output)))
@@ -201,7 +201,7 @@ test_that("print.ratiod_ratio_summary works", {
   )
 
   output <- capture.output(print(summ))
-  expect_true(any(grepl("ratiod ratio summary", output)))
+  expect_true(any(grepl("tulpaRatio ratio summary", output)))
 })
 
 test_that("print.ratiod_ratio_summary truncates long output", {
@@ -240,7 +240,7 @@ test_that("print.ratiod_contrast works with mock object", {
   )
 
   output <- capture.output(print(mock_contrast))
-  expect_true(any(grepl("ratiod ratio contrasts", output)))
+  expect_true(any(grepl("tulpaRatio ratio contrasts", output)))
   expect_true(any(grepl("Type: difference", output)))
   expect_true(any(grepl("Variable: season", output)))
   expect_true(any(grepl("Reference: summer", output)))
@@ -261,7 +261,7 @@ test_that("print.ratiod_fitted works with mock object", {
   )
 
   output <- capture.output(print(mock_fitted))
-  expect_true(any(grepl("ratiod fitted values", output)))
+  expect_true(any(grepl("tulpaRatio fitted values", output)))
   expect_true(any(grepl("Posterior draws: 100", output)))
 })
 
@@ -281,7 +281,7 @@ test_that("print.ratiod_prediction works with mock object", {
   )
 
   output <- capture.output(print(mock_pred))
-  expect_true(any(grepl("ratiod predictions", output)))
+  expect_true(any(grepl("tulpaRatio predictions", output)))
   expect_true(any(grepl("Posterior draws: 100", output)))
   expect_true(any(grepl("New observations: 3", output)))
 })

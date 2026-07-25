@@ -46,7 +46,7 @@ df <- data.frame(
 )
 fit <- tratio(count | effort ~ depth + (1|site), data = df,
              family = ratiod_poisson_gamma(),
-             iter = 200, warmup = 100, chains = 1)
+             control = list(iter = 200, warmup = 100, chains = 1))
 # plot_rhat(fit)
 }
 

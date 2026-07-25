@@ -345,7 +345,7 @@ test_that("print.ratiod_prediction works", {
   )
 
   output <- capture.output(print(pred))
-  expect_true(any(grepl("ratiod predictions", output)))
+  expect_true(any(grepl("tulpaRatio predictions", output)))
   expect_true(any(grepl("Posterior draws:", output)))
   expect_true(any(grepl("New observations:", output)))
 })

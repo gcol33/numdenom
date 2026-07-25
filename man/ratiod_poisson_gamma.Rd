@@ -48,7 +48,7 @@ fit <- tratio(
   catch | effort_hours ~ depth + season + (1 | vessel),
   data = df,
   family = ratiod_poisson_gamma(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

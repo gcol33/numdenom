@@ -1,6 +1,4 @@
-# tulpaRatio (development)
-
-## 1.4.0
+# tulpaRatio 1.4.0
 
 * `tratio()` replaces `ratiod()` as the package's front door, joining the
   `tulpa*` family of fitting verbs alongside `tulpa::tulpa()` and
@@ -20,7 +18,7 @@
 * `refresh` is removed. It was a documented argument that no backend ever
   read, so passing it changed nothing.
 
-## 1.3.1
+# tulpaRatio 1.3.1
 
 * `diagnostics()` replaces `mcmc_diagnostics()`, following the engine rename in
   tulpa 0.0.95. It delegates to `tulpa::diagnostics()`, which selects chain or

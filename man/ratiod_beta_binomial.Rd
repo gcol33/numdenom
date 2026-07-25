@@ -61,7 +61,7 @@ fit <- tratio(
   infected | tested ~ treatment + (1 | site),
   data = df,
   family = ratiod_beta_binomial(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

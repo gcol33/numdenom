@@ -149,7 +149,7 @@ fit <- tratio(
     temporal = temporal_rw1("year"),
     type = "IV"
   ),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 summary(fit)
 }

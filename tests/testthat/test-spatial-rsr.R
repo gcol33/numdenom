@@ -31,8 +31,8 @@ test_that("spatial_rsr wraps spatial_multiscale correctly", {
 })
 
 test_that("spatial_rsr rejects non-spatial input", {
-  expect_error(spatial_rsr("not spatial", ~ x), "ratiod spatial specification")
-  expect_error(spatial_rsr(list(a = 1), ~ x), "ratiod spatial specification")
+  expect_error(spatial_rsr("not spatial", ~ x), "tulpaRatio spatial specification")
+  expect_error(spatial_rsr(list(a = 1), ~ x), "tulpaRatio spatial specification")
 })
 
 test_that("spatial_rsr rejects non-formula restrict_to", {

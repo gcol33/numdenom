@@ -47,7 +47,7 @@ fit <- tratio(
   sp_count | total_count ~ habitat + (1 | site),
   data = df,
   family = ratiod_negbin_negbin(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

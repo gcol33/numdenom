@@ -55,7 +55,7 @@ fit <- tratio(
   count | total ~ x + (1 | site),
   data = df,
   family = ratiod_negbin_negbin(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 # Density overlay (requires bayesplot package)
 # pp_check(fit, type = "dens_overlay")

@@ -45,7 +45,7 @@ NULL
 #'   sp_count | total_count ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_negbin_negbin(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -111,7 +111,7 @@ ratiod_negbin_negbin <- function(link_num = "log", link_denom = "log") {
 #'   detections | trials ~ effort + (1 | site),
 #'   data = df,
 #'   family = ratiod_binomial(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -181,7 +181,7 @@ ratiod_binomial <- function(link = "logit", denominator_known = TRUE) {
 #'   catch | effort_hours ~ depth + season + (1 | vessel),
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -248,7 +248,7 @@ ratiod_poisson_gamma <- function(link_num = "log", link_denom = "log") {
 #'   catch | effort_hours ~ depth + (1 | vessel),
 #'   data = df,
 #'   family = ratiod_negbin_gamma(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -339,7 +339,7 @@ validate_link <- function(link, allowed) {
 #'   infected | tested ~ treatment + (1 | site),
 #'   data = df,
 #'   family = ratiod_beta_binomial(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -417,7 +417,7 @@ ratiod_beta_binomial <- function(link = "logit", denominator_known = TRUE) {
 #'   species_biomass | total_biomass ~ habitat + (1 | site),
 #'   data = df,
 #'   family = ratiod_gamma_gamma(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -494,7 +494,7 @@ ratiod_gamma_gamma <- function(link_num = "log", link_denom = "log") {
 #'   weight | length_cubed ~ age + sex + (1 | cohort),
 #'   data = df,
 #'   family = ratiod_lognormal(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'

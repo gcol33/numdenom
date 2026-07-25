@@ -85,7 +85,7 @@ fit <- tratio(
     seasonal = 12,
     short_term = "ar1"
   ),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Extract and plot components

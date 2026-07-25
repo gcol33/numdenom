@@ -36,7 +36,7 @@ test_that("print.ratiod_benchmark works", {
 
   output <- capture.output(print(bench))
 
-  expect_true(any(grepl("ratiod Benchmark Results", output)))
+  expect_true(any(grepl("tulpaRatio Benchmark Results", output)))
   expect_true(any(grepl("100", output)))  # N
   expect_true(any(grepl("10.5", output)))  # elapsed
 })
@@ -67,7 +67,7 @@ test_that("print.ratiod_benchmark handles NA diagnostics", {
 
   output <- capture.output(print(bench))
 
-  expect_true(any(grepl("ratiod Benchmark Results", output)))
+  expect_true(any(grepl("tulpaRatio Benchmark Results", output)))
   expect_true(any(grepl("Configuration", output)))
   expect_true(any(grepl("Timing", output)))
   # Should NOT print diagnostics when NA

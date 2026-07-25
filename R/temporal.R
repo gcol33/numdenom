@@ -59,10 +59,8 @@ NULL
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_rw1("year"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Panel data: separate trends per site
@@ -80,10 +78,8 @@ NULL
 #'   data = df_panel,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_rw1("year", group_var = "site"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Cyclic for monthly seasonal data
@@ -100,10 +96,8 @@ NULL
 #'   data = df_monthly,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_rw1("month", cyclic = TRUE),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -201,10 +195,8 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_rw2("year"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -308,10 +300,8 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_ar1("year"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Panel data with group-specific AR1
@@ -329,10 +319,8 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'   data = df_panel,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_ar1("year", group_var = "site"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -725,7 +713,7 @@ build_ar1_precision <- function(T, rho, tau = 1) {
 #'     seasonal = 12,
 #'     short_term = "ar1"
 #'   ),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract and plot components
@@ -1052,7 +1040,7 @@ validate_temporal_multiscale <- function(temporal, data) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_gp("time"),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -1324,10 +1312,8 @@ validate_temporal_gp <- function(temporal, data) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   tvc = temporal_tvc("year", terms = 1),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' summary(fit)
 #'
@@ -1337,10 +1323,8 @@ validate_temporal_gp <- function(temporal, data) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   tvc = temporal_tvc("year", terms = c("(Intercept)", "x"), structure = "rw2"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract and plot the time-varying coefficients
@@ -1605,10 +1589,8 @@ validate_tvc <- function(tvc, data, X) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   tvc = temporal_tvc("year", terms = c(1, 2)),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract TVC posteriors
@@ -1896,10 +1878,8 @@ plot.ratiod_tvc_posterior <- function(x, term = 1, type = "ribbon", ...) {
 #'   count | effort ~ temperature,
 #'   data = df,
 #'   temporal = temporal_rw2("year"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # RTR to protect temperature coefficient
@@ -1910,10 +1890,8 @@ plot.ratiod_tvc_posterior <- function(x, term = 1, type = "ribbon", ...) {
 #'     temporal_rw2("year"),
 #'     restrict_to = ~ temperature
 #'   ),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Compare coefficient estimates
@@ -2084,7 +2062,7 @@ apply_rtr_projection <- function(f, P_perp) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   temporal = temporal_multiscale("year", trend = "rw2", seasonal = 12),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract all temporal effects

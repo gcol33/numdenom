@@ -67,10 +67,10 @@ df <- data.frame(
 )
 fit1 <- tratio(count | effort ~ x + (1 | site), data = df,
               family = ratiod_poisson_gamma(),
-              iter = 200, warmup = 100, chains = 1)
+              control = list(iter = 200, warmup = 100, chains = 1))
 fit2 <- tratio(count | effort ~ x + z + (1 | site), data = df,
               family = ratiod_poisson_gamma(),
-              iter = 200, warmup = 100, chains = 1)
+              control = list(iter = 200, warmup = 100, chains = 1))
 # Model averaging (requires loo package)
 # avg <- ratiod_average(fit1, fit2)
 # print(avg)

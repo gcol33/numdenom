@@ -142,7 +142,7 @@ test_that("sim_ratiod print method works", {
 
   # Capture print output
   output <- capture.output(print(sim))
-  expect_true(any(grepl("Simulated ratiod data", output)))
+  expect_true(any(grepl("Simulated tulpaRatio data", output)))
   expect_true(any(grepl("Family:", output)))
   expect_true(any(grepl("Observations:", output)))
   expect_true(any(grepl("Groups:", output)))
@@ -195,7 +195,7 @@ test_that("sim_ratiod_sbc print method works", {
   )
 
   output <- capture.output(print(sims))
-  expect_true(any(grepl("ratiod SBC simulations", output)))
+  expect_true(any(grepl("tulpaRatio SBC simulations", output)))
   expect_true(any(grepl("Simulations:", output)))
   expect_true(any(grepl("Family:", output)))
 })

@@ -106,7 +106,7 @@ test_that("print.ratiod_ratio works", {
   r <- ratio(fit)
 
   output <- capture.output(print(r))
-  expect_true(any(grepl("ratiod ratio posterior", output)))
+  expect_true(any(grepl("tulpaRatio ratio posterior", output)))
   expect_true(any(grepl("Scale:", output)))
   expect_true(any(grepl("Observations:", output)))
 })
@@ -118,7 +118,7 @@ test_that("print.ratiod_ratio_summary works", {
   r <- ratio(fit, summary = TRUE)
 
   output <- capture.output(print(r))
-  expect_true(any(grepl("ratiod ratio summary", output)))
+  expect_true(any(grepl("tulpaRatio ratio summary", output)))
 })
 
 test_that("ratio_contrast computes differences", {
@@ -221,7 +221,7 @@ test_that("print.ratiod_contrast works", {
   contrast <- ratio_contrast(fit, ~ season)
   output <- capture.output(print(contrast))
 
-  expect_true(any(grepl("ratiod ratio contrasts", output)))
+  expect_true(any(grepl("tulpaRatio ratio contrasts", output)))
   expect_true(any(grepl("Type:", output)))
   expect_true(any(grepl("Reference:", output)))
 })
@@ -277,7 +277,7 @@ test_that("print.ratiod_fitted works", {
   fv <- fitted(fit)
 
   output <- capture.output(print(fv))
-  expect_true(any(grepl("ratiod fitted values", output)))
+  expect_true(any(grepl("tulpaRatio fitted values", output)))
   expect_true(any(grepl("Posterior draws:", output)))
 })
 

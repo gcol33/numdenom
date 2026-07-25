@@ -158,5 +158,5 @@ test_that("prior print methods work", {
   expect_output(print(prior_half_cauchy(2.5)), "Half-Cauchy")
   expect_output(print(prior_pc(1, 0.01)), "PC prior")
   expect_output(print(prior_beta(2, 2)), "Beta")
-  expect_output(print(ratiod_priors()), "ratiod prior specification")
+  expect_output(print(ratiod_priors()), "tulpaRatio prior specification")
 })

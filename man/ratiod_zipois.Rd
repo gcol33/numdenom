@@ -61,7 +61,7 @@ fit <- tratio(
   catch | effort ~ depth + (1 | vessel),
   data = df,
   family = ratiod_zipois(denom_family = "gamma"),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

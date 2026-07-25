@@ -60,7 +60,7 @@ fit <- tratio(
   weight | length_cubed ~ age + sex + (1 | cohort),
   data = df,
   family = ratiod_lognormal(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

@@ -59,10 +59,8 @@ fit <- tratio(
   data = df,
   family = ratiod_poisson_gamma(),
   temporal = temporal_rw1("year"),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Panel data: separate trends per site
@@ -80,10 +78,8 @@ fit2 <- tratio(
   data = df_panel,
   family = ratiod_poisson_gamma(),
   temporal = temporal_rw1("year", group_var = "site"),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Cyclic for monthly seasonal data
@@ -100,10 +96,8 @@ fit3 <- tratio(
   data = df_monthly,
   family = ratiod_poisson_gamma(),
   temporal = temporal_rw1("month", cyclic = TRUE),
-  backend = "hmc",
-  iter = 200,
-  warmup = 100,
-  chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 }
 

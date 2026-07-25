@@ -24,7 +24,7 @@ NULL
 #' @param group_var Name of the grouping variable in data (required if
 #'   `level = "group"`).
 #' @param proper Logical; if FALSE (default), uses Intrinsic CAR (ICAR) with
-#'   ρ = 1 fixed. If TRUE, uses proper CAR with ρ estimated. See Details.
+#'   rho = 1 fixed. If TRUE, uses proper CAR with rho estimated. See Details.
 #' @param shared Logical; if TRUE (default), spatial effect enters both
 #'   numerator and denominator linear predictors identically.
 #' @param parameterization Parameterization of the spatial random effect.
@@ -50,7 +50,7 @@ NULL
 #'
 #' **ICAR (proper = FALSE, default)**
 #'
-#' - Sets ρ = 1 (fixed)
+#' - Sets rho = 1 (fixed)
 #' - Improper prior (rank-deficient Q)
 #' - Requires sum-to-zero constraint for identifiability
 #' - Simpler: one fewer parameter to estimate
@@ -59,13 +59,13 @@ NULL
 #'
 #' **Proper CAR (proper = TRUE)**
 #'
-#' - Estimates ρ ∈ (0, 1) from data
+#' - Estimates rho in (0, 1) from data
 #' - Proper prior (integrates to 1)
-#' - ρ measures spatial autocorrelation strength
-#' - ρ → 0: approaches independence (IID)
-#' - ρ → 1: approaches ICAR
+#' - rho measures spatial autocorrelation strength
+#' - rho -> 0: approaches independence (IID)
+#' - rho -> 1: approaches ICAR
 #' - More flexible but additional parameter to estimate
-#' - Prior: ρ ~ Beta(1, 1) (uniform on (0, 1))
+#' - Prior: rho ~ Beta(1, 1) (uniform on (0, 1))
 #'
 #' @examples
 #' # Create adjacency matrix for 10 regions (chain structure)
@@ -74,11 +74,11 @@ NULL
 #'   adj[i, i+1] <- adj[i+1, i] <- 1
 #' }
 #'
-#' # ICAR (default, ρ = 1 fixed)
+#' # ICAR (default, rho = 1 fixed)
 #' icar <- spatial_car(adj, level = "group", group_var = "site")
 #' print(icar)
 #'
-#' # Proper CAR (ρ estimated)
+#' # Proper CAR (rho estimated)
 #' proper_car <- spatial_car(adj, level = "group", group_var = "site",
 #'                           proper = TRUE)
 #' print(proper_car)
@@ -101,10 +101,8 @@ NULL
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   spatial = spatial_car(adj, level = "group", group_var = "site"),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Proper CAR model (estimate spatial autocorrelation)
@@ -114,13 +112,11 @@ NULL
 #'   family = ratiod_poisson_gamma(),
 #'   spatial = spatial_car(adj, level = "group", group_var = "site",
 #'                         proper = TRUE),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
-#' # Extract ρ from proper CAR
+#' # Extract rho from proper CAR
 #' summary(fit_car)  # Shows rho_spatial parameter
 #' }
 #'
@@ -305,7 +301,7 @@ compute_car_rho_bounds <- function(adjacency) {
 #'   spatial = spatial_bym2(adj, level = "group", group_var = "region"),
 #'   data = epi_data,
 #'   family = ratiod_binomial(),
-#'   backend = "laplace"
+#'   mode = "laplace"
 #' )
 #' summary(fit)
 #' }
@@ -578,10 +574,8 @@ is_connected <- function(adjacency) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   spatial = spatial_gp(~ lon + lat),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' summary(fit)
 #'
@@ -591,10 +585,8 @@ is_connected <- function(adjacency) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   spatial = spatial_gp(~ lon + lat, cov = "matern", nu = 1.5),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' }
 #'
@@ -817,10 +809,8 @@ print.ratiod_gp <- function(x, ...) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   spatial = spatial_hsgp(~ lon + lat, m = 6),
-#'   backend = "hmc",
-#'   iter = 500,
-#'   warmup = 250,
-#'   chains = 2
+#'   mode = "hmc",
+#'   control = list(iter = 500, warmup = 250, chains = 2)
 #' )
 #' summary(fit)
 #' }
@@ -1054,7 +1044,7 @@ validate_hsgp_multiscale <- function(spatial, data) {
 #'     range_local = c(0.1, 0.5),
 #'     range_regional = c(1, 5)
 #'   ),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' summary(fit)
 #' }
@@ -1361,7 +1351,7 @@ validate_gp <- function(gp, data) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   svc = spatial_svc(~ lon + lat, terms = 1),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' summary(fit)
 #'
@@ -1748,7 +1738,7 @@ compute_nngp_neighbors <- function(coords, k) {
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
 #'   svc = spatial_svc(~ lon + lat, terms = c(1, 2)),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Extract SVC posteriors
@@ -2100,10 +2090,8 @@ validate_spatial <- function(spatial, data) {
 #'   count | effort ~ depth + temp,
 #'   data = df,
 #'   spatial = spatial_gp(~ lon + lat),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # RSR to protect depth and temp coefficients
@@ -2114,10 +2102,8 @@ validate_spatial <- function(spatial, data) {
 #'     spatial_gp(~ lon + lat),
 #'     restrict_to = ~ depth + temp
 #'   ),
-#'   backend = "hmc",
-#'   iter = 200,
-#'   warmup = 100,
-#'   chains = 1
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
 #' # Compare coefficient estimates

@@ -85,8 +85,8 @@ fit <- tratio(
   count | effort ~ depth + season,
   data = df,
   family = ratiod_poisson_gamma(),
-  backend = "hmc",
-  iter = 200, warmup = 100, chains = 1
+  mode = "hmc",
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Predict for new data
@@ -108,7 +108,7 @@ fit_gp <- tratio(
   data = df,
   spatial = spatial_gp(coords = c("x", "y")),
   family = ratiod_poisson_gamma(),
-  iter = 200, warmup = 100, chains = 1
+  control = list(iter = 200, warmup = 100, chains = 1)
 )
 
 # Predict at new locations (kriging)

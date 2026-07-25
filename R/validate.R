@@ -41,7 +41,7 @@ NULL
 #'   count | total ~ x + (1 | site),
 #'   data = df,
 #'   family = ratiod_negbin_negbin(),
-#'   iter = 200, warmup = 100, chains = 1
+#'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' # Density overlay (requires bayesplot package)
 #' # pp_check(fit, type = "dens_overlay")
@@ -452,10 +452,10 @@ waic.ratiod_fit <- function(x, ...) {
 #' )
 #' fit1 <- tratio(y_num | y_denom ~ x, data = df,
 #'               family = ratiod_negbin_negbin(),
-#'               iter = 200, warmup = 100, chains = 1)
+#'               control = list(iter = 200, warmup = 100, chains = 1))
 #' fit2 <- tratio(y_num | y_denom ~ x + z, data = df,
 #'               family = ratiod_negbin_negbin(),
-#'               iter = 200, warmup = 100, chains = 1)
+#'               control = list(iter = 200, warmup = 100, chains = 1))
 #' # Compare (requires loo package)
 #' # ratiod_compare(fit1, fit2)
 #' }
@@ -544,10 +544,10 @@ ratiod_compare <- function(..., criterion = c("loo", "waic")) {
 #' )
 #' fit1 <- tratio(count | effort ~ x + (1 | site), data = df,
 #'               family = ratiod_poisson_gamma(),
-#'               iter = 200, warmup = 100, chains = 1)
+#'               control = list(iter = 200, warmup = 100, chains = 1))
 #' fit2 <- tratio(count | effort ~ x + z + (1 | site), data = df,
 #'               family = ratiod_poisson_gamma(),
-#'               iter = 200, warmup = 100, chains = 1)
+#'               control = list(iter = 200, warmup = 100, chains = 1))
 #' # Model averaging (requires loo package)
 #' # avg <- ratiod_average(fit1, fit2)
 #' # print(avg)
