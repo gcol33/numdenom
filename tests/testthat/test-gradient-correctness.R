@@ -41,9 +41,6 @@ for (field in FIELDS) {
 for (field in MULTI_FIELDS) {
   for (mode in MODES) {
     test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
-      if (mode == "arena" && grepl("_st$", field)) {
-        skip("blocked on gcol33/tulpaRatio#14")
-      }
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
       expect_gt(r$n_params, 0)
       dev <- rel_dev(r$analytic, r$finite_diff)
@@ -56,6 +53,23 @@ for (field in MULTI_FIELDS) {
           field, mode, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
         )
       )
+    })
+  }
+}
+
+# Every autodiff mode differentiates the same templated log posterior, so a
+# structure missing from it is missing from all of them at once. The
+# spatiotemporal block was absent there while present in the analytic log
+# posterior: the interaction parameters carried no term at all, so their
+# gradient was exactly zero and every other parameter was differentiated
+# against a linear predictor short one effect. A zero count is what separates
+# an absent term from a wrong one.
+for (field in c("icar_st", "bym2_st")) {
+  for (mode in c("arena", "forward", "tape")) {
+    test_that(sprintf("autodiff carries the spatiotemporal block (%s, %s)", field, mode), {
+      r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
+      expect_equal(sum(r$analytic == 0), 0L)
+      expect_lt(max(rel_dev(r$analytic, r$finite_diff)), 1e-4)
     })
   }
 }
@@ -116,11 +130,7 @@ test_that("analytic and autodiff log posteriors agree up to a constant", {
   # one: NUTS consumes it as log_prob, so a mode whose value disagrees with its
   # own gradient drives the Hamiltonian off a different density.
   for (mode in c("arena", "handcoded")) {
-    # The spatiotemporal autodiff path reports an offset of its own; excluded
-    # here rather than loosening the bound, which would stop the invariant
-    # holding for everything else. See gcol33/tulpaRatio#14.
     fields <- c(FIELDS, MULTI_FIELDS)
-    if (mode == "arena") fields <- setdiff(fields, c("icar_st", "bym2_st"))
     offsets <- vapply(fields, function(field) {
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
       r$log_post - r$log_post_mode

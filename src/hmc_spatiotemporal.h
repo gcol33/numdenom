@@ -9,12 +9,16 @@
 #include <cmath>
 #include "hmc_temporal.h"
 #include "hmc_svc.h"
+#include "autodiff_utils.h"
+#include "hmc_temporal_autodiff.h"
+#include "hmc_svc_autodiff.h"
 
 namespace ratiod_spatiotemporal {
 
 using ratiod_temporal::TemporalType;
 using ratiod_svc::CovType;
-using ratiod_svc::compute_cov;
+using ratiod_svc_ad::compute_cov;
+using namespace ratiod::math;
 
 // =====================================================================
 // Spatiotemporal interaction types
@@ -101,21 +105,22 @@ struct SpatiotemporalData {
 
 // Log-prior for Type I (IID) interaction
 // delta[s,t] ~ N(0, sigma2) independently
-inline double type_i_log_prior(
-    const double* delta,  // Flattened S*T vector
+template<typename Scalar>
+inline Scalar type_i_log_prior(
+    const Scalar* delta,  // Flattened S*T vector
     int S,
     int T,
-    double tau  // precision = 1/sigma2
+    const Scalar& tau  // precision = 1/sigma2
 ) {
   int n = S * T;
-  double quad = 0.0;
+  Scalar quad = Scalar(0.0);
 
   for (int i = 0; i < n; i++) {
-    quad += delta[i] * delta[i];
+    quad = quad + delta[i] * delta[i];
   }
 
   // log p(delta|tau) = (n/2) log(tau) - (tau/2) sum(delta^2) + const
-  return 0.5 * n * std::log(tau) - 0.5 * tau * quad;
+  return Scalar(0.5 * n) * safe_log(tau) - Scalar(0.5) * tau * quad;
 }
 
 // =====================================================================
@@ -124,33 +129,36 @@ inline double type_i_log_prior(
 
 // Log-prior for Type II interaction
 // For each spatial unit s, delta[s,*] follows temporal structure
-inline double type_ii_log_prior(
-    const double* delta,  // Flattened S*T vector (column-major: delta[s + S*t])
+template<typename Scalar>
+inline Scalar type_ii_log_prior(
+    const Scalar* delta,  // Flattened S*T vector (column-major: delta[s + S*t])
     int S,
     int T,
-    double tau,
+    const Scalar& tau,
     TemporalType temp_type,
     bool cyclic
 ) {
-  double log_prior = 0.0;
+  Scalar log_prior = Scalar(0.0);
 
   // For each spatial unit
   for (int s = 0; s < S; s++) {
     // Extract temporal series for this location
-    std::vector<double> delta_s(T);
+    std::vector<Scalar> delta_s(T);
     for (int t = 0; t < T; t++) {
       delta_s[t] = delta[s * T + t];  // Column-major
     }
 
     // Apply temporal prior
     if (temp_type == TemporalType::RW1) {
-      double quad = ratiod_temporal::rw1_quadratic_form(delta_s.data(), T, cyclic);
+      Scalar quad = ratiod_temporal::rw1_quadratic_form_t(delta_s, T, cyclic);
       int rank = cyclic ? T : T - 1;
-      log_prior += 0.5 * rank * std::log(tau) - 0.5 * tau * quad;
+      log_prior = log_prior + Scalar(0.5 * rank) * safe_log(tau)
+                            - Scalar(0.5) * tau * quad;
     } else if (temp_type == TemporalType::RW2) {
-      double quad = ratiod_temporal::rw2_quadratic_form(delta_s.data(), T, cyclic);
+      Scalar quad = ratiod_temporal::rw2_quadratic_form_t(delta_s, T, cyclic);
       int rank = cyclic ? T : T - 2;
-      log_prior += 0.5 * rank * std::log(tau) - 0.5 * tau * quad;
+      log_prior = log_prior + Scalar(0.5 * rank) * safe_log(tau)
+                            - Scalar(0.5) * tau * quad;
     }
     // AR1 would need rho parameter
   }
@@ -163,20 +171,21 @@ inline double type_ii_log_prior(
 // =====================================================================
 
 // Compute ICAR quadratic form for a single vector
-inline double icar_quad_form(
-    const double* phi,
+template<typename Scalar>
+inline Scalar icar_quad_form(
+    const Scalar* phi,
     int n,
     const std::vector<int>& adj_row_ptr,
     const std::vector<int>& adj_col_idx
 ) {
-  double quad = 0.0;
+  Scalar quad = Scalar(0.0);
 
   for (int i = 0; i < n; i++) {
     for (int idx = adj_row_ptr[i]; idx < adj_row_ptr[i + 1]; idx++) {
       int j = adj_col_idx[idx] - 1;  // Convert to 0-based
       if (j > i) {  // Only count each edge once
-        double diff = phi[i] - phi[j];
-        quad += diff * diff;
+        Scalar diff = phi[i] - phi[j];
+        quad = quad + diff * diff;
       }
     }
   }
@@ -186,29 +195,31 @@ inline double icar_quad_form(
 
 // Log-prior for Type III interaction
 // For each time point t, delta[*,t] follows spatial structure (ICAR)
-inline double type_iii_log_prior(
-    const double* delta,  // Flattened S*T vector
+template<typename Scalar>
+inline Scalar type_iii_log_prior(
+    const Scalar* delta,  // Flattened S*T vector
     int S,
     int T,
-    double tau,
+    const Scalar& tau,
     const std::vector<int>& adj_row_ptr,
     const std::vector<int>& adj_col_idx,
     int rank_deficiency = 1  // 1 for ICAR
 ) {
-  double log_prior = 0.0;
+  Scalar log_prior = Scalar(0.0);
   int rank = S - rank_deficiency;
 
   // For each time point
   for (int t = 0; t < T; t++) {
     // Extract spatial field for this time point
-    std::vector<double> delta_t(S);
+    std::vector<Scalar> delta_t(S);
     for (int s = 0; s < S; s++) {
       delta_t[s] = delta[s * T + t];  // Column-major
     }
 
     // Apply ICAR prior
-    double quad = icar_quad_form(delta_t.data(), S, adj_row_ptr, adj_col_idx);
-    log_prior += 0.5 * rank * std::log(tau) - 0.5 * tau * quad;
+    Scalar quad = icar_quad_form(delta_t.data(), S, adj_row_ptr, adj_col_idx);
+    log_prior = log_prior + Scalar(0.5 * rank) * safe_log(tau)
+                          - Scalar(0.5) * tau * quad;
   }
 
   return log_prior;
@@ -222,12 +233,13 @@ inline double type_iii_log_prior(
 // Precision Q_delta = Q_s (x) Q_t (Kronecker product)
 // Quadratic form: delta' Q_delta delta = sum over (s1,t1,s2,t2) of delta[s1,t1] * Q_s[s1,s2] * Q_t[t1,t2] * delta[s2,t2]
 // This can be computed as: sum_t1,t2 Q_t[t1,t2] * (delta[*,t1]' Q_s delta[*,t2])
-inline double type_iv_log_prior(
-    const double* delta,  // Flattened S*T vector (column-major)
+template<typename Scalar>
+inline Scalar type_iv_log_prior(
+    const Scalar* delta,  // Flattened S*T vector (column-major)
     int S,
     int T,
-    double tau_space,
-    double tau_time,
+    const Scalar& tau_space,
+    const Scalar& tau_time,
     const std::vector<int>& adj_row_ptr,
     const std::vector<int>& adj_col_idx,
     TemporalType temp_type,
@@ -238,66 +250,69 @@ inline double type_iv_log_prior(
 
   // Step 1: Compute Q_s * delta for each time point
   // Q_s[i,j] = n_neighbors[i] if i==j, -1 if neighbors, 0 otherwise
-  std::vector<std::vector<double>> Q_s_delta(T, std::vector<double>(S, 0.0));
+  std::vector<std::vector<Scalar>> Q_s_delta(T, std::vector<Scalar>(S, Scalar(0.0)));
 
   for (int t = 0; t < T; t++) {
     for (int i = 0; i < S; i++) {
-      double val = 0.0;
+      Scalar val = Scalar(0.0);
       int n_neigh = adj_row_ptr[i + 1] - adj_row_ptr[i];
-      val += n_neigh * delta[i * T + t];  // Diagonal: n_neighbors
+      val = val + Scalar(n_neigh) * delta[i * T + t];  // Diagonal: n_neighbors
 
       for (int idx = adj_row_ptr[i]; idx < adj_row_ptr[i + 1]; idx++) {
         int j = adj_col_idx[idx] - 1;  // 0-based
-        val -= delta[j * T + t];  // Off-diagonal: -1
+        val = val - delta[j * T + t];  // Off-diagonal: -1
       }
       Q_s_delta[t][i] = val;
     }
   }
 
   // Step 2: Compute delta[*,t1]' Q_s delta[*,t2] for all t1, t2
-  std::vector<std::vector<double>> inner_prods(T, std::vector<double>(T, 0.0));
+  std::vector<std::vector<Scalar>> inner_prods(T, std::vector<Scalar>(T, Scalar(0.0)));
 
   for (int t1 = 0; t1 < T; t1++) {
     for (int t2 = 0; t2 < T; t2++) {
-      double ip = 0.0;
+      Scalar ip = Scalar(0.0);
       for (int s = 0; s < S; s++) {
-        ip += delta[s * T + t1] * Q_s_delta[t2][s];
+        ip = ip + delta[s * T + t1] * Q_s_delta[t2][s];
       }
       inner_prods[t1][t2] = ip;
     }
   }
 
   // Step 3: Apply temporal quadratic form
-  double quad = 0.0;
+  Scalar quad = Scalar(0.0);
 
   if (temp_type == TemporalType::RW1) {
     // RW1: Q_t[t,t] = 2 (interior), 1 (boundary); Q_t[t,t+1] = -1
     for (int t = 0; t < T - 1; t++) {
       // (delta[*,t] - delta[*,t+1])' Q_s (delta[*,t] - delta[*,t+1])
       // = inner_prods[t,t] - 2*inner_prods[t,t+1] + inner_prods[t+1,t+1]
-      quad += inner_prods[t][t] - 2.0 * inner_prods[t][t + 1] + inner_prods[t + 1][t + 1];
+      quad = quad + inner_prods[t][t] - Scalar(2.0) * inner_prods[t][t + 1]
+                  + inner_prods[t + 1][t + 1];
     }
     if (cyclic) {
-      quad += inner_prods[T-1][T-1] - 2.0 * inner_prods[T-1][0] + inner_prods[0][0];
+      quad = quad + inner_prods[T-1][T-1] - Scalar(2.0) * inner_prods[T-1][0]
+                  + inner_prods[0][0];
     }
   } else if (temp_type == TemporalType::RW2) {
     // RW2: second differences
     for (int t = 0; t < T - 2; t++) {
       // (delta[*,t] - 2*delta[*,t+1] + delta[*,t+2])' Q_s (...)
-      std::vector<double> diff2(S);
+      std::vector<Scalar> diff2(S);
       for (int s = 0; s < S; s++) {
-        diff2[s] = delta[s * T + t] - 2.0 * delta[s * T + t + 1] + delta[s * T + t + 2];
+        diff2[s] = delta[s * T + t] - Scalar(2.0) * delta[s * T + t + 1]
+                 + delta[s * T + t + 2];
       }
       // Apply Q_s to diff2
       for (int s = 0; s < S; s++) {
-        double Qs_diff2 = 0.0;
+        Scalar Qs_diff2 = Scalar(0.0);
         int n_neigh = adj_row_ptr[s + 1] - adj_row_ptr[s];
-        Qs_diff2 += n_neigh * diff2[s];
+        Qs_diff2 = Qs_diff2 + Scalar(n_neigh) * diff2[s];
         for (int idx = adj_row_ptr[s]; idx < adj_row_ptr[s + 1]; idx++) {
           int j = adj_col_idx[idx] - 1;
-          Qs_diff2 -= diff2[j];
+          Qs_diff2 = Qs_diff2 - diff2[j];
         }
-        quad += diff2[s] * Qs_diff2;
+        quad = quad + diff2[s] * Qs_diff2;
       }
     }
     // Cyclic extension if needed
@@ -313,8 +328,8 @@ inline double type_iv_log_prior(
 
   int total_rank = rank_space * rank_time;
 
-  double log_prior = 0.5 * total_rank * std::log(tau_space * tau_time);
-  log_prior -= 0.5 * tau_space * tau_time * quad;
+  Scalar log_prior = Scalar(0.5 * total_rank) * safe_log(tau_space * tau_time);
+  log_prior = log_prior - Scalar(0.5) * tau_space * tau_time * quad;
 
   return log_prior;
 }
@@ -325,61 +340,67 @@ inline double type_iv_log_prior(
 
 // Gneiting (2002) non-separable covariance
 // C(h, u) = sigma2 / (a*|u|^(2*alpha) + 1)^tau * exp(-c*||h||^(2*gamma) / (a*|u|^(2*alpha) + 1)^(beta*gamma))
-inline double gneiting_cov(
+template<typename Scalar>
+inline Scalar gneiting_cov(
     double h,           // Spatial distance
     double u,           // Temporal distance (absolute)
-    double sigma2,
-    double phi_space,   // Spatial range
-    double phi_time,    // Temporal range
+    const Scalar& sigma2,
+    const Scalar& phi_space,   // Spatial range
+    const Scalar& phi_time,    // Temporal range
     double alpha = 1.0, // Temporal smoothness (0.5 to 1)
     double gamma = 0.5, // Spatial smoothness (0.5 to 1)
     double beta = 1.0   // Space-time interaction (0 to 1)
 ) {
-  // Rescale distances by range parameters
-  double u_scaled = u / phi_time;
-  double h_scaled = h / phi_space;
+  using std::pow;
+
+  // Rescale distances by range parameters. The ranges are positive, so the
+  // absolute value can be taken on the distance instead of the ratio.
+  Scalar u_scaled = Scalar(std::abs(u)) / phi_time;
+  Scalar h_scaled = Scalar(h) / phi_space;
 
   // Parameters for the class
   double a = 1.0;  // Can be estimated
   double c = 1.0;  // Can be estimated
   double tau = 1.0;
 
-  double denom = std::pow(a * std::pow(std::abs(u_scaled), 2.0 * alpha) + 1.0, tau);
-  double exp_arg = -c * std::pow(h_scaled, 2.0 * gamma) /
-                   std::pow(a * std::pow(std::abs(u_scaled), 2.0 * alpha) + 1.0, beta * gamma);
+  Scalar base = Scalar(a) * pow(u_scaled, 2.0 * alpha) + Scalar(1.0);
+  Scalar denom = pow(base, tau);
+  Scalar exp_arg = Scalar(-c) * pow(h_scaled, 2.0 * gamma) / pow(base, beta * gamma);
 
-  return sigma2 / denom * std::exp(exp_arg);
+  return sigma2 / denom * safe_exp(exp_arg);
 }
 
 // Separable covariance (product)
-inline double separable_cov(
+template<typename Scalar>
+inline Scalar separable_cov(
     double h,
     double u,
-    double sigma2_space,
-    double sigma2_time,
-    double phi_space,
-    double phi_time,
+    const Scalar& sigma2_space,
+    const Scalar& sigma2_time,
+    const Scalar& phi_space,
+    const Scalar& phi_time,
     CovType cov_space,
     CovType cov_time
 ) {
-  double c_space = compute_cov(h, sigma2_space, phi_space, cov_space);
-  double c_time = compute_cov(u, sigma2_time, phi_time, cov_time);
+  Scalar c_space = compute_cov(h, sigma2_space, phi_space, cov_space);
+  Scalar c_time = compute_cov(u, sigma2_time, phi_time, cov_time);
   return c_space * c_time;
 }
 
 // Sum covariance
-inline double sum_cov(
+template<typename Scalar>
+inline Scalar sum_cov(
     double h,
     double u,
-    double sigma2_space,
-    double sigma2_time,
-    double phi_space,
-    double phi_time,
+    const Scalar& sigma2_space,
+    const Scalar& sigma2_time,
+    const Scalar& phi_space,
+    const Scalar& phi_time,
     CovType cov_space,
     CovType cov_time
 ) {
-  double c_space = compute_cov(h, sigma2_space, phi_space, cov_space);
-  double c_time = compute_cov(u, sigma2_time, phi_time, cov_time);
+  Scalar c_space = compute_cov(h, sigma2_space, phi_space, cov_space);
+  Scalar c_time = compute_cov(u, sigma2_time, phi_time, cov_time);
   return c_space + c_time;
 }
 
@@ -388,22 +409,23 @@ inline double sum_cov(
 // =====================================================================
 
 // Compute NNGP log-likelihood for spatiotemporal GP
-inline double st_gp_nngp_log_lik(
-    const std::vector<double>& w,      // ST effect (length N)
-    double sigma2,
-    double phi_space,
-    double phi_time,
+template<typename Scalar>
+inline Scalar st_gp_nngp_log_lik(
+    const std::vector<Scalar>& w,      // ST effect (length N)
+    const Scalar& sigma2,
+    const Scalar& phi_space,
+    const Scalar& phi_time,
     const SpatiotemporalData& st_data
 ) {
   int N = w.size();
   int nn = st_data.nn;
 
-  double log_lik = 0.0;
+  Scalar log_lik = Scalar(0.0);
 
   // First observation: marginal N(0, sigma2)
   int first_idx = st_data.nn_order[0];
-  log_lik += -0.5 * std::log(2.0 * M_PI * sigma2) -
-             0.5 * w[first_idx] * w[first_idx] / sigma2;
+  log_lik = log_lik - Scalar(0.5) * safe_log(Scalar(2.0 * M_PI) * sigma2)
+                    - Scalar(0.5) * w[first_idx] * w[first_idx] / sigma2;
 
   // Remaining observations: conditional on neighbors
   for (int i = 1; i < N; i++) {
@@ -419,14 +441,14 @@ inline double st_gp_nngp_log_lik(
     }
 
     if (n_neighbors == 0) {
-      log_lik += -0.5 * std::log(2.0 * M_PI * sigma2) -
-                 0.5 * w[obs_idx] * w[obs_idx] / sigma2;
+      log_lik = log_lik - Scalar(0.5) * safe_log(Scalar(2.0 * M_PI) * sigma2)
+                        - Scalar(0.5) * w[obs_idx] * w[obs_idx] / sigma2;
       continue;
     }
 
     // Build covariance structures
-    std::vector<double> c_vec(n_neighbors);
-    std::vector<double> C_mat(n_neighbors * n_neighbors);
+    std::vector<Scalar> c_vec(n_neighbors);
+    std::vector<Scalar> C_mat(n_neighbors * n_neighbors);
 
     // c_vec: covariances between obs i and its neighbors
     for (int j = 0; j < n_neighbors; j++) {
@@ -441,7 +463,8 @@ inline double st_gp_nngp_log_lik(
                           st_data.cov_space, st_data.cov_time);
       } else {
         // Separable (product)
-        c_vec[j] = separable_cov(h, u, std::sqrt(sigma2), std::sqrt(sigma2),
+        Scalar sigma = safe_sqrt(sigma2);
+        c_vec[j] = separable_cov(h, u, sigma, sigma,
                                  phi_space, phi_time,
                                  st_data.cov_space, st_data.cov_time);
       }
@@ -466,7 +489,7 @@ inline double st_gp_nngp_log_lik(
           u12 = std::abs(st_data.time_values[idx1] - st_data.time_values[idx2]);
         }
 
-        double cov_val;
+        Scalar cov_val;
         if (j1 == j2) {
           cov_val = sigma2;
         } else if (st_data.nonsep_type == NonsepType::GNEITING) {
@@ -475,7 +498,8 @@ inline double st_gp_nngp_log_lik(
           cov_val = sum_cov(h12, u12, sigma2, sigma2, phi_space, phi_time,
                            st_data.cov_space, st_data.cov_time);
         } else {
-          cov_val = separable_cov(h12, u12, std::sqrt(sigma2), std::sqrt(sigma2),
+          Scalar sigma = safe_sqrt(sigma2);
+          cov_val = separable_cov(h12, u12, sigma, sigma,
                                   phi_space, phi_time,
                                   st_data.cov_space, st_data.cov_time);
         }
@@ -486,15 +510,16 @@ inline double st_gp_nngp_log_lik(
     }
 
     // Cholesky decomposition
-    std::vector<double> L(n_neighbors * n_neighbors, 0.0);
+    std::vector<Scalar> L(n_neighbors * n_neighbors, Scalar(0.0));
     for (int j = 0; j < n_neighbors; j++) {
       for (int k = 0; k <= j; k++) {
-        double sum = C_mat[j * n_neighbors + k];
+        Scalar sum = C_mat[j * n_neighbors + k];
         for (int m = 0; m < k; m++) {
-          sum -= L[j * n_neighbors + m] * L[k * n_neighbors + m];
+          sum = sum - L[j * n_neighbors + m] * L[k * n_neighbors + m];
         }
         if (j == k) {
-          L[j * n_neighbors + j] = std::sqrt(std::max(1e-10, sum));
+          Scalar diag = (get_value(sum) < 1e-10) ? Scalar(1e-10) : sum;
+          L[j * n_neighbors + j] = safe_sqrt(diag);
         } else {
           L[j * n_neighbors + k] = sum / L[k * n_neighbors + k];
         }
@@ -502,42 +527,43 @@ inline double st_gp_nngp_log_lik(
     }
 
     // Solve L * y = c_vec
-    std::vector<double> y(n_neighbors);
+    std::vector<Scalar> y(n_neighbors);
     for (int j = 0; j < n_neighbors; j++) {
-      double sum = c_vec[j];
+      Scalar sum = c_vec[j];
       for (int k = 0; k < j; k++) {
-        sum -= L[j * n_neighbors + k] * y[k];
+        sum = sum - L[j * n_neighbors + k] * y[k];
       }
       y[j] = sum / L[j * n_neighbors + j];
     }
 
     // Solve L^T * alpha = y
-    std::vector<double> alpha(n_neighbors);
+    std::vector<Scalar> alpha(n_neighbors);
     for (int j = n_neighbors - 1; j >= 0; j--) {
-      double sum = y[j];
+      Scalar sum = y[j];
       for (int k = j + 1; k < n_neighbors; k++) {
-        sum -= L[k * n_neighbors + j] * alpha[k];
+        sum = sum - L[k * n_neighbors + j] * alpha[k];
       }
       alpha[j] = sum / L[j * n_neighbors + j];
     }
 
     // Conditional mean and variance
-    double cond_mean = 0.0;
+    Scalar cond_mean = Scalar(0.0);
     for (int j = 0; j < n_neighbors; j++) {
       int nn_orig_idx = st_data.nn_order[st_data.nn_idx[i * nn + j] - 1];
-      cond_mean += alpha[j] * w[nn_orig_idx];
+      cond_mean = cond_mean + alpha[j] * w[nn_orig_idx];
     }
 
-    double c_Cinv_c = 0.0;
+    Scalar c_Cinv_c = Scalar(0.0);
     for (int j = 0; j < n_neighbors; j++) {
-      c_Cinv_c += c_vec[j] * alpha[j];
+      c_Cinv_c = c_Cinv_c + c_vec[j] * alpha[j];
     }
-    double cond_var = std::max(1e-10, sigma2 - c_Cinv_c);
+    Scalar cond_var_raw = sigma2 - c_Cinv_c;
+    Scalar cond_var = (get_value(cond_var_raw) < 1e-10) ? Scalar(1e-10) : cond_var_raw;
 
     // Log-likelihood contribution
-    double resid = w[obs_idx] - cond_mean;
-    log_lik += -0.5 * std::log(2.0 * M_PI * cond_var) -
-               0.5 * resid * resid / cond_var;
+    Scalar resid = w[obs_idx] - cond_mean;
+    log_lik = log_lik - Scalar(0.5) * safe_log(Scalar(2.0 * M_PI) * cond_var)
+                      - Scalar(0.5) * resid * resid / cond_var;
   }
 
   return log_lik;
@@ -547,17 +573,20 @@ inline double st_gp_nngp_log_lik(
 // Master function: spatiotemporal log-prior
 // =====================================================================
 
-inline double spatiotemporal_log_prior(
-    const double* delta,
-    double tau,
-    double tau2,        // Second precision (for Type IV: temporal)
-    double rho,         // AR1 autocorrelation if needed
-    double phi_space,   // GP range parameters
-    double phi_time,
+template<typename Scalar>
+inline Scalar spatiotemporal_log_prior(
+    const Scalar* delta,
+    const Scalar& tau,
+    const Scalar& tau2,        // Second precision (for Type IV: temporal)
+    const Scalar& rho,         // AR1 autocorrelation if needed
+    const Scalar& phi_space,   // GP range parameters
+    const Scalar& phi_time,
     const SpatiotemporalData& st_data
 ) {
+  (void)rho;
+
   if (st_data.type == STType::NONE) {
-    return 0.0;
+    return Scalar(0.0);
   }
 
   int S = st_data.n_spatial;
@@ -584,13 +613,13 @@ inline double spatiotemporal_log_prior(
     case STType::NONSEP_GP: {
       // Convert delta to vector for GP function
       int N = st_data.n_params;
-      std::vector<double> w(delta, delta + N);
-      double sigma2 = 1.0 / tau;
+      std::vector<Scalar> w(delta, delta + N);
+      Scalar sigma2 = Scalar(1.0) / tau;
       return st_gp_nngp_log_lik(w, sigma2, phi_space, phi_time, st_data);
     }
 
     default:
-      return 0.0;
+      return Scalar(0.0);
   }
 }
 
@@ -630,35 +659,36 @@ inline void spatiotemporal_gradient_delta(
 // =====================================================================
 
 // Apply soft sum-to-zero constraint marginally
-inline double st_sum_to_zero_penalty(
-    const double* delta,
+template<typename Scalar>
+inline Scalar st_sum_to_zero_penalty(
+    const Scalar* delta,
     int S,
     int T,
     double lambda,
     bool marginal_space = true,
     bool marginal_time = true
 ) {
-  double penalty = 0.0;
+  Scalar penalty = Scalar(0.0);
 
   if (marginal_space) {
     // For each time point, spatial effects sum to zero
     for (int t = 0; t < T; t++) {
-      double sum = 0.0;
+      Scalar sum = Scalar(0.0);
       for (int s = 0; s < S; s++) {
-        sum += delta[s * T + t];
+        sum = sum + delta[s * T + t];
       }
-      penalty -= 0.5 * lambda * sum * sum;
+      penalty = penalty - Scalar(0.5 * lambda) * sum * sum;
     }
   }
 
   if (marginal_time) {
     // For each spatial unit, temporal effects sum to zero
     for (int s = 0; s < S; s++) {
-      double sum = 0.0;
+      Scalar sum = Scalar(0.0);
       for (int t = 0; t < T; t++) {
-        sum += delta[s * T + t];
+        sum = sum + delta[s * T + t];
       }
-      penalty -= 0.5 * lambda * sum * sum;
+      penalty = penalty - Scalar(0.5 * lambda) * sum * sum;
     }
   }
 

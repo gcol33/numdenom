@@ -9,9 +9,12 @@
 #define RATIOD_LOG_POST_IMPL_H
 
 #include <vector>
+#include <limits>
 #include "autodiff_utils.h"
 #include "soft_sum_to_zero.h"
 #include "spatial_field_constraint.h"
+#include "hmc_spatiotemporal.h"  // Templated spatiotemporal interaction priors
+#include "hmc_hsgp.h"  // Templated HSGP spectral density
 #include "hmc_gp_autodiff.h"  // Templated GP/NNGP functions
 #include "hmc_svc_autodiff.h"  // Templated SVC functions
 #include "hmc_tvc_autodiff.h"  // Templated TVC functions
@@ -28,6 +31,7 @@ using ratiod_hmc::ModelData;
 using ratiod_hmc::ParamLayout;
 using ratiod_hmc::ModelType;
 using ratiod_hmc::TemporalType;
+using ratiod_hmc::STType;
 using ratiod_zi::ZIType;
 
 namespace ratiod {
@@ -918,6 +922,163 @@ T compute_log_post_impl(
         ratiod_latent_ad::latent_contributions_all(latent_eta, latent_factors, latent_sigma, N, K);
     }
 
+    // Spatiotemporal interaction priors
+    const T* st_delta = nullptr;
+    std::vector<T> st_delta_nc;
+
+    if (layout.has_spatiotemporal &&
+        data.spatiotemporal_data.type != STType::NONE) {
+        const auto& st_data = data.spatiotemporal_data;
+        const int S = st_data.n_spatial;
+        const int T_st = st_data.n_times;
+        const int ST = S * T_st;
+
+        // Precision parameter
+        T log_tau_st = params[layout.log_tau_st_idx];
+        T tau_st = safe_exp(log_tau_st);
+        T tau_st2 = T(1.0);
+        T rho_st = T(0.0);
+        T phi_st_space = T(1.0);
+        T phi_st_time = T(1.0);
+
+        // PC prior on tau (exponential on sigma = 1/sqrt(tau))
+        T sigma_st = T(1.0) / safe_sqrt(tau_st);
+        double lambda_st = -std::log(data.st_sigma2_prior_alpha) / data.st_sigma2_prior_U;
+        log_post = log_post + T(std::log(lambda_st)) - T(lambda_st) * sigma_st
+                            - safe_log(T(2.0) * sigma_st);
+        log_post = log_post + log_tau_st;  // Jacobian for log transform
+
+        // AR1 rho parameter
+        if (layout.logit_rho_st_idx >= 0) {
+            T logit_rho_st = params[layout.logit_rho_st_idx];
+            rho_st = T(2.0) / (T(1.0) + safe_exp(-logit_rho_st)) - T(1.0);
+
+            // Uniform(-1, 1) prior on rho, Jacobian for the logit transform
+            T x = (rho_st + T(1.0)) / T(2.0);
+            log_post = log_post + safe_log(x) + safe_log(T(1.0) - x);
+        }
+
+        // GP range parameters
+        if (layout.is_st_gp) {
+            T log_phi_space = params[layout.log_phi_st_space_idx];
+            T log_phi_time = params[layout.log_phi_st_time_idx];
+            phi_st_space = safe_exp(log_phi_space);
+            phi_st_time = safe_exp(log_phi_time);
+
+            // Uniform prior within bounds
+            if (get_value(phi_st_space) < data.st_phi_space_prior_lower ||
+                get_value(phi_st_space) > data.st_phi_space_prior_upper) {
+                return T(-std::numeric_limits<double>::infinity());
+            }
+            if (get_value(phi_st_time) < data.st_phi_time_prior_lower ||
+                get_value(phi_st_time) > data.st_phi_time_prior_upper) {
+                return T(-std::numeric_limits<double>::infinity());
+            }
+            log_post = log_post + log_phi_space + log_phi_time;  // Jacobians
+        }
+
+        const T* z_or_delta = &params[layout.st_delta_start];
+
+        // NC reparameterization for Type IV: store z, reconstruct delta
+        const bool st_use_nc = (data.st_parameterization == 1 &&
+                                st_data.type == STType::TYPE_IV);
+
+        if (st_use_nc) {
+            // Forward transform: delta = z / sqrt(tau_st)
+            T inv_scale = T(1.0) / safe_sqrt(tau_st);
+            st_delta_nc.resize(ST);
+            for (int k = 0; k < ST; k++) {
+                st_delta_nc[k] = z_or_delta[k] * inv_scale;
+            }
+            st_delta = st_delta_nc.data();
+
+            // NC prior: -0.5 * z^T (Q_s (x) Q_t) z  (tau-free GMRF)
+            log_post = log_post + ratiod_spatiotemporal::spatiotemporal_log_prior(
+                z_or_delta, T(1.0), T(1.0), rho_st, phi_st_space, phi_st_time,
+                st_data
+            );
+
+            // Rank term with actual tau, combined with the NC Jacobian:
+            // 0.5 * rank * log(tau) - ST/2 * log(tau)
+            int rank_space = S - 1;
+            int rank_time = (st_data.temporal_type == TemporalType::RW1) ? (T_st - 1)
+                                                                        : (T_st - 2);
+            if (st_data.temporal_cyclic) rank_time = T_st;
+            int total_rank = rank_space * rank_time;
+            log_post = log_post + T(0.5 * (total_rank - ST)) * safe_log(tau_st);
+
+            // Sum-to-zero on reconstructed delta
+            log_post = log_post + ratiod_spatiotemporal::st_sum_to_zero_penalty(
+                st_delta, S, T_st, 0.001, true, true
+            );
+        } else if (data.st_is_hsgp) {
+            // HSGP-ST: spectral basis interaction (centered). Each basis
+            // function j gets an independent temporal GMRF with precision
+            // tau_st / S(lambda_j).
+            st_delta = z_or_delta;
+            const int M = data.st_hsgp_data.m_total;
+
+            T log_sigma2_st = params[layout.log_sigma2_st_hsgp_idx];
+            T log_ls_st = params[layout.log_lengthscale_st_hsgp_idx];
+            T sigma2_st_hsgp = safe_exp(log_sigma2_st);
+            T lengthscale_st_hsgp = safe_exp(log_ls_st);
+
+            // PC prior on sigma_st_hsgp: rate = 4.6
+            T sigma_st_hsgp = safe_sqrt(sigma2_st_hsgp);
+            log_post = log_post - T(4.6) * sigma_st_hsgp + T(0.5) * log_sigma2_st;
+
+            // LogNormal(0,1) on lengthscale
+            log_post = log_post - T(0.5) * log_ls_st * log_ls_st;
+
+            int rank_t = (st_data.temporal_type == TemporalType::RW1) ? (T_st - 1) :
+                         (st_data.temporal_type == TemporalType::RW2) ? (T_st - 2) : T_st;
+            if (st_data.temporal_cyclic) rank_t = T_st;
+
+            for (int j = 0; j < M; j++) {
+                T S_j = ratiod_hsgp::spectral_density_se(
+                    data.st_hsgp_data.eigenvalues[j], sigma2_st_hsgp,
+                    lengthscale_st_hsgp);
+                T S_j_floor = (get_value(S_j) < 1e-10) ? T(1e-10) : S_j;
+                T prec_j = tau_st / S_j_floor;
+
+                // GMRF quadratic form: -0.5 * prec_j * delta_j' Q_t delta_j
+                const T* dj = &st_delta[j * T_st];
+                T qf = T(0.0);
+                if (st_data.temporal_type == TemporalType::RW1) {
+                    for (int t = 1; t < T_st; t++) {
+                        T d1 = dj[t] - dj[t - 1];
+                        qf = qf + d1 * d1;
+                    }
+                } else if (st_data.temporal_type == TemporalType::RW2) {
+                    for (int t = 2; t < T_st; t++) {
+                        T d2 = dj[t] - T(2.0) * dj[t - 1] + dj[t - 2];
+                        qf = qf + d2 * d2;
+                    }
+                }
+                log_post = log_post + T(0.5 * rank_t) * safe_log(prec_j)
+                                    - T(0.5) * prec_j * qf;
+
+                // Soft sum-to-zero per basis function
+                T sum_j = T(0.0);
+                for (int t = 0; t < T_st; t++) sum_j = sum_j + dj[t];
+                log_post = log_post - T(0.5 * 0.001) * sum_j * sum_j;
+            }
+        } else {
+            // Centered parameterization (ICAR/BYM2 spatial)
+            st_delta = z_or_delta;
+
+            log_post = log_post + ratiod_spatiotemporal::spatiotemporal_log_prior(
+                st_delta, tau_st, tau_st2, rho_st, phi_st_space, phi_st_time,
+                st_data
+            );
+
+            // Soft sum-to-zero constraint for identifiability
+            log_post = log_post + ratiod_spatiotemporal::st_sum_to_zero_penalty(
+                st_delta, S, T_st, 0.001, true, true
+            );
+        }
+    }
+
     // Zero-inflation / One-inflation parameters
     std::vector<T> beta_zi;
     std::vector<T> beta_oi;
@@ -1066,6 +1227,31 @@ T compute_log_post_impl(
                 eta_denom = eta_denom + latent_effect;
             } else {
                 eta_num = eta_num + latent_effect;
+            }
+        }
+
+        // Add spatiotemporal interaction effect
+        if (layout.has_spatiotemporal && st_delta != nullptr) {
+            T st_effect = T(0.0);
+            if (data.st_is_hsgp) {
+                // HSGP-ST: sum_j Phi[i,j] * delta_st[j * T + t - 1]
+                int t = data.spatiotemporal_data.t_idx[i] - 1;  // 0-based
+                int M = data.st_hsgp_data.m_total;
+                int T_st = data.spatiotemporal_data.n_times;
+                for (int j = 0; j < M; j++) {
+                    st_effect = st_effect +
+                        data.st_hsgp_data.phi_flat[i * M + j] * st_delta[j * T_st + t];
+                }
+            } else {
+                // ICAR-ST: direct index lookup
+                int st_idx = data.spatiotemporal_data.st_flat[i];
+                if (st_idx > 0) st_effect = st_delta[st_idx - 1];
+            }
+            if (data.spatiotemporal_data.shared) {
+                eta_num = eta_num + st_effect;
+                eta_denom = eta_denom + st_effect;
+            } else {
+                eta_num = eta_num + st_effect;
             }
         }
 

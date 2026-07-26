@@ -20,6 +20,22 @@
 
 ## Bug fixes
 
+* Spatiotemporal models fitted under an autodiff gradient mode now sample the
+  density they are meant to (#14). The log posterior is written twice, once as
+  `compute_log_post` and once as the templated `compute_log_post_impl` that the
+  `arena`, `forward`, and `tape` modes differentiate, and the spatiotemporal
+  interaction was present only in the first. The interaction parameters
+  therefore carried no prior and contributed nothing to either linear
+  predictor, so their gradient was exactly zero and every other parameter was
+  differentiated against a linear predictor short one effect. The
+  interaction now enters the templated log posterior as well, covering the
+  Knorr-Held types I to IV, the separable and non-separable GP forms, the HSGP
+  basis form, and the non-centred Type IV parameterization. The interaction
+  math in `src/hmc_spatiotemporal.h` is templated in place rather than copied
+  into a second autodiff header, so both paths call one implementation.
+  `gradient_mode = "handcoded"` was correct throughout and is unchanged, to the
+  last bit.
+
 * The samplers no longer hold their per-thread scratch in the shape that
   corrupts the heap on Windows (#16). Every workspace in `hmc_sampler.cpp` was
   a `static thread_local` object owning heap buffers. Under the mingw toolchain

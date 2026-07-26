@@ -11,6 +11,7 @@
 #include <vector>
 #include <cmath>
 #include <RcppEigen.h>
+#include "autodiff_utils.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -42,10 +43,13 @@ struct HSGPData {
 
 // Spectral density for squared exponential kernel
 // S(omega) = sigma^2 * sqrt(2*pi) * ell * exp(-0.5 * ell^2 * omega^2)
-inline double spectral_density_se(double omega_sq, double sigma2, double lengthscale) {
-    double ell = lengthscale;
-    double ell2 = ell * ell;
-    return sigma2 * std::sqrt(2.0 * M_PI) * ell * std::exp(-0.5 * ell2 * omega_sq);
+template<typename Scalar>
+inline Scalar spectral_density_se(double omega_sq, const Scalar& sigma2,
+                                  const Scalar& lengthscale) {
+    Scalar ell = lengthscale;
+    Scalar ell2 = ell * ell;
+    return sigma2 * Scalar(std::sqrt(2.0 * M_PI)) * ell *
+           ratiod::math::safe_exp(Scalar(-0.5) * ell2 * omega_sq);
 }
 
 // Derivative of spectral density w.r.t. sigma2
