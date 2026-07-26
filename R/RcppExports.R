@@ -161,6 +161,10 @@ cpp_set_max_threads <- function(n_threads) {
     invisible(.Call(`_tulpaRatio_cpp_set_max_threads`, n_threads))
 }
 
+cpp_within_chain_team <- function(n_chains, max_concurrent, want) {
+    .Call(`_tulpaRatio_cpp_within_chain_team`, n_chains, max_concurrent, want)
+}
+
 cpp_num_procs <- function() {
     .Call(`_tulpaRatio_cpp_num_procs`)
 }
@@ -451,6 +455,10 @@ cpp_test_parallel_likelihood <- function(y, mu, n_threads) {
 
 cpp_test_parallel_independent <- function(n, n_threads) {
     .Call(`_tulpaRatio_cpp_test_parallel_independent`, n, n_threads)
+}
+
+cpp_tls_workspace_shrink <- function(cycles, work, n) {
+    .Call(`_tulpaRatio_cpp_tls_workspace_shrink`, cycles, work, n)
 }
 
 cpp_tulpa_abi_version <- function() {

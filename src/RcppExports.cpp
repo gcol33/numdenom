@@ -911,6 +911,19 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// cpp_within_chain_team
+Rcpp::IntegerVector cpp_within_chain_team(int n_chains, int max_concurrent, int want);
+RcppExport SEXP _tulpaRatio_cpp_within_chain_team(SEXP n_chainsSEXP, SEXP max_concurrentSEXP, SEXP wantSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_chains(n_chainsSEXP);
+    Rcpp::traits::input_parameter< int >::type max_concurrent(max_concurrentSEXP);
+    Rcpp::traits::input_parameter< int >::type want(wantSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_within_chain_team(n_chains, max_concurrent, want));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_num_procs
 int cpp_num_procs();
 RcppExport SEXP _tulpaRatio_cpp_num_procs() {
@@ -1815,6 +1828,19 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_tls_workspace_shrink
+double cpp_tls_workspace_shrink(int cycles, int work, int n);
+RcppExport SEXP _tulpaRatio_cpp_tls_workspace_shrink(SEXP cyclesSEXP, SEXP workSEXP, SEXP nSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type cycles(cyclesSEXP);
+    Rcpp::traits::input_parameter< int >::type work(workSEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_tls_workspace_shrink(cycles, work, n));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_tulpa_abi_version
 int cpp_tulpa_abi_version();
 RcppExport SEXP _tulpaRatio_cpp_tulpa_abi_version() {
@@ -1984,6 +2010,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_chain_concurrency", (DL_FUNC) &_tulpaRatio_cpp_chain_concurrency, 2},
     {"_tulpaRatio_cpp_chain_visits", (DL_FUNC) &_tulpaRatio_cpp_chain_visits, 2},
     {"_tulpaRatio_cpp_set_max_threads", (DL_FUNC) &_tulpaRatio_cpp_set_max_threads, 1},
+    {"_tulpaRatio_cpp_within_chain_team", (DL_FUNC) &_tulpaRatio_cpp_within_chain_team, 3},
     {"_tulpaRatio_cpp_num_procs", (DL_FUNC) &_tulpaRatio_cpp_num_procs, 0},
     {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 10},
     {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 7},
@@ -2057,6 +2084,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_test_parallel_dot_products", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_dot_products, 3},
     {"_tulpaRatio_cpp_test_parallel_likelihood", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_likelihood, 3},
     {"_tulpaRatio_cpp_test_parallel_independent", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_independent, 2},
+    {"_tulpaRatio_cpp_tls_workspace_shrink", (DL_FUNC) &_tulpaRatio_cpp_tls_workspace_shrink, 3},
     {"_tulpaRatio_cpp_tulpa_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_abi_version, 0},
     {"_tulpaRatio_cpp_tulpa_compiled_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_compiled_abi_version, 0},
     {"_tulpaRatio_cpp_tulpa_runtime_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_runtime_abi_version, 0},

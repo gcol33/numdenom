@@ -12,10 +12,10 @@ namespace ratiod_omp {
 // The team used for chain-parallel work never shrinks within a session.
 //
 // Sizing it per fit lets it shrink between fits, and a shrink makes libgomp
-// destroy the surplus workers and run their thread_local destructors while
-// later work is still in flight. On Windows that ends in heap corruption
-// (STATUS_HEAP_CORRUPTION at a free() on a worker thread). A team that only
-// ever grows is safe; only the shrink faults.
+// destroy the surplus workers, which runs whatever thread-exit hooks the
+// process has registered. Per-thread scratch is held so that a dying worker
+// frees nothing (tls_workspace.h); a team that only ever grows keeps the
+// surplus workers alive as well.
 //
 // The size is the widest budget any fit has asked for so far, never
 // omp_get_max_threads(). The nthreads-var is not a fixed quantity: laplace_core

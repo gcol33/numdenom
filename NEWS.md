@@ -18,6 +18,26 @@
 * `refresh` is removed. It was a documented argument that no backend ever
   read, so passing it changed nothing.
 
+## Bug fixes
+
+* The samplers no longer hold their per-thread scratch in the shape that
+  corrupts the heap on Windows (#16). Every workspace in `hmc_sampler.cpp` was
+  a `static thread_local` object owning heap buffers. Under the mingw toolchain
+  such an object gets emutls-backed storage and a destructor registered through
+  `__cxa_thread_atexit`, and the two are released by thread-exit hooks whose
+  relative order is unspecified, so the destructor can free through storage that
+  is already gone and the process dies at some later unrelated free. A worker
+  thread exits only when libgomp narrows a team, which is why the fault appeared
+  when a fit asked for fewer chains than the one before it. The 42 declarations
+  now go through `RATIOD_TLS_WORKSPACE` (`src/tls_workspace.h`), which keeps the
+  workspace behind a constant-initialized pointer: no initialization guard, no
+  destructor registration, nothing for a dying worker to free. No object in the
+  package registers a thread-exit destructor any more.
+
+* `tratio()` no longer fails against a tulpa version the requirement allows. It
+  calls `tulpa::tulpa_check_control()`, exported from tulpa 0.0.99, while
+  DESCRIPTION asked only for `tulpa (>= 0.0.95)`.
+
 # tulpaRatio 1.3.1
 
 * `diagnostics()` replaces `mcmc_diagnostics()`, following the engine rename in

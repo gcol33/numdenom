@@ -46,6 +46,41 @@ void cpp_set_max_threads(int n_threads) {
 #endif
 }
 
+// The width an inner region reaches while a chain body is running, beside the
+// width the same region reaches on its own.
+//
+// Every chain body runs inside the chain-parallel region, so a region within a
+// chain is a nested one, and OpenMP leaves nested teams at a single thread
+// unless the active-level limit is raised. A per-fit budget can only reach
+// within-chain work if that inner width is not already pinned to 1.
+// [[Rcpp::export]]
+Rcpp::IntegerVector cpp_within_chain_team(int n_chains, int max_concurrent,
+                                          int want) {
+  int outside = 1;
+  int inside = 1;
+#ifdef _OPENMP
+  #pragma omp parallel num_threads(want)
+  {
+    #pragma omp master
+    outside = omp_get_num_threads();
+  }
+  ratiod_omp::for_each_chain(n_chains, max_concurrent, [&](int c) {
+    if (c != 0) return;
+    #pragma omp parallel num_threads(want)
+    {
+      #pragma omp master
+      inside = omp_get_num_threads();
+    }
+  });
+#else
+  (void)n_chains;
+  (void)max_concurrent;
+  (void)want;
+#endif
+  return Rcpp::IntegerVector::create(Rcpp::_["outside"] = outside,
+                                     Rcpp::_["inside"] = inside);
+}
+
 // [[Rcpp::export]]
 int cpp_num_procs() {
 #ifdef _OPENMP
