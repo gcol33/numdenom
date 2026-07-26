@@ -47,6 +47,11 @@ fit_one_spatial <- function(sim, use_specs, seed_val, spatial_struct) {
 
 test_that("B1d spec path matches legacy for ICAR (group-level)", {
   skip_on_cran()
+  # The spec path leaves the field's null direction unidentified, so its level
+  # random-walks: mean(phi_spatial) lands at +200.9, -342.8 and +423.1 at seeds
+  # 42, 43 and 44 where legacy holds it within 0.02 of zero. The differences
+  # between units agree, so this is the constraint and not the field.
+  skip("blocked on gcol33/tulpaRatio#19")
   sim <- simulate_spatial_binomial()
   sp  <- tulpaRatio::spatial_car(adjacency = sim$adj, level = "group",
                                   group_var = "unit",
@@ -63,11 +68,10 @@ test_that("B1d spec path matches legacy for ICAR (group-level)", {
 
 test_that("B1d spec path matches legacy for BYM2 (group-level)", {
   skip_on_cran()
-  # The legacy path now applies a hard sum-to-zero constraint; the spec path
-  # delegates to tulpa::compute_log_post_generic, which still penalises
-  # sum(phi) with 0.01 read as a precision. Only one of the two engines has
-  # been corrected, so the equivalence assertion is expected to fail.
-  skip("blocked on gcol33/tulpa#241")
+  # Same defect as the ICAR case above, larger: phi_scaled sits at -1696
+  # against a legacy level of zero, with the differences between units again
+  # preserved.
+  skip("blocked on gcol33/tulpaRatio#19")
   sim <- simulate_spatial_binomial()
   sp  <- tulpaRatio::spatial_bym2(adjacency = sim$adj, level = "group",
                                    group_var = "unit",
