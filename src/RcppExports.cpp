@@ -1567,14 +1567,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_test_sum_to_zero_penalty
-double cpp_test_sum_to_zero_penalty(NumericVector phi, double lambda);
-RcppExport SEXP _tulpaRatio_cpp_test_sum_to_zero_penalty(SEXP phiSEXP, SEXP lambdaSEXP) {
+double cpp_test_sum_to_zero_penalty(NumericVector phi);
+RcppExport SEXP _tulpaRatio_cpp_test_sum_to_zero_penalty(SEXP phiSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericVector >::type phi(phiSEXP);
-    Rcpp::traits::input_parameter< double >::type lambda(lambdaSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_test_sum_to_zero_penalty(phi, lambda));
+    rcpp_result_gen = Rcpp::wrap(cpp_test_sum_to_zero_penalty(phi));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -2063,7 +2062,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_test_rw2_quadratic_form", (DL_FUNC) &_tulpaRatio_cpp_test_rw2_quadratic_form, 2},
     {"_tulpaRatio_cpp_test_ar1_log_density", (DL_FUNC) &_tulpaRatio_cpp_test_ar1_log_density, 3},
     {"_tulpaRatio_cpp_test_temporal_log_prior", (DL_FUNC) &_tulpaRatio_cpp_test_temporal_log_prior, 5},
-    {"_tulpaRatio_cpp_test_sum_to_zero_penalty", (DL_FUNC) &_tulpaRatio_cpp_test_sum_to_zero_penalty, 2},
+    {"_tulpaRatio_cpp_test_sum_to_zero_penalty", (DL_FUNC) &_tulpaRatio_cpp_test_sum_to_zero_penalty, 1},
     {"_tulpaRatio_cpp_test_log1pexp", (DL_FUNC) &_tulpaRatio_cpp_test_log1pexp, 1},
     {"_tulpaRatio_cpp_test_zi_logistic", (DL_FUNC) &_tulpaRatio_cpp_test_zi_logistic, 1},
     {"_tulpaRatio_cpp_test_log_logistic", (DL_FUNC) &_tulpaRatio_cpp_test_log_logistic, 1},

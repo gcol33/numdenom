@@ -918,8 +918,8 @@ double cpp_test_temporal_log_prior(
 }
 
 // [[Rcpp::export]]
-double cpp_test_sum_to_zero_penalty(NumericVector phi, double lambda) {
-  return ratiod_temporal::sum_to_zero_penalty(phi.begin(), phi.size(), lambda);
+double cpp_test_sum_to_zero_penalty(NumericVector phi) {
+  return ratiod_temporal::sum_to_zero_penalty(phi.begin(), (int)phi.size());
 }
 
 // ---------------------------------------------------------------------------

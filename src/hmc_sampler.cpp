@@ -12,7 +12,7 @@
 #include "autodiff_utils.h"
 #include "hmc_gp_autodiff.h"
 #include "hmc_gp_collapsed.h"
-#include "soft_sum_to_zero.h"
+#include <tulpa/soft_sum_to_zero.h>
 #include "spatial_field_constraint.h"
 #include "hmc_icar_collapsed.h"
 #include "hmc_temporal_autodiff.h"
@@ -1239,17 +1239,17 @@ double compute_log_post(
 
         if (data.temporal_type == TemporalType::RW1) {
           double quad = ratiod_temporal::rw1_quadratic_form(phi_g, T, data.temporal_cyclic);
-          int rank = data.temporal_cyclic ? T : T - 1;
+          int rank = tulpa::rw1_rank(T, data.temporal_cyclic);
           log_post += 0.5 * rank * log_tau_temporal - 0.5 * tau_temporal * quad;
           // Soft sum-to-zero constraint
-          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, ratiod_constraints::s2z_precision(T));
+          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T);
 
         } else if (data.temporal_type == TemporalType::RW2) {
           double quad = ratiod_temporal::rw2_quadratic_form(phi_g, T, data.temporal_cyclic);
-          int rank = data.temporal_cyclic ? T : T - 2;
+          int rank = tulpa::rw2_rank(T, data.temporal_cyclic);
           log_post += 0.5 * rank * log_tau_temporal - 0.5 * tau_temporal * quad;
           // Soft sum-to-zero constraint
-          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T, ratiod_constraints::s2z_precision(T));
+          log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T);
 
         } else if (data.temporal_type == TemporalType::AR1) {
           log_post += ratiod_temporal::ar1_log_density(phi_g, T, rho_ar1, tau_temporal);
@@ -1699,8 +1699,9 @@ double compute_log_post(
 
         // Add the rank term with actual tau and Jacobian correction
         int rank_space = S - 1;
-        int rank_time = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? (T - 1) : (T - 2);
-        if (data.spatiotemporal_data.temporal_cyclic) rank_time = T;
+        int rank_time = (data.spatiotemporal_data.temporal_type == TemporalType::RW1)
+            ? tulpa::rw1_rank(T, data.spatiotemporal_data.temporal_cyclic)
+            : tulpa::rw2_rank(T, data.spatiotemporal_data.temporal_cyclic);
         int total_rank = rank_space * rank_time;
         // GMRF normalization: 0.5 * rank * log(tau)
         // NC Jacobian: -ST/2 * log(tau)
@@ -1709,7 +1710,7 @@ double compute_log_post(
 
         // Sum-to-zero on reconstructed delta
         log_post += ratiod_spatiotemporal::st_sum_to_zero_penalty(
-          st_delta, S, T, 0.001, true, true
+          st_delta, S, T, true, true
         );
       } else if (data.st_is_hsgp) {
         // HSGP-ST: spectral basis interaction (centered)
@@ -1730,9 +1731,9 @@ double compute_log_post(
         log_post += -0.5 * log_ls_st * log_ls_st;
 
         // Per-basis-function temporal GMRF prior
-        int rank_t = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? (T - 1) :
-                     (data.spatiotemporal_data.temporal_type == TemporalType::RW2) ? (T - 2) : T;
-        if (data.spatiotemporal_data.temporal_cyclic) rank_t = T;
+        const bool st_cyc = data.spatiotemporal_data.temporal_cyclic;
+        int rank_t = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T, st_cyc) :
+                     (data.spatiotemporal_data.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T, st_cyc) : T;
 
         for (int j = 0; j < M; j++) {
           double S_j = ratiod_hsgp::spectral_density_se(
@@ -1755,7 +1756,7 @@ double compute_log_post(
           // Soft sum-to-zero per basis function
           double sum_j = 0.0;
           for (int t = 0; t < T; t++) sum_j += dj[t];
-          log_post += -0.5 * 0.001 * sum_j * sum_j;
+          log_post += -0.5 * tulpa::s2z_precision(T) * sum_j * sum_j;
         }
       } else {
         // Centered parameterization (ICAR/BYM2 spatial)
@@ -1769,7 +1770,7 @@ double compute_log_post(
 
         // Soft sum-to-zero constraint for identifiability
         log_post += ratiod_spatiotemporal::st_sum_to_zero_penalty(
-          st_delta, S, T, 0.001, true, true
+          st_delta, S, T, true, true
         );
       }
     }
@@ -1826,7 +1827,7 @@ double compute_log_post(
     log_post += ratiod_tvc::tvc_log_prior(tvc_w_flat, data.tvc_data, tvc_tau, tvc_rho);
 
     // Soft sum-to-zero constraint for identifiability
-    log_post += ratiod_tvc::tvc_sum_to_zero_penalty(tvc_w_flat, data.tvc_data, 0.001);
+    log_post += ratiod_tvc::tvc_sum_to_zero_penalty(tvc_w_flat, data.tvc_data);
 
     // Precompute TVC contribution to linear predictor
     tvc_eta.resize(data.N, 0.0);
@@ -1915,7 +1916,7 @@ double compute_log_post(
       }
 
       std::vector<double> svc_w_flat_vec(svc_w_flat, svc_w_flat + n_svc_params);
-      log_post += ratiod_svc::svc_sum_to_zero_penalty(svc_w_flat_vec, data.svc_data, 1.0);
+      log_post += ratiod_svc::svc_sum_to_zero_penalty(svc_w_flat_vec, data.svc_data);
 
       svc_eta_ptr = data.svc_data.eta_ws.data();
       std::fill(svc_eta_ptr, svc_eta_ptr + data.N, 0.0);
@@ -2379,8 +2380,6 @@ static inline void accumulate_phi_likelihood_grad(
 static inline void tau_temporal_prior_grad(
     const ModelData& data, const ParamLayout& layout,
     double tau_temporal, double* grad);
-static inline void temporal_sum_to_zero_grad(
-    const double* phi, int T, int base_idx, double lambda, double* grad);
 static inline void temporal_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
     double tau_temporal, double rho_ar1,
@@ -4624,17 +4623,6 @@ static inline void tau_temporal_prior_grad(
                                         - data.tau_temporal_rate * tau_temporal;
 }
 
-// Temporal sum-to-zero penalty gradient for RW1/RW2
-// d/d(phi[t]) [-0.5 * lambda * (sum phi)^2] = -lambda * sum(phi)
-static inline void temporal_sum_to_zero_grad(
-    const double* phi, int T, int base_idx, double lambda,
-    double* grad
-) {
-    double sp = 0.0;
-    for (int t = 0; t < T; t++) sp += phi[t];
-    for (int t = 0; t < T; t++) grad[base_idx + t] -= lambda * sp;
-}
-
 // =====================================================================
 // Temporal GMRF prior gradient helper (RW1/RW2/AR1)
 // Shared by all gradient functions that include temporal effects.
@@ -4679,8 +4667,8 @@ static inline void temporal_gmrf_prior_grad(
                 grad[base + T - 1] += tau_temporal * dc;
             }
             total_qf += qf;
-            total_rank += data.temporal_cyclic ? T : T - 1;
-            temporal_sum_to_zero_grad(phi_g, T, base, ratiod_constraints::s2z_precision(T), grad);
+            total_rank += tulpa::rw1_rank(T, data.temporal_cyclic);
+            ratiod_temporal::sum_to_zero_penalty_grad(phi_g, T, &grad[base]);
         }
         grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
 
@@ -4714,8 +4702,8 @@ static inline void temporal_gmrf_prior_grad(
                 grad[base + 1] -= tau_temporal * d2_b;
             }
             total_qf += qf;
-            total_rank += data.temporal_cyclic ? T : T - 2;
-            temporal_sum_to_zero_grad(phi_g, T, base, ratiod_constraints::s2z_precision(T), grad);
+            total_rank += tulpa::rw2_rank(T, data.temporal_cyclic);
+            ratiod_temporal::sum_to_zero_penalty_grad(phi_g, T, &grad[base]);
         }
         grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
 
@@ -5544,7 +5532,7 @@ void compute_gradient_icar_collapsed(
             collapsed_icar_ws(), beta_num, beta_denom,
             tau, phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, layout, n_params, ratiod_constraints::s2z_precision(data.n_spatial_units));
+            data, layout, n_params, tulpa::s2z_precision(data.n_spatial_units));
 
         if (laplace_result.success) {
             for (int j = 0; j < n_params; j++) {
@@ -5753,7 +5741,7 @@ void compute_gradient_icar_collapsed(
             a, c_bym2, rho,
             phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, layout, n_params, ratiod_constraints::s2z_precision(data.n_spatial_units));
+            data, layout, n_params, tulpa::s2z_precision(data.n_spatial_units));
 
         if (laplace_result.success) {
             for (int j = 0; j < n_params; j++) {
@@ -6565,18 +6553,12 @@ void compute_gradient_svc_handcoded(
         // Add NNGP gradient contributions for SVC hyperparameters
         grad[layout.log_sigma2_svc_start + j] += svc_grads.grad_log_sigma2;
         grad[layout.log_phi_svc_start + j] += svc_grads.grad_log_phi;
-
-        // Sum-to-zero gradient: d/dw_k [-0.5 * lambda_mean * N * mean(w)^2] = -lambda_mean * mean(w)
-        double sum_w = 0.0;
-        for (int i = 0; i < N_obs; i++) {
-            sum_w += w_j_ptr[i];
-        }
-        double mean_w = sum_w / N_obs;
-        double stz_grad = -1.0 * mean_w;  // lambda_mean = 1.0
-        for (int i = 0; i < N_obs; i++) {
-            grad[layout.svc_w_start + j * N_obs + i] += stz_grad;
-        }
     }
+
+    // Sum-to-zero gradient, over all terms at once, from the same helper the
+    // log-posterior's penalty is written in, so the two share one constant.
+    ratiod_svc::svc_sum_to_zero_penalty_grad(svc_w_flat, data.svc_data,
+                                             layout.svc_w_start, grad.data());
 
     // =========================================================================
     // Data likelihood loop (vectorized eta + per-obs scatter)
@@ -9125,9 +9107,8 @@ void compute_gradient_spatiotemporal_handcoded(
         }
 
         int rank_space = S - 1;
-        int rank_time = (st.temporal_type == TemporalType::RW1) ? (T - 1) :
-                        (st.temporal_type == TemporalType::RW2) ? (T - 2) : T;
-        if (st.temporal_cyclic) rank_time = T;
+        int rank_time = (st.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T, st.temporal_cyclic) :
+                        (st.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T, st.temporal_cyclic) : T;
         int total_rank = rank_space * rank_time;
 
         if (st_use_nc) {
@@ -9150,7 +9131,13 @@ void compute_gradient_spatiotemporal_handcoded(
     // Sum-to-zero penalty gradients (on reconstructed delta)
     // For NC: chain rule d/dz = inv_scale * d/d(delta), and penalty also contributes to tau
     {
-        double lambda_stz = 0.001;
+        // Each margin carries its own constant, matching st_sum_to_zero_penalty:
+        // a space margin (row_sums, over the S units at one time) is pinned at
+        // s2z_precision(S), a time margin (col_sums, over the T times at one
+        // unit) at s2z_precision(T). Sharing one constant leaves whichever
+        // margin is longer under-identified.
+        const double lambda_s = tulpa::s2z_precision(S);
+        const double lambda_t = tulpa::s2z_precision(T);
         // For NC, the penalty -0.5*lambda*sum(delta)^2 where delta=z*inv_scale
         // d/dz = -lambda * sum(delta) * inv_scale
         // d/d(log_tau) = -lambda * sum(delta) * d(delta)/d(log_tau) summed
@@ -9180,19 +9167,19 @@ void compute_gradient_spatiotemporal_handcoded(
         for (int s = 0; s < S; s++) {
             for (int t = 0; t < T; t++) {
                 grad[layout.st_delta_start + s * T + t] -=
-                    lambda_stz * stz_scale * (row_sums_buf[t] + col_sums_buf[s]);
+                    stz_scale * (lambda_s * row_sums_buf[t] + lambda_t * col_sums_buf[s]);
             }
         }
         if (st_use_nc) {
-            for (int t = 0; t < T; t++) tau_stz_grad += row_sums_buf[t] * row_sums_buf[t];
-            for (int s = 0; s < S; s++) tau_stz_grad += col_sums_buf[s] * col_sums_buf[s];
-            tau_stz_grad *= 0.5 * lambda_stz;
+            for (int t = 0; t < T; t++) tau_stz_grad += lambda_s * row_sums_buf[t] * row_sums_buf[t];
+            for (int s = 0; s < S; s++) tau_stz_grad += lambda_t * col_sums_buf[s] * col_sums_buf[s];
+            tau_stz_grad *= 0.5;
             grad[layout.log_tau_st_idx] += tau_stz_grad;
         }
 
         // Accumulate sum-to-zero penalty into ST log-prior
-        for (int t = 0; t < T; t++) st_lp_accum -= 0.5 * lambda_stz * row_sums_buf[t] * row_sums_buf[t];
-        for (int s = 0; s < S; s++) st_lp_accum -= 0.5 * lambda_stz * col_sums_buf[s] * col_sums_buf[s];
+        for (int t = 0; t < T; t++) st_lp_accum -= 0.5 * lambda_s * row_sums_buf[t] * row_sums_buf[t];
+        for (int s = 0; s < S; s++) st_lp_accum -= 0.5 * lambda_t * col_sums_buf[s] * col_sums_buf[s];
     }
 
     // Non-centered RE chain rule transformation
@@ -10247,9 +10234,9 @@ void compute_gradient_composite(
         double sigma2_st_h = std::exp(params[layout.log_sigma2_st_hsgp_idx]);
         double ls_st_h = std::exp(params[layout.log_lengthscale_st_hsgp_idx]);
 
-        int rank_t = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? (T_st_h - 1) :
-                     (data.spatiotemporal_data.temporal_type == TemporalType::RW2) ? (T_st_h - 2) : T_st_h;
-        if (data.spatiotemporal_data.temporal_cyclic) rank_t = T_st_h;
+        const bool st_cyc_g = data.spatiotemporal_data.temporal_cyclic;
+        int rank_t = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T_st_h, st_cyc_g) :
+                     (data.spatiotemporal_data.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T_st_h, st_cyc_g) : T_st_h;
 
         double grad_log_sigma2_st = 0.0;
         double grad_log_ls_st = 0.0;
@@ -10279,8 +10266,9 @@ void compute_gradient_composite(
             // Sum-to-zero per basis function
             double sum_j = 0.0;
             for (int t = 0; t < T_st_h; t++) sum_j += dj[t];
+            const double lam_j = tulpa::s2z_precision(T_st_h) * sum_j;
             for (int t = 0; t < T_st_h; t++)
-                grad[layout.st_delta_start + j * T_st_h + t] -= 0.001 * sum_j;
+                grad[layout.st_delta_start + j * T_st_h + t] -= lam_j;
 
             // Tau gradient contribution from this basis function
             // d/d(log_tau) [0.5*rank*log(prec_j) - 0.5*prec_j*qf]
@@ -10415,9 +10403,8 @@ void compute_gradient_composite(
             }
 
             int rank_space = S_st - 1;
-            int rank_time = (st.temporal_type == TemporalType::RW1) ? (T_st - 1) :
-                            (st.temporal_type == TemporalType::RW2) ? (T_st - 2) : T_st;
-            if (st.temporal_cyclic) rank_time = T_st;
+            int rank_time = (st.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T_st, st.temporal_cyclic) :
+                            (st.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T_st, st.temporal_cyclic) : T_st;
             int total_rank = rank_space * rank_time;
 
             if (st_use_nc) {
@@ -10429,19 +10416,21 @@ void compute_gradient_composite(
             }
         }
 
-        // Sum-to-zero penalty on ST delta
-        double lambda_stz = 0.001;
+        // Sum-to-zero penalty on ST delta, each margin at its own precision
+        // (see st_sum_to_zero_penalty).
+        const double lambda_s_g = tulpa::s2z_precision(S_st);
+        const double lambda_t_g = tulpa::s2z_precision(T_st);
         for (int t = 0; t < T_st; t++) {
             double row_sum = 0.0;
             for (int s = 0; s < S_st; s++) row_sum += st_delta[s * T_st + t];
             for (int s = 0; s < S_st; s++)
-                grad[layout.st_delta_start + s * T_st + t] -= lambda_stz * row_sum;
+                grad[layout.st_delta_start + s * T_st + t] -= lambda_s_g * row_sum;
         }
         for (int s = 0; s < S_st; s++) {
             double col_sum = 0.0;
             for (int t = 0; t < T_st; t++) col_sum += st_delta[s * T_st + t];
             for (int t = 0; t < T_st; t++)
-                grad[layout.st_delta_start + s * T_st + t] -= lambda_stz * col_sum;
+                grad[layout.st_delta_start + s * T_st + t] -= lambda_t_g * col_sum;
         }
     }
 

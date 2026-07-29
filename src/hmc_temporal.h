@@ -10,6 +10,9 @@
 #include <cmath>
 #include <utility>
 
+#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
+#include <tulpa/sum_to_zero.h>       // rw1_rank / rw2_rank
+
 // Fallback definition of M_PI if not provided by <cmath>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -260,14 +263,14 @@ inline double temporal_log_prior(
   if (type == TemporalType::RW1) {
     // RW1: p(phi|tau) propto tau^{(T-1)/2} exp(-0.5 * tau * phi' Q phi)
     double quad = rw1_quadratic_form(phi, T, cyclic);
-    int rank = cyclic ? T : T - 1;  // Rank of precision matrix
+    int rank = tulpa::rw1_rank(T, cyclic);
     log_prior += 0.5 * rank * std::log(tau);
     log_prior -= 0.5 * tau * quad;
 
   } else if (type == TemporalType::RW2) {
     // RW2: p(phi|tau) propto tau^{(T-2)/2} exp(-0.5 * tau * phi' Q phi)
     double quad = rw2_quadratic_form(phi, T, cyclic);
-    int rank = cyclic ? T : T - 2;  // Rank of precision matrix
+    int rank = tulpa::rw2_rank(T, cyclic);
     log_prior += 0.5 * rank * std::log(tau);
     log_prior -= 0.5 * tau * quad;
 
@@ -291,13 +294,27 @@ inline double temporal_log_prior(
 // Sum-to-zero constraint (soft)
 // =====================================================================
 
-// Apply soft sum-to-zero constraint penalty for RW models
-inline double sum_to_zero_penalty(const double* phi, int T, double lambda) {
-  double sum = 0.0;
-  for (int t = 0; t < T; t++) {
-    sum += phi[t];
+// Apply the soft sum-to-zero constraint penalty for RW models. The pinned sum
+// runs over all T coefficients of the field, so the precision is
+// s2z_precision(T); it is derived here rather than taken from the caller so no
+// call site can pass a kappa where a precision is meant (tulpa/soft_sum_to_zero.h).
+template <typename T>
+inline T sum_to_zero_penalty(const T* phi, int T_len) {
+  T sum = T(0.0);
+  for (int t = 0; t < T_len; t++) {
+    sum = sum + phi[t];
   }
-  return -0.5 * lambda * sum * sum;
+  return T(-0.5 * tulpa::s2z_precision(T_len)) * sum * sum;
+}
+
+// Gradient of sum_to_zero_penalty w.r.t. each phi[t], accumulated into `grad`.
+// Every coefficient sees the same -lambda * sum, since the penalty depends on
+// the field only through its sum.
+inline void sum_to_zero_penalty_grad(const double* phi, int T_len, double* grad) {
+  double sum = 0.0;
+  for (int t = 0; t < T_len; t++) sum += phi[t];
+  const double push = tulpa::s2z_precision(T_len) * sum;
+  for (int t = 0; t < T_len; t++) grad[t] -= push;
 }
 
 } // namespace ratiod_temporal

@@ -59,10 +59,10 @@ inline double rw1_grad_log_sigma2(const double* phi, int n, double sigma2) {
         double diff = phi[t] - phi[t-1];
         quad += diff * diff;
     }
-    // d/d(sigma2) [log_GMRF] = -0.5*(n-1)/sigma2 + 0.5*quad/sigma2^2
+    // d/d(sigma2) [log_GMRF] = -0.5*rank/sigma2 + 0.5*quad/sigma2^2
     // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
-    //           = -0.5*(n-1) + 0.5*quad/sigma2
-    return -0.5 * (n - 1) + 0.5 * quad / (sigma2 + 1e-10);
+    //           = -0.5*rank + 0.5*quad/sigma2
+    return -0.5 * tulpa::rw1_rank(n, false) + 0.5 * quad / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -110,7 +110,7 @@ inline double rw1_cyclic_grad_log_sigma2(const double* phi, int n, double sigma2
         double diff = phi[0] - phi[n-1];
         quad += diff * diff;
     }
-    return -0.5 * n + 0.5 * quad / (sigma2 + 1e-10);
+    return -0.5 * tulpa::rw1_rank(n, true) + 0.5 * quad / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -145,9 +145,9 @@ inline double rw2_grad_log_sigma2(const double* phi, int n, double sigma2) {
         double d = phi[t] - 2.0 * phi[t-1] + phi[t-2];
         quad += d * d;
     }
-    // d/d(sigma2) = -0.5*(n-2)/sigma2 + 0.5*quad/sigma2^2
+    // d/d(sigma2) = -0.5*rank/sigma2 + 0.5*quad/sigma2^2
     // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
-    return -0.5 * (n - 2) + 0.5 * quad / (sigma2 + 1e-10);
+    return -0.5 * tulpa::rw2_rank(n, false) + 0.5 * quad / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -292,14 +292,19 @@ inline void multiscale_temporal_prior_gradients(
     grads.grad_log_sigma2_short = 0.0;
     grads.grad_logit_rho_short = 0.0;
 
-    // Trend component
+    // Trend component. The soft sum-to-zero term multiscale_temporal_log_lik
+    // adds to each intrinsic arm is differentiated here, on the same sum and at
+    // the same derived precision, so the analytic gradient and the
+    // log-posterior carry the same terms.
     if (n_trend > 0) {
         if (temp_data.trend_type == TemporalType::RW1) {
             rw1_grad_phi(trend, n_trend, sigma2_trend, grads.grad_trend.data());
             grads.grad_log_sigma2_trend = rw1_grad_log_sigma2(trend, n_trend, sigma2_trend);
+            ratiod_temporal::sum_to_zero_penalty_grad(trend, n_trend, grads.grad_trend.data());
         } else if (temp_data.trend_type == TemporalType::RW2) {
             rw2_grad_phi(trend, n_trend, sigma2_trend, grads.grad_trend.data());
             grads.grad_log_sigma2_trend = rw2_grad_log_sigma2(trend, n_trend, sigma2_trend);
+            ratiod_temporal::sum_to_zero_penalty_grad(trend, n_trend, grads.grad_trend.data());
         }
     }
 
@@ -307,6 +312,7 @@ inline void multiscale_temporal_prior_gradients(
     if (n_seasonal > 0 && temp_data.seasonal_period > 0) {
         rw1_cyclic_grad_phi(seasonal, n_seasonal, sigma2_seasonal, grads.grad_seasonal.data());
         grads.grad_log_sigma2_seasonal = rw1_cyclic_grad_log_sigma2(seasonal, n_seasonal, sigma2_seasonal);
+        ratiod_temporal::sum_to_zero_penalty_grad(seasonal, n_seasonal, grads.grad_seasonal.data());
     }
 
     // Short-term component

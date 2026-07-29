@@ -1,6 +1,11 @@
 // hmc_temporal_multiscale.h
 // Multi-scale temporal decomposition: trend + seasonal + short-term
 // Builds on existing RW1/RW2/AR1 infrastructure
+//
+// Templated over the scalar type: double for the plain sampler, the autodiff
+// types for gradient modes. One body per kernel, so the log-posterior the
+// sampler evaluates and the one the autodiff paths differentiate cannot carry
+// different terms.
 
 #ifndef RATIOD_HMC_TEMPORAL_MULTISCALE_H
 #define RATIOD_HMC_TEMPORAL_MULTISCALE_H
@@ -9,8 +14,15 @@
 #include <cmath>
 #include <string>
 #include "hmc_temporal.h"  // For TemporalType enum
+#include "autodiff_utils.h"
+
+#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
+#include <tulpa/sum_to_zero.h>       // rw1_rank / rw2_rank
 
 namespace ratiod_temporal {
+
+using ratiod::math::safe_log;
+using ratiod::math::safe_sqrt;
 
 // TemporalType enum is defined in hmc_temporal.h
 
@@ -35,32 +47,38 @@ struct MultiscaleTemporalData {
 // RW1 log-likelihood (intrinsic first-order random walk)
 // -----------------------------------------------------------------------------
 
-// Log-likelihood for RW1: sum of (phi[t] - phi[t-1])^2 / (2*sigma2)
-inline double rw1_log_lik(
-    const std::vector<double>& phi,  // Length T
-    double sigma2,
-    bool cyclic = false
+// Log-likelihood for RW1: sum of (phi[t] - phi[t-1])^2 / (2*sigma2).
+// `pin` adds the soft sum-to-zero term that identifies the constant null
+// direction against the intercept; see multiscale_temporal_log_lik.
+template <typename T>
+inline T rw1_log_lik(
+    const std::vector<T>& phi,  // Length T
+    const T& sigma2,
+    bool cyclic = false,
+    bool pin = false
 ) {
-  int T = static_cast<int>(phi.size());
-  if (T < 2) return 0.0;
+  int n = static_cast<int>(phi.size());
+  if (n < 2) return T(0.0);
 
-  double log_lik = 0.0;
+  T log_lik = T(0.0);
 
   // First differences
-  for (int t = 1; t < T; t++) {
-    double diff = phi[t] - phi[t - 1];
-    log_lik += -0.5 * diff * diff / sigma2;
+  for (int t = 1; t < n; t++) {
+    T diff = phi[t] - phi[t - 1];
+    log_lik = log_lik - T(0.5) * diff * diff / sigma2;
   }
 
   // Cyclic: add connection from last to first
   if (cyclic) {
-    double diff = phi[0] - phi[T - 1];
-    log_lik += -0.5 * diff * diff / sigma2;
+    T diff = phi[0] - phi[n - 1];
+    log_lik = log_lik - T(0.5) * diff * diff / sigma2;
   }
 
   // Normalizing constant (improper prior, omit for sampling)
-  int n_diffs = cyclic ? T : (T - 1);
-  log_lik += -0.5 * n_diffs * std::log(2.0 * M_PI * sigma2);
+  log_lik = log_lik
+          - T(0.5 * tulpa::rw1_rank(n, cyclic)) * safe_log(T(2.0 * M_PI) * sigma2);
+
+  if (pin) log_lik = log_lik + sum_to_zero_penalty(phi.data(), n);
 
   return log_lik;
 }
@@ -70,33 +88,40 @@ inline double rw1_log_lik(
 // -----------------------------------------------------------------------------
 
 // Log-likelihood for RW2: sum of (phi[t] - 2*phi[t-1] + phi[t-2])^2 / (2*sigma2)
-inline double rw2_log_lik(
-    const std::vector<double>& phi,  // Length T
-    double sigma2,
-    bool cyclic = false
+template <typename T>
+inline T rw2_log_lik(
+    const std::vector<T>& phi,  // Length T
+    const T& sigma2,
+    bool cyclic = false,
+    bool pin = false
 ) {
-  int T = static_cast<int>(phi.size());
-  if (T < 3) return 0.0;
+  int n = static_cast<int>(phi.size());
+  if (n < 3) return T(0.0);
 
-  double log_lik = 0.0;
+  T log_lik = T(0.0);
 
   // Second differences
-  for (int t = 2; t < T; t++) {
-    double diff2 = phi[t] - 2.0 * phi[t - 1] + phi[t - 2];
-    log_lik += -0.5 * diff2 * diff2 / sigma2;
+  for (int t = 2; t < n; t++) {
+    T diff2 = phi[t] - T(2.0) * phi[t - 1] + phi[t - 2];
+    log_lik = log_lik - T(0.5) * diff2 * diff2 / sigma2;
   }
 
   // Cyclic: add wrap-around connections
   if (cyclic) {
-    double diff2_1 = phi[0] - 2.0 * phi[T - 1] + phi[T - 2];
-    double diff2_2 = phi[1] - 2.0 * phi[0] + phi[T - 1];
-    log_lik += -0.5 * diff2_1 * diff2_1 / sigma2;
-    log_lik += -0.5 * diff2_2 * diff2_2 / sigma2;
+    T diff2_1 = phi[0] - T(2.0) * phi[n - 1] + phi[n - 2];
+    T diff2_2 = phi[1] - T(2.0) * phi[0] + phi[n - 1];
+    log_lik = log_lik - T(0.5) * diff2_1 * diff2_1 / sigma2;
+    log_lik = log_lik - T(0.5) * diff2_2 * diff2_2 / sigma2;
   }
 
   // Normalizing constant
-  int n_diffs = cyclic ? T : (T - 2);
-  log_lik += -0.5 * n_diffs * std::log(2.0 * M_PI * sigma2);
+  log_lik = log_lik
+          - T(0.5 * tulpa::rw2_rank(n, cyclic)) * safe_log(T(2.0 * M_PI) * sigma2);
+
+  // Only the constant direction is pinned. A non-cyclic RW2 also annihilates a
+  // linear ramp, which the intercept does not absorb and a slope term does, so
+  // that direction is left to the temporal covariate rather than pinned here.
+  if (pin) log_lik = log_lik + sum_to_zero_penalty(phi.data(), n);
 
   return log_lik;
 }
@@ -106,26 +131,28 @@ inline double rw2_log_lik(
 // -----------------------------------------------------------------------------
 
 // Log-likelihood for AR1: phi[t] = rho * phi[t-1] + epsilon[t]
-inline double ar1_log_lik(
-    const std::vector<double>& phi,  // Length T
-    double sigma2,                   // Innovation variance
-    double rho                       // Autocorrelation (-1 < rho < 1)
+template <typename T>
+inline T ar1_log_lik(
+    const std::vector<T>& phi,  // Length T
+    const T& sigma2,            // Innovation variance
+    const T& rho                // Autocorrelation (-1 < rho < 1)
 ) {
-  int T = static_cast<int>(phi.size());
-  if (T < 2) return 0.0;
+  int n = static_cast<int>(phi.size());
+  if (n < 2) return T(0.0);
 
-  double log_lik = 0.0;
+  T log_lik = T(0.0);
 
   // Marginal distribution of first observation
-  double marginal_var = sigma2 / (1.0 - rho * rho);
-  log_lik += -0.5 * std::log(2.0 * M_PI * marginal_var) -
-             0.5 * phi[0] * phi[0] / marginal_var;
+  T one_minus_rho2 = T(1.0) - rho * rho;
+  T marginal_var = sigma2 / (one_minus_rho2 + T(1e-10));
+  log_lik = log_lik - T(0.5) * safe_log(T(2.0 * M_PI) * marginal_var);
+  log_lik = log_lik - T(0.5) * phi[0] * phi[0] / marginal_var;
 
   // Conditional distributions
-  for (int t = 1; t < T; t++) {
-    double resid = phi[t] - rho * phi[t - 1];
-    log_lik += -0.5 * std::log(2.0 * M_PI * sigma2) -
-               0.5 * resid * resid / sigma2;
+  for (int t = 1; t < n; t++) {
+    T resid = phi[t] - rho * phi[t - 1];
+    log_lik = log_lik - T(0.5) * safe_log(T(2.0 * M_PI) * sigma2);
+    log_lik = log_lik - T(0.5) * resid * resid / sigma2;
   }
 
   return log_lik;
@@ -135,16 +162,17 @@ inline double ar1_log_lik(
 // IID log-likelihood (independent identically distributed)
 // -----------------------------------------------------------------------------
 
-inline double iid_log_lik(
-    const std::vector<double>& phi,  // Length T
-    double sigma2
+template <typename T>
+inline T iid_log_lik(
+    const std::vector<T>& phi,  // Length T
+    const T& sigma2
 ) {
-  int T = static_cast<int>(phi.size());
-  double log_lik = 0.0;
+  int n = static_cast<int>(phi.size());
+  T log_lik = T(0.0);
 
-  for (int t = 0; t < T; t++) {
-    log_lik += -0.5 * std::log(2.0 * M_PI * sigma2) -
-               0.5 * phi[t] * phi[t] / sigma2;
+  for (int t = 0; t < n; t++) {
+    log_lik = log_lik - T(0.5) * safe_log(T(2.0 * M_PI) * sigma2);
+    log_lik = log_lik - T(0.5) * phi[t] * phi[t] / sigma2;
   }
 
   return log_lik;
@@ -155,35 +183,42 @@ inline double iid_log_lik(
 // -----------------------------------------------------------------------------
 
 // Combined log-likelihood for trend + seasonal + short-term
-inline double multiscale_temporal_log_lik(
-    const std::vector<double>& trend,       // Length n_times (or empty)
-    const std::vector<double>& seasonal,    // Length seasonal_period (or empty)
-    const std::vector<double>& short_term,  // Length n_times (or empty)
-    double sigma2_trend,
-    double sigma2_seasonal,
-    double sigma2_short,
-    double rho_short,                       // Only used if short_term is AR1
+template <typename T>
+inline T multiscale_temporal_log_lik(
+    const std::vector<T>& trend,       // Length n_times (or empty)
+    const std::vector<T>& seasonal,    // Length seasonal_period (or empty)
+    const std::vector<T>& short_term,  // Length n_times (or empty)
+    const T& sigma2_trend,
+    const T& sigma2_seasonal,
+    const T& sigma2_short,
+    const T& rho_short,                // Only used if short_term is AR1
     const MultiscaleTemporalData& temp_data
 ) {
-  double log_lik = 0.0;
+  T log_lik = T(0.0);
+
+  // Trend and seasonal are both intrinsic and both enter the SAME linear
+  // predictor, so each carries a constant null direction that is unidentified
+  // against the intercept and against the other component. Both are pinned.
+  // The short-term arm is proper (AR1/IID), identifies its own level, and is
+  // left alone.
 
   // Trend component
   if (temp_data.trend_type == TemporalType::RW1 && !trend.empty()) {
-    log_lik += rw1_log_lik(trend, sigma2_trend, false);
+    log_lik = log_lik + rw1_log_lik(trend, sigma2_trend, false, true);
   } else if (temp_data.trend_type == TemporalType::RW2 && !trend.empty()) {
-    log_lik += rw2_log_lik(trend, sigma2_trend, false);
+    log_lik = log_lik + rw2_log_lik(trend, sigma2_trend, false, true);
   }
 
   // Seasonal component (always cyclic RW1)
   if (temp_data.seasonal_period > 0 && !seasonal.empty()) {
-    log_lik += rw1_log_lik(seasonal, sigma2_seasonal, true);  // Cyclic
+    log_lik = log_lik + rw1_log_lik(seasonal, sigma2_seasonal, true, true);
   }
 
   // Short-term component
   if (temp_data.short_term_type == TemporalType::AR1 && !short_term.empty()) {
-    log_lik += ar1_log_lik(short_term, sigma2_short, rho_short);
+    log_lik = log_lik + ar1_log_lik(short_term, sigma2_short, rho_short);
   } else if (temp_data.short_term_type == TemporalType::IID && !short_term.empty()) {
-    log_lik += iid_log_lik(short_term, sigma2_short);
+    log_lik = log_lik + iid_log_lik(short_term, sigma2_short);
   }
 
   return log_lik;
@@ -194,36 +229,39 @@ inline double multiscale_temporal_log_lik(
 // -----------------------------------------------------------------------------
 
 // eta_temporal[i] = trend[time_idx[i]] + seasonal[time_idx[i] % period] + short[time_idx[i]]
+template <typename T>
 inline void compute_temporal_eta(
-    const std::vector<double>& trend,
-    const std::vector<double>& seasonal,
-    const std::vector<double>& short_term,
+    const std::vector<T>& trend,
+    const std::vector<T>& seasonal,
+    const std::vector<T>& short_term,
     const MultiscaleTemporalData& temp_data,
-    std::vector<double>& eta_temporal  // Output: length n_obs
+    std::vector<T>& eta_temporal  // Output: length n_obs
 ) {
   int N = temp_data.n_obs;
   eta_temporal.resize(N);
 
   for (int i = 0; i < N; i++) {
-    double effect = 0.0;
+    T effect = T(0.0);
     int t_idx = temp_data.time_index[i] - 1;  // Convert to 0-based
 
     // Trend contribution
-    if (!trend.empty() && t_idx < static_cast<int>(trend.size())) {
-      effect += trend[t_idx];
+    if (!trend.empty() && t_idx >= 0 &&
+        t_idx < static_cast<int>(trend.size())) {
+      effect = effect + trend[t_idx];
     }
 
     // Seasonal contribution (wrap around using modulo)
     if (temp_data.seasonal_period > 0 && !seasonal.empty()) {
       int s_idx = t_idx % temp_data.seasonal_period;
-      if (s_idx < static_cast<int>(seasonal.size())) {
-        effect += seasonal[s_idx];
+      if (s_idx >= 0 && s_idx < static_cast<int>(seasonal.size())) {
+        effect = effect + seasonal[s_idx];
       }
     }
 
     // Short-term contribution
-    if (!short_term.empty() && t_idx < static_cast<int>(short_term.size())) {
-      effect += short_term[t_idx];
+    if (!short_term.empty() && t_idx >= 0 &&
+        t_idx < static_cast<int>(short_term.size())) {
+      effect = effect + short_term[t_idx];
     }
 
     eta_temporal[i] = effect;
@@ -235,21 +273,21 @@ inline void compute_temporal_eta(
 // -----------------------------------------------------------------------------
 
 // PC prior for temporal variance (favor simpler models with smaller variance)
-inline double log_prior_sigma2_temporal_pc(double sigma2, double U, double alpha) {
-  double rate = -std::log(alpha) / U;
-  double sigma = std::sqrt(sigma2);
-  return std::log(rate) - rate * sigma - std::log(2.0 * sigma);
+template <typename T>
+inline T log_prior_sigma2_temporal_pc(const T& sigma2, double U, double alpha) {
+  T rate = T(-std::log(alpha) / U);
+  T sigma = safe_sqrt(sigma2);
+  return safe_log(rate) - rate * sigma - safe_log(T(2.0) * sigma);
 }
 
 // Prior for AR1 rho: Beta(a, b) on (rho + 1) / 2
-inline double log_prior_rho(double rho, double a = 2.0, double b = 2.0) {
-  if (rho <= -1.0 || rho >= 1.0) return -INFINITY;
-
+template <typename T>
+inline T log_prior_rho(const T& rho, double a = 2.0, double b = 2.0) {
   // Transform to [0, 1]
-  double x = (rho + 1.0) / 2.0;
+  T x = (rho + T(1.0)) / T(2.0);
 
   // Beta log density (unnormalized)
-  return (a - 1.0) * std::log(x) + (b - 1.0) * std::log(1.0 - x);
+  return T(a - 1.0) * safe_log(x) + T(b - 1.0) * safe_log(T(1.0) - x);
 }
 
 // Parse temporal type from string

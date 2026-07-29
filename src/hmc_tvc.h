@@ -77,13 +77,13 @@ inline double tvc_term_log_prior(
 
   if (structure == TemporalType::RW1) {
     double quad = rw1_quadratic_form(w, n_times, false);
-    int rank = n_times - 1;
+    int rank = tulpa::rw1_rank(n_times, false);
     log_prior += 0.5 * rank * std::log(tau);
     log_prior -= 0.5 * tau * quad;
 
   } else if (structure == TemporalType::RW2) {
     double quad = rw2_quadratic_form(w, n_times, false);
-    int rank = n_times - 2;
+    int rank = tulpa::rw2_rank(n_times, false);
     log_prior += 0.5 * rank * std::log(tau);
     log_prior -= 0.5 * tau * quad;
 
@@ -166,25 +166,29 @@ inline void compute_tvc_eta(
 // Sum-to-zero constraint for identifiability
 // -----------------------------------------------------------------------------
 
-// Apply soft sum-to-zero constraint to TVC (for each term and group)
-inline double tvc_sum_to_zero_penalty(
-    const std::vector<double>& w_flat,
-    const TVCData& tvc_data,
-    double lambda
+// Apply soft sum-to-zero constraint to TVC (for each term and group). Each
+// pinned sum runs over the n_times coefficients of one (group, term), so the
+// precision is s2z_precision(n_times); it is derived here rather than taken
+// from the caller so no call site can pass a kappa where a precision is meant.
+template <typename T>
+inline T tvc_sum_to_zero_penalty(
+    const std::vector<T>& w_flat,
+    const TVCData& tvc_data
 ) {
   int n_times = tvc_data.n_times;
   int n_tvc = tvc_data.n_tvc;
   int n_groups = tvc_data.n_groups;
 
-  double penalty = 0.0;
+  const double lambda = tulpa::s2z_precision(n_times);
+  T penalty = T(0.0);
 
   for (int g = 0; g < n_groups; g++) {
     for (int j = 0; j < n_tvc; j++) {
-      double sum = 0.0;
+      T sum = T(0.0);
       for (int t = 0; t < n_times; t++) {
-        sum += w_flat[(g * n_tvc + j) * n_times + t];
+        sum = sum + w_flat[(g * n_tvc + j) * n_times + t];
       }
-      penalty -= 0.5 * lambda * sum * sum;
+      penalty = penalty - T(0.5 * lambda) * sum * sum;
     }
   }
 

@@ -1084,7 +1084,12 @@ struct SparseGMRFBlock {
   // temp_type: RW1, RW2, AR1
   // tau: precision parameter
   // h_lik: diagonal of likelihood Hessian (length ST), or nullptr for prior-only
-  // lambda_stz: sum-to-zero penalty (default 0.001)
+  // diag_ridge: Tikhonov ridge lambda*I added to the diagonal so the Kronecker
+  //   of two intrinsic precisions factorizes. This is NOT the sum-to-zero
+  //   penalty, which is rank-1 per margin (lambda*11' over each margin, see
+  //   st_sum_to_zero_penalty) and does not fill the Kronecker null space. The
+  //   two are different objects and take different constants; sizing this one
+  //   from s2z_precision would put a ~1e6 ridge on the factorization.
   void build_and_factorize(
       const std::vector<int>& adj_row_ptr,
       const std::vector<int>& adj_col_idx,
@@ -1092,7 +1097,7 @@ struct SparseGMRFBlock {
       bool cyclic,
       double tau,
       const double* h_lik,  // diagonal Hessian correction (length S*T), can be nullptr
-      double lambda_stz = 0.001
+      double diag_ridge = 0.001
   ) {
     int ST = S * T;
 
@@ -1169,10 +1174,10 @@ struct SparseGMRFBlock {
       }
     }
 
-    // Add diagonal corrections: likelihood Hessian + sum-to-zero penalty + regularization
+    // Add diagonal corrections: likelihood Hessian + ridge + regularization
     double reg = 1e-6;  // Numerical regularization for rank deficiency
     for (int k = 0; k < ST; k++) {
-      double diag_add = lambda_stz + reg;  // sum-to-zero soft constraint
+      double diag_add = diag_ridge + reg;
       if (h_lik) diag_add += h_lik[k];     // likelihood curvature
       triplets.emplace_back(k, k, diag_add);
     }

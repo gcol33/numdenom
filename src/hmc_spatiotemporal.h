@@ -151,12 +151,12 @@ inline Scalar type_ii_log_prior(
     // Apply temporal prior
     if (temp_type == TemporalType::RW1) {
       Scalar quad = ratiod_temporal::rw1_quadratic_form_t(delta_s, T, cyclic);
-      int rank = cyclic ? T : T - 1;
+      int rank = tulpa::rw1_rank(T, cyclic);
       log_prior = log_prior + Scalar(0.5 * rank) * safe_log(tau)
                             - Scalar(0.5) * tau * quad;
     } else if (temp_type == TemporalType::RW2) {
       Scalar quad = ratiod_temporal::rw2_quadratic_form_t(delta_s, T, cyclic);
-      int rank = cyclic ? T : T - 2;
+      int rank = tulpa::rw2_rank(T, cyclic);
       log_prior = log_prior + Scalar(0.5 * rank) * safe_log(tau)
                             - Scalar(0.5) * tau * quad;
     }
@@ -323,8 +323,8 @@ inline Scalar type_iv_log_prior(
   // But for improper priors (ICAR, RW), we use rank instead
 
   int rank_space = S - 1;  // ICAR rank deficiency
-  int rank_time = (temp_type == TemporalType::RW1) ? (T - 1) : (T - 2);
-  if (cyclic) rank_time = T;
+  int rank_time = (temp_type == TemporalType::RW1) ? tulpa::rw1_rank(T, cyclic)
+                                                   : tulpa::rw2_rank(T, cyclic);
 
   int total_rank = rank_space * rank_time;
 
@@ -658,13 +658,14 @@ inline void spatiotemporal_gradient_delta(
 // Sum-to-zero constraint for interactions
 // =====================================================================
 
-// Apply soft sum-to-zero constraint marginally
+// Apply soft sum-to-zero constraint marginally. Each margin gets the precision
+// for its own length -- a space margin sums S terms, a time margin sums T --
+// so the two cannot share one constant (see tulpa/soft_sum_to_zero.h).
 template<typename Scalar>
 inline Scalar st_sum_to_zero_penalty(
     const Scalar* delta,
     int S,
     int T,
-    double lambda,
     bool marginal_space = true,
     bool marginal_time = true
 ) {
@@ -672,23 +673,25 @@ inline Scalar st_sum_to_zero_penalty(
 
   if (marginal_space) {
     // For each time point, spatial effects sum to zero
+    const double lambda_s = tulpa::s2z_precision(S);
     for (int t = 0; t < T; t++) {
       Scalar sum = Scalar(0.0);
       for (int s = 0; s < S; s++) {
         sum = sum + delta[s * T + t];
       }
-      penalty = penalty - Scalar(0.5 * lambda) * sum * sum;
+      penalty = penalty - Scalar(0.5 * lambda_s) * sum * sum;
     }
   }
 
   if (marginal_time) {
     // For each spatial unit, temporal effects sum to zero
+    const double lambda_t = tulpa::s2z_precision(T);
     for (int s = 0; s < S; s++) {
       Scalar sum = Scalar(0.0);
       for (int t = 0; t < T; t++) {
         sum = sum + delta[s * T + t];
       }
-      penalty = penalty - Scalar(0.5 * lambda) * sum * sum;
+      penalty = penalty - Scalar(0.5 * lambda_t) * sum * sum;
     }
   }
 

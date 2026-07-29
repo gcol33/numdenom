@@ -15,7 +15,8 @@ sim_data <- function(seed, N = 500, S = 50, TT = 20) {
   trials <- sample(10:50, N, replace = TRUE)
   eta <- TRUE_INTERCEPT + TRUE_SLOPE * x
   data.frame(y = rbinom(N, trials, plogis(eta)), trials = trials,
-             x = x, site = site, time = time, spatial_site = site)
+             x = x, site = site, time = time, spatial_site = site,
+             lon = runif(N), lat = runif(N))
 }
 
 grid_adj <- function(S) {
@@ -82,6 +83,87 @@ test_that("ICAR combined with RW1 recovers the intercept", {
                temporal = temporal_rw1("time"))
   expect_lt(r$intercept$rhat, 1.05)
   expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.08)
+})
+
+test_that("multiscale trend and seasonal recover the intercept", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+
+  # Trend (RW1) and seasonal (cyclic RW1) are both intrinsic and both land on
+  # the same linear predictor, so each carries a constant null direction that is
+  # unidentified against the intercept AND against the other. With neither
+  # pinned the intercept is free to move along a two-dimensional ridge; the
+  # shape of the fitted series is unaffected, which is why only a recovery
+  # assertion on the intercept catches it.
+  r <- fit_one(sim_data(11),
+               temporal = temporal_multiscale("time", trend = "rw1",
+                                              seasonal = 4, short_term = "none"))
+  expect_lt(r$intercept$rhat, 1.05)
+  expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.08)
+  expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.08)
+})
+
+test_that("multiscale RW2 trend recovers the intercept", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+
+  r <- fit_one(sim_data(22),
+               temporal = temporal_multiscale("time", trend = "rw2",
+                                              seasonal = NULL, short_term = "none"))
+  expect_lt(r$intercept$rhat, 1.05)
+  expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.08)
+})
+
+test_that("a TVC term recovers the intercept and its own slope", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+
+  # A TVC trajectory is an intrinsic RW over time per (group, term). Its mean is
+  # unidentified against the fixed coefficient on the same covariate, so the
+  # quantity that moves when the pin is absent is the SLOPE rather than the
+  # intercept.
+  #
+  # No rhat assertion here: TVC chains freeze after warmup (per-chain posterior
+  # SD ~1e-5, rhat 3-5), which reproduces on the released build and is tracked
+  # as gcol33/tulpaRatio#23. What this case therefore checks is that the
+  # posterior MODE sits at truth, which is what an absent pin destroys; restore
+  # the rhat assertion once #23 is fixed.
+  r <- fit_one(sim_data(11),
+               temporal = temporal_tvc("time", terms = "x", structure = "rw1"))
+  expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.1)
+  expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.1)
+})
+
+# No SVC case here. An NNGP field's prior is proper, so its mean constraint is a
+# ridge rather than an identification pin, and its constant is still the
+# unexplained 1/n_obs it has always had (gcol33/tulpaRatio#25). A fit small
+# enough to belong in a test file takes minutes, so the case belongs with the
+# constant it is meant to check.
+
+test_that("a spatiotemporal interaction recovers the intercept", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+
+  # The interaction is pinned along both margins. A space margin sums S terms
+  # and a time margin T, so the two carry their own constants; sharing one
+  # leaves whichever margin is longer under-identified. Kept to 9 x 5 so the
+  # interaction has fewer coefficients than the data has observations.
+  #
+  # No rhat assertion here: this model reaches rhat 1.14 rather than 1.05, and a
+  # 4x longer run moves it to 2.05 while the per-chain SD shrinks, which is
+  # tracked as gcol33/tulpaRatio#24. Pinning the margins is what takes the
+  # intercept posterior SD from 0.111 to 0.011 and rhat from 3.43 to 1.14, so
+  # the recovery below is the assertion that speaks to this field's
+  # identification; restore the rhat assertion once #24 is fixed.
+  df <- sim_data(11, S = 9, TT = 5)
+  r <- fit_one(df,
+               spatiotemporal = spatiotemporal(
+                 spatial = spatial_car(grid_adj(9), level = "group",
+                                       group_var = "spatial_site"),
+                 temporal = temporal_rw1("time"),
+                 type = "IV"))
+  expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.1)
+  expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.1)
 })
 
 test_that("a spatial-only model reaches a sampler that reports its chains", {

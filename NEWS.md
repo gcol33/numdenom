@@ -1,3 +1,85 @@
+# tulpaRatio 1.4.2
+
+* **Every intrinsic field is now identified at the engine's constant (#12).**
+  `s2z_precision(n)` returns `1 / (kappa * n)^2` from `sd(sum phi) = kappa * n`,
+  so callers pass a PRECISION. The spatiotemporal and TVC penalties took that
+  constant as an argument and their call sites filled it with a bare `0.001` --
+  which is `kappa` itself, weaker by ~2.5e6 at `T = 20`, pinning the field's sum
+  at sd 31.6 instead of 0.02. Each penalty now derives the constant from the
+  length of the sum it pins, so no call site can supply one. The interaction
+  margins take their own constants rather than sharing one: a space margin sums
+  `S` terms and a time margin `T`.
+
+* **SVC keeps its own constant, deliberately.** Its penalty is rewritten on the
+  sum rather than the mean -- the two forms are the same penalty, related by a
+  factor of `n_obs` -- and both it and its gradient now read one
+  `svc_sum_to_zero_ridge()`. That constant is NOT `s2z_precision(n_obs)`: an
+  NNGP field's prior is proper, so its mean is identified and what is wanted is
+  a ridge, not the pin a rank-deficient field needs. Substituting the intrinsic
+  constant was tried and reverted -- at `N = 80` it is 156.25 against the
+  ridge's 0.0125, and at that stiffness 4 chains x 1000 iterations return in 9
+  seconds with per-chain posterior SD 0, Rhat 15.1 and the slope at 0.095
+  against a truth of 0.3, where the ridge samples for minutes. Deriving the
+  right constant for a proper field on its own terms is #25.
+
+* **The multiscale trend and seasonal arms are pinned (#12).** Neither carried a
+  sum-to-zero term on any path. Both are intrinsic and both enter the same
+  linear predictor, so each had a constant null direction aliased with the
+  intercept and with the other -- a two-dimensional ridge the fitted series
+  hides, because only the level moves. Both are now pinned in the log posterior
+  and in the analytic gradient; the proper short-term arm (AR1/IID) identifies
+  its own level and is left alone. On a 500-observation binomial fit against a
+  known intercept of 0.5, over 4 chains:
+
+  | trend + seasonal | intercept | posterior SD | Rhat | slope (truth 0.3) |
+  |---|---|---|---|---|
+  | RW1 + cyclic seasonal, before | 2.6101 | 7.1840 | 1.589 | 0.2886 |
+  | RW1 + cyclic seasonal, after | 0.5054 | 0.0170 | 1.012 | 0.2878 |
+  | RW2, before | 3.7200 | 1.1098 | 2.163 | 0.2926 |
+  | RW2, after | 0.4868 | 0.0167 | 1.000 | 0.2907 |
+
+  The slope is right either way, which is why nothing downstream flagged it.
+
+* **The spatiotemporal interaction's margins are identified (#12).** Same fit
+  with a Knorr-Held Type IV interaction over 9 units x 5 times: the intercept
+  posterior SD moves from 0.1106 to 0.0109 and Rhat from 3.43 to 1.14. It does
+  not reach 1.05, and a 4x longer run makes it worse rather than better; that
+  residual is tracked separately as #24.
+
+* **The cyclic RW rank is no longer overcounted (#12).** RW1 and RW2 ranks were
+  computed inline as `cyclic ? T : T-1` / `T-2` at 16 sites. A cycle-graph
+  Laplacian still annihilates the constant, so a cyclic RW1 has rank `T-1`, and
+  a cyclic RW2 `T-1` as well (a linear ramp is not periodic). Every site now
+  calls `tulpa::rw1_rank()` / `rw2_rank()` from the engine, which cannot drift
+  from the engine's own normalizers.
+
+* **The spatiotemporal analytic gradient matches the penalty it differentiates.**
+  Three further `0.001` literals sat in the ST gradient paths, including the one
+  feeding the fused log-posterior reconstruction. With the old constant the
+  resulting mismatch was too small to see; at the correct precision
+  `test-gradient-correctness.R` fails on `icar_st` and `bym2_st` until the
+  gradient carries the same per-margin constants. `hmc_sampler.h`'s
+  `build_and_factorize()` keeps its `0.001`, renamed `diag_ridge`: it is a
+  Tikhonov ridge `lambda*I` that makes a Kronecker of two intrinsic precisions
+  factorize, not the rank-1-per-margin sum-to-zero penalty.
+
+* **The multiscale, TVC and SVC sum-to-zero terms are written once.** The
+  double and autodiff twins of the multiscale kernels, `tvc_sum_to_zero_penalty`
+  and `svc_sum_to_zero_penalty` are collapsed into one body templated over the
+  scalar type. The missing multiscale pin survived a previous migration pass
+  precisely because it had to be found in six places; there is now one.
+  `src/soft_sum_to_zero.h` is gone in favour of the engine's
+  `tulpa/soft_sum_to_zero.h`.
+
+* **Recovery tests cover the fields that were unconstrained.**
+  `test-recovery-constrained-fields.R` gains multiscale (RW1 trend + cyclic
+  seasonal, and RW2 trend), TVC and spatiotemporal cases. Shape and class
+  assertions pass just as happily when a field's level is free, which is how
+  all three items reached a release. The TVC and spatiotemporal cases assert
+  recovery but not `Rhat`: neither model mixes to 1.05, which reproduces on the
+  released build for TVC (#23) and is a separate residual for the interaction
+  (#24). Both comments say so and name the issue to restore them under.
+
 # tulpaRatio 1.4.1
 
 * **The spec path's ICAR / BYM2 field is identified (#19).** The bridge that

@@ -57,9 +57,9 @@ inline double rw1_grad_log_tau(const double* w, int n_times, double tau) {
         double diff = w[t] - w[t-1];
         quad += diff * diff;
     }
-    // d/d(log_tau) = 0.5*(T-1) - 0.5*tau*quad + tau (Jacobian: d tau / d log_tau = tau)
+    // d/d(log_tau) = 0.5*rank - 0.5*tau*quad + tau (Jacobian: d tau / d log_tau = tau)
     // But we want d log_post / d log_tau, which includes Jacobian automatically in computation
-    return 0.5 * (n_times - 1) - 0.5 * tau * quad;
+    return 0.5 * tulpa::rw1_rank(n_times, false) - 0.5 * tau * quad;
 }
 
 // =============================================================================
@@ -115,7 +115,7 @@ inline double rw2_grad_log_tau(const double* w, int n_times, double tau) {
         double d = w[t] - 2.0 * w[t-1] + w[t-2];
         quad += d * d;
     }
-    return 0.5 * (n_times - 2) - 0.5 * tau * quad;
+    return 0.5 * tulpa::rw2_rank(n_times, false) - 0.5 * tau * quad;
 }
 
 // =============================================================================
@@ -265,8 +265,9 @@ inline void tvc_prior_gradients_ws(
         }
     }
 
-    // Add soft sum-to-zero penalty gradients
-    double lambda = 0.001;
+    // Add soft sum-to-zero penalty gradients. Same precision the penalty in
+    // tvc_sum_to_zero_penalty derives, over the same n_times-long sum.
+    const double lambda = tulpa::s2z_precision(n_times);
     for (int g = 0; g < n_groups; g++) {
         for (int j = 0; j < n_tvc; j++) {
             int offset = (g * n_tvc + j) * n_times;

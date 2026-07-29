@@ -11,7 +11,7 @@
 #include <vector>
 #include <limits>
 #include "autodiff_utils.h"
-#include "soft_sum_to_zero.h"
+#include <tulpa/soft_sum_to_zero.h>
 #include "spatial_field_constraint.h"
 #include "hmc_spatiotemporal.h"  // Templated spatiotemporal interaction priors
 #include "hmc_hsgp.h"  // Templated HSGP spectral density
@@ -19,7 +19,7 @@
 #include "hmc_svc_autodiff.h"  // Templated SVC functions
 #include "hmc_tvc_autodiff.h"  // Templated TVC functions
 #include "hmc_latent_autodiff.h"  // Templated latent factor functions
-#include "hmc_temporal_multiscale_autodiff.h"  // Templated multiscale temporal functions
+#include "hmc_temporal_multiscale.h"  // Templated multiscale temporal functions
 
 // Expects these to be defined by including hmc_sampler.h first:
 // - ratiod_hmc::ModelData
@@ -535,13 +535,13 @@ T compute_log_post_impl(
                     }
                 }
                 // Rank: T for cyclic, T-1 for non-cyclic
-                int rank_rw1 = data.temporal_cyclic ? T_times : T_times - 1;
+                int rank_rw1 = tulpa::rw1_rank(T_times, data.temporal_cyclic);
                 log_post = log_post + T(0.5 * rank_rw1 * data.n_temporal_groups) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
 
                 // Soft sum-to-zero, per group; matches the analytic log posterior.
                 {
-                    const T s2z = T(ratiod_constraints::s2z_precision(T_times));
+                    const T s2z = T(tulpa::s2z_precision(T_times));
                     for (int g = 0; g < data.n_temporal_groups; g++) {
                         T grp_sum = T(0.0);
                         for (int t = 0; t < T_times; t++)
@@ -572,13 +572,13 @@ T compute_log_post_impl(
                     }
                 }
                 // Rank: T for cyclic, T-2 for non-cyclic
-                int rank_rw2 = data.temporal_cyclic ? T_times : T_times - 2;
+                int rank_rw2 = tulpa::rw2_rank(T_times, data.temporal_cyclic);
                 log_post = log_post + T(0.5 * rank_rw2 * data.n_temporal_groups) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
 
                 // Soft sum-to-zero, per group; matches the analytic log posterior.
                 {
-                    const T s2z = T(ratiod_constraints::s2z_precision(T_times));
+                    const T s2z = T(tulpa::s2z_precision(T_times));
                     for (int g = 0; g < data.n_temporal_groups; g++) {
                         T grp_sum = T(0.0);
                         for (int t = 0; t < T_times; t++)
@@ -643,7 +643,7 @@ T compute_log_post_impl(
             }
 
             // PC prior on sigma2_trend + Jacobian for log transform
-            log_post = log_post + ratiod_multiscale_ad::log_prior_sigma2_temporal_pc(
+            log_post = log_post + ratiod_temporal::log_prior_sigma2_temporal_pc(
                 ms_sigma2_trend, data.ms_sigma2_trend_prior_U, data.ms_sigma2_trend_prior_alpha);
             log_post = log_post + log_sigma2_trend;  // Jacobian
         }
@@ -660,7 +660,7 @@ T compute_log_post_impl(
             }
 
             // PC prior on sigma2_seasonal + Jacobian
-            log_post = log_post + ratiod_multiscale_ad::log_prior_sigma2_temporal_pc(
+            log_post = log_post + ratiod_temporal::log_prior_sigma2_temporal_pc(
                 ms_sigma2_seasonal, data.ms_sigma2_seasonal_prior_U, data.ms_sigma2_seasonal_prior_alpha);
             log_post = log_post + log_sigma2_seasonal;  // Jacobian
         }
@@ -677,7 +677,7 @@ T compute_log_post_impl(
             }
 
             // PC prior on sigma2_short + Jacobian
-            log_post = log_post + ratiod_multiscale_ad::log_prior_sigma2_temporal_pc(
+            log_post = log_post + ratiod_temporal::log_prior_sigma2_temporal_pc(
                 ms_sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha);
             log_post = log_post + log_sigma2_short;  // Jacobian
 
@@ -695,13 +695,13 @@ T compute_log_post_impl(
         }
 
         // GMRF log-likelihood for all components
-        log_post = log_post + ratiod_multiscale_ad::multiscale_temporal_log_lik(
+        log_post = log_post + ratiod_temporal::multiscale_temporal_log_lik(
             ms_trend, ms_seasonal, ms_short_term,
             ms_sigma2_trend, ms_sigma2_seasonal, ms_sigma2_short, ms_rho_short,
             ms_data);
 
         // Precompute multiscale temporal contribution to linear predictor
-        ratiod_multiscale_ad::compute_temporal_eta(
+        ratiod_temporal::compute_temporal_eta(
             ms_trend, ms_seasonal, ms_short_term, ms_data, ms_temporal_eta);
     }
 
@@ -801,7 +801,7 @@ T compute_log_post_impl(
             }
 
             // Soft sum-to-zero constraint
-            log_post = log_post + ratiod_svc_ad::svc_sum_to_zero_penalty(svc_w_flat, data.svc_data, 1.0);
+            log_post = log_post + ratiod_svc::svc_sum_to_zero_penalty(svc_w_flat, data.svc_data);
 
             // Precompute SVC contribution to linear predictor
             svc_eta.resize(n_obs, T(0.0));
@@ -862,8 +862,8 @@ T compute_log_post_impl(
         );
 
         // Soft sum-to-zero constraint for identifiability
-        log_post = log_post + ratiod_tvc_ad::tvc_sum_to_zero_penalty(
-            tvc_w_flat, data.tvc_data, 0.001
+        log_post = log_post + ratiod_tvc::tvc_sum_to_zero_penalty(
+            tvc_w_flat, data.tvc_data
         );
 
         // Precompute TVC contribution to linear predictor
@@ -1001,15 +1001,15 @@ T compute_log_post_impl(
             // Rank term with actual tau, combined with the NC Jacobian:
             // 0.5 * rank * log(tau) - ST/2 * log(tau)
             int rank_space = S - 1;
-            int rank_time = (st_data.temporal_type == TemporalType::RW1) ? (T_st - 1)
-                                                                        : (T_st - 2);
-            if (st_data.temporal_cyclic) rank_time = T_st;
+            int rank_time = (st_data.temporal_type == TemporalType::RW1)
+                ? tulpa::rw1_rank(T_st, st_data.temporal_cyclic)
+                : tulpa::rw2_rank(T_st, st_data.temporal_cyclic);
             int total_rank = rank_space * rank_time;
             log_post = log_post + T(0.5 * (total_rank - ST)) * safe_log(tau_st);
 
             // Sum-to-zero on reconstructed delta
             log_post = log_post + ratiod_spatiotemporal::st_sum_to_zero_penalty(
-                st_delta, S, T_st, 0.001, true, true
+                st_delta, S, T_st, true, true
             );
         } else if (data.st_is_hsgp) {
             // HSGP-ST: spectral basis interaction (centered). Each basis
@@ -1030,9 +1030,8 @@ T compute_log_post_impl(
             // LogNormal(0,1) on lengthscale
             log_post = log_post - T(0.5) * log_ls_st * log_ls_st;
 
-            int rank_t = (st_data.temporal_type == TemporalType::RW1) ? (T_st - 1) :
-                         (st_data.temporal_type == TemporalType::RW2) ? (T_st - 2) : T_st;
-            if (st_data.temporal_cyclic) rank_t = T_st;
+            int rank_t = (st_data.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T_st, st_data.temporal_cyclic) :
+                         (st_data.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T_st, st_data.temporal_cyclic) : T_st;
 
             for (int j = 0; j < M; j++) {
                 T S_j = ratiod_hsgp::spectral_density_se(
@@ -1061,7 +1060,7 @@ T compute_log_post_impl(
                 // Soft sum-to-zero per basis function
                 T sum_j = T(0.0);
                 for (int t = 0; t < T_st; t++) sum_j = sum_j + dj[t];
-                log_post = log_post - T(0.5 * 0.001) * sum_j * sum_j;
+                log_post = log_post - T(0.5 * tulpa::s2z_precision(T_st)) * sum_j * sum_j;
             }
         } else {
             // Centered parameterization (ICAR/BYM2 spatial)
@@ -1074,7 +1073,7 @@ T compute_log_post_impl(
 
             // Soft sum-to-zero constraint for identifiability
             log_post = log_post + ratiod_spatiotemporal::st_sum_to_zero_penalty(
-                st_delta, S, T_st, 0.001, true, true
+                st_delta, S, T_st, true, true
             );
         }
     }

@@ -103,13 +103,13 @@ T tvc_term_log_prior(
 
     if (structure == TemporalType::RW1) {
         T quad = rw1_quadratic_form(w, n_times, cyclic);
-        int rank = cyclic ? n_times : (n_times - 1);
+        int rank = tulpa::rw1_rank(n_times, cyclic);
         log_prior = log_prior + T(0.5 * rank) * safe_log(tau);
         log_prior = log_prior - T(0.5) * tau * quad;
 
     } else if (structure == TemporalType::RW2) {
         T quad = rw2_quadratic_form(w, n_times, cyclic);
-        int rank = cyclic ? n_times : (n_times - 2);
+        int rank = tulpa::rw2_rank(n_times, cyclic);
         log_prior = log_prior + T(0.5 * rank) * safe_log(tau);
         log_prior = log_prior - T(0.5) * tau * quad;
 
@@ -200,35 +200,8 @@ void compute_tvc_eta(
     }
 }
 
-// =============================================================================
-// Sum-to-zero constraint for identifiability
-// =============================================================================
-
-// Soft sum-to-zero constraint for TVC (each term and group)
-template<typename T>
-T tvc_sum_to_zero_penalty(
-    const std::vector<T>& w_flat,
-    const TVCData& tvc_data,
-    double lambda = 0.001
-) {
-    int n_times = tvc_data.n_times;
-    int n_tvc = tvc_data.n_tvc;
-    int n_groups = tvc_data.n_groups;
-
-    T penalty = T(0.0);
-
-    for (int g = 0; g < n_groups; g++) {
-        for (int j = 0; j < n_tvc; j++) {
-            T sum = T(0.0);
-            for (int t = 0; t < n_times; t++) {
-                sum = sum + w_flat[(g * n_tvc + j) * n_times + t];
-            }
-            penalty = penalty - T(0.5 * lambda) * sum * sum;
-        }
-    }
-
-    return penalty;
-}
+// The sum-to-zero constraint is ratiod_tvc::tvc_sum_to_zero_penalty in
+// hmc_tvc.h, templated over the scalar type and shared with the plain sampler.
 
 // =============================================================================
 // TVC hyperparameter priors

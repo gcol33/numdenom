@@ -123,14 +123,14 @@ T temporal_log_prior_t(
     if (type == TemporalType::RW1) {
         // RW1: p(phi|tau) propto tau^{(T-1)/2} exp(-0.5 * tau * phi' Q phi)
         T quad = rw1_quadratic_form_t(phi, T_len, cyclic);
-        int rank = cyclic ? T_len : T_len - 1;  // Rank of precision matrix
+        int rank = tulpa::rw1_rank(T_len, cyclic);
         log_prior = log_prior + T(0.5 * rank) * safe_log(tau);
         log_prior = log_prior - T(0.5) * tau * quad;
 
     } else if (type == TemporalType::RW2) {
         // RW2: p(phi|tau) propto tau^{(T-2)/2} exp(-0.5 * tau * phi' Q phi)
         T quad = rw2_quadratic_form_t(phi, T_len, cyclic);
-        int rank = cyclic ? T_len : T_len - 2;  // Rank of precision matrix
+        int rank = tulpa::rw2_rank(T_len, cyclic);
         log_prior = log_prior + T(0.5 * rank) * safe_log(tau);
         log_prior = log_prior - T(0.5) * tau * quad;
 

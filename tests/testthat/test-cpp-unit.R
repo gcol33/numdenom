@@ -1123,16 +1123,24 @@ test_that("temporal_log_prior RW1 matches manual computation", {
 })
 
 test_that("sum_to_zero_penalty penalizes sum != 0", {
+  # The penalty derives its own precision from the length of the sum it pins:
+  # sd(sum phi) = kappa * n with kappa = 0.001, so lambda = 1 / (kappa * n)^2.
+  lambda <- 1 / (0.001 * 3)^2
+
   # Centered phi
   phi_centered <- c(-1, 0, 1)
-  result_centered <- tulpaRatio:::cpp_test_sum_to_zero_penalty(phi_centered, 0.001)
+  result_centered <- tulpaRatio:::cpp_test_sum_to_zero_penalty(phi_centered)
   expect_equal(result_centered, 0.0, tolerance = 1e-10)
 
   # Non-centered phi
   phi_noncentered <- c(1, 2, 3)  # sum = 6
-  result_noncentered <- tulpaRatio:::cpp_test_sum_to_zero_penalty(phi_noncentered, 0.001)
-  expected <- -0.5 * 0.001 * 36
+  result_noncentered <- tulpaRatio:::cpp_test_sum_to_zero_penalty(phi_noncentered)
+  expected <- -0.5 * lambda * 36
   expect_equal(result_noncentered, expected, tolerance = 1e-10)
+
+  # A kappa passed where a precision is meant is ~2.5e6 too weak at n = 20;
+  # the constant is derived inside the penalty so no caller can supply one.
+  expect_lt(result_noncentered, -0.5 * 0.001 * 36)
 })
 
 # ---------------------------------------------------------------------------

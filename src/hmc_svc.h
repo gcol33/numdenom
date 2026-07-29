@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <Rcpp.h>  // For Rcpp::Rcout in debug
 
+#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
+
 // Fallback definition of M_PI if not provided by <cmath>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -270,30 +272,68 @@ inline void compute_svc_eta(
 // Sum-to-zero constraint for identifiability
 // -----------------------------------------------------------------------------
 
-// Apply soft sum-to-zero constraint on SVC weights (for each SVC term)
-// Without this, beta and mean(w) are not separately identifiable.
-// Uses mean(w) with lambda_mean penalty: -0.5 * lambda_mean * N * mean(w)^2
-// This is equivalent to: mean(w) ~ N(0, 1/lambda_mean)
-inline double svc_sum_to_zero_penalty(
-    const std::vector<double>& w_flat,
-    const SVCData& svc_data,
-    double lambda_mean = 1.0
+// Soft ridge on the mean of each SVC term's weights, which trades off against
+// the fixed coefficient on the same covariate. Written on the sum: the earlier
+// mean form -0.5 * lambda_mean * n_obs * mean(w)^2 is the identity
+// -0.5 * (lambda_mean / n_obs) * sum^2, so the two are the same penalty and
+// svc_sum_to_zero_ridge() is the one constant both this and its gradient read.
+//
+// This does NOT take s2z_precision(n_obs). An NNGP field has a PROPER prior --
+// its mean is identified, just weakly -- so what is wanted here is a ridge, not
+// the identification constraint an intrinsic (rank-deficient) field needs.
+// s2z_precision(80) is 156.25 against this ridge's 0.0125, and at that
+// stiffness the sampler stops moving: same data, same code, only the constant
+// changed, 4 chains x 1000 iterations returns in 9s with per-chain posterior SD
+// 0, Rhat 15 and the slope at 0.095 against a truth of 0.3, where the ridge
+// runs for minutes and samples. Deriving the right constant for a proper field
+// on its own terms is gcol33/tulpaRatio#25.
+inline double svc_sum_to_zero_ridge(int n_obs) {
+  return 1.0 / static_cast<double>(n_obs > 0 ? n_obs : 1);
+}
+
+template <typename T>
+inline T svc_sum_to_zero_penalty(
+    const std::vector<T>& w_flat,
+    const SVCData& svc_data
 ) {
   int n_obs = svc_data.n_obs;
   int n_svc = svc_data.n_svc;
 
-  double penalty = 0.0;
+  const double lambda = svc_sum_to_zero_ridge(n_obs);
+  T penalty = T(0.0);
 
   for (int j = 0; j < n_svc; j++) {
-    double sum = 0.0;
+    T sum = T(0.0);
     for (int i = 0; i < n_obs; i++) {
-      sum += w_flat[j * n_obs + i];
+      sum = sum + w_flat[j * n_obs + i];
     }
-    double mean_w = sum / n_obs;
-    penalty -= 0.5 * lambda_mean * n_obs * mean_w * mean_w;
+    penalty = penalty - T(0.5 * lambda) * sum * sum;
   }
 
   return penalty;
+}
+
+// Gradient of svc_sum_to_zero_penalty w.r.t. each weight, accumulated into
+// `grad` at `base_idx` in the same j-major layout the penalty reads. Every
+// weight of a term sees the same -lambda * sum, since the penalty depends on
+// the term only through its sum.
+inline void svc_sum_to_zero_penalty_grad(
+    const double* w_flat,
+    const SVCData& svc_data,
+    int base_idx,
+    double* grad
+) {
+  int n_obs = svc_data.n_obs;
+  int n_svc = svc_data.n_svc;
+
+  const double lambda = svc_sum_to_zero_ridge(n_obs);
+
+  for (int j = 0; j < n_svc; j++) {
+    double sum = 0.0;
+    for (int i = 0; i < n_obs; i++) sum += w_flat[j * n_obs + i];
+    const double push = lambda * sum;
+    for (int i = 0; i < n_obs; i++) grad[base_idx + j * n_obs + i] -= push;
+  }
 }
 
 // -----------------------------------------------------------------------------
