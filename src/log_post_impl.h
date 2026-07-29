@@ -13,6 +13,7 @@
 #include "autodiff_utils.h"
 #include <tulpa/soft_sum_to_zero.h>
 #include "spatial_field_constraint.h"
+#include "hmc_re.h"  // Templated random-effect prior and effects
 #include "hmc_spatiotemporal.h"  // Templated spatiotemporal interaction priors
 #include "hmc_hsgp.h"  // Templated HSGP spectral density
 #include "hmc_gp_autodiff.h"  // Templated GP/NNGP functions
@@ -38,6 +39,29 @@ namespace ratiod {
 
 using namespace math;
 
+// Structures this density does not express, named so a caller on the R thread
+// can refuse rather than sample the wrong posterior.
+//
+// The arena / forward / tape modes differentiate this density, and for those
+// modes verify_gradient_runtime differences this same density, so a structure
+// missing here is invisible to both: the gradient and its numerical reference
+// agree on the same wrong value. The collapsed parameterizations cannot be
+// expressed here at all -- they marginalize the field by locating its mode with
+// Newton and adding a Laplace correction, which is not a closed-form function of
+// the parameters -- so they are reported instead.
+inline const char* log_post_impl_gap(const ModelData& data,
+                                     const ParamLayout& layout) {
+    if (layout.is_icar_collapsed) return "collapsed ICAR";
+    if (layout.is_bym2_collapsed) return "collapsed BYM2";
+    if (data.gp_collapsed) return "collapsed GP";
+    // Expressible, but not written here yet, and the finite-difference harness
+    // cannot build either one to check a transcription against. Named rather
+    // than guessed at (gcol33/tulpaRatio#26).
+    if (data.msgp_is_hsgp) return "HSGP multi-scale GP";
+    if (data.has_gp && data.gp_parameterization == 1) return "non-centred GP";
+    return nullptr;
+}
+
 // ============================================================================
 // Templated log-posterior computation
 // T = double for evaluation, T = ad::Var for autodiff gradients
@@ -62,6 +86,10 @@ T compute_log_post_impl(
     }
     const std::vector<T>& params = center_spatial ? params_centered : params_in;
 
+    // A collapsed field is marginalized out and has no slot in the parameter
+    // vector, so nothing below may index it.
+    const bool spatial_in_params = layout.has_spatial && layout.spatial_start >= 0;
+
     T log_post = T(0.0);
 
     // ========================================================================
@@ -72,33 +100,14 @@ T compute_log_post_impl(
     const T* beta_num = &params[layout.beta_num_start];
     const T* beta_denom = &params[layout.beta_denom_start];
 
-    // Random effects
-    // For non-centered parameterization (re_parameterization == 1):
-    //   - params store z ~ N(0,1)
-    //   - actual RE = sigma_re * z
-    // For centered parameterization (re_parameterization == 0):
-    //   - params store re ~ N(0, sigma_re^2) directly
-    T sigma_re = T(1.0);
-    std::vector<T> re;
-    if (layout.has_re) {
-        T log_sigma_re = params[layout.log_sigma_re_idx];
-        sigma_re = safe_exp(log_sigma_re);
-
-        int n_re = layout.re_end - layout.re_start;
-        re.resize(n_re);
-
-        if (data.re_parameterization == 1) {
-            // Non-centered: params are z values, compute re = sigma * z
-            for (int g = 0; g < n_re; g++) {
-                T z_g = params[layout.re_start + g];
-                re[g] = sigma_re * z_g;
-            }
-        } else {
-            // Centered: params are actual RE values
-            for (int g = 0; g < n_re; g++) {
-                re[g] = params[layout.re_start + g];
-            }
-        }
+    // Random effects: prior and effective effects together, from the one
+    // implementation both densities call. See hmc_re.h.
+    ratiod_re::ReEffects<T> re_eff;
+    {
+        bool re_ok = true;
+        log_post = log_post
+            + ratiod_re::re_log_prior(params, data, layout, re_eff, re_ok);
+        if (!re_ok) return T(-INFINITY);
     }
 
     // Overdispersion (phi for Gamma denominator in poisson_gamma)
@@ -121,7 +130,7 @@ T compute_log_post_impl(
     T sigma_u_bym2 = T(1.0);
     const T* theta_bym2 = nullptr;
 
-    if (layout.has_spatial) {
+    if (spatial_in_params) {
         phi_spatial = &params[layout.spatial_start];
 
         if (layout.is_bym2) {
@@ -190,33 +199,6 @@ T compute_log_post_impl(
         log_post = log_post + log_prior_normal(beta_denom[j], tau_beta);
     }
 
-    // Random effects prior with Half-Cauchy on sigma_re
-    // For non-centered: z ~ N(0,1), so prior is on params (z values) with tau=1
-    // For centered: re ~ N(0, sigma_re^2), so prior uses tau = 1/sigma_re^2
-    if (layout.has_re) {
-        // Half-Cauchy prior on sigma_re (same for both parameterizations)
-        T log_sigma_re = params[layout.log_sigma_re_idx];
-        log_post = log_post + log_prior_half_cauchy(log_sigma_re, data.sigma_re_scale);
-
-        // Prior on RE/z values
-        int n_re = layout.re_end - layout.re_start;
-        if (data.re_parameterization == 1) {
-            // Non-centered: z ~ N(0, 1), so tau = 1
-            for (int g = 0; g < n_re; g++) {
-                T z_g = params[layout.re_start + g];
-                log_post = log_post + log_prior_normal(z_g, 1.0);
-            }
-        } else {
-            // Centered: re ~ N(0, sigma_re^2)
-            // Keep tau_re as autodiff variable so gradient flows to sigma_re
-            T tau_re = T(1.0) / (sigma_re * sigma_re + T(1e-10));
-            for (int g = 0; g < n_re; g++) {
-                log_post = log_post + T(-0.5) * tau_re * re[g] * re[g];
-                log_post = log_post + T(0.5) * safe_log(tau_re);
-            }
-        }
-    }
-
     // Overdispersion: Gamma prior
     if (layout.has_phi_num) {
         T log_phi = params[layout.log_phi_num_idx];
@@ -228,7 +210,7 @@ T compute_log_post_impl(
     }
 
     // Spatial priors
-    if (layout.has_spatial) {
+    if (spatial_in_params) {
         if (layout.is_bym2) {
             // BYM2 Riebler: Half-Cauchy on sigma_total
             T log_sigma = params[layout.log_sigma_bym2_idx];
@@ -339,6 +321,45 @@ T compute_log_post_impl(
         // NNGP log-likelihood on spatial effects
         log_post = log_post + ratiod_gp::gp_nngp_log_lik_t(
             gp_w, sigma2_gp, phi_gp, data.gp_data);
+    }
+
+    // HSGP spatial parameters and priors
+    std::vector<T> hsgp_f;
+
+    if (layout.is_hsgp && data.has_hsgp) {
+        T log_sigma2_hsgp = params[layout.log_sigma2_hsgp_idx];
+        T log_ls_hsgp = params[layout.log_lengthscale_hsgp_idx];
+        T sigma2_hsgp = safe_exp(log_sigma2_hsgp);
+        T ls_hsgp = safe_exp(log_ls_hsgp);
+
+        // PC prior on sigma: P(sigma > 1) = 0.01 -> rate 4.6, plus the Jacobian
+        // d(sigma)/d(log_sigma2) = 0.5 * sigma.
+        T sigma_hsgp = safe_sqrt(sigma2_hsgp);
+        const double rate_sigma_hsgp = 4.6;
+        log_post = log_post + T(std::log(rate_sigma_hsgp))
+                            - T(rate_sigma_hsgp) * sigma_hsgp
+                            - safe_log(T(2.0) * sigma_hsgp)
+                            + T(0.5) * log_sigma2_hsgp;
+
+        // LogNormal(0, 1) on the lengthscale; the -log(ell) of the density and
+        // the +log(ell) Jacobian of the log transform cancel.
+        log_post = log_post - T(0.5) * log_ls_hsgp * log_ls_hsgp;
+
+        // N(0, I) on the basis coefficients, and f = Phi * (sqrt(S) .* beta).
+        const int M_hsgp = data.hsgp_data.m_total;
+        const int N_hsgp = data.hsgp_data.n_obs;
+        hsgp_f.assign(N_hsgp, T(0.0));
+        for (int j = 0; j < M_hsgp; j++) {
+            T beta_j = params[layout.hsgp_beta_start + j];
+            log_post = log_post - T(0.5) * beta_j * beta_j;
+
+            T scaled_j = safe_sqrt(ratiod_hsgp::spectral_density_se(
+                data.hsgp_data.eigenvalues[j], sigma2_hsgp, ls_hsgp)) * beta_j;
+            for (int i = 0; i < N_hsgp; i++) {
+                hsgp_f[i] = hsgp_f[i]
+                    + T(data.hsgp_data.phi_flat[i * M_hsgp + j]) * scaled_j;
+            }
+        }
     }
 
     // Multi-scale GP spatial parameters and priors
@@ -827,10 +848,9 @@ T compute_log_post_impl(
             T log_tau = params[layout.log_tau_tvc_start + j];
             tvc_tau[j] = safe_exp(log_tau);
 
-            // Gamma prior on tau + Jacobian for log transform
-            log_post = log_post + T(data.tvc_tau_shape - 1.0) * log_tau
-                     - T(data.tvc_tau_rate) * tvc_tau[j]
-                     + log_tau;  // Jacobian
+            // Gamma(shape, rate) on tau + Jacobian for log transform
+            log_post = log_post + log_prior_gamma(log_tau, data.tvc_tau_shape,
+                                                  data.tvc_tau_rate);
         }
 
         // Extract rho (AR1 correlation) parameters if AR1 structure
@@ -1126,14 +1146,14 @@ T compute_log_post_impl(
         }
 
         // Add random effects (shared between num and denom)
-        if (layout.has_re && data.re_group[i] > 0) {
-            int g = data.re_group[i] - 1;
-            eta_num = eta_num + re[g];
-            eta_denom = eta_denom + re[g];
+        if (!re_eff.empty()) {
+            T re_contrib = ratiod_re::re_eta(i, data, layout, re_eff);
+            eta_num = eta_num + re_contrib;
+            eta_denom = eta_denom + re_contrib;
         }
 
         // Add spatial effects
-        if (layout.has_spatial && !data.spatial_group.empty() && data.spatial_group[i] > 0) {
+        if (spatial_in_params && !data.spatial_group.empty() && data.spatial_group[i] > 0) {
             int s = data.spatial_group[i] - 1;
             T spatial_effect;
 
@@ -1158,6 +1178,13 @@ T compute_log_post_impl(
             } else {
                 eta_num = eta_num + gp_effect;
             }
+        }
+
+        // Add HSGP spatial effect
+        if (!hsgp_f.empty()) {
+            T hsgp_effect = hsgp_f[i];
+            eta_num = eta_num + hsgp_effect;
+            if (data.hsgp_data.shared) eta_denom = eta_denom + hsgp_effect;
         }
 
         // Add multi-scale GP spatial effect

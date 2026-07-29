@@ -1,3 +1,70 @@
+# tulpaRatio 1.4.3
+
+* **The two log posteriors are now the same function (#18).** `compute_log_post`
+  and the templated `compute_log_post_impl<double>` that the `A_r` / `A` / `A_t`
+  gradient modes differentiate returned different numbers on every model and
+  omitted different structures. For those modes the runtime gradient check
+  differences that same templated density, so a structure missing from it was
+  invisible to both the gradient and its own numerical reference: they agreed on
+  the same wrong value. Differencing the two densities against each other
+  instead, over every structure the parameter layout allocates for, is what
+  found the following.
+
+  | structure | before | after |
+  | --- | --- | --- |
+  | HSGP spatial field | absent: all 11 parameters gradient exactly 0, worst relative deviation 1.00 | 1.3e-7 |
+  | random slopes, uncorrelated | slope variance absent, 1.00 | 1.2e-9 |
+  | random slopes, correlated | Cholesky factor and variance absent, 1.08 | 1.0e-8 |
+  | crossed random intercepts | second term absent: 5 effects and its variance 0, 1.33 | 1.2e-9 |
+  | TVC precision | a different prior on each side, 0.376 | 4.2e-10 |
+  | collapsed ICAR / BYM2 | read `params[-1]`, access violation | refused |
+
+  The residual constant that remained on every model was the binomial
+  coefficient: the eta-form likelihood drops it as constant in eta, which is
+  right for a Laplace inner solve and wrong for a log posterior that is reported
+  and compared. `lp - lp_impl` was a flat -7156.27 across all fields and is now
+  0 to floating-point noise.
+
+* **A collapsed spatial field refuses an autodiff gradient mode instead of
+  crashing.** The collapsed parameterizations marginalize the field out by
+  locating its mode with Newton and adding a Laplace correction, which is not a
+  closed-form function of the parameters, so the templated density cannot
+  express them and the layout allocates no slot for the field. Reading that
+  absent slot was an access violation. `gradient_mode` in `"A_r"`, `"A"`, `"A_t"`
+  now errors at the front door naming the parameterization; `"H"` and `"N"` carry
+  the analytic density and are unaffected. The same declaration covers the HSGP
+  multi-scale GP and the non-centred GP, which are expressible but not written
+  yet (#26).
+
+* **The TVC precision takes the prior it is configured with.** `tvc_tau_shape`
+  and `tvc_tau_rate` reach the sampler from `priors` and defaulted to
+  `Gamma(2, 0.5)`, but two of the three implementations ignored them for a
+  hard-coded PC prior with `P(sigma > 1) = 0.01`. The density, the specialized
+  gradient and the composite gradient now all read the configured
+  hyperparameters, through one derivative helper.
+
+* **The random-effect prior is one implementation.** `hmc_re.h` computes the
+  prior and the effective effects for every layout the sampler allocates -- one
+  or more crossed terms, intercept-only or with slopes, correlated or not,
+  centred or non-centred -- and both densities call it, so a term cannot be added
+  to one and not the other. The TVC quadratic forms, per-term prior and eta
+  assembly move the same way: templated in `hmc_tvc.h` and re-exported to
+  `ratiod_tvc_ad`, replacing copies that had already drifted on the cyclic
+  wrap-around edge. The RW1/RW2/AR1 templates take a pointer, so a caller holding
+  a strided slice passes an offset rather than copying into a vector.
+
+* `cpp_gradient_check()` reaches the structures it could not build before
+  (`hsgp`, `tvc`, `re`, `re_crossed`, `re_slopes`, `re_slopes_corr`,
+  `icar_collapsed`, `bym2_collapsed`), differences either density via
+  `reference =`, and reports `log_post_impl` and `impl_gap` alongside the
+  gradient. `test-gradient-correctness.R` asserts across every field that the two
+  densities return the same number, that no block has an identically-zero
+  gradient under any autodiff mode, and that a collapsed model refuses one.
+  Its tolerance now allows an absolute `1e-6` before the relative comparison: a
+  central difference of a log posterior of magnitude 1e3-1e4 resolves a gradient
+  entry to about 1e-7, and the HSGP basis coefficients run to 6e-4, where 1e-4
+  relative asked for more than the difference can deliver.
+
 # tulpaRatio 1.4.2
 
 * **Every intrinsic field is now identified at the engine's constant (#12).**

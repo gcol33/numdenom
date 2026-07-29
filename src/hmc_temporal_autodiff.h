@@ -18,9 +18,12 @@ using namespace ratiod::math;
 // Templated RW1 quadratic form
 // =============================================================================
 
+// The pointer form is the implementation: callers that hold a strided slice of a
+// flat coefficient vector (a spatiotemporal location's series, one TVC term's
+// trajectory) can pass an offset instead of copying into a vector first.
 template<typename T>
 T rw1_quadratic_form_t(
-    const std::vector<T>& phi,
+    const T* phi,
     int T_len,
     bool cyclic
 ) {
@@ -46,8 +49,13 @@ T rw1_quadratic_form_t(
 // =============================================================================
 
 template<typename T>
+T rw1_quadratic_form_t(const std::vector<T>& phi, int T_len, bool cyclic) {
+    return rw1_quadratic_form_t(phi.data(), T_len, cyclic);
+}
+
+template<typename T>
 T rw2_quadratic_form_t(
-    const std::vector<T>& phi,
+    const T* phi,
     int T_len,
     bool cyclic
 ) {
@@ -79,8 +87,13 @@ T rw2_quadratic_form_t(
 // =============================================================================
 
 template<typename T>
+T rw2_quadratic_form_t(const std::vector<T>& phi, int T_len, bool cyclic) {
+    return rw2_quadratic_form_t(phi.data(), T_len, cyclic);
+}
+
+template<typename T>
 T ar1_log_density_t(
-    const std::vector<T>& phi,
+    const T* phi,
     int T_len,
     const T& rho,
     const T& tau  // precision = 1/sigma^2
@@ -103,6 +116,11 @@ T ar1_log_density_t(
     }
 
     return log_dens;
+}
+
+template<typename T>
+T ar1_log_density_t(const std::vector<T>& phi, int T_len, const T& rho, const T& tau) {
+    return ar1_log_density_t(phi.data(), T_len, rho, tau);
 }
 
 // =============================================================================

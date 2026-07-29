@@ -105,6 +105,11 @@ using GradientFn = void(*)(
 // Resolve the gradient function pointer once based on mode + model config
 GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const ParamLayout& layout);
 
+// Errors when the active gradient mode differentiates the templated log
+// posterior and the model carries a structure that density cannot express.
+// Call on the R thread, before sampling starts.
+void require_autodiff_supported(const ModelData& data, const ParamLayout& layout);
+
 // Model data container with spatial support
 struct ModelData {
   // Unique ID for cache invalidation (incremented per construction)

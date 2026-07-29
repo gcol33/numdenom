@@ -935,8 +935,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_gradient_check
-Rcpp::List cpp_gradient_check(std::string field, int n_obs, int n_units, int n_times, double eps, unsigned int seed, std::string mode, bool precenter, std::string family, bool temporal_shared);
-RcppExport SEXP _tulpaRatio_cpp_gradient_check(SEXP fieldSEXP, SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_timesSEXP, SEXP epsSEXP, SEXP seedSEXP, SEXP modeSEXP, SEXP precenterSEXP, SEXP familySEXP, SEXP temporal_sharedSEXP) {
+Rcpp::List cpp_gradient_check(std::string field, int n_obs, int n_units, int n_times, double eps, unsigned int seed, std::string mode, bool precenter, std::string family, bool temporal_shared, std::string reference);
+RcppExport SEXP _tulpaRatio_cpp_gradient_check(SEXP fieldSEXP, SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_timesSEXP, SEXP epsSEXP, SEXP seedSEXP, SEXP modeSEXP, SEXP precenterSEXP, SEXP familySEXP, SEXP temporal_sharedSEXP, SEXP referenceSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -950,7 +950,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type precenter(precenterSEXP);
     Rcpp::traits::input_parameter< std::string >::type family(familySEXP);
     Rcpp::traits::input_parameter< bool >::type temporal_shared(temporal_sharedSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_gradient_check(field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared));
+    Rcpp::traits::input_parameter< std::string >::type reference(referenceSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_gradient_check(field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared, reference));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -2011,7 +2012,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_set_max_threads", (DL_FUNC) &_tulpaRatio_cpp_set_max_threads, 1},
     {"_tulpaRatio_cpp_within_chain_team", (DL_FUNC) &_tulpaRatio_cpp_within_chain_team, 3},
     {"_tulpaRatio_cpp_num_procs", (DL_FUNC) &_tulpaRatio_cpp_num_procs, 0},
-    {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 10},
+    {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 11},
     {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 7},
     {"_tulpaRatio_cpp_test_leapfrog", (DL_FUNC) &_tulpaRatio_cpp_test_leapfrog, 4},
     {"_tulpaRatio_cpp_test_hamiltonian", (DL_FUNC) &_tulpaRatio_cpp_test_hamiltonian, 2},

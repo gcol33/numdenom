@@ -169,8 +169,8 @@ cpp_num_procs <- function() {
     .Call(`_tulpaRatio_cpp_num_procs`)
 }
 
-cpp_gradient_check <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, eps = 1e-5, seed = 42L, mode = "handcoded", precenter = FALSE, family = "binomial", temporal_shared = TRUE) {
-    .Call(`_tulpaRatio_cpp_gradient_check`, field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared)
+cpp_gradient_check <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, eps = 1e-5, seed = 42L, mode = "handcoded", precenter = FALSE, family = "binomial", temporal_shared = TRUE, reference = "analytic") {
+    .Call(`_tulpaRatio_cpp_gradient_check`, field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared, reference)
 }
 
 cpp_logpost_at <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, seed = 42L, family = "binomial", temporal_shared = TRUE) {

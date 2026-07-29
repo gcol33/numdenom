@@ -1793,12 +1793,10 @@ double compute_log_post(
       double log_tau = params[layout.log_tau_tvc_start + j];
       tvc_tau[j] = std::exp(log_tau);
 
-      // PC prior on tau (exponential prior on sigma = 1/sqrt(tau))
-      // P(sigma > U) = alpha  =>  rate = -log(alpha) / U
-      double sigma = 1.0 / std::sqrt(tvc_tau[j]);
-      double rate = -std::log(0.01) / 1.0;  // P(sigma > 1) = 0.01
-      log_post += std::log(rate) - rate * sigma - std::log(2.0 * sigma);
-      log_post += log_tau;  // Jacobian for log transform
+      // Gamma(shape, rate) on tau at the configured hyperparameters, with the
+      // Jacobian of the log transform.
+      log_post += ratiod::math::log_prior_gamma(log_tau, data.tvc_tau_shape,
+                                                data.tvc_tau_rate);
     }
 
     // Extract rho parameters for AR1 structure
@@ -2214,6 +2212,11 @@ double compute_log_post(
         // Plain binomial (no inflation)
         ll_i = log_lik_binomial(data.y_num[i], data.y_denom[i], eta_num);
       }
+      // The eta-form likelihood and the inflated variants all drop the binomial
+      // coefficient, which is constant in eta but not in the data, so a log
+      // posterior reported or compared across implementations needs it back. It
+      // is zero at y = 0 and y = n, so the inflation arms take it unchanged.
+      ll_i += ratiod::math::portable_lchoose(n_trials, y);
     } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
       double mu_num = std::exp(eta_num);
       double mu_denom = std::exp(eta_denom);
@@ -6874,14 +6877,10 @@ void compute_gradient_tvc_handcoded(
     re_gradient_prior(data, layout, re, grad.data(), sigma_re);
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
-    // TVC hyperparameter priors: PC prior on tau (must match compute_log_post)
-    // log_post = log(rate) - rate/sqrt(tau) - log(2*sigma) + log(tau)
-    //          = const - rate * tau^{-1/2} + 1.5 * log(tau)
-    // d/d(log_tau) = 0.5 * rate / sqrt(tau) + 1.5
-    double tvc_pc_rate = -std::log(0.01) / 1.0;  // P(sigma > 1) = 0.01
+    // TVC hyperparameter priors: Gamma on tau at the configured hyperparameters.
     for (int j = 0; j < n_tvc; j++) {
-        double sigma_j = 1.0 / std::sqrt(tvc_tau[j]);
-        grad[layout.log_tau_tvc_start + j] = 0.5 * tvc_pc_rate * sigma_j + 1.5;
+        grad[layout.log_tau_tvc_start + j] = ratiod_tvc::log_prior_tau_gamma_grad(
+            tvc_tau[j], data.tvc_tau_shape, data.tvc_tau_rate);
     }
 
     // AR1: Uniform(-1,1) prior on rho (must match compute_log_post)
@@ -9571,12 +9570,11 @@ void compute_gradient_composite(
         }
     }
 
-    // TVC priors (PC prior: P(sigma > 1) = 0.01)
+    // TVC priors: Gamma on tau at the configured hyperparameters.
     if (layout.has_tvc && data.has_tvc) {
-        double tvc_pc_rate = -std::log(0.01) / 1.0;
         for (int j = 0; j < n_tvc; j++) {
-            double sigma_j = 1.0 / std::sqrt(tvc_tau_buf[j]);
-            grad[layout.log_tau_tvc_start + j] = 0.5 * tvc_pc_rate * sigma_j + 1.5;
+            grad[layout.log_tau_tvc_start + j] = ratiod_tvc::log_prior_tau_gamma_grad(
+                tvc_tau_buf[j], data.tvc_tau_shape, data.tvc_tau_rate);
             if (data.tvc_data.structure == ratiod_temporal::TemporalType::AR1) {
                 double u = (tvc_rho_buf[j] + 1.0) / 2.0;
                 grad[layout.logit_rho_tvc_start + j] = 1.0 - 2.0 * u;
@@ -10574,6 +10572,30 @@ GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const P
     // that no specialized function above handles (e.g., HSGP+TVC, SVC+RW1,
     // latent+spatial, crossed+slopes). Slower than specialized but faster than A_r.
     return &compute_gradient_composite;
+}
+
+// Refuse an autodiff gradient mode on a model the templated log posterior
+// cannot express. Called on the R thread before sampling starts, because
+// resolve_gradient_fn runs on OpenMP workers where a throw cannot cross the
+// region boundary. The H and N modes carry the analytic density and are
+// unaffected.
+void require_autodiff_supported(const ModelData& data, const ParamLayout& layout) {
+  if (g_gradient_mode != GradientMode::AUTODIFF_ARENA &&
+      g_gradient_mode != GradientMode::AUTODIFF_FORWARD &&
+      g_gradient_mode != GradientMode::AUTODIFF_TAPE) return;
+
+  const char* gap = ratiod::log_post_impl_gap(data, layout);
+  if (gap == nullptr) return;
+
+  const char* mode_name =
+      (g_gradient_mode == GradientMode::AUTODIFF_ARENA)   ? "A_r" :
+      (g_gradient_mode == GradientMode::AUTODIFF_FORWARD) ? "A"   : "A_t";
+  Rcpp::stop(std::string("gradient_mode '") + mode_name +
+             "' differentiates the templated log posterior, which does not "
+             "express the " + gap + " parameterization: that field is "
+             "marginalized out by locating its mode and adding a Laplace "
+             "correction, which is not a closed-form function of the "
+             "parameters. Use gradient_mode = \"H\" or \"N\".");
 }
 
 // =====================================================================
@@ -13459,6 +13481,8 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   // All gradient modes (N, A, A_t, H) are now thread-safe and can run in parallel.
   // The old global tape limitation has been removed.
 
+  require_autodiff_supported(data, layout);
+
   if (n_chains > 1) {
     // The team stays at ratiod_omp::chain_team_size() for the whole session;
     // n_cores caps how many chains are in flight at once. Sizing the team from
@@ -14267,6 +14291,8 @@ Rcpp::List cpp_hmc_fit(
   // This prevents R GC from invalidating memory during sampling
   std::atomic_thread_fence(std::memory_order_seq_cst);
 
+  require_autodiff_supported(data, compute_param_layout(data));
+
   // Run sampler
   if (n_chains == 1) {
     ParamLayout layout = compute_param_layout(data);
@@ -14847,6 +14873,8 @@ Rcpp::List cpp_hmc_fit_gp(
 
   // Initialize parameters - use explicit std::vector copy from Rcpp
   std::vector<double> q0(q_init.begin(), q_init.end());
+
+  require_autodiff_supported(data, compute_param_layout(data));
 
   // Run sampler
   if (n_chains == 1) {

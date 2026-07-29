@@ -7,7 +7,7 @@
 
 #include <vector>
 #include <cmath>
-#include "hmc_temporal.h"  // Reuse RW1/RW2/AR1 implementations
+#include "hmc_temporal_autodiff.h"  // Templated RW1/RW2/AR1 implementations
 
 namespace ratiod_tvc {
 
@@ -15,6 +15,9 @@ using ratiod_temporal::TemporalType;
 using ratiod_temporal::rw1_quadratic_form;
 using ratiod_temporal::rw2_quadratic_form;
 using ratiod_temporal::ar1_log_density;
+using ratiod_temporal::rw1_quadratic_form_t;
+using ratiod_temporal::rw2_quadratic_form_t;
+using ratiod_temporal::ar1_log_density_t;
 
 // TVC data structure
 struct TVCData {
@@ -66,38 +69,37 @@ struct TVCData {
 // w: temporal trajectory (length n_times)
 // tau: precision parameter
 // rho: AR1 correlation (only used if structure == AR1)
-inline double tvc_term_log_prior(
-    const double* w,
+template <typename T>
+inline T tvc_term_log_prior(
+    const T* w,
     int n_times,
     TemporalType structure,
-    double tau,
-    double rho = 0.0
+    const T& tau,
+    const T& rho,
+    bool cyclic = false
 ) {
-  double log_prior = 0.0;
+  using ratiod::math::safe_log;
+  T log_prior = T(0.0);
 
   if (structure == TemporalType::RW1) {
-    double quad = rw1_quadratic_form(w, n_times, false);
-    int rank = tulpa::rw1_rank(n_times, false);
-    log_prior += 0.5 * rank * std::log(tau);
-    log_prior -= 0.5 * tau * quad;
+    T quad = rw1_quadratic_form_t(w, n_times, cyclic);
+    log_prior = log_prior + T(0.5 * tulpa::rw1_rank(n_times, cyclic)) * safe_log(tau)
+                          - T(0.5) * tau * quad;
 
   } else if (structure == TemporalType::RW2) {
-    double quad = rw2_quadratic_form(w, n_times, false);
-    int rank = tulpa::rw2_rank(n_times, false);
-    log_prior += 0.5 * rank * std::log(tau);
-    log_prior -= 0.5 * tau * quad;
+    T quad = rw2_quadratic_form_t(w, n_times, cyclic);
+    log_prior = log_prior + T(0.5 * tulpa::rw2_rank(n_times, cyclic)) * safe_log(tau)
+                          - T(0.5) * tau * quad;
 
   } else if (structure == TemporalType::AR1) {
-    log_prior += ar1_log_density(w, n_times, rho, tau);
+    log_prior = log_prior + ar1_log_density_t(w, n_times, rho, tau);
 
   } else if (structure == TemporalType::IID) {
     // IID: independent N(0, 1/tau) for each time point
-    log_prior += 0.5 * n_times * std::log(tau);
-    double quad = 0.0;
-    for (int t = 0; t < n_times; t++) {
-      quad += w[t] * w[t];
-    }
-    log_prior -= 0.5 * tau * quad;
+    T quad = T(0.0);
+    for (int t = 0; t < n_times; t++) quad = quad + w[t] * w[t];
+    log_prior = log_prior + T(0.5 * n_times) * safe_log(tau)
+                          - T(0.5) * tau * quad;
   }
 
   return log_prior;
@@ -107,25 +109,26 @@ inline double tvc_term_log_prior(
 // w_flat: all TVC values (n_times * n_tvc * n_groups, flattened)
 // tau: vector of precisions (length n_tvc)
 // rho: vector of AR1 correlations (length n_tvc, only for AR1)
-inline double tvc_log_prior(
-    const std::vector<double>& w_flat,
+template <typename T>
+inline T tvc_log_prior(
+    const std::vector<T>& w_flat,
     const TVCData& tvc_data,
-    const std::vector<double>& tau,
-    const std::vector<double>& rho
+    const std::vector<T>& tau,
+    const std::vector<T>& rho
 ) {
-  int n_times = tvc_data.n_times;
-  int n_tvc = tvc_data.n_tvc;
-  int n_groups = tvc_data.n_groups;
+  const int n_times = tvc_data.n_times;
+  const int n_tvc = tvc_data.n_tvc;
+  const int n_groups = tvc_data.n_groups;
 
-  double log_prior = 0.0;
+  T log_prior = T(0.0);
 
   // Layout: w_flat[g * n_tvc * n_times + j * n_times + t]
   for (int g = 0; g < n_groups; g++) {
     for (int j = 0; j < n_tvc; j++) {
-      const double* w_jg = &w_flat[(g * n_tvc + j) * n_times];
-      double rho_j = (tvc_data.structure == TemporalType::AR1) ? rho[j] : 0.0;
-      log_prior += tvc_term_log_prior(w_jg, n_times, tvc_data.structure,
-                                       tau[j], rho_j);
+      const T* w_jg = &w_flat[(g * n_tvc + j) * n_times];
+      T rho_j = (tvc_data.structure == TemporalType::AR1) ? rho[j] : T(0.0);
+      log_prior = log_prior + tvc_term_log_prior(w_jg, n_times, tvc_data.structure,
+                                                 tau[j], rho_j, tvc_data.cyclic);
     }
   }
 
@@ -138,26 +141,26 @@ inline double tvc_log_prior(
 
 // Compute TVC contribution to linear predictor for all observations
 // eta_tvc[i] = sum_j X_tvc[i,j] * w[time_index[i], j, group_index[i]]
+template <typename T>
 inline void compute_tvc_eta(
-    const std::vector<double>& w_flat,  // n_groups * n_tvc * n_times
+    const std::vector<T>& w_flat,  // n_groups * n_tvc * n_times
     const TVCData& tvc_data,
-    std::vector<double>& eta_tvc         // Output: length n_obs
+    std::vector<T>& eta_tvc         // Output: length n_obs
 ) {
-  int N = tvc_data.n_obs;
-  int n_times = tvc_data.n_times;
-  int n_tvc = tvc_data.n_tvc;
+  const int N = tvc_data.n_obs;
+  const int n_times = tvc_data.n_times;
+  const int n_tvc = tvc_data.n_tvc;
 
-  std::fill(eta_tvc.begin(), eta_tvc.end(), 0.0);
+  eta_tvc.assign(N, T(0.0));
 
   for (int i = 0; i < N; i++) {
-    int t = tvc_data.time_index[i] - 1;  // 0-based
-    int g = tvc_data.group_index[i] - 1;  // 0-based
+    const int t = tvc_data.time_index[i] - 1;  // 0-based
+    const int g = tvc_data.group_index[i] - 1;  // 0-based
 
     for (int j = 0; j < n_tvc; j++) {
       // w_flat layout: [g * n_tvc * n_times + j * n_times + t]
-      double w_ijg = w_flat[(g * n_tvc + j) * n_times + t];
-      double x_ij = tvc_data.X_tvc[i * n_tvc + j];
-      eta_tvc[i] += x_ij * w_ijg;
+      eta_tvc[i] = eta_tvc[i] + T(tvc_data.X_tvc[i * n_tvc + j])
+                              * w_flat[(g * n_tvc + j) * n_times + t];
     }
   }
 }
@@ -201,6 +204,13 @@ inline T tvc_sum_to_zero_penalty(
 
 // Log prior for TVC precision (PC prior style)
 // Favors smaller variance = simpler (more constant) coefficients
+// d/d(log_tau) of the Gamma(shape, rate) prior on tau taken with the Jacobian of
+// the log transform, i.e. of (shape-1)*log_tau - rate*tau + log_tau. Derived
+// once so the analytic gradient paths cannot drift from the density again.
+inline double log_prior_tau_gamma_grad(double tau, double shape, double rate) {
+  return shape - rate * tau;
+}
+
 inline double log_prior_tau_pc(double tau, double U, double alpha) {
   // sigma ~ Exponential(rate = -log(alpha)/U)
   // tau = 1/sigma^2, apply Jacobian
