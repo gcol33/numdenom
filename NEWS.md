@@ -1,3 +1,17 @@
+# tulpaRatio 1.4.1
+
+* **The spec path's ICAR / BYM2 field is identified (#19).** The bridge that
+  builds the engine's `ModelData` assigned the CSR adjacency without the
+  component partition the sum-to-zero augmentation iterates over, so the field's
+  constant direction carried no precision and its level random-walked:
+  `mean(phi_spatial)` reached +200.9, -342.8 and +423.1 at seeds 42, 43 and 44
+  where the legacy backend holds it within 0.02 of zero, and `tau_spatial` came
+  out at 16.89 against the legacy 11.90. The field's shape and the fixed effects
+  were unaffected, which is why it read as a healthy fit. The bridge now calls
+  `ModelData::set_spatial_adjacency()`, which derives the partition and the
+  component count from the adjacency (tulpa 0.0.108). The two B1d spec-vs-legacy
+  parity tests run again, having been skipped since the defect was filed.
+
 # tulpaRatio 1.4.0
 
 * `tratio()` replaces `ratiod()` as the package's front door, joining the

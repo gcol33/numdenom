@@ -584,13 +584,11 @@ Rcpp::List cpp_tulpaRatio_run_nuts_specs(
 
       data.spatial_group   =
           Rcpp::as<std::vector<int>>(spatial_params["group"]);
-      data.n_spatial_units = Rcpp::as<int>(spatial_params["n_units"]);
-      data.adj_row_ptr     =
-          Rcpp::as<std::vector<int>>(spatial_params["adj_row_ptr"]);
-      data.adj_col_idx     =
-          Rcpp::as<std::vector<int>>(spatial_params["adj_col_idx"]);
-      data.n_neighbors     =
-          Rcpp::as<std::vector<int>>(spatial_params["n_neighbors"]);
+      data.set_spatial_adjacency(
+          Rcpp::as<int>(spatial_params["n_units"]),
+          Rcpp::as<std::vector<int>>(spatial_params["adj_row_ptr"]),
+          Rcpp::as<std::vector<int>>(spatial_params["adj_col_idx"]),
+          Rcpp::as<std::vector<int>>(spatial_params["n_neighbors"]));
       if (spatial_params.containsElementNamed("bym2_scale")) {
         data.bym2_scale_factor = Rcpp::as<double>(spatial_params["bym2_scale"]);
       }
