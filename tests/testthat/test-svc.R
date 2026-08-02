@@ -72,7 +72,7 @@ test_that("compute_nngp_neighbors() computes correct neighbors", {
   coords <- expand.grid(x = 1:3, y = 1:3)
   coords <- as.matrix(coords)
 
-  neighbors <- compute_nngp_neighbors(coords, k = 4)
+  neighbors <- tulpaRatio:::compute_nngp_neighbors(coords, k = 4)
 
   expect_equal(nrow(neighbors$nn_idx), 9)
   expect_equal(ncol(neighbors$nn_idx), 4)
@@ -98,7 +98,7 @@ test_that("validate_svc() resolves term indices correctly", {
   # Mock design matrix
   X <- model.matrix(~ depth, data = df)
 
-  validated <- validate_svc(svc, df, X)
+  validated <- tulpaRatio:::validate_svc(svc, df, X)
 
   expect_equal(validated$svc_indices, c(1L, 2L))
   expect_equal(validated$svc_names, c("(Intercept)", "depth"))
@@ -113,7 +113,7 @@ test_that("validate_svc() errors on missing columns", {
   df_bad <- data.frame(x = 1:10, lat = runif(10))
   X <- matrix(1, nrow = 10, ncol = 1)
 
-  expect_error(validate_svc(svc, df_bad, X), "lon")
+  expect_error(tulpaRatio:::validate_svc(svc, df_bad, X), "lon")
 })
 
 test_that("validate_svc() errors on missing term names", {
@@ -123,7 +123,7 @@ test_that("validate_svc() errors on missing term names", {
   X <- model.matrix(~ x, data = df)
   colnames(X) <- c("(Intercept)", "x")
 
-  expect_error(validate_svc(svc, df, X), "nonexistent")
+  expect_error(tulpaRatio:::validate_svc(svc, df, X), "nonexistent")
 })
 
 test_that("print.ratiod_svc() works", {
@@ -141,5 +141,5 @@ test_that("validate_spatial() skips SVC objects",
   df <- data.frame(lon = 1:5, lat = 1:5)
 
   # Should not error - SVC validation is separate
-  expect_silent(validate_spatial(svc, df))
+  expect_silent(tulpaRatio:::validate_spatial(svc, df))
 })

@@ -222,7 +222,7 @@ test_that("validate_temporal extracts time indices", {
   )
 
   temp <- temporal_rw1("time")
-  validated <- validate_temporal(temp, df)
+  validated <- tulpaRatio:::validate_temporal(temp, df)
 
   expect_equal(length(validated$time_index), 20)
   expect_equal(validated$n_times, 5)
@@ -239,7 +239,7 @@ test_that("validate_temporal with panel groups", {
   )
 
   temp <- temporal_rw1("time", group_var = "site")
-  validated <- validate_temporal(temp, df)
+  validated <- tulpaRatio:::validate_temporal(temp, df)
 
   expect_equal(length(validated$time_index), 30)
   expect_equal(validated$n_times, 5)
@@ -631,7 +631,7 @@ test_that("validate_temporal_gp extracts time values correctly", {
   )
 
   temp <- temporal_gp("time")
-  validated <- validate_temporal_gp(temp, df)
+  validated <- tulpaRatio:::validate_temporal_gp(temp, df)
 
   expect_equal(validated$n_obs, 20)
   expect_equal(length(validated$time_values), 20)
@@ -647,7 +647,7 @@ test_that("validate_temporal_gp handles date/time variables", {
   )
 
   temp <- temporal_gp("date")
-  validated <- validate_temporal_gp(temp, df)
+  validated <- tulpaRatio:::validate_temporal_gp(temp, df)
 
   expect_equal(validated$n_obs, 10)
   expect_true(is.numeric(validated$time_values))
@@ -662,7 +662,7 @@ test_that("validate_temporal_gp with grouping", {
   )
 
   temp <- temporal_gp("time", group_var = "group")
-  validated <- validate_temporal_gp(temp, df)
+  validated <- tulpaRatio:::validate_temporal_gp(temp, df)
 
   expect_equal(validated$n_groups, 3)
   # For GP, we have one effect per unique time per group
@@ -744,7 +744,7 @@ test_that("validate_tvc resolves index terms correctly", {
   X <- model.matrix(~ 1 + x, data = df)
 
   tvc <- temporal_tvc("year", terms = c(1, 2))  # Intercept and x
-  validated <- validate_tvc(tvc, df, X)
+  validated <- tulpaRatio:::validate_tvc(tvc, df, X)
 
   expect_equal(validated$n_times, 5)
   expect_equal(validated$n_tvc, 2)
@@ -763,7 +763,7 @@ test_that("validate_tvc resolves named terms correctly", {
   X <- model.matrix(~ 1 + x + z, data = df)
 
   tvc <- temporal_tvc("year", terms = c("x", "z"))
-  validated <- validate_tvc(tvc, df, X)
+  validated <- tulpaRatio:::validate_tvc(tvc, df, X)
 
   expect_equal(validated$n_tvc, 2)
   expect_equal(validated$tvc_names, c("x", "z"))
@@ -782,7 +782,7 @@ test_that("validate_tvc errors on missing terms", {
   tvc <- temporal_tvc("year", terms = c("missing_var"))
 
   expect_error(
-    validate_tvc(tvc, df, X),
+    tulpaRatio:::validate_tvc(tvc, df, X),
     regexp = "not found in design matrix"
   )
 })
@@ -798,7 +798,7 @@ test_that("validate_tvc with panel groups", {
   X <- model.matrix(~ 1 + x, data = df)
 
   tvc <- temporal_tvc("year", terms = 1, group_var = "site")
-  validated <- validate_tvc(tvc, df, X)
+  validated <- tulpaRatio:::validate_tvc(tvc, df, X)
 
   expect_equal(validated$n_times, 5)
   expect_equal(validated$n_groups, 2)
@@ -867,7 +867,7 @@ test_that("validate_rtr computes projection matrix", {
   )
 
   rtr <- temporal_rtr(temporal_rw2("year"), restrict_to = ~ temp + precip)
-  validated <- validate_rtr(rtr, df, ~ y ~ temp + precip)
+  validated <- tulpaRatio:::validate_rtr(rtr, df, ~ y ~ temp + precip)
 
   expect_true(!is.null(validated$rtr_projection))
   expect_equal(nrow(validated$rtr_projection), 50)
@@ -886,7 +886,7 @@ test_that("validate_rtr errors on missing variables", {
   rtr <- temporal_rtr(temporal_rw2("year"), restrict_to = ~ temp + missing)
 
   expect_error(
-    validate_rtr(rtr, df, ~ y ~ temp),
+    tulpaRatio:::validate_rtr(rtr, df, ~ y ~ temp),
     regexp = "not found in data"
   )
 })
@@ -894,7 +894,7 @@ test_that("validate_rtr errors on missing variables", {
 
 test_that("compute_rtr_projection is orthogonal", {
   X <- matrix(rnorm(100), 50, 2)
-  P_perp <- compute_rtr_projection(X)
+  P_perp <- tulpaRatio:::compute_rtr_projection(X)
 
   # P_perp should be symmetric
   expect_true(all(abs(P_perp - t(P_perp)) < 1e-10))
@@ -911,13 +911,13 @@ test_that("compute_rtr_projection is orthogonal", {
 
 test_that("apply_rtr_projection works correctly", {
   X <- matrix(rnorm(100), 50, 2)
-  P_perp <- compute_rtr_projection(X)
+  P_perp <- tulpaRatio:::compute_rtr_projection(X)
 
   # Random temporal effect
   f <- rnorm(50)
 
   # Projected effect
-  f_rtr <- apply_rtr_projection(f, P_perp)
+  f_rtr <- tulpaRatio:::apply_rtr_projection(f, P_perp)
 
   # f_rtr should be orthogonal to X columns
   for (j in 1:2) {

@@ -138,7 +138,7 @@ test_that("validate_spatiotemporal computes correct dimensions", {
   )
   df$x <- rnorm(nrow(df))
 
-  st_valid <- validate_spatiotemporal(st, df)
+  st_valid <- tulpaRatio:::validate_spatiotemporal(st, df)
 
   expect_equal(st_valid$n_spatial, 4)
   expect_equal(st_valid$n_times, 5)
@@ -163,7 +163,7 @@ test_that("build_st_index creates correct mappings", {
     x = rnorm(6)
   )
 
-  st_valid <- validate_spatiotemporal(st, df)
+  st_valid <- tulpaRatio:::validate_spatiotemporal(st, df)
   idx <- st_valid$st_index
 
   expect_equal(idx$S, 3)
@@ -186,9 +186,9 @@ test_that("prepare_spatiotemporal_for_hmc returns correct structure", {
   )
 
   df <- expand.grid(site = 1:3, time = 1:4)
-  st_valid <- validate_spatiotemporal(st, df)
+  st_valid <- tulpaRatio:::validate_spatiotemporal(st, df)
 
-  hmc_data <- prepare_spatiotemporal_for_hmc(st_valid, df)
+  hmc_data <- tulpaRatio:::prepare_spatiotemporal_for_hmc(st_valid, df)
 
   expect_true(hmc_data$has_spatiotemporal)
   expect_equal(hmc_data$type, "II")
@@ -199,7 +199,7 @@ test_that("prepare_spatiotemporal_for_hmc returns correct structure", {
 
 
 test_that("prepare_spatiotemporal_for_hmc handles NULL", {
-  hmc_data <- prepare_spatiotemporal_for_hmc(NULL, data.frame())
+  hmc_data <- tulpaRatio:::prepare_spatiotemporal_for_hmc(NULL, data.frame())
 
   expect_false(hmc_data$has_spatiotemporal)
   expect_equal(hmc_data$type, "none")
@@ -305,7 +305,7 @@ test_that("validate_st_gp computes dimensions correctly", {
     time = rep(1:4, each = 5)
   )
 
-  st_valid <- validate_st_gp(st_gp, df)
+  st_valid <- tulpaRatio:::validate_st_gp(st_gp, df)
 
   expect_equal(st_valid$n_obs, 20)
   expect_equal(st_valid$n_times, 4)
@@ -325,7 +325,7 @@ test_that("validate_st_gp checks for missing coordinates", {
   )
 
   expect_error(
-    validate_st_gp(st_gp, df),
+    tulpaRatio:::validate_st_gp(st_gp, df),
     "missing values"
   )
 })
@@ -341,7 +341,7 @@ test_that("validate_st_gp checks for missing time values", {
   )
 
   expect_error(
-    validate_st_gp(st_gp, df),
+    tulpaRatio:::validate_st_gp(st_gp, df),
     "missing values"
   )
 })
@@ -356,7 +356,7 @@ test_that("validate_st_gp handles Date time variable", {
     date = as.Date("2020-01-01") + 0:9
   )
 
-  st_valid <- validate_st_gp(st_gp, df)
+  st_valid <- tulpaRatio:::validate_st_gp(st_gp, df)
   expect_true(is.numeric(st_valid$time_values))
 })
 
@@ -366,7 +366,7 @@ test_that("compute_st_nngp_neighbors creates valid structure", {
   coords <- cbind(runif(15), runif(15))
   time <- rep(1:3, each = 5)
 
-  result <- compute_st_nngp_neighbors(coords, time, k = 3)
+  result <- tulpaRatio:::compute_st_nngp_neighbors(coords, time, k = 3)
 
   expect_equal(nrow(result$nn_idx), 15)
   expect_equal(ncol(result$nn_idx), 3)

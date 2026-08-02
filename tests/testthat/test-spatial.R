@@ -43,11 +43,11 @@ test_that("spatial_bym2 computes scale factor", {
 test_that("is_connected detects disconnected graphs", {
   # Connected graph
   adj_conn <- matrix(c(0, 1, 0, 1, 0, 1, 0, 1, 0), 3, 3)
-  expect_true(is_connected(adj_conn))
+  expect_true(tulpaRatio:::is_connected(adj_conn))
 
   # Disconnected graph (two isolated nodes)
   adj_disc <- matrix(c(0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0), 4, 4)
-  expect_false(is_connected(adj_disc))
+  expect_false(tulpaRatio:::is_connected(adj_disc))
 })
 
 
@@ -124,7 +124,7 @@ test_that("compute_car_rho_bounds returns valid range", {
     adj[i, i + 1] <- adj[i + 1, i] <- 1
   }
 
-  bounds <- compute_car_rho_bounds(adj)
+  bounds <- tulpaRatio:::compute_car_rho_bounds(adj)
 
   expect_true(is.numeric(bounds))
   expect_equal(length(bounds), 2)
@@ -144,7 +144,7 @@ test_that("compute_car_rho_bounds handles isolated nodes", {
   # Node 4 has no neighbors (isolated)
 
   expect_warning(
-    bounds <- compute_car_rho_bounds(adj),
+    bounds <- tulpaRatio:::compute_car_rho_bounds(adj),
     regexp = "isolated"
   )
 

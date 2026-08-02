@@ -96,7 +96,7 @@ test_that("validate_temporal_multiscale computes indices", {
     x = rnorm(55)
   )
 
-  validated <- validate_temporal_multiscale(tm, df)
+  validated <- tulpaRatio:::validate_temporal_multiscale(tm, df)
 
   expect_equal(validated$n_times, 11)
   expect_equal(length(validated$time_index), 55)
@@ -111,7 +111,7 @@ test_that("validate_temporal_multiscale handles groups", {
     site = rep(c("A", "B", "C"), each = 6)
   )
 
-  validated <- validate_temporal_multiscale(tm, df)
+  validated <- tulpaRatio:::validate_temporal_multiscale(tm, df)
 
   expect_equal(validated$n_times, 6)
   expect_equal(validated$n_groups, 3)
@@ -122,21 +122,21 @@ test_that("validate_temporal_multiscale errors for missing time variable", {
   tm <- temporal_multiscale("year")
   df <- data.frame(time = 1:10)
 
-  expect_error(validate_temporal_multiscale(tm, df), "year.*not found")
+  expect_error(tulpaRatio:::validate_temporal_multiscale(tm, df), "year.*not found")
 })
 
 test_that("validate_temporal_multiscale errors for RW2 with < 3 time points", {
   tm <- temporal_multiscale("year", trend = "rw2")
   df <- data.frame(year = c(2020, 2021))
 
-  expect_error(validate_temporal_multiscale(tm, df), "at least 3 time points")
+  expect_error(tulpaRatio:::validate_temporal_multiscale(tm, df), "at least 3 time points")
 })
 
 test_that("validate_temporal_multiscale warns for short series with seasonal", {
   tm <- temporal_multiscale("month", trend = "none", seasonal = 12, short_term = "none")
   df <- data.frame(month = 1:6)
 
-  expect_warning(validate_temporal_multiscale(tm, df), "less than seasonal period")
+  expect_warning(tulpaRatio:::validate_temporal_multiscale(tm, df), "less than seasonal period")
 })
 
 test_that("validate_temporal_multiscale builds precision structures", {
@@ -144,7 +144,7 @@ test_that("validate_temporal_multiscale builds precision structures", {
 
   df <- data.frame(year = rep(1:20, 5))
 
-  validated <- validate_temporal_multiscale(tm, df)
+  validated <- tulpaRatio:::validate_temporal_multiscale(tm, df)
 
   expect_true("trend" %in% names(validated$precision_structures))
   expect_true("seasonal" %in% names(validated$precision_structures))
@@ -161,7 +161,7 @@ test_that("validate_temporal_multiscale calculates n_temporal_params correctly",
   tm <- temporal_multiscale("t", trend = "rw1", seasonal = 4, short_term = "iid")
   df <- data.frame(t = 1:10)
 
-  validated <- validate_temporal_multiscale(tm, df)
+  validated <- tulpaRatio:::validate_temporal_multiscale(tm, df)
   expect_equal(validated$n_temporal_params, 10 + 4 + 10)
 
   # With 3 groups: 24 * 3 = 72
@@ -169,7 +169,7 @@ test_that("validate_temporal_multiscale calculates n_temporal_params correctly",
                              group_var = "g")
   df2 <- data.frame(t = rep(1:10, 3), g = rep(c("A", "B", "C"), each = 10))
 
-  validated2 <- validate_temporal_multiscale(tm2, df2)
+  validated2 <- tulpaRatio:::validate_temporal_multiscale(tm2, df2)
   expect_equal(validated2$n_temporal_params, (10 + 4 + 10) * 3)
 })
 
@@ -181,7 +181,7 @@ test_that("validate_temporal_multiscale handles factor time variable", {
                     levels = c("Q1", "Q2", "Q3", "Q4"))
   )
 
-  validated <- validate_temporal_multiscale(tm, df)
+  validated <- tulpaRatio:::validate_temporal_multiscale(tm, df)
 
   expect_equal(validated$n_times, 4)
   expect_equal(validated$time_levels, c("Q1", "Q2", "Q3", "Q4"))
