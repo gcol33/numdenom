@@ -70,12 +70,17 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // field is identified.
   const bool want_ms = (field == "icar_ms" || field == "bym2_ms");
   const bool want_st = (field == "icar_st" || field == "bym2_st");
+  // icar_collapsed_rw1 / bym2_collapsed_rw1 pair a collapsed spatial field
+  // with a companion temporal RW1 term -- the combination gcol33/tulpaRatio#27
+  // found the specialized collapsed gradient silently dropping.
   const bool want_icar = (field == "icar" || field == "icar_rw1" ||
                           field == "icar_ms" || field == "icar_st" ||
-                          field == "icar_collapsed");
+                          field == "icar_collapsed" || field == "icar_collapsed_rw1");
   const bool want_bym2 = (field == "bym2" || field == "bym2_ms" ||
-                          field == "bym2_st" || field == "bym2_collapsed");
-  const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st);
+                          field == "bym2_st" || field == "bym2_collapsed" ||
+                          field == "bym2_collapsed_rw1");
+  const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st ||
+                          field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1");
   const bool want_rw2  = (field == "rw2");
   const bool want_hsgp = (field == "hsgp");
   const bool want_tvc  = (field == "tvc");
@@ -186,8 +191,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.bym2_scale_factor = 1.0;
     // Collapsed: the field is marginalized out, so the layout allocates no
     // phi/theta and the density carries a Laplace correction at the mode.
-    data.icar_collapsed = (field == "icar_collapsed");
-    data.bym2_collapsed = (field == "bym2_collapsed");
+    data.icar_collapsed = (field == "icar_collapsed" || field == "icar_collapsed_rw1");
+    data.bym2_collapsed = (field == "bym2_collapsed" || field == "bym2_collapsed_rw1");
   } else if (want_hsgp) {
     // HSGP is an observation-level spectral field: m_per_dim^2 basis
     // coefficients plus a variance and a lengthscale. Kept at m = 3 so the

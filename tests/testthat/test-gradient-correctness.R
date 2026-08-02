@@ -24,6 +24,14 @@ STRUCTURE_FIELDS <- c("re", "re_crossed", "re_slopes", "re_slopes_corr",
 # cannot express it and the autodiff modes must refuse rather than differentiate
 # something else.
 COLLAPSED_FIELDS <- c("icar_collapsed", "bym2_collapsed")
+# A collapsed spatial field alongside a companion temporal RW1 term. The inner
+# Laplace mode-finding held beta and re_vals fixed but never added the temporal
+# offset to eta, so phi* was the mode of the wrong conditional and log det(H)
+# was evaluated at the wrong point (gcol33/tulpaRatio#27); separately, the
+# temporal block's own gradient only picked up the envelope/data-likelihood
+# term and not log det(H)'s own dependence on the temporal offset through the
+# curvature W_data.
+COLLAPSED_TEMPORAL_FIELDS <- c("icar_collapsed_rw1", "bym2_collapsed_rw1")
 ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS)
 MODES <- c("handcoded", "arena")
 AUTODIFF_MODES <- c("arena", "forward", "tape")
@@ -63,6 +71,26 @@ for (field in FIELDS) {
       )
     })
   }
+}
+
+# Collapsed + temporal only ever reaches the specialized H-mode gradient
+# (compute_gradient_icar_collapsed): the collapsed marginal has no autodiff
+# expression, so unlike FIELDS above there is no "arena" case to loop over.
+for (field in COLLAPSED_TEMPORAL_FIELDS) {
+  test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
+    expect_gt(r$n_params, 0)
+    dev <- rel_dev(r$analytic, r$finite_diff)
+    worst <- which.max(dev)
+    expect_lt(
+      max(dev),
+      1e-4,
+      label = sprintf(
+        "%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+        field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+      )
+    )
+  })
 }
 
 for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS)) {
@@ -185,7 +213,7 @@ test_that("the collapsed parameterizations are declared, not silently mis-differ
   # The templated density cannot express them, so it must say so and the
   # autodiff modes must refuse. Left undeclared, the gradient of every parameter
   # is taken against a posterior with no spatial marginal in it.
-  for (field in COLLAPSED_FIELDS) {
+  for (field in c(COLLAPSED_FIELDS, COLLAPSED_TEMPORAL_FIELDS)) {
     r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
     expect_false(is.na(r$impl_gap), label = sprintf("field = %s", field))
   }
@@ -227,8 +255,12 @@ test_that("a collapsed field refuses an autodiff gradient mode at the front door
   for (mode in AUTODIFF_MODES_STR) {
     expect_error(fit_with(mode), "collapsed ICAR", info = mode)
   }
-  # The analytic density carries the marginal, so H must still fit.
-  expect_identical(suppressWarnings(fit_with("H"))$backend, "hmc")
+  # The analytic density carries the marginal, so H must still fit, and must
+  # not fall back to a gradient-mismatch warning (gcol33/tulpaRatio#27): the
+  # inner Laplace mode-finding has to see the temporal offset the same way
+  # the log posterior does.
+  expect_warning(fit_h <- fit_with("H"), NA)
+  expect_identical(fit_h$backend, "hmc")
 })
 
 test_that("centring makes the spatial field's mean invisible to the likelihood", {

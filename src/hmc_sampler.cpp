@@ -858,6 +858,9 @@ double compute_log_post(
       }
     }
 
+    CollapsedTemporalOffset collapsed_temporal_offset =
+        collapsed_temporal_obs_offset(data, layout, params);
+
     auto cres = collapsed_icar_log_post_contribution(
         data.bym2_collapsed, tau_spatial,
         data.bym2_collapsed ? std::exp(params[layout.log_sigma_bym2_idx]) : 0.0,
@@ -865,7 +868,8 @@ double compute_log_post(
         data.bym2_scale_factor, phi_num, phi_denom,
         &params[layout.beta_num_start], &params[layout.beta_denom_start],
         re_vals_collapsed.empty() ? nullptr : re_vals_collapsed.data(),
-        data, collapsed_icar_ws());
+        data, collapsed_icar_ws(),
+        collapsed_temporal_offset.num_ptr(), collapsed_temporal_offset.denom_ptr());
 
     phi_spatial = cres.phi_spatial;
     theta_bym2 = cres.theta_bym2;
@@ -5356,6 +5360,13 @@ void compute_gradient_icar_collapsed(
         }
     }
 
+    // Companion plain temporal GMRF term, held fixed for the inner Laplace
+    // the same way beta and re_vals are (see collapsed_temporal_obs_offset).
+    CollapsedTemporalOffset collapsed_temporal_offset =
+        collapsed_temporal_obs_offset(data, layout, params);
+    const double* temporal_offset_num = collapsed_temporal_offset.num_ptr();
+    const double* temporal_offset_denom = collapsed_temporal_offset.denom_ptr();
+
     // Spatial hyperparameters
     bool is_bym2 = layout.is_bym2_collapsed;
     double tau = 0.0, sigma_total = 0.0, rho = 0.0;
@@ -5378,18 +5389,25 @@ void compute_gradient_icar_collapsed(
             beta_num, beta_denom, sigma_total, rho, data.bym2_scale_factor,
             phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, collapsed_icar_ws());
+            data, collapsed_icar_ws(), 20, 1e-6,
+            temporal_offset_num, temporal_offset_denom);
     } else {
         collapsed_lp = collapsed_icar_find_mode(
             beta_num, beta_denom, tau, phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, collapsed_icar_ws());
+            data, collapsed_icar_ws(), 20, 1e-6,
+            temporal_offset_num, temporal_offset_denom);
     }
 
     // ---- Outer priors (simple analytical, don't depend on phi*) ----
     beta_gradient_prior(data, layout, beta_num, beta_denom, grad.data());
     re_gradient_prior(data, layout, re, grad.data(), sigma_re);
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
+
+    // Filled by whichever branch below runs; read afterwards to scatter a
+    // companion temporal term's likelihood gradient (both were computed at
+    // the correct, temporal-inclusive eta).
+    std::vector<double> resid_num(N), resid_denom(N);
 
     // ---- ICAR H-mode: analytical envelope + analytical Laplace ----
     // BYM2: numerical fallback (TODO: implement BYM2 H-mode)
@@ -5398,13 +5416,13 @@ void compute_gradient_icar_collapsed(
         // At mode, ∂f/∂φ = 0, so d/dθ[f(φ*,θ)] = ∂f/∂θ|_{φ*}
 
         // A1: Data LL gradient via residual scattering
-        std::vector<double> resid_num(N), resid_denom(N);
         collapsed_icar_compute_residuals(
             collapsed_icar_ws(), beta_num, beta_denom,
             phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
             0.0, 0.0,  // not BYM2
-            data, resid_num.data(), resid_denom.data());
+            data, resid_num.data(), resid_denom.data(),
+            temporal_offset_num, temporal_offset_denom);
 
         // Scatter residuals to beta_num: X_num' * resid_num
         for (int k = 0; k < data.p_num; k++) {
@@ -5453,6 +5471,8 @@ void compute_gradient_icar_collapsed(
                     eta_num_i += re_vals[data.re_group[i] - 1];
                     if (!is_binomial) eta_denom_i += re_vals[data.re_group[i] - 1];
                 }
+                if (temporal_offset_num != nullptr) eta_num_i += temporal_offset_num[i];
+                if (!is_binomial && temporal_offset_denom != nullptr) eta_denom_i += temporal_offset_denom[i];
 
                 double mu_num = std::exp(std::min(eta_num_i, 20.0));
 
@@ -5535,7 +5555,8 @@ void compute_gradient_icar_collapsed(
             collapsed_icar_ws(), beta_num, beta_denom,
             tau, phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, layout, n_params, tulpa::s2z_precision(data.n_spatial_units));
+            data, layout, n_params, tulpa::s2z_precision(data.n_spatial_units),
+            temporal_offset_num, temporal_offset_denom);
 
         if (laplace_result.success) {
             for (int j = 0; j < n_params; j++) {
@@ -5556,6 +5577,8 @@ void compute_gradient_icar_collapsed(
                             ? cp_l.sigma_re * cp_l.re[g] : cp_l.re[g];
                     }
                 }
+                CollapsedTemporalOffset temporal_offset_l =
+                    collapsed_temporal_obs_offset(data, layout, p);
                 CollapsedICARWorkspace temp_ws;
                 temp_ws.init(S, false);
                 temp_ws.phi_star = collapsed_icar_ws().phi_star;
@@ -5564,7 +5587,8 @@ void compute_gradient_icar_collapsed(
                     cp_l.beta_num, cp_l.beta_denom, tau_l,
                     cp_l.phi_num, cp_l.phi_denom,
                     re_vals_l.empty() ? nullptr : re_vals_l.data(),
-                    data, temp_ws);
+                    data, temp_ws, 20, 1e-6,
+                    temporal_offset_l.num_ptr(), temporal_offset_l.denom_ptr());
                 double lp = mode_lp + temp_ws.laplace_log_det;
                 lp += (data.tau_spatial_shape - 1.0) * std::log(tau_l) - data.tau_spatial_rate * tau_l
                       + p[layout.log_tau_spatial_idx];
@@ -5596,13 +5620,13 @@ void compute_gradient_icar_collapsed(
 
         // === Part A: Envelope theorem gradient ===
         // A1: Data LL gradient via residual scattering
-        std::vector<double> resid_num(N), resid_denom(N);
         collapsed_icar_compute_residuals(
             collapsed_icar_ws(), beta_num, beta_denom,
             phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
             a, c_bym2,  // BYM2 scaling
-            data, resid_num.data(), resid_denom.data());
+            data, resid_num.data(), resid_denom.data(),
+            temporal_offset_num, temporal_offset_denom);
 
         // Scatter residuals to beta_num
         for (int k = 0; k < data.p_num; k++) {
@@ -5652,6 +5676,8 @@ void compute_gradient_icar_collapsed(
                     eta_num_i += re_vals[data.re_group[i] - 1];
                     if (!is_binomial) eta_denom_i += re_vals[data.re_group[i] - 1];
                 }
+                if (temporal_offset_num != nullptr) eta_num_i += temporal_offset_num[i];
+                if (!is_binomial && temporal_offset_denom != nullptr) eta_denom_i += temporal_offset_denom[i];
                 double mu_num = std::exp(std::min(eta_num_i, 20.0));
 
                 switch (data.model_type) {
@@ -5744,7 +5770,8 @@ void compute_gradient_icar_collapsed(
             a, c_bym2, rho,
             phi_num, phi_denom,
             re_vals.empty() ? nullptr : re_vals.data(),
-            data, layout, n_params, tulpa::s2z_precision(data.n_spatial_units));
+            data, layout, n_params, tulpa::s2z_precision(data.n_spatial_units),
+            temporal_offset_num, temporal_offset_denom);
 
         if (laplace_result.success) {
             for (int j = 0; j < n_params; j++) {
@@ -5768,6 +5795,8 @@ void compute_gradient_icar_collapsed(
                             ? cp_l.sigma_re * cp_l.re[g] : cp_l.re[g];
                     }
                 }
+                CollapsedTemporalOffset temporal_offset_l =
+                    collapsed_temporal_obs_offset(data, layout, p);
                 CollapsedICARWorkspace temp_ws;
                 temp_ws.init(S, true);
                 temp_ws.phi_star = collapsed_icar_ws().phi_star;
@@ -5777,7 +5806,8 @@ void compute_gradient_icar_collapsed(
                     cp_l.beta_num, cp_l.beta_denom, sigma_l, rho_l, data.bym2_scale_factor,
                     cp_l.phi_num, cp_l.phi_denom,
                     re_vals_l.empty() ? nullptr : re_vals_l.data(),
-                    data, temp_ws);
+                    data, temp_ws, 20, 1e-6,
+                    temporal_offset_l.num_ptr(), temporal_offset_l.denom_ptr());
                 return temp_ws.laplace_log_det;
             };
             const double eps = 1e-5;
@@ -5806,11 +5836,57 @@ void compute_gradient_icar_collapsed(
         grad[layout.logit_rho_bym2_idx] += 1.0 - 2.0 * rho;
     }
 
+    // ---- Companion temporal GMRF: gradient + prior ----
+    // resid_num/resid_denom above are computed at the correct (temporal-
+    // inclusive) eta, so scattering them into the temporal likelihood
+    // gradient is the same envelope-theorem step as the beta/RE scatter.
+    if (collapsed_temporal_offset.num.size() == (size_t)N) {
+        int T_temporal = layout.temporal_end - layout.temporal_start;
+        double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
+        double rho_ar1 = 0.5;
+        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
+            rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
+        }
+        // tau_temporal_prior_grad assigns (=) rather than accumulates, so it
+        // has to run before temporal_gmrf_prior_grad's += -- same order as
+        // every other call site (e.g. compute_gradient_composite).
+        tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
+        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
+            grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+
+        // Seed with the Laplace log-det's own temporal gradient (already added
+        // into grad[] by the Part B loop above -- log det(H) depends on eta,
+        // hence on the temporal offset, through the curvature W_data, not just
+        // through phi*'s value). temporal_gmrf_prior_grad assigns (=) rather
+        // than accumulates when it writes the likelihood term, so that
+        // contribution has to be folded in here first or it gets overwritten.
+        std::vector<double> grad_temporal_lik(T_temporal, 0.0);
+        for (int t = 0; t < T_temporal; t++) {
+            grad_temporal_lik[t] = grad[layout.temporal_start + t];
+        }
+        for (int i = 0; i < N; i++) {
+            if (data.temporal_time_idx.empty() || data.temporal_time_idx[i] <= 0) continue;
+            int t = data.temporal_time_idx[i] - 1;
+            int g = data.temporal_group_idx[i] - 1;
+            int t_base = g * data.n_times + t;
+            if (t_base < 0 || t_base >= T_temporal) continue;
+            grad_temporal_lik[t_base] += data.temporal_shared ? (resid_num[i] + resid_denom[i]) : resid_num[i];
+        }
+        temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
+                                 &params[layout.temporal_start], T_temporal,
+                                 grad_temporal_lik.data(), grad.data());
+    }
+
     // ---- NC transform for RE ----
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
 
     // ---- Log-posterior ----
-    if (log_post_out) {
+    // A companion temporal term adds prior mass (temporal_gmrf_prior_grad above
+    // has no matching log-density helper), so fall back to the authoritative
+    // compute_log_post rather than hand-derive that term a second time here.
+    if (log_post_out && collapsed_temporal_offset.num.size() == (size_t)N) {
+        *log_post_out = compute_log_post(params, data, layout);
+    } else if (log_post_out) {
         double lp = collapsed_lp + collapsed_icar_ws().laplace_log_det;
 
         // Beta priors

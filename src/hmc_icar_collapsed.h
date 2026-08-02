@@ -626,7 +626,11 @@ inline UnitLikResult compute_unit_lik(
     const ModelData& data,
     bool is_binomial,
     const int* obs_list = nullptr,  // pre-filtered obs indices at this unit (or NULL)
-    int n_obs = -1                  // number of obs at this unit (-1 = scan all)
+    int n_obs = -1,                 // number of obs at this unit (-1 = scan all)
+    const double* obs_offset_num = nullptr,   // additive per-observation offset on eta_num
+                                               // (e.g. a companion temporal effect), length
+                                               // data.N, or NULL if the model has none
+    const double* obs_offset_denom = nullptr  // same, for eta_denom (NULL if not shared there)
 ) {
     UnitLikResult res = {0.0, 0.0, 0.0};
     int N = (n_obs >= 0) ? n_obs : data.N;
@@ -654,6 +658,11 @@ inline UnitLikResult compute_unit_lik(
             eta_num_i += re_val;
             if (!is_binomial) eta_denom_i += re_val;
         }
+
+        // Add companion offset (e.g. temporal): held fixed for this inner
+        // optimization, same as beta and re_vals above.
+        if (obs_offset_num != nullptr) eta_num_i += obs_offset_num[i];
+        if (!is_binomial && obs_offset_denom != nullptr) eta_denom_i += obs_offset_denom[i];
 
         // Per-family likelihood, gradient, Hessian
         double mu_num = std::exp(std::min(eta_num_i, 20.0));
@@ -750,7 +759,9 @@ inline double collapsed_icar_find_mode(
     const ModelData& data,
     CollapsedICARWorkspace& ws,
     int max_newton = 20,
-    double newton_tol = 1e-6
+    double newton_tol = 1e-6,
+    const double* obs_offset_num = nullptr,   // companion effect (e.g. temporal) on eta_num
+    const double* obs_offset_denom = nullptr  // same, for eta_denom (NULL if not shared there)
 ) {
     int S = data.n_spatial_units;
     bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
@@ -775,8 +786,11 @@ inline double collapsed_icar_find_mode(
 
     std::vector<double> Qphi(S);
     std::vector<double> delta(S, 0.0);
+    double grad_norm = 0.0;
+    int newton_iters_used = 0;
 
     for (int newton_iter = 0; newton_iter < max_newton; newton_iter++) {
+        newton_iters_used = newton_iter + 1;
         // Compute per-unit data likelihood, gradient, and Hessian
         std::fill(ws.grad.begin(), ws.grad.end(), 0.0);
         std::fill(ws.W_data.begin(), ws.W_data.end(), 0.0);
@@ -788,7 +802,7 @@ inline double collapsed_icar_find_mode(
                                                  beta_num, beta_denom,
                                                  phi_num, phi_denom,
                                                  re_vals, data, is_binomial,
-                                                 obs_s, n_obs_s);
+                                                 obs_s, n_obs_s, obs_offset_num, obs_offset_denom);
             ws.grad[s] = lr.grad;
             ws.W_data[s] = std::max(lr.neg_hess, 1e-8);
         }
@@ -803,7 +817,7 @@ inline double collapsed_icar_find_mode(
         }
 
         // Check convergence
-        double grad_norm = 0.0;
+        grad_norm = 0.0;
         for (int i = 0; i < S; i++) grad_norm += ws.grad[i] * ws.grad[i];
         grad_norm = std::sqrt(grad_norm);
 
@@ -827,7 +841,7 @@ inline double collapsed_icar_find_mode(
                                              beta_num, beta_denom,
                                              phi_num, phi_denom,
                                              re_vals, data, is_binomial,
-                                             obs_s, n_obs_s);
+                                             obs_s, n_obs_s, obs_offset_num, obs_offset_denom);
         data_ll += lr.ll;
         ws.W_data[s] = std::max(lr.neg_hess, 1e-8);  // Update for Laplace
     }
@@ -860,7 +874,9 @@ inline double collapsed_bym2_find_mode(
     const ModelData& data,
     CollapsedICARWorkspace& ws,
     int max_newton = 20,
-    double newton_tol = 1e-6
+    double newton_tol = 1e-6,
+    const double* obs_offset_num = nullptr,   // companion effect (e.g. temporal) on eta_num
+    const double* obs_offset_denom = nullptr  // same, for eta_denom (NULL if not shared there)
 ) {
     int S = data.n_spatial_units;
     bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
@@ -918,7 +934,7 @@ inline double collapsed_bym2_find_mode(
                                                  beta_num, beta_denom,
                                                  phi_num, phi_denom,
                                                  re_vals, data, is_binomial,
-                                                 obs_s, n_obs_s);
+                                                 obs_s, n_obs_s, obs_offset_num, obs_offset_denom);
             // Data gradients w.r.t. phi and theta (chain rule through b_s)
             ws.grad[s] = lr.grad * a;          // dLL/dphi_s = dLL/db * a
             ws.grad[S + s] = lr.grad * c;      // dLL/dtheta_s = dLL/db * c
@@ -970,7 +986,7 @@ inline double collapsed_bym2_find_mode(
                                              beta_num, beta_denom,
                                              phi_num, phi_denom,
                                              re_vals, data, is_binomial,
-                                             obs_s, n_obs_s);
+                                             obs_s, n_obs_s, obs_offset_num, obs_offset_denom);
         data_ll += lr.ll;
         ws.W_data[s] = std::max(lr.neg_hess, 1e-8);
     }
@@ -1012,7 +1028,9 @@ inline void collapsed_icar_compute_residuals(
     double a_bym2, double c_bym2,  // BYM2 scaling factors (a=0, c=0 for ICAR)
     const ModelData& data,
     double* resid_num,  // length N
-    double* resid_denom // length N
+    double* resid_denom, // length N
+    const double* obs_offset_num = nullptr,   // companion effect (e.g. temporal) on eta_num
+    const double* obs_offset_denom = nullptr  // same, for eta_denom (NULL if not shared there)
 ) {
     int N = data.N;
     bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
@@ -1044,6 +1062,9 @@ inline void collapsed_icar_compute_residuals(
             eta_num_i += re_vals[data.re_group[i] - 1];
             if (!is_binomial) eta_denom_i += re_vals[data.re_group[i] - 1];
         }
+
+        if (obs_offset_num != nullptr) eta_num_i += obs_offset_num[i];
+        if (!is_binomial && obs_offset_denom != nullptr) eta_denom_i += obs_offset_denom[i];
 
         double mu_num = std::exp(std::min(eta_num_i, 20.0));
 
@@ -1295,7 +1316,9 @@ inline LaplaceGradFullResult compute_laplace_gradient_icar_H(
     const ModelData& data,
     const ratiod_hmc::ParamLayout& layout,
     int n_params,
-    double lambda_s2z
+    double lambda_s2z,
+    const double* obs_offset_num = nullptr,   // companion effect (e.g. temporal) on eta_num
+    const double* obs_offset_denom = nullptr  // same, for eta_denom (NULL if not shared there)
 ) {
     int S = ws.S;
     int N = data.N;
@@ -1372,6 +1395,7 @@ inline LaplaceGradFullResult compute_laplace_gradient_icar_H(
         Hinv_diag(s) = Ainv_diag(s) - wb_scale * u_ones(s) * u_ones(s);
     }
 
+
     // ---- Phase 2: Per-obs derivatives, aggregate per-site ----
     std::vector<double> dWdphi(S, 0.0);
 
@@ -1404,6 +1428,8 @@ inline LaplaceGradFullResult compute_laplace_gradient_icar_H(
             eta_num_i += re_vals[data.re_group[i] - 1];
             if (!is_binomial) eta_denom_i += re_vals[data.re_group[i] - 1];
         }
+        if (obs_offset_num != nullptr) eta_num_i += obs_offset_num[i];
+        if (!is_binomial && obs_offset_denom != nullptr) eta_denom_i += obs_offset_denom[i];
 
         double mu_num = std::exp(std::min(eta_num_i, 20.0));
         double w_n = 0.0, w_d = 0.0;
@@ -1518,6 +1544,7 @@ inline LaplaceGradFullResult compute_laplace_gradient_icar_H(
     icar_precision_matvec(ws.phi_star.data(), Qphi.data(), S,
                           data.adj_row_ptr, data.adj_col_idx, data.n_neighbors);
 
+
     // ---- Phase 6: Finalize per-obs coefficients ----
     // coeff[i] = Hinv_diag[s(i)] * dw_deta[i] - u[s(i)] * w[i]
     // These combine the direct (∂W/∂θ) and indirect (through φ* movement) terms
@@ -1564,6 +1591,27 @@ inline LaplaceGradFullResult compute_laplace_gradient_icar_H(
                         -0.5 * (obs_dw_deta_num[i] + obs_dw_deta_den[i]);
                 }
             }
+        }
+    }
+
+    // Companion temporal GMRF (e.g. RW1): same additive-in-eta structure as
+    // RE above, so the Laplace log-det picks it up the same way. Without
+    // this the envelope-theorem term in compute_gradient_icar_collapsed is
+    // the only contribution the temporal block gets, which is what left
+    // gcol33/tulpaRatio#27's fix still disagreeing with the numerical
+    // reference: log det(H) depends on eta (hence on the temporal offset)
+    // through the curvature W_data, not only through phi*'s value.
+    if (obs_offset_num != nullptr) {
+        for (int i = 0; i < N; i++) {
+            if (data.temporal_time_idx.empty() || data.temporal_time_idx[i] <= 0) continue;
+            int t = data.temporal_time_idx[i] - 1;
+            int g = data.temporal_group_idx[i] - 1;
+            int t_base = g * data.n_times + t;
+            if (t_base < 0 || t_base >= (layout.temporal_end - layout.temporal_start)) continue;
+            double contrib = (obs_offset_denom != nullptr)
+                ? -0.5 * (obs_dw_deta_num[i] + obs_dw_deta_den[i])
+                : -0.5 * obs_dw_deta_num[i];
+            result.laplace_grad[layout.temporal_start + t_base] += contrib;
         }
     }
 
@@ -1615,7 +1663,9 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
     const ModelData& data,
     const ratiod_hmc::ParamLayout& layout,
     int n_params,
-    double lambda_s2z
+    double lambda_s2z,
+    const double* obs_offset_num = nullptr,   // companion effect (e.g. temporal) on eta_num
+    const double* obs_offset_denom = nullptr  // same, for eta_denom (NULL if not shared there)
 ) {
     int S = ws.S;
     int dim = 2 * S;
@@ -1714,6 +1764,8 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
             eta_num_i += re_vals[data.re_group[i] - 1];
             if (!is_binomial) eta_denom_i += re_vals[data.re_group[i] - 1];
         }
+        if (obs_offset_num != nullptr) eta_num_i += obs_offset_num[i];
+        if (!is_binomial && obs_offset_denom != nullptr) eta_denom_i += obs_offset_denom[i];
 
         double mu_num = std::exp(std::min(eta_num_i, 20.0));
         double w_n = 0.0, w_d = 0.0;
@@ -1863,6 +1915,23 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
         }
     }
 
+    // Companion temporal GMRF (e.g. RW1): same additive-in-eta structure as
+    // RE above -- see the ICAR version of this function for why log det(H)
+    // needs this (gcol33/tulpaRatio#27).
+    if (obs_offset_num != nullptr) {
+        for (int i = 0; i < N; i++) {
+            if (data.temporal_time_idx.empty() || data.temporal_time_idx[i] <= 0) continue;
+            int t = data.temporal_time_idx[i] - 1;
+            int g = data.temporal_group_idx[i] - 1;
+            int t_base = g * data.n_times + t;
+            if (t_base < 0 || t_base >= (layout.temporal_end - layout.temporal_start)) continue;
+            double contrib = (obs_offset_denom != nullptr)
+                ? -0.5 * (obs_dw_deta_num[i] + obs_dw_deta_den[i])
+                : -0.5 * obs_dw_deta_num[i];
+            result.laplace_grad[layout.temporal_start + t_base] += contrib;
+        }
+    }
+
     // ---- Phase 6: Direct sigma/rho traces (structural H change) ----
     // dH/d(log_sigma)_direct: [[2a²W, 2acW], [2acW, 2c²W]]
     double tr_sigma_direct = 0.0;
@@ -1968,6 +2037,51 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
 }
 
 // =========================================================================
+// Companion offset: a plain temporal GMRF term (RW1/RW2/AR1) alongside a
+// collapsed spatial field. The inner Laplace mode-finding above treats beta,
+// re_vals and this offset identically -- all held fixed while phi*/theta* is
+// found -- so a companion temporal effect has to enter eta there the same
+// way, or phi* is the mode of the wrong conditional and the Laplace
+// correction is evaluated at the wrong point (gcol33/tulpaRatio#27). This is
+// the only companion structure threaded through today; TVC, a spatiotemporal
+// interaction, a temporal GP, multiscale temporal, latent factors and HSGP
+// remain untouched (tracked separately).
+// =========================================================================
+
+struct CollapsedTemporalOffset {
+    std::vector<double> num;
+    std::vector<double> denom;  // empty unless the temporal term is shared
+    const double* num_ptr() const { return num.empty() ? nullptr : num.data(); }
+    const double* denom_ptr() const { return denom.empty() ? nullptr : denom.data(); }
+};
+
+inline CollapsedTemporalOffset collapsed_temporal_obs_offset(
+    const ModelData& data,
+    const ratiod_hmc::ParamLayout& layout,
+    const std::vector<double>& params
+) {
+    CollapsedTemporalOffset out;
+    const bool has_gmrf_temporal = layout.has_temporal && !layout.is_temporal_gp &&
+                                    !layout.has_multiscale_temporal && !layout.has_tvc;
+    if (!has_gmrf_temporal) return out;
+
+    const double* phi_temporal = &params[layout.temporal_start];
+    const int T_temporal = layout.temporal_end - layout.temporal_start;
+    out.num.assign(data.N, 0.0);
+    if (data.temporal_shared) out.denom.assign(data.N, 0.0);
+    for (int i = 0; i < data.N; i++) {
+        if (data.temporal_time_idx.empty() || data.temporal_time_idx[i] <= 0) continue;
+        int t = data.temporal_time_idx[i] - 1;
+        int g = data.temporal_group_idx[i] - 1;
+        int t_base = g * data.n_times + t;
+        if (t_base < 0 || t_base >= T_temporal) continue;
+        out.num[i] = phi_temporal[t_base];
+        if (data.temporal_shared) out.denom[i] = phi_temporal[t_base];
+    }
+    return out;
+}
+
+// =========================================================================
 // High-level wrappers for compute_log_post integration
 // These encapsulate all collapsed ICAR/BYM2 logic so the main log_post
 // function only needs a single call instead of 80+ lines of inline code.
@@ -1998,7 +2112,9 @@ inline CollapsedICARLogPostResult collapsed_icar_log_post_contribution(
     const double* beta_num, const double* beta_denom,
     const double* re_vals,     // nullptr if no RE
     const ModelData& data,
-    CollapsedICARWorkspace& ws) {
+    CollapsedICARWorkspace& ws,
+    const double* obs_offset_num = nullptr,   // companion effect (e.g. temporal) on eta_num
+    const double* obs_offset_denom = nullptr) {  // same, for eta_denom (NULL if not shared there)
 
     CollapsedICARLogPostResult res;
     int S = data.n_spatial_units;
@@ -2008,7 +2124,8 @@ inline CollapsedICARLogPostResult collapsed_icar_log_post_contribution(
 
         collapsed_bym2_find_mode(
             beta_num, beta_denom, sigma_total, rho, bym2_scale_factor,
-            phi_num, phi_denom, re_vals, data, ws);
+            phi_num, phi_denom, re_vals, data, ws,
+            20, 1e-6, obs_offset_num, obs_offset_denom);
 
         res.phi_spatial = ws.phi_star.data();
         res.theta_bym2 = ws.theta_star.data();
@@ -2033,7 +2150,7 @@ inline CollapsedICARLogPostResult collapsed_icar_log_post_contribution(
         // Collapsed ICAR
         collapsed_icar_find_mode(
             beta_num, beta_denom, tau_spatial, phi_num, phi_denom,
-            re_vals, data, ws);
+            re_vals, data, ws, 20, 1e-6, obs_offset_num, obs_offset_denom);
 
         res.phi_spatial = ws.phi_star.data();
 
