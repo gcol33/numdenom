@@ -1,5 +1,24 @@
 # tulpaRatio 1.4.3
 
+* **The Gibbs BYM2 sampler no longer leaks the spatial field's level into the
+  intercept unchecked (#15).** The per-site update held the structured field
+  (`phi`) to sum zero by moving its mean into the intercept every sweep,
+  unconditionally: no acceptance test weighed that move against the
+  intercept's own prior. `dev_notes/gibbs_prior_recovery.R` (now
+  `tests/testthat/test-gibbs-prior-recovery.R`) fits with zero binomial trials,
+  where the likelihood is flat and the posterior must equal the prior exactly;
+  under a `N(0, 0.5^2)` intercept prior the sampled sd came out at 1049 instead
+  of 0.5, a ~2000x inflation. The move now competes for acceptance like every
+  other update that touches the intercept, and gained a dedicated block-level
+  move (mirroring the one the unstructured component already had) so the
+  now-resisted level direction still mixes: BYM2 intercept ESS is 749 at
+  iter=2000/warmup=1000 where it used to need the same bar ICAR clears at
+  1000/500. The Gibbs priors already matched `compute_log_post`'s (Half-Cauchy
+  `sigma_total`, Uniform(0,1) `rho`, Gamma `tau`, threaded through `fit_gibbs()`
+  via `priors`) from prior work on this issue; this closes out the remaining
+  checklist items, including removing the unused `pc_lambda` left over from an
+  earlier tau update.
+
 * **The two log posteriors are now the same function (#18).** `compute_log_post`
   and the templated `compute_log_post_impl<double>` that the `A_r` / `A` / `A_t`
   gradient modes differentiate returned different numbers on every model and

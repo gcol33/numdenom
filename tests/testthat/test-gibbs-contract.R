@@ -128,19 +128,29 @@ test_that("the intercept mixes under a spatial field", {
   skip_if_not_installed("posterior")
   d <- gibbs_field_data()
 
-  intercept_ess <- function(spatial) {
+  intercept_ess <- function(spatial, iter, warmup) {
     fit <- tratio(y | trials ~ x, data = d$df, family = ratiod_binomial(),
                   spatial = spatial,
-                  control = list(iter = 1000, warmup = 500, chains = 4, seed = 99, verbose = FALSE))
+                  control = list(iter = iter, warmup = warmup, chains = 4, seed = 99, verbose = FALSE))
     dr <- as.matrix(fit$draws)
     posterior::ess_bulk(matrix(dr[, "beta_num[1]"],
                                nrow = nrow(dr) / fit$chains, ncol = fit$chains))
   }
 
   # Measured on this fit: 76 before the field was identified against the
-  # intercept, 212 after. BYM2 carries the second level too: 6 before, 178 after.
-  expect_gt(intercept_ess(spatial_car(d$adj, level = "group", group_var = "site")), 120)
-  expect_gt(intercept_ess(spatial_bym2(d$adj, level = "group", group_var = "site")), 80)
+  # intercept, 212 after (#13).
+  expect_gt(intercept_ess(spatial_car(d$adj, level = "group", group_var = "site"), 1000, 500), 120)
+
+  # BYM2's phi update used to fold the field's level into the intercept
+  # unconditionally, with no acceptance test weighing the intercept's own
+  # prior. That gave a fast-looking ESS (178 at 1000/500) but the level was
+  # not drawn from the posterior: dev_notes/gibbs_prior_recovery.R caught the
+  # intercept's variance inflated by ~2000x under a tight prior. Weighing the
+  # move against the intercept's prior (#15) removes the bias but costs
+  # iterations on this weakly-identified direction -- rhat is 1.16 at 1000/500
+  # and 1.01 at 2000/1000, so the bar here needs double the warmup ICAR clears
+  # it with.
+  expect_gt(intercept_ess(spatial_bym2(d$adj, level = "group", group_var = "site"), 2000, 1000), 300)
 })
 
 test_that("single-chain and BYM2 fits keep the contract", {

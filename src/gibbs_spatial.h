@@ -444,9 +444,6 @@ inline GibbsResult run_gibbs_icar(
     int beta_accept = 0, beta_total = 0;
     int disp_accept = 0, disp_total = 0;
 
-    // PC prior for tau: P(sigma > 1) = 0.01 => lambda = -log(0.01)/1 = 4.605
-    double pc_lambda = 4.605;
-
     // TVC initialization
     int tvc_n_w = d.has_tvc ? (d.tvc_n_groups * d.tvc_n_terms * d.tvc_n_times) : 0;
     std::vector<double> tvc_w(tvc_n_w, 0.0);
@@ -872,6 +869,7 @@ inline GibbsResult run_gibbs_bym2(
     double sigma_scale = 0.1;
     double rho_scale = 0.3;
     double level_scale = 0.2;
+    double phi_level_scale = 0.2;
     double sigma_joint_scale = 0.2;
     double rho_joint_scale = 0.2;
 
@@ -883,6 +881,7 @@ inline GibbsResult run_gibbs_bym2(
     int sigma_accept_cnt = 0, sigma_total_cnt = 0;
     int rho_accept_cnt = 0, rho_total_cnt = 0;
     int level_accept_cnt = 0, level_total_cnt = 0;
+    int phi_level_accept_cnt = 0, phi_level_total_cnt = 0;
     int sigma_joint_accept_cnt = 0, sigma_joint_total_cnt = 0;
     int rho_joint_accept_cnt = 0, rho_joint_total_cnt = 0;
 
@@ -910,46 +909,92 @@ inline GibbsResult run_gibbs_bym2(
         double sigma_s = sigma_total * std::sqrt(rho);
 
         // ---- 1. Update phi (ICAR structured) via MH ----
-        for (int s = 0; s < S; s++) {
-            // phi is the standardised ICAR field: precision 1, scale carried by
-            // sigma and rho. Drawing from its own full conditional is what makes
-            // the acceptance ratio the likelihood ratio alone.
-            auto [cond_mean, cond_prec] = icar_conditional(
-                s, phi.data(), 1.0, d.adj_row_ptr, d.adj_col_idx, d.n_neighbors);
+        // phi is the standardised ICAR field: precision 1, scale carried by
+        // sigma and rho. Drawing from its own full conditional is what makes
+        // the acceptance ratio the likelihood ratio alone -- for the field
+        // itself. The field reaches eta as sigma_s * scale_factor * phi, so
+        // holding phi to sum zero moves sigma_s * scale_factor * phi_mean into
+        // the intercept every sweep; that move has its own prior (the
+        // intercept's N(0, sigma_beta^2)) and belongs in the same acceptance
+        // test as the site update, exactly as run_gibbs_icar's phi_off does
+        // above. Deciding it unconditionally after the sweep (no MH test)
+        // ignored the intercept's prior and let the field's level random-walk
+        // into the intercept without resistance.
+        {
+            const double c = sigma_s * scale_factor;
+            double phi_off = 0.0;
+            for (int s = 0; s < S; s++) {
+                auto [cond_mean, cond_prec] = icar_conditional(
+                    s, phi.data(), 1.0, d.adj_row_ptr, d.adj_col_idx, d.n_neighbors);
 
-            double phi_prop = cond_mean + rnorm(rng) / std::sqrt(cond_prec + 1e-10);
+                const double actual_s = phi[s] + phi_off;
+                const double phi_prop = cond_mean + phi_off
+                                      + rnorm(rng) / std::sqrt(cond_prec + 1e-10);
+                const double delta = phi_prop - actual_s;
+                const double phi_shift = constrain ? delta / S : 0.0;
+                const double eta_shift = c * phi_shift;
 
-            // Need full site log-lik with proposed phi change
-            double old_phi_s = phi[s];
-            double ll_curr = site_log_lik_bym2(s, phi.data(), theta.data(),
-                                                sigma_total, rho, scale_factor,
-                                                beta_num.data(), beta_denom.data(),
-                                                disp_num_val, disp_denom_val, d);
-            phi[s] = phi_prop;
-            double ll_prop = site_log_lik_bym2(s, phi.data(), theta.data(),
-                                                sigma_total, rho, scale_factor,
-                                                beta_num.data(), beta_denom.data(),
-                                                disp_num_val, disp_denom_val, d);
+                phi[s] = actual_s;
+                double ll_curr = site_log_lik_bym2(s, phi.data(), theta.data(),
+                                                    sigma_total, rho, scale_factor,
+                                                    beta_num.data(), beta_denom.data(),
+                                                    disp_num_val, disp_denom_val, d);
+                phi[s] = actual_s + delta;
+                double ll_prop = site_log_lik_bym2(s, phi.data(), theta.data(),
+                                                    sigma_total, rho, scale_factor,
+                                                    beta_num.data(), beta_denom.data(),
+                                                    disp_num_val, disp_denom_val, d);
 
-            if (std::log(runif(rng)) < ll_prop - ll_curr) {
-                phi_accept[s]++;
-            } else {
-                phi[s] = old_phi_s;  // Reject
+                double log_ratio = ll_prop - ll_curr;
+                if (constrain) {
+                    log_ratio += intercept_shift_log_prior_ratio(
+                        beta_num.data(), beta_denom.data(), d, eta_shift);
+                }
+
+                if (std::log(runif(rng)) < log_ratio) {
+                    if (constrain) {
+                        phi_off -= phi_shift;
+                        beta_num[d.icept_num] += eta_shift;
+                        if (d.icept_denom >= 0) beta_denom[d.icept_denom] += eta_shift;
+                    }
+                    phi_accept[s]++;
+                } else {
+                    phi[s] = actual_s;  // Reject
+                }
+                phi_total[s]++;
             }
-            phi_total[s]++;
+            if (phi_off != 0.0) {
+                for (int s = 0; s < S; s++) phi[s] += phi_off;
+            }
         }
 
-        // Sum-to-zero constraint on the structured component. The field reaches
-        // eta as sigma_s * scale_factor * phi, so that product of the mean is
-        // what the intercept takes on and eta is unchanged across the shift.
+        // ---- 1b. Move the structured component's level against the intercept ----
+        // A uniform shift phi -> phi - c leaves phi'Qphi exactly unchanged (Q's
+        // null space is the constant vector), so at eta held fixed this move has
+        // no likelihood term and no prior term for phi itself -- only the
+        // intercept's own N(0, sigma_beta^2) resists it. Theta already has this
+        // move in step 2b; without the analogous move here, the field's level
+        // only explored the intercept through the site-by-site test above, one
+        // small accepted step at a time.
         if (constrain) {
-            double phi_mean = 0.0;
-            for (int s = 0; s < S; s++) phi_mean += phi[s];
-            phi_mean /= S;
-            for (int s = 0; s < S; s++) phi[s] -= phi_mean;
-            const double level = sigma_s * scale_factor * phi_mean;
-            beta_num[d.icept_num] += level;
-            if (d.icept_denom >= 0) beta_denom[d.icept_denom] += level;
+            const double c = phi_level_scale * rnorm(rng);
+            const double shift = sigma_s * scale_factor * c;
+
+            const double prec_beta = 1.0 / (d.sigma_beta * d.sigma_beta);
+            const double b_num = beta_num[d.icept_num];
+            double log_ratio = -0.5 * prec_beta * (shift * shift + 2.0 * b_num * shift);
+            if (d.icept_denom >= 0) {
+                const double b_den = beta_denom[d.icept_denom];
+                log_ratio -= 0.5 * prec_beta * (shift * shift + 2.0 * b_den * shift);
+            }
+
+            if (std::log(runif(rng)) < log_ratio) {
+                for (int s = 0; s < S; s++) phi[s] -= c;
+                beta_num[d.icept_num] += shift;
+                if (d.icept_denom >= 0) beta_denom[d.icept_denom] += shift;
+                phi_level_accept_cnt++;
+            }
+            phi_level_total_cnt++;
         }
 
         // ---- 2. Update theta (iid unstructured) via MH ----
@@ -1224,6 +1269,7 @@ inline GibbsResult run_gibbs_bym2(
             adapt(sigma_scale, sigma_accept_cnt, sigma_total_cnt);
             adapt(rho_scale, rho_accept_cnt, rho_total_cnt);
             adapt(level_scale, level_accept_cnt, level_total_cnt);
+            adapt(phi_level_scale, phi_level_accept_cnt, phi_level_total_cnt);
             adapt(sigma_joint_scale, sigma_joint_accept_cnt, sigma_joint_total_cnt);
             adapt(rho_joint_scale, rho_joint_accept_cnt, rho_joint_total_cnt);
             if (has_disp_num || has_disp_denom)
