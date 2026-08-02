@@ -122,14 +122,10 @@ test_that("a TVC term recovers the intercept and its own slope", {
   # unidentified against the fixed coefficient on the same covariate, so the
   # quantity that moves when the pin is absent is the SLOPE rather than the
   # intercept.
-  #
-  # No rhat assertion here: TVC chains freeze after warmup (per-chain posterior
-  # SD ~1e-5, rhat 3-5), which reproduces on the released build and is tracked
-  # as gcol33/tulpaRatio#23. What this case therefore checks is that the
-  # posterior MODE sits at truth, which is what an absent pin destroys; restore
-  # the rhat assertion once #23 is fixed.
   r <- fit_one(sim_data(11),
                temporal = temporal_tvc("time", terms = "x", structure = "rw1"))
+  expect_lt(r$intercept$rhat, 1.05)
+  expect_lt(r$slope$rhat, 1.05)
   expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.1)
   expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.1)
 })

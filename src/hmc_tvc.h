@@ -35,29 +35,36 @@ struct TVCData {
   TemporalType structure;             // RW1, RW2, AR1, or GP
   bool shared = false;                // Whether TVC is shared between num/denom
   bool cyclic = false;                // Whether temporal structure is cyclic
+};
 
-  // Pre-allocated workspace buffers (avoids per-gradient-call heap allocation)
-  mutable std::vector<double> tau_ws;           // size n_tvc
-  mutable std::vector<double> rho_ws;           // size n_tvc
-  mutable std::vector<double> w_flat_ws;        // size n_groups * n_tvc * n_times
-  mutable std::vector<double> eta_ws;           // size n_obs
-  mutable std::vector<double> grad_w_ws;        // size n_groups * n_tvc * n_times
-  mutable std::vector<double> grad_log_tau_ws;  // size n_tvc
-  mutable std::vector<double> grad_logit_rho_ws;// size n_tvc
-  mutable std::vector<double> grad_w_jg_ws;     // size n_times (reused per group-term)
-  mutable std::vector<double> d_ws;             // size n_times (RW2 second differences)
+// Scratch buffers for compute_gradient_tvc_handcoded. Held per-thread (via
+// RATIOD_TLS_WORKSPACE at the call site), never as members of TVCData: TVCData
+// hangs off the single ModelData that every chain thread shares, so buffers
+// living there are the same memory for every chain and a concurrent write from
+// one chain overwrites what another chain's gradient evaluation is reading
+// (gcol33/tulpaRatio#23).
+struct TVCGradWorkspace {
+  std::vector<double> tau;           // size n_tvc
+  std::vector<double> rho;           // size n_tvc
+  std::vector<double> w_flat;        // size n_groups * n_tvc * n_times
+  std::vector<double> eta;           // size n_obs
+  std::vector<double> grad_w;        // size n_groups * n_tvc * n_times
+  std::vector<double> grad_log_tau;  // size n_tvc
+  std::vector<double> grad_logit_rho;// size n_tvc
+  std::vector<double> grad_w_jg;     // size n_times (reused per group-term)
+  std::vector<double> d_buf;         // size n_times (RW2 second differences)
 
-  void init_workspace() {
+  void resize(int n_tvc, int n_times, int n_groups, int n_obs) {
     int n_w = n_groups * n_tvc * n_times;
-    tau_ws.resize(n_tvc);
-    rho_ws.resize(n_tvc);
-    w_flat_ws.resize(n_w);
-    eta_ws.resize(n_obs);
-    grad_w_ws.resize(n_w);
-    grad_log_tau_ws.resize(n_tvc);
-    grad_logit_rho_ws.resize(n_tvc);
-    grad_w_jg_ws.resize(n_times);
-    d_ws.resize(n_times);
+    tau.resize(n_tvc);
+    rho.resize(n_tvc);
+    w_flat.resize(n_w);
+    eta.resize(n_obs);
+    grad_w.resize(n_w);
+    grad_log_tau.resize(n_tvc);
+    grad_logit_rho.resize(n_tvc);
+    grad_w_jg.resize(n_times);
+    d_buf.resize(n_times);
   }
 };
 

@@ -233,7 +233,6 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       tvc.time_index[i] = (i % n_times) + 1;
       tvc.X_tvc[i] = data.X_num_flat[static_cast<size_t>(i) * 2 + 1];
     }
-    tvc.init_workspace();
     data.has_tvc = true;
     data.tvc_tau_shape = 1.0;
     data.tvc_tau_rate = 0.01;

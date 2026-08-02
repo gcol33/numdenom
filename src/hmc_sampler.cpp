@@ -6920,14 +6920,18 @@ void compute_gradient_tvc_handcoded(
     double phi_num = cp.phi_num;
     double phi_denom = cp.phi_denom;
 
-    // TVC parameters (use pre-allocated workspace buffers)
+    // TVC parameters (per-thread scratch: data.tvc_data is shared by every
+    // chain thread, so its own buffers cannot be written from here)
     int n_tvc = data.tvc_data.n_tvc;
     int n_times = data.tvc_data.n_times;
     int n_groups = data.tvc_data.n_groups;
     int n_w = n_groups * n_tvc * n_times;
 
-    double* tvc_tau = data.tvc_data.tau_ws.data();
-    double* tvc_rho = data.tvc_data.rho_ws.data();
+    RATIOD_TLS_WORKSPACE(ratiod_tvc::TVCGradWorkspace, tvc_scratch);
+    tvc_scratch.resize(n_tvc, n_times, n_groups, data.N);
+
+    double* tvc_tau = tvc_scratch.tau.data();
+    double* tvc_rho = tvc_scratch.rho.data();
     for (int j = 0; j < n_tvc; j++) {
         tvc_tau[j] = std::exp(params[layout.log_tau_tvc_start + j]);
         if (data.tvc_data.structure == ratiod_temporal::TemporalType::AR1) {
@@ -6939,8 +6943,8 @@ void compute_gradient_tvc_handcoded(
         }
     }
 
-    // Extract TVC w values into pre-allocated buffer
-    double* tvc_w_flat = data.tvc_data.w_flat_ws.data();
+    // Extract TVC w values into per-thread scratch
+    double* tvc_w_flat = tvc_scratch.w_flat.data();
     for (int k = 0; k < n_w; k++) {
         tvc_w_flat[k] = params[layout.tvc_w_start + k];
     }
@@ -6973,11 +6977,11 @@ void compute_gradient_tvc_handcoded(
     // Compute TVC prior gradients using zero-allocation workspace version
     // =========================================================================
     ratiod_tvc::TVCGradientWS tvc_ws;
-    tvc_ws.grad_w = data.tvc_data.grad_w_ws.data();
-    tvc_ws.grad_log_tau = data.tvc_data.grad_log_tau_ws.data();
-    tvc_ws.grad_logit_rho = data.tvc_data.grad_logit_rho_ws.data();
-    tvc_ws.grad_w_jg = data.tvc_data.grad_w_jg_ws.data();
-    tvc_ws.d_buf = data.tvc_data.d_ws.data();
+    tvc_ws.grad_w = tvc_scratch.grad_w.data();
+    tvc_ws.grad_log_tau = tvc_scratch.grad_log_tau.data();
+    tvc_ws.grad_logit_rho = tvc_scratch.grad_logit_rho.data();
+    tvc_ws.grad_w_jg = tvc_scratch.grad_w_jg.data();
+    tvc_ws.d_buf = tvc_scratch.d_buf.data();
     tvc_ws.n_w = n_w;
     tvc_ws.n_tvc = n_tvc;
     ratiod_tvc::tvc_prior_gradients_ws(tvc_w_flat, data.tvc_data, tvc_tau, tvc_rho, tvc_ws);
@@ -6998,7 +7002,7 @@ void compute_gradient_tvc_handcoded(
     // =========================================================================
     // Precompute TVC contribution to linear predictor (pre-allocated buffer)
     // =========================================================================
-    double* tvc_eta = data.tvc_data.eta_ws.data();
+    double* tvc_eta = tvc_scratch.eta.data();
     std::fill(tvc_eta, tvc_eta + data.N, 0.0);
     for (int i = 0; i < data.N; i++) {
         int t = data.tvc_data.time_index[i] - 1;  // 0-based
@@ -14271,9 +14275,6 @@ Rcpp::List cpp_hmc_fit(
     // Prior parameters
     data.tvc_tau_shape = tvc_tau_shape;
     data.tvc_tau_rate = tvc_tau_rate;
-
-    // Pre-allocate gradient workspace buffers (avoids per-call heap allocation)
-    data.tvc_data.init_workspace();
   } else {
     data.tvc_data.n_tvc = 0;
     data.tvc_data.n_times = 0;
