@@ -32,7 +32,15 @@ COLLAPSED_FIELDS <- c("icar_collapsed", "bym2_collapsed")
 # term and not log det(H)'s own dependence on the temporal offset through the
 # curvature W_data.
 COLLAPSED_TEMPORAL_FIELDS <- c("icar_collapsed_rw1", "bym2_collapsed_rw1")
-ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS)
+# A Type IV (Kronecker) spatiotemporal interaction with no accompanying
+# additive spatial or temporal field -- the only structured term is the
+# interaction itself, matching gcol33/tulpaRatio#24's repro. MULTI_FIELDS'
+# icar_st/bym2_st reach compute_gradient_spatiotemporal_handcoded too, but
+# only ever build a Type I interaction; the Kronecker stencil in the Type IV
+# branch (both its centered and non-centered forms) had never been checked
+# against finite differences before #24.
+ST_IV_FIELDS <- c("st4", "st4_nc")
+ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS)
 MODES <- c("handcoded", "arena")
 AUTODIFF_MODES <- c("arena", "forward", "tape")
 # The same three under the names the front door takes.
@@ -93,7 +101,7 @@ for (field in COLLAPSED_TEMPORAL_FIELDS) {
   })
 }
 
-for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS)) {
+for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS)) {
   for (mode in MODES) {
     test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)

@@ -12286,7 +12286,13 @@ HMCResultCpp run_hmc_chain_cpp(
   // Uses sparse Cholesky of posterior precision Q = tau*(Q_s⊗Q_t) + diag(H_lik).
   // At warmup end, extracts diag(Q^{-1}) to set precision-informed diagonal mass.
   // NOTE: Factorization happens later (after warmup discovers tau and H_lik).
-  bool use_sparse_gmrf_mass = true;
+  // Centered-only: the raw parameter this reads at warmup end (q[st_delta_start+k],
+  // see the [SPARSE_GMRF] block below) IS delta under the centered parameterization.
+  // Under non-centered (data.st_parameterization == 1) that slot holds z = delta *
+  // sqrt(tau) instead, which this Q = tau*(Qs⊗Qt) + diag(H_lik) construction does not
+  // describe -- z's natural scale is tau-free and near-unit, which the ordinary
+  // Welford-adapted mass below already handles.
+  bool use_sparse_gmrf_mass = (data.st_parameterization == 0);
   if (use_sparse_gmrf_mass && data.has_spatiotemporal && data.spatiotemporal_data.type == STType::TYPE_IV) {
     int st_S = data.spatiotemporal_data.n_spatial;
     int st_T = data.spatiotemporal_data.n_times;

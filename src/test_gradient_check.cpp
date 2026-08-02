@@ -70,6 +70,13 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // field is identified.
   const bool want_ms = (field == "icar_ms" || field == "bym2_ms");
   const bool want_st = (field == "icar_st" || field == "bym2_st");
+  // st4: a spatiotemporal Type IV (Kronecker) interaction with NO accompanying
+  // additive spatial or temporal field -- matching gcol33/tulpaRatio#24's repro,
+  // where the only structured term is the interaction itself. icar_st/bym2_st
+  // above exercise compute_gradient_spatiotemporal_handcoded's multi-feature
+  // path but only ever build a Type I interaction; this is the first field to
+  // check the handcoded Type IV Kronecker block against finite differences.
+  const bool want_st4 = (field == "st4" || field == "st4_nc");
   // icar_collapsed_rw1 / bym2_collapsed_rw1 pair a collapsed spatial field
   // with a companion temporal RW1 term -- the combination gcol33/tulpaRatio#27
   // found the specialized collapsed gradient silently dropping.
@@ -272,11 +279,15 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.has_multiscale_temporal = true;
   }
 
-  // Spatiotemporal interaction: Type I (IID) over the S x T grid, which routes
-  // to compute_gradient_spatiotemporal_handcoded.
-  if (want_st) {
+  // Spatiotemporal interaction over the S x T grid, which routes to
+  // compute_gradient_spatiotemporal_handcoded. want_st is Type I (IID) paired
+  // with a separate additive ICAR/BYM2 field; want_st4 is Type IV (Kronecker)
+  // on its own, with the interaction's own space margin carrying the CSR
+  // adjacency and its own time margin carrying a real RW1 structure.
+  if (want_st || want_st4) {
     auto& st = data.spatiotemporal_data;
-    st.type = ratiod_spatiotemporal::STType::TYPE_I;
+    st.type = want_st4 ? ratiod_spatiotemporal::STType::TYPE_IV
+                        : ratiod_spatiotemporal::STType::TYPE_I;
     st.shared = true;
     st.n_spatial = n_units;
     st.n_times = n_times;
@@ -294,13 +305,30 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     st.spatial_is_gp = false;
     st.spatial_proper = false;
     st.bym2_scale = 1.0;
-    st.temporal_type = ratiod_temporal::TemporalType::NONE;
-    st.temporal_cyclic = false;
+    if (want_st4) {
+      // build_grid_adjacency emits 0-based col_idx (the convention data.adj_col_idx
+      // uses); the interaction's own adjacency is read with adj_col_idx[idx]-1
+      // throughout (hmc_spatiotemporal.h, hmc_sampler.cpp), i.e. it is 1-based,
+      // matching what R's spatiotemporal.R comments as "0-based row_ptr, 1-based
+      // col_idx -- C++ does -1". Shift it here rather than reusing the 0-based
+      // helper as-is, which would read adj_col_idx[idx]-1 == -1 out of bounds.
+      build_grid_adjacency(n_units, st.adj_row_ptr, st.adj_col_idx, st.n_neighbors);
+      for (int& j : st.adj_col_idx) j += 1;
+      st.temporal_type = ratiod_temporal::TemporalType::RW1;
+      st.temporal_cyclic = false;
+    } else {
+      st.temporal_type = ratiod_temporal::TemporalType::NONE;
+      st.temporal_cyclic = false;
+    }
     st.sigma2_prior_U = 1.0;
     st.sigma2_prior_alpha = 0.01;
     data.has_spatiotemporal = true;
     data.st_is_hsgp = false;
-    data.st_parameterization = 0;
+    // st4_nc exercises the non-centered branch of compute_gradient_spatiotemporal_
+    // handcoded's Type IV block (st_use_nc): params store z, delta = z/sqrt(tau_st).
+    // Like st4's centered path, this has never been checked against finite
+    // differences (gcol33/tulpaRatio#24).
+    data.st_parameterization = (field == "st4_nc") ? 1 : 0;
   }
 
   data.zi_type = ZIType::NONE;

@@ -145,21 +145,27 @@ test_that("a spatiotemporal interaction recovers the intercept", {
   # leaves whichever margin is longer under-identified. Kept to 9 x 5 so the
   # interaction has fewer coefficients than the data has observations.
   #
-  # No rhat assertion here: this model reaches rhat 1.14 rather than 1.05, and a
-  # 4x longer run moves it to 2.05 while the per-chain SD shrinks, which is
-  # tracked as gcol33/tulpaRatio#24. Pinning the margins is what takes the
-  # intercept posterior SD from 0.111 to 0.011 and rhat from 3.43 to 1.14, so
-  # the recovery below is the assertion that speaks to this field's
-  # identification; restore the rhat assertion once #24 is fixed.
+  # This data carries no true space-time signal, so the interaction's
+  # posterior for tau drifts to large values and, under the centered
+  # parameterization, dragged rhat to 1.14 (and to 2.05 over a 4x longer run,
+  # with the per-chain SD shrinking) -- a funnel between tau and the field's
+  # conditional scale that gcol33/tulpaRatio#24 traced to no single step size
+  # spanning both regimes. parameterization = "noncentered" samples a tau-free
+  # z and reconstructs the interaction as z / sqrt(tau), which decouples the
+  # two: rhat drops to 1.004 (intercept) / 1.000 (slope) at the same 1000-iter
+  # budget this test uses.
   df <- sim_data(11, S = 9, TT = 5)
   r <- fit_one(df,
                spatiotemporal = spatiotemporal(
                  spatial = spatial_car(grid_adj(9), level = "group",
                                        group_var = "spatial_site"),
                  temporal = temporal_rw1("time"),
-                 type = "IV"))
+                 type = "IV",
+                 parameterization = "noncentered"))
   expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.1)
   expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.1)
+  expect_lt(r$intercept$rhat, 1.05)
+  expect_lt(r$slope$rhat, 1.05)
 })
 
 test_that("a spatial-only model reaches a sampler that reports its chains", {

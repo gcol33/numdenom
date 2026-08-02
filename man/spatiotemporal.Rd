@@ -8,7 +8,8 @@ spatiotemporal(
   spatial,
   temporal,
   type = c("I", "II", "III", "IV", "iid", "separable"),
-  shared = TRUE
+  shared = TRUE,
+  parameterization = c("centered", "noncentered")
 )
 }
 \arguments{
@@ -30,6 +31,16 @@ or \code{\link[=spatial_gp]{spatial_gp()}}.}
 \item{shared}{Logical; if TRUE (default), spatiotemporal effect enters both
 numerator and denominator. Set to FALSE for process-specific effects
 (triggers warning about potential confounding).}
+
+\item{parameterization}{For \code{type = "IV"} with the HMC backend: \code{"centered"}
+(default) samples the interaction directly; \code{"noncentered"} samples a
+tau-free \code{z} and reconstructs the interaction as \code{z / sqrt(tau)}. When the
+data carry little or no space-time interaction, the posterior for \code{tau}
+drifts toward large values and the centered field's conditional scale
+shrinks with it (a funnel), which NUTS cannot span with a single step
+size; \code{"noncentered"} decouples the two and should be tried first when
+\code{rhat} for the interaction (or an intercept sharing its geometry) will
+not drop with more warmup. Ignored outside the HMC backend.}
 }
 \value{
 A \code{ratiod_spatiotemporal} object

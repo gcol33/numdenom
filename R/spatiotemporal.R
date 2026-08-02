@@ -57,6 +57,15 @@ NULL
 #' @param shared Logical; if TRUE (default), spatiotemporal effect enters both
 #'   numerator and denominator. Set to FALSE for process-specific effects
 #'   (triggers warning about potential confounding).
+#' @param parameterization For `type = "IV"` with the HMC backend: `"centered"`
+#'   (default) samples the interaction directly; `"noncentered"` samples a
+#'   tau-free `z` and reconstructs the interaction as `z / sqrt(tau)`. When the
+#'   data carry little or no space-time interaction, the posterior for `tau`
+#'   drifts toward large values and the centered field's conditional scale
+#'   shrinks with it (a funnel), which NUTS cannot span with a single step
+#'   size; `"noncentered"` decouples the two and should be tried first when
+#'   `rhat` for the interaction (or an intercept sharing its geometry) will
+#'   not drop with more warmup. Ignored outside the HMC backend.
 #'
 #' @return A `ratiod_spatiotemporal` object
 #'
@@ -153,7 +162,8 @@ NULL
 spatiotemporal <- function(spatial,
                            temporal,
                            type = c("I", "II", "III", "IV", "iid", "separable"),
-                           shared = TRUE) {
+                           shared = TRUE,
+                           parameterization = c("centered", "noncentered")) {
 
   # Validate spatial specification
 
@@ -172,6 +182,7 @@ spatiotemporal <- function(spatial,
   # Normalize type
   type <- match.arg(type)
   if (type == "iid") type <- "I"
+  parameterization <- match.arg(parameterization)
 
   # Check compatibility
   if (type == "separable") {
@@ -215,6 +226,7 @@ spatiotemporal <- function(spatial,
       spatial = spatial,
       temporal = temporal,
       shared = shared,
+      parameterization = parameterization,
       # Filled in during validation
       n_spatial = NULL,
       n_times = NULL,
@@ -427,6 +439,7 @@ prepare_spatiotemporal_for_hmc <- function(st, data) {
     has_spatiotemporal = TRUE,
     type = st$type,
     shared = st$shared,
+    parameterization = st$parameterization %||% "centered",
     n_spatial = S,
     n_times = T,
     n_params = st$n_params,

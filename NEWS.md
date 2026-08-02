@@ -1,5 +1,34 @@
 # tulpaRatio 1.4.3
 
+* **A spatiotemporal Type IV interaction has a non-centered parameterization,
+  which fixes chains freezing on data with little or no true interaction
+  (#24).** `spatiotemporal(..., type = "IV")` reached `rhat` 1.14 at
+  iter=1000/warmup=500 on data simulated with no space-time signal, and a 4x
+  longer run moved that to 2.05 while every chain's own posterior sd shrank.
+  The interaction's precision `tau` has no likelihood signal pulling it away
+  from the boundary in that case, so its posterior drifts to very large
+  values (tau ~ 4.3e8 was observed at warmup's end); under the centered
+  parameterization the field's conditional scale shrinks as `1/sqrt(tau)`,
+  so exploring both regions needs step sizes that differ by orders of
+  magnitude, and NUTS answered by pinning the trajectory length at
+  `max_treedepth` on essentially every iteration and collapsing the step size
+  toward its floor -- the signature of a funnel between a variance component
+  and the field it scales, not of a chain that merely needs more draws. A
+  finite-difference check of `compute_gradient_spatiotemporal_handcoded`'s
+  Type IV (Kronecker) block, absent until now, confirmed the analytic
+  gradient was not the cause. `spatiotemporal(..., parameterization =
+  "noncentered")` samples a tau-free `z` and reconstructs the interaction as
+  `z / sqrt(tau)`, decoupling the two: `rhat` on the same repro drops to 1.00
+  at iter=1000 and stays at 1.00 at iter=4000, with stable per-chain sd and
+  a step size about 10x larger. The non-centered path already existed in the
+  gradient code but was never reachable from R and was itself unchecked
+  against finite differences; the warmup-end precision-informed mass-matrix
+  warm-start specific to Type IV (which reads the raw parameter as the
+  centered field directly) is now skipped under the non-centered
+  parameterization, which it does not describe. `parameterization` still
+  defaults to `"centered"`, since data that do carry real space-time
+  structure move `tau` away from the boundary and may not need it.
+
 * **The Gibbs BYM2 sampler no longer leaks the spatial field's level into the
   intercept unchecked (#15).** The per-site update held the structured field
   (`phi`) to sum zero by moving its mean into the intercept every sweep,
