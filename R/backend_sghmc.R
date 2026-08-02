@@ -85,6 +85,10 @@ fit_sghmc <- function(formula,
 
   # Prepare spatial structure
   spatial_info <- prepare_spatial_for_hmc(spatial, data, N)
+  if (identical(spatial_info$type, "car_proper")) {
+    stop("Proper CAR (`spatial_car(..., proper = TRUE)`) is not supported by ",
+         "the SGHMC backend. Use `mode = \"hmc\"`.", call. = FALSE)
+  }
 
   # Prepare temporal structure
   temporal_info <- prepare_temporal_for_hmc(temporal, data, N)
@@ -315,6 +319,10 @@ fit_sgld <- function(formula,
 
   # Prepare structures (same as SGHMC)
   spatial_info <- prepare_spatial_for_hmc(spatial, data, N)
+  if (identical(spatial_info$type, "car_proper")) {
+    stop("Proper CAR (`spatial_car(..., proper = TRUE)`) is not supported by ",
+         "the SGHMC backend. Use `mode = \"hmc\"`.", call. = FALSE)
+  }
   temporal_info <- prepare_temporal_for_hmc(temporal, data, N)
 
   if (is.null(zi) && (isTRUE(family$zero_inflated) || isTRUE(family$one_inflated))) {

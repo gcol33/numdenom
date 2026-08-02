@@ -86,6 +86,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   const bool want_bym2 = (field == "bym2" || field == "bym2_ms" ||
                           field == "bym2_st" || field == "bym2_collapsed" ||
                           field == "bym2_collapsed_rw1");
+  // Proper CAR (rho estimated, gcol33/tulpaRatio#31): exercises
+  // compute_gradient_composite's is_car_proper branch, the only gradient
+  // path it reaches under H/AUTO (can_use_analytical_gradient excludes it).
+  const bool want_car_proper = (field == "car_proper");
   const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st ||
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1");
   const bool want_rw2  = (field == "rw2");
@@ -189,8 +193,9 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.total_re_groups = 0;
   }
 
-  if (want_icar || want_bym2) {
-    data.spatial_type = want_bym2 ? SpatialType::BYM2 : SpatialType::ICAR;
+  if (want_icar || want_bym2 || want_car_proper) {
+    data.spatial_type = want_bym2 ? SpatialType::BYM2 :
+                         want_car_proper ? SpatialType::CAR_PROPER : SpatialType::ICAR;
     data.n_spatial_units = n_units;
     build_grid_adjacency(n_units, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors);
     data.spatial_group.resize(n_obs);
@@ -200,6 +205,12 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     // phi/theta and the density carries a Laplace correction at the mode.
     data.icar_collapsed = (field == "icar_collapsed" || field == "icar_collapsed_rw1");
     data.bym2_collapsed = (field == "bym2_collapsed" || field == "bym2_collapsed_rw1");
+    // rho in the interior of (0, 1), away from both boundaries the
+    // finite-difference step could clip against.
+    data.car_rho_lower = 0.0;
+    data.car_rho_upper = 1.0;
+    data.car_rho_prior_a = 1.0;
+    data.car_rho_prior_b = 1.0;
   } else if (want_hsgp) {
     // HSGP is an observation-level spectral field: m_per_dim^2 basis
     // coefficients plus a variance and a lengthscale. Kept at m = 3 so the

@@ -15,6 +15,7 @@
 #include <tulpa/soft_sum_to_zero.h>
 #include "spatial_field_constraint.h"
 #include "hmc_icar_collapsed.h"
+#include "hmc_car_proper.h"
 #include "hmc_temporal_autodiff.h"
 #include "hmc_tvc_grad.h"
 #include "hmc_multiscale_temporal_grad.h"
@@ -272,10 +273,12 @@ ParamLayout compute_param_layout(const ModelData& data) {
     layout.log_phi_denom_idx = -1;
   }
 
-  // Spatial effects (ICAR/BYM2 only - GP handled separately below)
+  // Spatial effects (ICAR/BYM2/proper CAR only - GP handled separately below)
   layout.has_spatial = (data.spatial_type == SpatialType::ICAR ||
-                        data.spatial_type == SpatialType::BYM2);
+                        data.spatial_type == SpatialType::BYM2 ||
+                        data.spatial_type == SpatialType::CAR_PROPER);
   layout.is_bym2 = (data.spatial_type == SpatialType::BYM2);
+  layout.is_car_proper = (data.spatial_type == SpatialType::CAR_PROPER);
   layout.is_icar_collapsed = (data.spatial_type == SpatialType::ICAR && data.icar_collapsed);
   layout.is_bym2_collapsed = (data.spatial_type == SpatialType::BYM2 && data.bym2_collapsed);
 
@@ -298,10 +301,12 @@ ParamLayout compute_param_layout(const ModelData& data) {
       }
       layout.log_tau_spatial_idx = -1;
     } else {
-      // ICAR: log_tau, [phi if not collapsed]
+      // ICAR / proper CAR: log_tau, [logit_rho if proper CAR], [phi if not collapsed]
       layout.log_tau_spatial_idx = idx++;
+      layout.logit_rho_car_idx = layout.is_car_proper ? idx++ : -1;
       if (data.icar_collapsed) {
-        // Collapsed: phi marginalized out, not in param vector
+        // Collapsed: phi marginalized out, not in param vector (ICAR only;
+        // proper CAR never collapses -- blocked at the R level)
         layout.spatial_start = layout.spatial_end = -1;
       } else {
         layout.spatial_start = idx;
@@ -314,6 +319,7 @@ ParamLayout compute_param_layout(const ModelData& data) {
     }
   } else {
     layout.log_tau_spatial_idx = -1;
+    layout.logit_rho_car_idx = -1;
     layout.spatial_start = layout.spatial_end = -1;
     layout.log_sigma_bym2_idx = -1;
     layout.logit_rho_bym2_idx = -1;
@@ -781,8 +787,12 @@ double compute_log_post(
   // direction into the prior. See spatial_field_constraint.h.
   std::vector<double> params_centered;
   double phi_raw_sum = 0.0;
+  // Proper CAR has a full-rank precision (rho < 1), so its mean is already
+  // identified by the prior; centering it would impose an identification
+  // constraint the model does not need, unlike ICAR/BYM2's rank-deficient Q.
   const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                              && !data.icar_collapsed && !data.bym2_collapsed;
+                              && !data.icar_collapsed && !data.bym2_collapsed
+                              && !layout.is_car_proper;
   if (center_spatial) {
     params_centered = params_in;
     phi_raw_sum = ratiod_constraints::center_spatial_block(
@@ -817,6 +827,7 @@ double compute_log_post(
   double tau_spatial = 1.0, log_tau_spatial = 0.0;
   double sigma_s_bym2 = 1.0, sigma_u_bym2 = 1.0;
   double rho_bym2 = 0.5;  // Riebler mixing parameter
+  double rho_car = 0.0;   // Proper CAR correlation strength
   const double* phi_spatial = nullptr;
   const double* theta_bym2 = nullptr;
 
@@ -836,6 +847,10 @@ double compute_log_post(
     } else {
       log_tau_spatial = params[layout.log_tau_spatial_idx];
       tau_spatial = std::exp(log_tau_spatial);
+      if (layout.is_car_proper) {
+        double u = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_car_idx]));
+        rho_car = data.car_rho_lower + (data.car_rho_upper - data.car_rho_lower) * u;
+      }
       if (!data.icar_collapsed) {
         phi_spatial = &params[layout.spatial_start];
       }
@@ -1085,7 +1100,7 @@ double compute_log_post(
         }
       }
       // Collapsed: phi/theta priors already included in collapsed_lp above
-    } else {
+    } else if (!layout.is_car_proper) {
       // ICAR
       // tau ~ Gamma(shape, rate) (always needed, even collapsed)
       log_post += (data.tau_spatial_shape - 1.0) * log_tau_spatial
@@ -1103,6 +1118,28 @@ double compute_log_post(
                         * (quad + ratiod_constraints::free_direction_quad(phi_raw_sum, J));
       }
       // Collapsed: ICAR prior on phi* + 0.5*(J-1)*log(tau) already in collapsed_lp above
+    } else {
+      // Proper CAR: tau ~ Gamma(shape, rate); rho ~ Beta(a, b) scaled to
+      // (car_rho_lower, car_rho_upper), with the logit-transform Jacobian
+      // folded in (the untransformed density is car_proper::log_prior_rho;
+      // the Jacobian log(upper-lower) + log(u) + log(1-u) combines with it
+      // to a*log(u) + b*log(1-u)).
+      log_post += (data.tau_spatial_shape - 1.0) * log_tau_spatial
+                - data.tau_spatial_rate * tau_spatial + log_tau_spatial;
+
+      const double u_rho = (rho_car - data.car_rho_lower)
+                          / (data.car_rho_upper - data.car_rho_lower);
+      log_post += data.car_rho_prior_a * std::log(u_rho)
+                + data.car_rho_prior_b * std::log(1.0 - u_rho);
+
+      // phi ~ N(0, (tau * Q(rho))^{-1}), Q(rho) = D - rho*W; full rank for
+      // |rho| < 1, so no sum-to-zero identification term is needed here.
+      auto Q = ratiod_car_proper::compute_car_precision(
+          J, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors, rho_car);
+      const double log_det_Q = ratiod_car_proper::car_log_det(J, Q);
+      const double quad = ratiod_car_proper::car_quadratic_form(
+          phi_spatial, J, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors, rho_car);
+      log_post += 0.5 * log_det_Q + 0.5 * J * log_tau_spatial - 0.5 * tau_spatial * quad;
     }
   }
 
@@ -2401,6 +2438,7 @@ static inline void spatial_gmrf_prior_grad(
     const double* phi_spatial, double phi_raw_sum, bool centered,
     double tau_spatial,
     double sigma_s_bym2, double sigma_u_bym2, double rho_bym2,
+    double rho_car,
     const double* theta_bym2,
     const double* grad_spatial_lik,
     double* grad);
@@ -4064,7 +4102,7 @@ void compute_gradient_analytical(
   // ============ Spatial GMRF prior gradients (ICAR and BYM2) ============
   if (layout.has_spatial && n_spatial > 0) {
     spatial_gmrf_prior_grad(data, layout, phi_spatial, phi_raw_sum, center_spatial,
-                            tau_spatial, sigma_s_bym2, sigma_u_bym2, rho_bym2,
+                            tau_spatial, sigma_s_bym2, sigma_u_bym2, rho_bym2, 0.0,
                             theta_bym2, grad_spatial_lik.data(), grad.data());
   }
 
@@ -4832,17 +4870,20 @@ static inline void spatial_gmrf_prior_grad(
     double tau_spatial,
     double sigma_s_bym2, double sigma_u_bym2,
     double rho_bym2,
+    double rho_car,
     const double* theta_bym2,
     const double* grad_spatial_lik,
     double* grad
 ) {
     const int S = data.n_spatial_units;
     const bool is_bym2 = (data.spatial_type == SpatialType::BYM2);
+    const bool is_car_proper = (data.spatial_type == SpatialType::CAR_PROPER);
 
     // The likelihood sees the centred field, so its gradient with respect to
     // the raw parameters is the projection (I - 11'/n). Applied here only:
     // d(eta)/d(sigma_bym2) is a function of the centred field with no such
-    // projection, so grad_spatial_lik itself must stay unprojected.
+    // projection, so grad_spatial_lik itself must stay unprojected. Proper
+    // CAR is never centered (see compute_log_post), so glik_mean is 0 for it.
     double glik_mean = 0.0;
     if (centered) {
         for (int s = 0; s < S; s++) glik_mean += grad_spatial_lik[s];
@@ -4854,17 +4895,19 @@ static inline void spatial_gmrf_prior_grad(
 
     // ICAR prior: -0.5 * tau * phi' * Q * phi where Q_ij = n_neighbors[i] if i=j, -1 if i~j
     // d/d(phi[i]) = -tau * (n_neighbors[i]*phi[i] - sum_{j~i} phi[j])
+    // Proper CAR: Q(rho)_ij = n_neighbors[i] if i=j, -rho if i~j; no freed direction.
     double icar_quad = 0.0;
     // Gradient of the freed constant direction; see spatial_field_constraint.h.
     const double free_scale = is_bym2 ? 1.0 : tau_spatial;
-    const double free_grad =
+    const double free_grad = is_car_proper ? 0.0 :
         ratiod_constraints::free_direction_grad(phi_raw_sum, S, free_scale);
     for (int i = 0; i < S; i++) {
         double Qphi_i = data.n_neighbors[i] * phi_spatial[i];
+        const double w = is_car_proper ? rho_car : 1.0;
         for (int k = data.adj_row_ptr[i]; k < data.adj_row_ptr[i + 1]; k++) {
             const int j = data.adj_col_idx[k];
-            Qphi_i -= phi_spatial[j];
-            if (j > i) {
+            Qphi_i -= w * phi_spatial[j];
+            if (j > i && !is_car_proper) {
                 const double diff = phi_spatial[i] - phi_spatial[j];
                 icar_quad += diff * diff;
             }
@@ -4894,6 +4937,32 @@ static inline void spatial_gmrf_prior_grad(
         grad[layout.log_sigma_bym2_idx] += grad_sigma_s_lik + grad_sigma_u_lik;
         grad[layout.logit_rho_bym2_idx] += 0.5 * ((1.0 - rho_bym2) * grad_sigma_s_lik
                                                     - rho_bym2 * grad_sigma_u_lik);
+    } else if (is_car_proper) {
+        // tau gradient: same shape as plain ICAR, but the quadratic form is
+        // rho-weighted (car_quadratic_form), not the rho=1 special case above.
+        const double quad = ratiod_car_proper::car_quadratic_form(
+            phi_spatial, S, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors, rho_car);
+        grad[layout.log_tau_spatial_idx] += 0.5 * S - 0.5 * tau_spatial * quad;
+
+        // rho gradient: 0.5*log|Q(rho)| has no closed form cheaper than a
+        // dense Cholesky (trace(Q^-1 W) needs the inverse), so it is central-
+        // differenced here, on this one scalar, and chain-ruled to logit
+        // scale. The quadratic-form part is exact (it is linear in rho).
+        auto gmrf_term = [&](double rho) {
+            auto Q = ratiod_car_proper::compute_car_precision(
+                S, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors, rho);
+            const double logdet = ratiod_car_proper::car_log_det(S, Q);
+            const double q = ratiod_car_proper::car_quadratic_form(
+                phi_spatial, S, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors, rho);
+            return 0.5 * logdet - 0.5 * tau_spatial * q;
+        };
+        const double eps = 1e-5;
+        const double rho_p = std::min(rho_car + eps, data.car_rho_upper - 1e-9);
+        const double rho_m = std::max(rho_car - eps, data.car_rho_lower + 1e-9);
+        const double d_gmrf_d_rho = (gmrf_term(rho_p) - gmrf_term(rho_m)) / (rho_p - rho_m);
+        const double u = (rho_car - data.car_rho_lower) / (data.car_rho_upper - data.car_rho_lower);
+        const double d_rho_d_logit = (data.car_rho_upper - data.car_rho_lower) * u * (1.0 - u);
+        grad[layout.logit_rho_car_idx] += d_gmrf_d_rho * d_rho_d_logit;
     } else {
         // Plain ICAR: tau gradient. (Q + 11'/J) is full rank, so the exponent on
         // tau is n/2 and the quadratic form carries the freed direction.
@@ -8710,7 +8779,7 @@ void compute_gradient_ms_temporal_handcoded(
                                         grad_spatial_lik.data(), grad.data());
         spatial_gmrf_prior_grad(data, layout, spatial_phi, centering.raw_sum(),
                                 centering.active(), tau_spatial,
-                                sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
+                                sigma_s_bym2, sigma_u_bym2, rho_bym2, 0.0, theta_bym2,
                                 grad_spatial_lik.data(), grad.data());
     }
 
@@ -9008,7 +9077,7 @@ void compute_gradient_spatiotemporal_handcoded(
                                         grad_spatial_lik.data(), grad.data());
         spatial_gmrf_prior_grad(data, layout, spatial_phi, centering.raw_sum(),
                                 centering.active(), tau_spatial,
-                                sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
+                                sigma_s_bym2, sigma_u_bym2, rho_bym2, 0.0, theta_bym2,
                                 grad_spatial_lik.data(), grad.data());
     }
 
@@ -9292,8 +9361,11 @@ void compute_gradient_composite(
     // Centre the spatial block once, matching compute_log_post; see
     // spatial_field_constraint.h. The returned gradient is with respect to the
     // raw parameters, which is what spatial_gmrf_prior_grad projects for.
+    // Proper CAR is full rank (rho < 1) and already identified, so it is not
+    // centered like ICAR/BYM2's rank-deficient Q.
     const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                                && !data.icar_collapsed && !data.bym2_collapsed;
+                                && !data.icar_collapsed && !data.bym2_collapsed
+                                && !layout.is_car_proper;
     ratiod_constraints::CenteredSpatialParams centering(
         params_in, center_spatial, layout.spatial_start, data.n_spatial_units);
     const std::vector<double>& params = centering.params();
@@ -9324,13 +9396,17 @@ void compute_gradient_composite(
     // --- Spatial (ICAR/BYM2/pCAR) ---
     double tau_spatial = 0.0;
     const double* spatial_phi = nullptr;
-    double sigma_s_bym2 = 0.0, sigma_u_bym2 = 0.0, rho_bym2 = 0.5;
+    double sigma_s_bym2 = 0.0, sigma_u_bym2 = 0.0, rho_bym2 = 0.5, rho_car = 0.0;
     const double* theta_bym2 = nullptr;
     const bool has_icar_bym2 = layout.has_spatial && !layout.is_hsgp && !layout.is_gp &&
                                 !layout.is_multiscale_gp && !layout.has_svc;
     if (has_icar_bym2) {
         if (!layout.is_bym2) tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
         spatial_phi = &params[layout.spatial_start];
+        if (layout.is_car_proper) {
+            const double u = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_car_idx]));
+            rho_car = data.car_rho_lower + (data.car_rho_upper - data.car_rho_lower) * u;
+        }
         if (layout.is_bym2) {
             double sigma_total = std::exp(params[layout.log_sigma_bym2_idx]);
             double logit_rho = params[layout.logit_rho_bym2_idx];
@@ -9590,7 +9666,7 @@ void compute_gradient_composite(
     if (!has_slopes) re_gradient_prior(data, layout, re, grad.data(), sigma_re);
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
-    // ICAR/BYM2 spatial priors
+    // ICAR/BYM2/pCAR spatial priors
     if (has_icar_bym2 && !layout.is_bym2) {
         grad[layout.log_tau_spatial_idx] = (data.tau_spatial_shape - 1.0) - data.tau_spatial_rate * tau_spatial + 1.0;
     }
@@ -9599,6 +9675,12 @@ void compute_gradient_composite(
         double ratio = sigma_total / data.sigma_re_scale;
         grad[layout.log_sigma_bym2_idx] = -2.0 * ratio * ratio / (1.0 + ratio * ratio) + 1.0;
         grad[layout.logit_rho_bym2_idx] = 1.0 - 2.0 * rho_bym2;
+    }
+    if (has_icar_bym2 && layout.is_car_proper) {
+        // Beta(a, b) on rho with the logit-transform Jacobian folded in; see
+        // the matching derivation in compute_log_post.
+        const double u = (rho_car - data.car_rho_lower) / (data.car_rho_upper - data.car_rho_lower);
+        grad[layout.logit_rho_car_idx] = data.car_rho_prior_a * (1.0 - u) - data.car_rho_prior_b * u;
     }
 
     // HSGP priors (must match hardcoded rate=4.6 in compute_log_post)
@@ -10150,7 +10232,7 @@ void compute_gradient_composite(
                                         grad_spatial_lik.data(), grad.data());
         spatial_gmrf_prior_grad(data, layout, spatial_phi, centering.raw_sum(),
                                 centering.active(), tau_spatial,
-                                sigma_s_bym2, sigma_u_bym2, rho_bym2, theta_bym2,
+                                sigma_s_bym2, sigma_u_bym2, rho_bym2, rho_car, theta_bym2,
                                 grad_spatial_lik.data(), grad.data());
     }
 
@@ -13935,6 +14017,8 @@ Rcpp::List cpp_hmc_fit(
     data.spatial_type = SpatialType::ICAR;
   } else if (spatial_type_str == "bym2") {
     data.spatial_type = SpatialType::BYM2;
+  } else if (spatial_type_str == "car_proper") {
+    data.spatial_type = SpatialType::CAR_PROPER;
   } else {
     data.spatial_type = SpatialType::NONE;
   }
@@ -13947,6 +14031,17 @@ Rcpp::List cpp_hmc_fit(
   data.bym2_scale_factor = bym2_scale_factor;
   data.spatial_Q_inv = std::move(spatial_Q_inv);
   data.spatial_L_Q = std::move(spatial_L_Q);
+
+  if (data.spatial_type == SpatialType::CAR_PROPER) {
+    if (spatial_params.containsElementNamed("rho_lower"))
+      data.car_rho_lower = Rcpp::as<double>(spatial_params["rho_lower"]);
+    if (spatial_params.containsElementNamed("rho_upper"))
+      data.car_rho_upper = Rcpp::as<double>(spatial_params["rho_upper"]);
+    if (spatial_params.containsElementNamed("rho_prior_a"))
+      data.car_rho_prior_a = Rcpp::as<double>(spatial_params["rho_prior_a"]);
+    if (spatial_params.containsElementNamed("rho_prior_b"))
+      data.car_rho_prior_b = Rcpp::as<double>(spatial_params["rho_prior_b"]);
+  }
 
   // Collapsed ICAR/BYM2 parameterization
   data.icar_collapsed = false;

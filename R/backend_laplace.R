@@ -584,6 +584,11 @@ fit_laplace_spatial <- function(formula,
   # Check spatial type and dispatch appropriately
   spatial_type <- spatial$type %||% "car"
 
+  if (spatial_type == "car_proper") {
+    stop("Proper CAR (`spatial_car(..., proper = TRUE)`) is not supported by ",
+         "the Laplace backend. Use `mode = \"hmc\"`.", call. = FALSE)
+  }
+
   # GP spatial
   if (spatial_type == "gp" || inherits(spatial, "ratiod_gp")) {
     return(fit_laplace_gp(

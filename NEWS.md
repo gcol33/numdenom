@@ -1,5 +1,37 @@
 # tulpaRatio 1.4.3
 
+* **`spatial_car(..., proper = TRUE)` now fits a proper CAR instead of
+  silently downgrading to ICAR (#31).** The R object already computed rho
+  bounds and printed "Proper CAR"; a complete C++ implementation
+  (`hmc_car_proper.h`) already existed too. Neither was wired to the other --
+  every backend collapsed `type = "car_proper"` to `"icar"` before it reached
+  C++ (`# Handle all ICAR-type models (car, car_proper both use ICAR
+  parameterization)`), so `rho` stayed fixed at 1 and the roxygen example's
+  claim that `summary(fit_car)` shows a `rho_spatial` parameter was false. The
+  HMC backend now threads `rho` through as its own parameter (`Q(rho) = D -
+  rho*W`, `Beta(1,1)` prior by default, logit-transformed), added to
+  `SpatialType`, `ParamLayout`, and the shared `spatial_gmrf_prior_grad`/
+  `compute_log_post` machinery that `compute_gradient_composite` and every H
+  gradient mode already read from. `phi`'s gradient is exact; `rho`'s
+  log-determinant term has no cheap closed form (it needs `trace(Q^-1 W)`), so
+  it is central-differenced on that one scalar and chain-ruled to logit scale,
+  verified against `test_gradient_check.cpp`'s finite-difference harness (0
+  deviation across all 29 parameters on the `car_proper` field). Proper CAR is
+  full rank for `rho < 1`, so unlike ICAR/BYM2 it is not hard-centered.
+  Autodiff gradient modes (`A`, `A_r`, `A_t`) refuse at the front door with a
+  clear error rather than differentiate a density missing the field's prior
+  entirely, since the log-determinant is not yet expressed in the templated
+  density; `mode = "hmc"` with the default `gradient_mode = "auto"` (or `"H"`)
+  is unaffected. Gibbs already rejected `car_proper` (its type whitelist never
+  included it); Laplace, PG, VI, SGHMC, and ESS now reject it explicitly too,
+  instead of silently fitting an ICAR model or -- for the three backends that
+  call `compute_log_post_impl<double>` directly -- silently dropping the
+  spatial prior's contribution to the posterior altogether. Fixing this also
+  surfaced a second, independent bug in `predict()`'s areal-prediction path,
+  which read `phi_spatial` starting one column early for any type it treated
+  as "ICAR-shaped" once `car_proper` genuinely had an extra `rho` parameter
+  in front of it.
+
 * **A spatiotemporal Type IV interaction has a non-centered parameterization,
   which fixes chains freezing on data with little or no true interaction
   (#24).** `spatiotemporal(..., type = "IV")` reached `rhat` 1.14 at

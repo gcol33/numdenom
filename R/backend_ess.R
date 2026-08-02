@@ -91,6 +91,10 @@ fit_ess <- function(formula,
 
   # Prepare spatial structure
   spatial_info <- prepare_spatial_for_hmc(spatial, data, hmc_data$N)
+  if (identical(spatial_info$type, "car_proper")) {
+    stop("Proper CAR (`spatial_car(..., proper = TRUE)`) is not supported by ",
+         "the ESS backend. Use `mode = \"hmc\"`.", call. = FALSE)
+  }
 
   # Prepare temporal structure
   temporal_info <- prepare_temporal_for_hmc(temporal, data, hmc_data$N)

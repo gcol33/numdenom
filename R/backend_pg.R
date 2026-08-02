@@ -97,6 +97,11 @@ fit_pg_binomial <- function(formula,
   # Check for spatial structure
   has_spatial <- !is.null(spatial)
 
+  if (has_spatial && !is.null(spatial$type) && spatial$type == "car_proper") {
+    stop("Proper CAR (`spatial_car(..., proper = TRUE)`) is not supported by ",
+         "the PG backend. Use `mode = \"hmc\"`.", call. = FALSE)
+  }
+
   # Dispatch to GP if spatial is GP type
   if (has_spatial && (spatial$type == "gp" || inherits(spatial, "ratiod_gp"))) {
     return(fit_pg_binomial_gp(
@@ -1421,6 +1426,11 @@ fit_pg_negbin <- function(formula,
 
   # Check for spatial
   has_spatial <- !is.null(spatial)
+
+  if (has_spatial && !is.null(spatial$type) && spatial$type == "car_proper") {
+    stop("Proper CAR (`spatial_car(..., proper = TRUE)`) is not supported by ",
+         "the PG backend. Use `mode = \"hmc\"`.", call. = FALSE)
+  }
 
   n_iter <- as.integer(iter)
   n_warmup <- as.integer(warmup)

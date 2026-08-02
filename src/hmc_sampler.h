@@ -48,7 +48,7 @@ using ratiod_spatiotemporal::NonsepType;
 // =====================================================================
 
 enum class ModelType { BINOMIAL, NEGBIN_NEGBIN, POISSON_GAMMA, NEGBIN_GAMMA, GAMMA_GAMMA, LOGNORMAL, BETA_BINOMIAL };
-enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP, HSGP };
+enum class SpatialType { NONE, ICAR, BYM2, GP, MULTISCALE_GP, HSGP, CAR_PROPER };
 
 // Gradient computation methods
 // AUTO: Use fastest available (H > A_r > A > A_t > N)
@@ -170,6 +170,11 @@ struct ModelData {
   std::vector<int> adj_col_idx;      // CSR format: column indices
   std::vector<int> n_neighbors;      // Number of neighbors per unit
   double bym2_scale_factor = 1.0;    // For BYM2 scaling
+  // Proper CAR (rho estimated from data, Q = D - rho*W): rho support and prior
+  double car_rho_lower = 0.0;
+  double car_rho_upper = 1.0;
+  double car_rho_prior_a = 1.0;      // Beta(a, b) on rho, scaled to (lower, upper)
+  double car_rho_prior_b = 1.0;
   // Precision mass matrix data (precomputed from Q)
   std::vector<double> spatial_Q_inv;    // (Q + lambda*I)^{-1}, column-major [S×S]
   std::vector<double> spatial_L_Q;      // Cholesky L of (Q + lambda*I), column-major [S×S]
@@ -367,6 +372,10 @@ struct ParamLayout {
   int log_sigma_bym2_idx;     // log(sigma_total): total spatial SD
   int logit_rho_bym2_idx;     // logit(rho): mixing parameter (structured fraction)
   int theta_bym2_start, theta_bym2_end;
+  // Proper CAR extra: rho (correlation strength), shares log_tau_spatial_idx
+  // and spatial_start/end with ICAR above.
+  bool is_car_proper = false;
+  int logit_rho_car_idx;      // logit-scaled rho in (car_rho_lower, car_rho_upper)
 
   // Temporal parameters
   int log_tau_temporal_idx;             // Log precision for temporal

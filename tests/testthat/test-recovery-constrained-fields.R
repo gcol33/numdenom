@@ -168,6 +168,67 @@ test_that("a spatiotemporal interaction recovers the intercept", {
   expect_lt(r$slope$rhat, 1.05)
 })
 
+test_that("proper CAR recovers rho and the intercept (gcol33/tulpaRatio#31)", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+  skip_if_not_installed("MASS")
+
+  # Simulate directly from Q(rho) = D - rho*W so the field itself, not just
+  # the regression coefficients, carries a known truth to recover.
+  S <- 36L
+  A <- grid_adj(S)
+  D <- diag(rowSums(A))
+  rho_true <- 0.75
+  tau_true <- 3.0
+  set.seed(44)
+  Q <- D - rho_true * A
+  phi_true <- as.numeric(MASS::mvrnorm(1, mu = rep(0, S), Sigma = solve(tau_true * Q)))
+
+  n_per <- 25L
+  N <- S * n_per
+  site <- rep(seq_len(S), each = n_per)
+  x <- rnorm(N)
+  trials <- sample(15:50, N, replace = TRUE)
+  eta <- TRUE_INTERCEPT + TRUE_SLOPE * x + phi_true[site]
+  df <- data.frame(y = rbinom(N, trials, plogis(eta)), trials = trials, x = x,
+                   site = factor(site))
+
+  f <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
+             spatial = spatial_car(A, level = "group", group_var = "site", proper = TRUE),
+             mode = "hmc",
+             control = list(iter = 1500, warmup = 750, chains = 4, verbose = FALSE))
+  expect_identical(f$backend, "hmc")
+
+  dr <- as.matrix(f$draws)
+  expect_true("rho_spatial" %in% colnames(dr))
+  expect_true("tau_spatial" %in% colnames(dr))
+  per <- nrow(dr) / f$chains
+  summarise <- function(v) {
+    m <- matrix(dr[, v], nrow = per, ncol = f$chains)
+    list(mean = mean(dr[, v]),
+         lo = unname(quantile(dr[, v], 0.025)),
+         hi = unname(quantile(dr[, v], 0.975)),
+         rhat = posterior::rhat(m))
+  }
+  r_int <- summarise("beta_num[1]")
+  r_rho <- summarise("rho_spatial")
+  r_tau <- summarise("tau_spatial")
+
+  expect_lt(r_int$rhat, 1.05)
+  expect_lt(r_rho$rhat, 1.1)
+  expect_equal(r_int$mean, TRUE_INTERCEPT, tolerance = 0.15)
+
+  # rho is weakly identified even at this size (a well-known property of
+  # proper CAR, not specific to this implementation), so the interval, not
+  # the point estimate, is what recovery means here.
+  expect_true(r_rho$lo <= rho_true && rho_true <= r_rho$hi,
+              label = sprintf("rho 95%% CI [%.3f, %.3f] vs true %.2f",
+                              r_rho$lo, r_rho$hi, rho_true))
+  expect_true(r_tau$lo <= tau_true && tau_true <= r_tau$hi,
+              label = sprintf("tau 95%% CI [%.3f, %.3f] vs true %.2f",
+                              r_tau$lo, r_tau$hi, tau_true))
+})
+
 test_that("a spatial-only model reaches a sampler that reports its chains", {
   skip_on_cran()
   # Spatial-only models route to the Gibbs backend, which must honour chains=

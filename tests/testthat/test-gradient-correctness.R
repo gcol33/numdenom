@@ -32,6 +32,12 @@ COLLAPSED_FIELDS <- c("icar_collapsed", "bym2_collapsed")
 # term and not log det(H)'s own dependence on the temporal offset through the
 # curvature W_data.
 COLLAPSED_TEMPORAL_FIELDS <- c("icar_collapsed_rw1", "bym2_collapsed_rw1")
+# Proper CAR (rho estimated from the data, gcol33/tulpaRatio#31). Reaches
+# compute_gradient_composite only (can_use_analytical_gradient excludes it,
+# same as every other spatial type but ICAR/BYM2), and its log-determinant
+# has no templated expression, so -- like the collapsed fields -- it has no
+# "arena" case.
+CAR_PROPER_FIELDS <- c("car_proper")
 # A Type IV (Kronecker) spatiotemporal interaction with no accompanying
 # additive spatial or temporal field -- the only structured term is the
 # interaction itself, matching gcol33/tulpaRatio#24's repro. MULTI_FIELDS'
@@ -85,6 +91,23 @@ for (field in FIELDS) {
 # (compute_gradient_icar_collapsed): the collapsed marginal has no autodiff
 # expression, so unlike FIELDS above there is no "arena" case to loop over.
 for (field in COLLAPSED_TEMPORAL_FIELDS) {
+  test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
+    expect_gt(r$n_params, 0)
+    dev <- rel_dev(r$analytic, r$finite_diff)
+    worst <- which.max(dev)
+    expect_lt(
+      max(dev),
+      1e-4,
+      label = sprintf(
+        "%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+        field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+      )
+    )
+  })
+}
+
+for (field in CAR_PROPER_FIELDS) {
   test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
     r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
     expect_gt(r$n_params, 0)
@@ -225,6 +248,50 @@ test_that("the collapsed parameterizations are declared, not silently mis-differ
     r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
     expect_false(is.na(r$impl_gap), label = sprintf("field = %s", field))
   }
+})
+
+test_that("proper CAR is declared, not silently mis-differentiated", {
+  # Its log-determinant needs a dense Cholesky with no templated expression
+  # (gcol33/tulpaRatio#31), so the autodiff modes must refuse rather than
+  # differentiate a density with no spatial marginal in it.
+  for (field in CAR_PROPER_FIELDS) {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
+    expect_false(is.na(r$impl_gap), label = sprintf("field = %s", field))
+  }
+})
+
+test_that("proper CAR refuses an autodiff gradient mode at the front door", {
+  skip_on_cran()
+  set.seed(1)
+  N <- 200L
+  S <- 16L
+  side <- ceiling(sqrt(S))
+  g <- expand.grid(lon = seq_len(side), lat = seq_len(side))[seq_len(S), ]
+  A <- matrix(0, S, S)
+  for (i in seq_len(S)) for (j in seq_len(S)) {
+    if (i != j && sqrt((g$lon[i] - g$lon[j])^2 + (g$lat[i] - g$lat[j])^2) <= 1.5)
+      A[i, j] <- 1
+  }
+  dimnames(A) <- list(as.character(seq_len(S)), as.character(seq_len(S)))
+  x <- rnorm(N)
+  trials <- sample(10:40, N, replace = TRUE)
+  df <- data.frame(
+    y = rbinom(N, trials, plogis(0.5 + 0.3 * x)), trials = trials, x = x,
+    site = factor(rep(seq_len(S), length.out = N))
+  )
+  fit_with <- function(mode) {
+    tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
+           spatial = spatial_car(A, level = "group", group_var = "site", proper = TRUE),
+           control = list(iter = 30, warmup = 15, chains = 1, verbose = FALSE,
+                          gradient_mode = mode))
+  }
+  for (mode in AUTODIFF_MODES_STR) {
+    expect_error(fit_with(mode), "proper CAR", info = mode)
+  }
+  # The analytic density carries the prior, so H (and its AUTO fallback) must
+  # still fit without a gradient-mismatch warning.
+  expect_warning(fit_h <- fit_with("H"), NA)
+  expect_identical(fit_h$backend, "hmc")
 })
 
 test_that("a collapsed field refuses an autodiff gradient mode at the front door", {

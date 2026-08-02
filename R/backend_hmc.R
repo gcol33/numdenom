@@ -564,7 +564,11 @@ fit_hmc <- function(formula,
       bym2_scale = spatial_info$bym2_scale,
       Q_inv = spatial_info$Q_inv,
       L_Q = spatial_info$L_Q,
-      parameterization = spatial_info$parameterization %||% "standard"
+      parameterization = spatial_info$parameterization %||% "standard",
+      rho_lower = spatial_info$rho_lower %||% 0.0,
+      rho_upper = spatial_info$rho_upper %||% 1.0,
+      rho_prior_a = spatial_info$rho_prior_a %||% 1.0,
+      rho_prior_b = spatial_info$rho_prior_b %||% 1.0
     )
 
     temporal_params <- list(
@@ -1395,6 +1399,8 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
   } else if (inherits(spatial, "ratiod_spatial_bym2") ||
              (!is.null(spatial$type) && spatial$type == "bym2")) {
     "bym2"
+  } else if (!is.null(spatial$type) && spatial$type == "car_proper") {
+    "car_proper"
   } else if (inherits(spatial, "ratiod_spatial_car") ||
              inherits(spatial, "ratiod_spatial_icar") ||
              (!is.null(spatial$type) && spatial$type %in% c("car", "car_proper"))) {
@@ -1463,6 +1469,7 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     L_Q_flat <- as.numeric(L_Q_lower)    # Column-major flat [S x S]
   }
 
+  rho_bounds <- spatial$rho_bounds
   list(
     type = spatial_type,
     group = spatial_group,
@@ -1474,7 +1481,11 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     group_var = spatial$group_var,  # Preserve for prediction lookup
     Q_inv = Q_inv_flat,
     L_Q = L_Q_flat,
-    parameterization = spatial$parameterization %||% "standard"
+    parameterization = spatial$parameterization %||% "standard",
+    rho_lower = if (spatial_type == "car_proper") unname(rho_bounds["lower"]) %||% 0.0 else NULL,
+    rho_upper = if (spatial_type == "car_proper") unname(rho_bounds["upper"]) %||% 1.0 else NULL,
+    rho_prior_a = 1.0,
+    rho_prior_b = 1.0
   )
 }
 
@@ -1513,6 +1524,8 @@ initialize_hmc_params_spatial <- function(hmc_data, model_type, spatial_info) {
       # log_sigma_total + logit_rho + phi_scaled + theta
       n_params <- n_params + 2 + 2 * spatial_info$n_units
     }
+  } else if (spatial_info$type == "car_proper") {
+    n_params <- n_params + 2 + spatial_info$n_units  # log_tau + logit_rho + phi
   }
 
   rep(0.0, n_params)
@@ -1628,6 +1641,17 @@ extract_spatial_draws <- function(samples, idx, spatial_info) {
         draws[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
         idx <- idx + 1
       }
+    }
+  } else if (spatial_info$type == "car_proper") {
+    draws[["tau_spatial"]] <- exp(samples[, idx])
+    idx <- idx + 1
+    rho_lower <- spatial_info$rho_lower %||% 0.0
+    rho_upper <- spatial_info$rho_upper %||% 1.0
+    draws[["rho_spatial"]] <- rho_lower + (rho_upper - rho_lower) / (1 + exp(-samples[, idx]))
+    idx <- idx + 1
+    for (s in seq_len(spatial_info$n_units)) {
+      draws[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
+      idx <- idx + 1
     }
   } else if (spatial_info$type == "bym2") {
     param <- spatial_info$parameterization %||% "standard"
@@ -1828,6 +1852,9 @@ compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
       phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
       spatial_effect <- phi_spatial
     }
+  } else if (spatial_info$type == "car_proper") {
+    idx <- idx + 1  # Skip logit_rho (log_tau already skipped above)
+    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
   } else if (spatial_info$type == "bym2") {
     bym2_param_ratio <- spatial_info$parameterization %||% "standard"
     # Riebler parameterization: log_sigma_total, logit_rho
@@ -2206,6 +2233,8 @@ initialize_hmc_params_spatial_temporal <- function(hmc_data, model_type,
     } else {
       n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
     }
+  } else if (spatial_info$type == "car_proper") {
+    n_params <- n_params + 2 + spatial_info$n_units  # log_tau + logit_rho + phi
   } else if (spatial_info$type == "bym2") {
     bym2_param_init <- spatial_info$parameterization %||% "standard"
     if (bym2_param_init == "collapsed") {
@@ -2403,6 +2432,8 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
     } else {
       q_init <- c(q_init, rep(0.0, 1 + spatial_info$n_units))
     }
+  } else if (spatial_info$type == "car_proper") {
+    q_init <- c(q_init, rep(0.0, 2 + spatial_info$n_units))  # log_tau + logit_rho + phi
   } else if (spatial_info$type == "bym2") {
     bym2_param <- spatial_info$parameterization %||% "standard"
     if (bym2_param == "collapsed") {
@@ -3369,6 +3400,10 @@ compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
       spatial_effect <- phi_spatial
       idx <- idx + spatial_info$n_units
     }
+  } else if (spatial_info$type == "car_proper") {
+    idx <- idx + 1  # Skip logit_rho (log_tau already skipped above)
+    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
+    idx <- idx + spatial_info$n_units
   } else if (spatial_info$type == "bym2") {
     bym2_param_ratio <- spatial_info$parameterization %||% "standard"
     # Riebler parameterization: log_sigma_total, logit_rho

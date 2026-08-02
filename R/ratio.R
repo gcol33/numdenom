@@ -1278,9 +1278,14 @@ predict_spatial_areal <- function(object, newdata, return_spatial) {
 
   spatial_type <- spatial$type %||% "icar"
 
-  # Handle all ICAR-type models (car, car_proper both use ICAR parameterization)
-  if (spatial_type %in% c("icar", "car", "car_proper")) {
+  # ICAR/car use the ICAR parameterization (log_tau, phi); car_proper adds a
+  # logit_rho scalar between them.
+  if (spatial_type %in% c("icar", "car")) {
     idx <- idx + 1  # skip tau_spatial
+    phi_spatial <- samples[, (idx + 1):(idx + n_units), drop = FALSE]
+    spatial_effect <- phi_spatial
+  } else if (spatial_type == "car_proper") {
+    idx <- idx + 2  # skip tau_spatial, logit_rho
     phi_spatial <- samples[, (idx + 1):(idx + n_units), drop = FALSE]
     spatial_effect <- phi_spatial
   } else if (spatial_type == "bym2") {
