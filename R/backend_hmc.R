@@ -52,7 +52,10 @@ NULL
 #' @param iter Total number of iterations per chain
 #' @param warmup Number of warmup iterations per chain
 #' @param chains Number of chains to run (can be parallelized)
-#' @param cores Number of cores for parallel computation
+#' @param cores Core budget for the fit. Split as `concurrent_chains =
+#'   min(cores, chains)` chains in flight at once, each running with
+#'   `cores %/% concurrent_chains` threads for its own within-chain
+#'   gradient/likelihood work. Defaults to the machine's OpenMP thread cap.
 #' @param L Number of leapfrog steps per iteration
 #' @param seed Random seed for reproducibility
 #' @param verbose Print progress
@@ -86,10 +89,14 @@ fit_hmc <- function(formula,
                     metric = "auto",
                     riemannian = NULL) {
 
-  # Set cores
+  # Set cores. Defaults to the machine's OpenMP cap, matching how the PG and
+  # Laplace backends default their own (purely within-chain) `cores` budget:
+  # see fit_pg_binomial()'s `cpp_pg_get_max_threads()` default in backend_pg.R.
   if (is.null(cores)) {
-    cores <- min(chains, cpp_get_max_threads())
+    cores <- cpp_get_max_threads()
   }
+  cores <- as.integer(cores)
+  if (is.na(cores) || cores < 1L) cores <- 1L
 
   # Set seed
   if (is.null(seed)) {
@@ -340,10 +347,13 @@ fit_hmc <- function(formula,
     }
   }
 
-  # Decide parallelization strategy
-  # If chains > 1 and cores > 1: parallelize across chains
-  # If chains == 1 and cores > 1: parallelize within chain (likelihood)
-  n_threads_within <- ifelse(chains > 1 && cores > 1, 1L, as.integer(cores))
+  # `cores` is a budget split two ways rather than a chain-concurrency count
+  # alone: concurrent_chains chains run at once, and each gets the rest of the
+  # budget for its own within-chain gradient/likelihood parallelism. A single
+  # chain (concurrent_chains == 1) gets the whole budget within-chain, which a
+  # chain-count-only cap could never express (#17).
+  concurrent_chains <- min(cores, chains)
+  n_threads_within <- as.integer(cores %/% concurrent_chains)
 
   # Get temporal prior parameters
   tau_temporal_shape <- priors$tau_temporal_shape %||% 1.0
@@ -1012,7 +1022,7 @@ fit_hmc <- function(formula,
         metric_str = metric,
         adapt_delta = adapt_delta_value,
         riemannian = riemannian_value,
-        n_cores = as.integer(cores)
+        n_cores = as.integer(concurrent_chains)
       )
     }
   }

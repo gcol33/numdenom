@@ -19,6 +19,23 @@
   checklist items, including removing the unused `pc_lambda` left over from an
   earlier tau update.
 
+* **A per-fit `cores` budget can now reach within-chain work (#17).** For a
+  single-chain HMC fit, `cores` used to be capped at `chains` before the user
+  ever saw it (`min(chains, cpp_get_max_threads())`), so a one-chain fit always
+  got exactly one thread for its gradient and likelihood loops regardless of
+  machine size, and the regions that do carry a `num_threads()` clause
+  (`compute_gradient_analytical`'s fallback path, the `linalg_fast.h` kernels)
+  had no way to reach more than one. `cores` is now a genuine budget split two
+  ways: `concurrent_chains = min(cores, chains)` chains run at once, each with
+  `cores %/% concurrent_chains` threads of its own. Reaching that width when
+  chains also run concurrently needed OpenMP nesting enabled
+  (`omp_set_max_active_levels(2)`): a region inside a chain body is a nested
+  one, and OpenMP pins nested teams to one thread by default. Most common model
+  configurations (plain Poisson-gamma/binomial/negbin with simple random
+  effects) take a vectorized Eigen gradient path that never reaches these OMP
+  regions at all; the scalar fallback that does carry them serves zero-
+  inflation, correlated random slopes, and GP/multiscale spatial models.
+
 * **The two log posteriors are now the same function (#18).** `compute_log_post`
   and the templated `compute_log_post_impl<double>` that the `A_r` / `A` / `A_t`
   gradient modes differentiate returned different numbers on every model and

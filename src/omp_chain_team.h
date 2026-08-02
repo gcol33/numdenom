@@ -45,6 +45,15 @@ inline int chain_team_size(int wanted) {
 template <typename Fn>
 inline void for_each_chain(int n_chains, int max_concurrent, Fn fn) {
 #ifdef _OPENMP
+  // A per-fit thread count set via ScopedThreadCount (or the ambient
+  // nthreads-var read directly, as compute_gradient_analytical's fallback
+  // path does) is inherited into this team's workers as their own nthreads-var,
+  // but OpenMP still runs any parallel region a worker starts at width 1
+  // unless nesting is enabled: the default max-active-levels is 1. Without
+  // this, a chain running concurrently with others could never also get
+  // within-chain width, and `cores` (#17) could not express a budget split
+  // across both dimensions at once.
+  omp_set_max_active_levels(2);
   const int width = std::max(1, std::min(max_concurrent, n_chains));
   const int team = chain_team_size(width);
   for (int base = 0; base < n_chains; base += width) {

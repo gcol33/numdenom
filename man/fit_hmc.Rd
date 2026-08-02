@@ -50,7 +50,9 @@ fit_hmc(
 
 \item{chains}{Number of chains to run (can be parallelized)}
 
-\item{cores}{Number of cores for parallel computation}
+\item{cores}{Core budget for the fit. Split as \code{concurrent_chains = min(cores, chains)} chains in flight at once, each running with
+\code{cores \%/\% concurrent_chains} threads for its own within-chain
+gradient/likelihood work. Defaults to the machine's OpenMP thread cap.}
 
 \item{L}{Number of leapfrog steps per iteration}
 
