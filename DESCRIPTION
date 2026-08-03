@@ -35,6 +35,7 @@ LinkingTo:
     tulpa
 Remotes:
     github::gcol33/tulpa
+Additional_repositories: https://gcol33.r-universe.dev
 Suggests:
     bayesplot,
     patchwork,
