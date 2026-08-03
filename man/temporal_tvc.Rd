@@ -7,7 +7,7 @@
 temporal_tvc(
   time_var,
   terms = 1,
-  structure = c("rw1", "rw2", "ar1", "gp"),
+  structure = c("rw1", "rw2", "ar1", "iid", "gp"),
   group_var = NULL,
   shared = TRUE
 )
@@ -28,7 +28,9 @@ temporal_tvc(
 \item \code{"rw1"}: First-order random walk (default)
 \item \code{"rw2"}: Second-order random walk (smoother)
 \item \code{"ar1"}: First-order autoregressive
-\item \code{"gp"}: Gaussian process (for irregular time spacing)
+\item \code{"iid"}: Independent draws at each time point (no temporal smoothing)
+\item \code{"gp"}: Gaussian process (for irregular time spacing). Not yet
+implemented; \code{temporal_tvc()} errors if selected.
 }}
 
 \item{group_var}{Optional name of grouping variable for panel data.}

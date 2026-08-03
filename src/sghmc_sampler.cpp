@@ -160,7 +160,10 @@ Rcpp::List cpp_sghmc_fit(
 
     if (data.zi_type != ZIType::NONE) {
         NumericMatrix X_zi = Rcpp::as<NumericMatrix>(zi_params["X"]);
-        data.p_zi = X_zi.ncol();
+        // Use explicit p_zi from R (not X_zi.ncol()) because OI-only models
+        // pass a 1-column placeholder X_zi but p_zi=0
+        SEXP p_zi_sexp = zi_params["p_zi"];
+        data.p_zi = (!Rf_isNull(p_zi_sexp)) ? Rcpp::as<int>(p_zi_sexp) : X_zi.ncol();
         data.X_zi_flat.resize(N * data.p_zi);
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < data.p_zi; j++) {
@@ -468,7 +471,10 @@ Rcpp::List cpp_sgld_fit(
 
     if (data.zi_type != ZIType::NONE) {
         NumericMatrix X_zi = Rcpp::as<NumericMatrix>(zi_params["X"]);
-        data.p_zi = X_zi.ncol();
+        // Use explicit p_zi from R (not X_zi.ncol()) because OI-only models
+        // pass a 1-column placeholder X_zi but p_zi=0
+        SEXP p_zi_sexp = zi_params["p_zi"];
+        data.p_zi = (!Rf_isNull(p_zi_sexp)) ? Rcpp::as<int>(p_zi_sexp) : X_zi.ncol();
         data.X_zi_flat.resize(N * data.p_zi);
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < data.p_zi; j++) {

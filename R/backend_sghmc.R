@@ -93,19 +93,10 @@ fit_sghmc <- function(formula,
   # Prepare temporal structure
   temporal_info <- prepare_temporal_for_hmc(temporal, data, N)
 
-  # Prepare zero-inflation structure
-  if (is.null(zi) && (isTRUE(family$zero_inflated) || isTRUE(family$one_inflated))) {
-    zi_type_str <- if (family$zi_type == "hurdle") "hurdle" else "zi"
-    zi_info <- list(
-      type = zi_type_str,
-      X_zi = model.matrix(~ 1, data = data),
-      prior_sd = 10.0
-    )
-  } else if (!is.null(zi)) {
-    zi_info <- prepare_zi_for_hmc(zi, data, N)
-  } else {
-    zi_info <- list(type = "none", X_zi = matrix(0, nrow = N, ncol = 1), prior_sd = 10.0)
-  }
+  # Prepare zero-inflation structure. Handles both an explicit `zi = `
+  # argument and auto-detection from a ZI/hurdle/OI/ZOIB family when
+  # `zi` is not given.
+  zi_info <- prepare_zi_for_hmc(zi, data, N, family)
 
   # Prior parameters
   if (is.null(priors)) priors <- list()
@@ -160,6 +151,7 @@ fit_sghmc <- function(formula,
   zi_params <- list(
     type = zi_info$type,
     X = zi_info$X_zi,
+    p_zi = zi_info$p_zi %||% as.integer(ncol(zi_info$X_zi)),  # Explicit p_zi for OI-only models
     prior_sd = zi_info$prior_sd %||% 10.0
   )
 
@@ -325,14 +317,10 @@ fit_sgld <- function(formula,
   }
   temporal_info <- prepare_temporal_for_hmc(temporal, data, N)
 
-  if (is.null(zi) && (isTRUE(family$zero_inflated) || isTRUE(family$one_inflated))) {
-    zi_type_str <- if (family$zi_type == "hurdle") "hurdle" else "zi"
-    zi_info <- list(type = zi_type_str, X_zi = model.matrix(~ 1, data = data), prior_sd = 10.0)
-  } else if (!is.null(zi)) {
-    zi_info <- prepare_zi_for_hmc(zi, data, N)
-  } else {
-    zi_info <- list(type = "none", X_zi = matrix(0, nrow = N, ncol = 1), prior_sd = 10.0)
-  }
+  # Prepare zero-inflation structure. Handles both an explicit `zi = `
+  # argument and auto-detection from a ZI/hurdle/OI/ZOIB family when
+  # `zi` is not given.
+  zi_info <- prepare_zi_for_hmc(zi, data, N, family)
 
   # Priors
   if (is.null(priors)) priors <- list()
@@ -386,6 +374,7 @@ fit_sgld <- function(formula,
   zi_params <- list(
     type = zi_info$type,
     X = zi_info$X_zi,
+    p_zi = zi_info$p_zi %||% as.integer(ncol(zi_info$X_zi)),  # Explicit p_zi for OI-only models
     prior_sd = zi_info$prior_sd %||% 10.0
   )
 

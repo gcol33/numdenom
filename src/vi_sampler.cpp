@@ -246,29 +246,19 @@ Rcpp::List cpp_vi_fit(
     data.temporal_group_idx[i] = temporal_group_idx[i];
   }
 
-  // Zero-inflation
+  // Zero-inflation: use the canonical parser (ratiod_zi::parse_zi_type) so
+  // VI dispatches on the same fully-qualified strings ("zi_poisson",
+  // "zi_negbin", "zi_binomial", "hurdle_binomial", "oi_binomial", "zoib",
+  // ...) as the HMC/ESS/SGHMC backends, instead of a separate, lossy parser.
   std::string zi_type_str = Rcpp::as<std::string>(zi_params["type"]);
-  if (zi_type_str == "none") {
-    data.zi_type = ratiod_zi::ZIType::NONE;
-  } else if (zi_type_str == "zi" || zi_type_str == "zi_poisson") {
-    data.zi_type = ratiod_zi::ZIType::ZI_POISSON;
-  } else if (zi_type_str == "zi_negbin") {
-    data.zi_type = ratiod_zi::ZIType::ZI_NEGBIN;
-  } else if (zi_type_str == "zi_binomial") {
-    data.zi_type = ratiod_zi::ZIType::ZI_BINOMIAL;
-  } else if (zi_type_str == "hurdle" || zi_type_str == "hurdle_poisson") {
-    data.zi_type = ratiod_zi::ZIType::HURDLE_POISSON;
-  } else if (zi_type_str == "hurdle_negbin") {
-    data.zi_type = ratiod_zi::ZIType::HURDLE_NEGBIN;
-  } else if (zi_type_str == "hurdle_binomial") {
-    data.zi_type = ratiod_zi::ZIType::HURDLE_BINOMIAL;
-  } else {
-    data.zi_type = ratiod_zi::ZIType::NONE;
-  }
+  data.zi_type = ratiod_zi::parse_zi_type(zi_type_str);
 
   if (data.zi_type != ratiod_zi::ZIType::NONE) {
     Rcpp::NumericMatrix X_zi = zi_params["X"];
-    data.p_zi = X_zi.ncol();
+    // Use explicit p_zi from R (not X_zi.ncol()) because OI-only models
+    // pass a 1-column placeholder X_zi but p_zi=0
+    SEXP p_zi_sexp = zi_params["p_zi"];
+    data.p_zi = (!Rf_isNull(p_zi_sexp)) ? Rcpp::as<int>(p_zi_sexp) : X_zi.ncol();
     data.X_zi_flat.resize(data.N * data.p_zi);
     for (int i = 0; i < data.N; i++) {
       for (int j = 0; j < data.p_zi; j++) {
@@ -279,6 +269,27 @@ Rcpp::List cpp_vi_fit(
     data.p_zi = 0;
   }
   data.zi_prior_sd = Rcpp::as<double>(zi_params["prior_sd"]);
+
+  // One-inflation (for OI-binomial and ZOIB)
+  data.p_oi = 0;
+  SEXP p_oi_sexp = zi_params["p_oi"];
+  if (!Rf_isNull(p_oi_sexp)) {
+    data.p_oi = Rcpp::as<int>(p_oi_sexp);
+  }
+  if (data.p_oi > 0) {
+    Rcpp::NumericMatrix X_oi = zi_params["X_oi"];
+    data.X_oi_flat.resize(data.N * data.p_oi);
+    for (int i = 0; i < data.N; i++) {
+      for (int j = 0; j < data.p_oi; j++) {
+        data.X_oi_flat[i * data.p_oi + j] = X_oi(i, j);
+      }
+    }
+  }
+  data.oi_prior_sd = data.zi_prior_sd;
+  SEXP oi_prior_sd_sexp = zi_params["oi_prior_sd"];
+  if (!Rf_isNull(oi_prior_sd_sexp)) {
+    data.oi_prior_sd = Rcpp::as<double>(oi_prior_sd_sexp);
+  }
 
   // Latent factors
   data.has_latent = Rcpp::as<bool>(latent_params["has_latent"]);
@@ -393,9 +404,22 @@ int cpp_vi_get_n_params(
 
   // Zero-inflation
   std::string zi_type = Rcpp::as<std::string>(zi_params["type"]);
-  if (zi_type != "none") {
-    Rcpp::NumericMatrix X_zi = zi_params["X"];
-    n_params += X_zi.ncol();
+  if (ratiod_zi::parse_zi_type(zi_type) != ratiod_zi::ZIType::NONE) {
+    // Use explicit p_zi from R (not X_zi.ncol()) because OI-only models
+    // pass a 1-column placeholder X_zi but p_zi=0
+    SEXP p_zi_sexp = zi_params["p_zi"];
+    if (!Rf_isNull(p_zi_sexp)) {
+      n_params += Rcpp::as<int>(p_zi_sexp);
+    } else {
+      Rcpp::NumericMatrix X_zi = zi_params["X"];
+      n_params += X_zi.ncol();
+    }
+  }
+
+  // One-inflation (for OI-binomial and ZOIB)
+  SEXP p_oi_sexp = zi_params["p_oi"];
+  if (!Rf_isNull(p_oi_sexp)) {
+    n_params += Rcpp::as<int>(p_oi_sexp);
   }
 
   return n_params;

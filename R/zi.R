@@ -123,6 +123,108 @@ hurdle_poisson <- function(formula = NULL) {
 }
 
 
+#' Create a zero-inflated binomial specification
+#'
+#' @param formula Optional formula for the zero-inflation probability.
+#'   If NULL, uses intercept-only model for P(structural zero).
+#'
+#' @return A `ratiod_zi` object
+#'
+#' @examples
+#' # Intercept-only ZI
+#' zi_binomial()
+#'
+#' # ZI probability depends on a covariate
+#' zi_binomial(~ habitat)
+#'
+#' @export
+zi_binomial <- function(formula = NULL) {
+  structure(
+    list(
+      type = "zi_binomial",
+      formula = formula,
+      distribution = "binomial"
+    ),
+    class = "ratiod_zi"
+  )
+}
+
+
+#' Create a hurdle binomial specification
+#'
+#' @param formula Optional formula for the hurdle probability (P(Y > 0)).
+#'   If NULL, uses intercept-only model.
+#'
+#' @return A `ratiod_zi` object
+#'
+#' @examples
+#' # Intercept-only hurdle
+#' hurdle_binomial()
+#'
+#' @export
+hurdle_binomial <- function(formula = NULL) {
+  structure(
+    list(
+      type = "hurdle_binomial",
+      formula = formula,
+      distribution = "binomial"
+    ),
+    class = "ratiod_zi"
+  )
+}
+
+
+#' Create a one-inflated binomial specification
+#'
+#' @param formula Optional formula for the one-inflation probability
+#'   (excess at the upper boundary, y = n). If NULL, uses intercept-only model.
+#'
+#' @return A `ratiod_zi` object
+#'
+#' @examples
+#' # Intercept-only OI
+#' oi_binomial()
+#'
+#' @export
+oi_binomial <- function(formula = NULL) {
+  structure(
+    list(
+      type = "oi_binomial",
+      formula = formula,
+      distribution = "binomial"
+    ),
+    class = "ratiod_zi"
+  )
+}
+
+
+#' Create a zero-and-one-inflated binomial (ZOIB) specification
+#'
+#' @param zi_formula Optional formula for the zero-inflation probability.
+#'   If NULL, uses intercept-only model.
+#' @param oi_formula Optional formula for the one-inflation probability.
+#'   If NULL, uses intercept-only model.
+#'
+#' @return A `ratiod_zi` object
+#'
+#' @examples
+#' # Intercept-only for both zero and one inflation
+#' zoib()
+#'
+#' @export
+zoib <- function(zi_formula = NULL, oi_formula = NULL) {
+  structure(
+    list(
+      type = "zoib",
+      formula = zi_formula,
+      oi_formula = oi_formula,
+      distribution = "binomial"
+    ),
+    class = "ratiod_zi"
+  )
+}
+
+
 #' Create a hurdle negative binomial specification
 #'
 #' @param formula Optional formula for the hurdle probability (P(Y > 0)).
@@ -163,6 +265,10 @@ print.ratiod_zi <- function(x, ...) {
     "zi_negbin" = "Zero-Inflated Negative Binomial",
     "hurdle_poisson" = "Hurdle Poisson",
     "hurdle_negbin" = "Hurdle Negative Binomial",
+    "zi_binomial" = "Zero-Inflated Binomial",
+    "hurdle_binomial" = "Hurdle Binomial",
+    "oi_binomial" = "One-Inflated Binomial",
+    "zoib" = "Zero-and-One-Inflated Binomial",
     x$type
   )
 
@@ -170,7 +276,18 @@ print.ratiod_zi <- function(x, ...) {
   cat("==================================\n")
   cat("Type:", type_label, "\n")
 
-  if (is.null(x$formula)) {
+  if (identical(x$type, "zoib")) {
+    if (is.null(x$formula)) {
+      cat("Zero-inflation formula: ~ 1 (intercept only)\n")
+    } else {
+      cat("Zero-inflation formula:", deparse(x$formula), "\n")
+    }
+    if (is.null(x$oi_formula)) {
+      cat("One-inflation formula: ~ 1 (intercept only)\n")
+    } else {
+      cat("One-inflation formula:", deparse(x$oi_formula), "\n")
+    }
+  } else if (is.null(x$formula)) {
     cat("Formula: ~ 1 (intercept only)\n")
   } else {
     cat("Formula:", deparse(x$formula), "\n")
@@ -194,10 +311,12 @@ validate_zi <- function(zi, data = NULL) {
 
   if (!inherits(zi, "ratiod_zi")) {
     stop("zi must be a ratiod_zi object (created by zi_poisson(), zi_negbin(), ",
-         "hurdle_poisson(), or hurdle_negbin())", call. = FALSE)
+         "hurdle_poisson(), hurdle_negbin(), zi_binomial(), hurdle_binomial(), ",
+         "oi_binomial(), or zoib())", call. = FALSE)
   }
 
-  valid_types <- c("zi_poisson", "zi_negbin", "hurdle_poisson", "hurdle_negbin")
+  valid_types <- c("zi_poisson", "zi_negbin", "hurdle_poisson", "hurdle_negbin",
+                    "zi_binomial", "hurdle_binomial", "oi_binomial", "zoib")
   if (!zi$type %in% valid_types) {
     stop("Unknown ZI type: ", zi$type, call. = FALSE)
   }
@@ -212,5 +331,107 @@ validate_zi <- function(zi, data = NULL) {
     }
   }
 
+  if (identical(zi$type, "zoib") && !is.null(zi$oi_formula) && !is.null(data)) {
+    formula_vars <- all.vars(zi$oi_formula)
+    missing_vars <- setdiff(formula_vars, names(data))
+    if (length(missing_vars) > 0) {
+      stop("ZOIB one-inflation formula contains variables not in data: ",
+           paste(missing_vars, collapse = ", "), call. = FALSE)
+    }
+  }
+
   zi
+}
+
+
+#' Determine the ZI/hurdle/OI/ZOIB type string and design-matrix shape
+#' implied by a ZI/hurdle *family* (e.g. `ratiod_zinegbin()`), independent
+#' of any explicit `zi = ` argument.
+#'
+#' This is the single source of truth for family-based ZI auto-detection,
+#' shared by every backend (HMC, VI, ESS, SGHMC) so the specific
+#' `"zi_poisson"`/`"zi_negbin"`/`"zi_binomial"`/etc. string always reaches
+#' the C++ dispatch, instead of a bare `"zi"`/`"hurdle"` collapsing every
+#' variant to the same (or wrong) likelihood.
+#'
+#' @param family A `ratiod_family` object with `zero_inflated`/`one_inflated`
+#'   set (checked by the caller before calling this)
+#' @param N Number of observations, for building placeholder design matrices
+#'
+#' @return A list with `type`, `X_zi`, `p_zi`, `coef_names`, `X_oi`, `p_oi`,
+#'   `coef_names_oi`
+#' @keywords internal
+family_zi_info <- function(family, N) {
+  dist <- family$numerator$distribution
+
+  zi_type <- if (family$zi_type == "hurdle") {
+    switch(dist,
+      "hurdle_binomial" = "hurdle_binomial",
+      "hurdle_poisson" = "hurdle_poisson",
+      "hurdle_neg_binomial" = "hurdle_negbin",
+      "hurdle_binomial"  # fallback
+    )
+  } else if (family$zi_type == "one_inflated") {
+    # One-inflated models (excess at upper boundary)
+    "oi_binomial"
+  } else if (family$zi_type == "zoib") {
+    # Zero-and-one-inflated binomial
+    "zoib"
+  } else {
+    # Zero-inflated mixture models
+    switch(dist,
+      "zero_inflated_binomial" = "zi_binomial",
+      "zero_inflated_poisson" = "zi_poisson",
+      "zero_inflated_neg_binomial" = "zi_negbin",
+      "zi_binomial"  # fallback
+    )
+  }
+
+  if (family$zi_type == "one_inflated") {
+    # OI-binomial: only OI coefficient, no ZI
+    list(
+      type = zi_type,
+      X_zi = matrix(0, nrow = N, ncol = 1),  # Placeholder (not used)
+      p_zi = 0L,  # No ZI coefficient for OI-only models
+      coef_names = NULL,
+      X_oi = matrix(1, nrow = N, ncol = 1),  # Intercept-only
+      p_oi = 1L,
+      coef_names_oi = "(Intercept)_oi"
+    )
+  } else if (family$zi_type == "zoib") {
+    # ZOIB: both ZI and OI coefficients
+    list(
+      type = zi_type,
+      X_zi = matrix(1, nrow = N, ncol = 1),  # Intercept-only
+      p_zi = 1L,
+      coef_names = "(Intercept)_zi",
+      X_oi = matrix(1, nrow = N, ncol = 1),  # Intercept-only
+      p_oi = 1L,
+      coef_names_oi = "(Intercept)_oi"
+    )
+  } else {
+    # ZI/Hurdle models: only ZI coefficient
+    list(
+      type = zi_type,
+      X_zi = matrix(1, nrow = N, ncol = 1),  # Intercept-only
+      p_zi = 1L,
+      coef_names = "(Intercept)_zi",
+      X_oi = NULL,
+      p_oi = 0L,
+      coef_names_oi = NULL
+    )
+  }
+}
+
+
+#' Build a design matrix for a ZI/OI component from an optional formula
+#' @keywords internal
+build_zi_design_matrix <- function(formula, data, N, suffix) {
+  if (is.null(formula) || identical(formula, ~1)) {
+    X <- matrix(1, nrow = N, ncol = 1)
+    colnames(X) <- paste0("(Intercept)", suffix)
+  } else {
+    X <- model.matrix(formula, data = data)
+  }
+  X
 }

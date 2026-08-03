@@ -244,3 +244,137 @@ test_that("all ZI families validate link functions", {
   expect_error(ratiod_zoibinomial(link_zi = "identity"))
   expect_error(ratiod_hurdle_binomial(link_hurdle = "log"))
 })
+
+
+# ============================================================================
+# Explicit zi = binomial-family ZI/hurdle/OI/ZOIB constructors (#33)
+# ============================================================================
+
+test_that("zi_binomial creates correct structure", {
+  zi <- zi_binomial()
+
+  expect_s3_class(zi, "ratiod_zi")
+  expect_equal(zi$type, "zi_binomial")
+  expect_null(zi$formula)
+  expect_equal(zi$distribution, "binomial")
+})
+
+
+test_that("hurdle_binomial creates correct structure", {
+  zi <- hurdle_binomial()
+
+  expect_s3_class(zi, "ratiod_zi")
+  expect_equal(zi$type, "hurdle_binomial")
+  expect_null(zi$formula)
+  expect_equal(zi$distribution, "binomial")
+})
+
+
+test_that("oi_binomial creates correct structure", {
+  zi <- oi_binomial()
+
+  expect_s3_class(zi, "ratiod_zi")
+  expect_equal(zi$type, "oi_binomial")
+  expect_null(zi$formula)
+  expect_equal(zi$distribution, "binomial")
+})
+
+
+test_that("zoib creates correct structure with separate zi/oi formulas", {
+  zi <- zoib(~ habitat, ~ effort)
+
+  expect_s3_class(zi, "ratiod_zi")
+  expect_equal(zi$type, "zoib")
+  expect_true(inherits(zi$formula, "formula"))
+  expect_true(inherits(zi$oi_formula, "formula"))
+  expect_equal(zi$distribution, "binomial")
+})
+
+
+test_that("validate_zi accepts the new binomial-family ZI types", {
+  expect_s3_class(validate_zi(zi_binomial()), "ratiod_zi")
+  expect_s3_class(validate_zi(hurdle_binomial()), "ratiod_zi")
+  expect_s3_class(validate_zi(oi_binomial()), "ratiod_zi")
+  expect_s3_class(validate_zi(zoib()), "ratiod_zi")
+})
+
+
+test_that("validate_zi checks zoib's oi_formula variables exist", {
+  zi <- zoib(oi_formula = ~ nonexistent_var)
+  df <- data.frame(x = 1:10, y = 10:1)
+
+  expect_error(
+    validate_zi(zi, df),
+    "not in data"
+  )
+})
+
+
+test_that("print works for the new binomial-family ZI specs", {
+  output <- capture.output(print(zi_binomial()))
+  expect_true(any(grepl("Zero-Inflated Binomial", output)))
+
+  output <- capture.output(print(zoib(~ habitat, ~ effort)))
+  expect_true(any(grepl("Zero-and-One-Inflated Binomial", output)))
+  expect_true(any(grepl("Zero-inflation formula", output)))
+  expect_true(any(grepl("One-inflation formula", output)))
+})
+
+
+test_that("prepare_zi_for_hmc builds OI-only design (no ZI coefficient)", {
+  zi <- oi_binomial(~ x)
+  df <- data.frame(x = 1:10, y = 10:1)
+
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(zi, df, 10)
+
+  expect_equal(zi_info$type, "oi_binomial")
+  expect_equal(zi_info$p_zi, 0L)
+  expect_equal(ncol(zi_info$X_oi), 2)  # Intercept + x
+  expect_equal(zi_info$p_oi, 2)
+})
+
+
+test_that("prepare_zi_for_hmc builds both ZI and OI designs for zoib", {
+  zi <- zoib(~ x, ~ 1)
+  df <- data.frame(x = 1:10, y = 10:1)
+
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(zi, df, 10)
+
+  expect_equal(zi_info$type, "zoib")
+  expect_equal(ncol(zi_info$X_zi), 2)  # Intercept + x
+  expect_equal(zi_info$p_zi, 2)
+  expect_equal(ncol(zi_info$X_oi), 1)  # Intercept only
+  expect_equal(zi_info$p_oi, 1)
+})
+
+
+test_that("prepare_zi_for_hmc auto-detects the specific ZI string from a family", {
+  df <- data.frame(x = 1:10, y = 10:1)
+
+  # zi_negbin family: must produce "zi_negbin", never a bare "zi" (#33)
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(NULL, df, 10, ratiod_zinegbin())
+  expect_equal(zi_info$type, "zi_negbin")
+
+  # hurdle_negbin family: must produce "hurdle_negbin", never a bare "hurdle"
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(NULL, df, 10, ratiod_hurdle_negbin())
+  expect_equal(zi_info$type, "hurdle_negbin")
+
+  # Binomial-family ZI variants: previously unreachable through auto-detection
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(NULL, df, 10, ratiod_zibinomial())
+  expect_equal(zi_info$type, "zi_binomial")
+  expect_equal(zi_info$p_zi, 1L)
+  expect_equal(zi_info$p_oi, 0L)
+
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(NULL, df, 10, ratiod_hurdle_binomial())
+  expect_equal(zi_info$type, "hurdle_binomial")
+
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(NULL, df, 10, ratiod_oibinomial())
+  expect_equal(zi_info$type, "oi_binomial")
+  expect_equal(zi_info$p_zi, 0L)
+  expect_equal(zi_info$p_oi, 1L)
+
+  zi_info <- tulpaRatio:::prepare_zi_for_hmc(NULL, df, 10, ratiod_zoibinomial())
+  expect_equal(zi_info$type, "zoib")
+  expect_equal(zi_info$p_zi, 1L)
+  expect_equal(zi_info$p_oi, 1L)
+})

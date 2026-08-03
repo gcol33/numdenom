@@ -202,75 +202,10 @@ fit_hmc <- function(formula,
   # Prepare temporal structure
   temporal_info <- prepare_temporal_for_hmc(temporal, data, hmc_data$N)
 
-  # Prepare zero-inflation structure
-
-  # Check if family itself is ZI/OI/ZOIB (ratiod_zi*, ratiod_hurdle_*, ratiod_oi*, ratiod_zoib*)
-  # In this case, extract ZI info from family, not from zi= parameter
-  if (is.null(zi) && (isTRUE(family$zero_inflated) || isTRUE(family$one_inflated))) {
-    # Determine ZI type string based on family distribution and zi_type
-    dist <- family$numerator$distribution
-    zi_type <- if (family$zi_type == "hurdle") {
-      # Hurdle models
-      switch(dist,
-        "hurdle_binomial" = "hurdle_binomial",
-        "hurdle_poisson" = "hurdle_poisson",
-        "hurdle_neg_binomial" = "hurdle_negbin",
-        "hurdle_binomial"  # fallback
-      )
-    } else if (family$zi_type == "one_inflated") {
-      # One-inflated models (excess at upper boundary)
-      "oi_binomial"
-    } else if (family$zi_type == "zoib") {
-      # Zero-and-one-inflated binomial
-      "zoib"
-    } else {
-      # Zero-inflated mixture models
-      switch(dist,
-        "zero_inflated_binomial" = "zi_binomial",
-        "zero_inflated_poisson" = "zi_poisson",
-        "zero_inflated_neg_binomial" = "zi_negbin",
-        "zi_binomial"  # fallback
-      )
-    }
-
-    # Build ZI/OI info based on model type
-    if (family$zi_type == "one_inflated") {
-      # OI-binomial: only OI coefficient, no ZI
-      zi_info <- list(
-        type = zi_type,
-        X_zi = matrix(0, nrow = hmc_data$N, ncol = 1),  # Placeholder (not used)
-        p_zi = 0L,  # No ZI coefficient for OI-only models
-        coef_names = NULL,
-        X_oi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
-        p_oi = 1L,
-        coef_names_oi = "(Intercept)_oi"
-      )
-    } else if (family$zi_type == "zoib") {
-      # ZOIB: both ZI and OI coefficients
-      zi_info <- list(
-        type = zi_type,
-        X_zi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
-        p_zi = 1L,
-        coef_names = "(Intercept)_zi",
-        X_oi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
-        p_oi = 1L,
-        coef_names_oi = "(Intercept)_oi"
-      )
-    } else {
-      # ZI/Hurdle models: only ZI coefficient
-      zi_info <- list(
-        type = zi_type,
-        X_zi = matrix(1, nrow = hmc_data$N, ncol = 1),  # Intercept-only
-        p_zi = 1L,
-        coef_names = "(Intercept)_zi",
-        X_oi = NULL,
-        p_oi = 0L,
-        coef_names_oi = NULL
-      )
-    }
-  } else {
-    zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N)
-  }
+  # Prepare zero-inflation structure. Handles both an explicit `zi = `
+  # argument and auto-detection from a ZI/hurdle/OI/ZOIB family (e.g.
+  # ratiod_zinegbin()) when `zi` is not given.
+  zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N, family)
 
   # Prepare latent factor structure
   latent_info <- prepare_latent_for_hmc(latent, hmc_data$N)
@@ -2276,8 +2211,19 @@ get_max_threads <- function() {
 
 
 #' Prepare zero-inflation structure for HMC
+#'
+#' Single source of truth for turning either an explicit `zi = ` argument
+#' or a ZI/hurdle/OI/ZOIB *family* (e.g. `ratiod_zinegbin()`, with no
+#' explicit `zi = `) into the `zi_info` list every backend consumes.
+#' @param family Optional `ratiod_family` object, used for auto-detection
+#'   when `zi` is NULL (see [family_zi_info()])
 #' @keywords internal
-prepare_zi_for_hmc <- function(zi, data, N) {
+prepare_zi_for_hmc <- function(zi, data, N, family = NULL) {
+  if (is.null(zi) && !is.null(family) &&
+      (isTRUE(family$zero_inflated) || isTRUE(family$one_inflated))) {
+    return(family_zi_info(family, N))
+  }
+
   if (is.null(zi)) {
     return(list(
       type = "none",
@@ -2291,18 +2237,40 @@ prepare_zi_for_hmc <- function(zi, data, N) {
   }
 
   # ZI is a ratiod_zi object with formula and type
-  zi_type <- zi$type  # "zi_poisson", "zi_negbin", "hurdle_poisson", "hurdle_negbin"
+  zi_type <- zi$type
 
-  # Build design matrix from ZI formula
-  if (is.null(zi$formula) || zi$formula == ~ 1) {
-    # Intercept-only ZI model
-    X_zi <- matrix(1, nrow = N, ncol = 1)
-    colnames(X_zi) <- "(Intercept)_zi"
-  } else {
-    # Build design matrix from formula
-    X_zi <- model.matrix(zi$formula, data = data)
+  if (identical(zi_type, "oi_binomial")) {
+    # OI-only: no ZI coefficient, only OI coefficient
+    X_oi <- build_zi_design_matrix(zi$formula, data, N, "_oi")
+    return(list(
+      type = zi_type,
+      X_zi = matrix(0, nrow = N, ncol = 1),  # Placeholder (not used)
+      p_zi = 0L,
+      coef_names = NULL,
+      X_oi = X_oi,
+      p_oi = ncol(X_oi),
+      coef_names_oi = colnames(X_oi)
+    ))
   }
 
+  if (identical(zi_type, "zoib")) {
+    # ZOIB: both ZI and OI coefficients, from separate formulas
+    X_zi <- build_zi_design_matrix(zi$formula, data, N, "_zi")
+    X_oi <- build_zi_design_matrix(zi$oi_formula, data, N, "_oi")
+    return(list(
+      type = zi_type,
+      X_zi = X_zi,
+      p_zi = ncol(X_zi),
+      coef_names = colnames(X_zi),
+      X_oi = X_oi,
+      p_oi = ncol(X_oi),
+      coef_names_oi = colnames(X_oi)
+    ))
+  }
+
+  # zi_poisson / zi_negbin / hurdle_poisson / hurdle_negbin / zi_binomial / hurdle_binomial:
+  # only a ZI coefficient
+  X_zi <- build_zi_design_matrix(zi$formula, data, N, "_zi")
   list(
     type = zi_type,
     X_zi = X_zi,

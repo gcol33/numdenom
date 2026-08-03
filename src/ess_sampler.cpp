@@ -171,7 +171,10 @@ Rcpp::List cpp_ess_fit(
 
     if (data.zi_type != ZIType::NONE) {
         NumericMatrix X_zi = Rcpp::as<NumericMatrix>(zi_params["X"]);
-        data.p_zi = X_zi.ncol();
+        // Use explicit p_zi from R (not X_zi.ncol()) because OI-only models
+        // pass a 1-column placeholder X_zi but p_zi=0
+        SEXP p_zi_sexp = zi_params["p_zi"];
+        data.p_zi = (!Rf_isNull(p_zi_sexp)) ? Rcpp::as<int>(p_zi_sexp) : X_zi.ncol();
         data.X_zi_flat.resize(N * data.p_zi);
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < data.p_zi; j++) {
@@ -391,10 +394,16 @@ int cpp_ess_get_n_params(
     }
 
     // ZI
-    std::string zi_type = Rcpp::as<std::string>(zi_params["type"]);
-    if (zi_type != "none") {
-        NumericMatrix X_zi = Rcpp::as<NumericMatrix>(zi_params["X"]);
-        n_params += X_zi.ncol();  // beta_zi
+    if (ratiod_zi::parse_zi_type(Rcpp::as<std::string>(zi_params["type"])) != ZIType::NONE) {
+        // Use explicit p_zi from R (not X_zi.ncol()) because OI-only models
+        // pass a 1-column placeholder X_zi but p_zi=0
+        SEXP p_zi_sexp = zi_params["p_zi"];
+        if (!Rf_isNull(p_zi_sexp)) {
+            n_params += Rcpp::as<int>(p_zi_sexp);
+        } else {
+            NumericMatrix X_zi = Rcpp::as<NumericMatrix>(zi_params["X"]);
+            n_params += X_zi.ncol();  // beta_zi
+        }
     }
 
     return n_params;

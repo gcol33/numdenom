@@ -99,19 +99,10 @@ fit_vi <- function(formula,
   # Prepare temporal structure
   temporal_info <- prepare_temporal_for_hmc(temporal, data, hmc_data$N)
 
-  # Prepare zero-inflation structure
-  if (is.null(zi) && (isTRUE(family$zero_inflated) || isTRUE(family$one_inflated))) {
-    zi_type_str <- if (family$zi_type == "hurdle") "hurdle" else "zi"
-    zi_info <- list(
-      type = zi_type_str,
-      X_zi = model.matrix(~ 1, data = data),
-      prior_sd = 10.0
-    )
-  } else if (!is.null(zi)) {
-    zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N)
-  } else {
-    zi_info <- list(type = "none", X_zi = matrix(0, nrow = hmc_data$N, ncol = 1), prior_sd = 10.0)
-  }
+  # Prepare zero-inflation structure. Handles both an explicit `zi = `
+  # argument and auto-detection from a ZI/hurdle/OI/ZOIB family when
+  # `zi` is not given.
+  zi_info <- prepare_zi_for_hmc(zi, data, hmc_data$N, family)
 
   # Prior parameters
   if (is.null(priors)) priors <- list()
@@ -166,7 +157,12 @@ fit_vi <- function(formula,
   zi_params <- list(
     type = zi_info$type,
     X = zi_info$X_zi,
-    prior_sd = zi_info$prior_sd %||% 10.0
+    p_zi = zi_info$p_zi %||% as.integer(ncol(zi_info$X_zi)),  # Explicit p_zi for OI-only models
+    prior_sd = priors$zi_prior_sd %||% 10.0,
+    # OI info for OI-binomial and ZOIB models
+    X_oi = zi_info$X_oi,
+    p_oi = zi_info$p_oi %||% 0L,
+    oi_prior_sd = priors$oi_prior_sd %||% priors$zi_prior_sd %||% 10.0
   )
 
   latent_params <- list(
@@ -315,8 +311,12 @@ get_param_names_vi <- function(hmc_data, spatial_info, temporal_info, zi_info, m
   # Fixed effects numerator
   names <- c(names, paste0("beta_num[", seq_len(ncol(hmc_data$X_num)), "]"))
 
-  # Fixed effects denominator
-  names <- c(names, paste0("beta_denom[", seq_len(ncol(hmc_data$X_denom)), "]"))
+  # Fixed effects denominator (binomial/beta_binomial have 0 columns: fixed
+  # trials, no denominator coefficient; paste0() would otherwise emit a
+  # phantom "beta_denom[]" name for a zero-length seq_len())
+  if (ncol(hmc_data$X_denom) > 0) {
+    names <- c(names, paste0("beta_denom[", seq_len(ncol(hmc_data$X_denom)), "]"))
+  }
 
   # Random effects
   if (hmc_data$n_re_groups > 0) {
@@ -350,9 +350,17 @@ get_param_names_vi <- function(hmc_data, spatial_info, temporal_info, zi_info, m
     }
   }
 
-  # Zero-inflation
-  if (zi_info$type != "none") {
-    names <- c(names, paste0("beta_zi[", seq_len(ncol(zi_info$X_zi)), "]"))
+  # Zero-inflation. Use the explicit p_zi (not ncol(X_zi)) because OI-only
+  # models pass a 1-column placeholder X_zi but p_zi = 0.
+  p_zi <- zi_info$p_zi %||% ncol(zi_info$X_zi)
+  if (zi_info$type != "none" && p_zi > 0) {
+    names <- c(names, paste0("beta_zi[", seq_len(p_zi), "]"))
+  }
+
+  # One-inflation (OI-binomial and ZOIB)
+  p_oi <- zi_info$p_oi %||% 0L
+  if (p_oi > 0) {
+    names <- c(names, paste0("beta_oi[", seq_len(p_oi), "]"))
   }
 
   names
