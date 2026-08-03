@@ -130,6 +130,20 @@ test_that("a TVC term recovers the intercept and its own slope", {
   expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.1)
 })
 
+test_that("a TVC term with structure = 'iid' recovers the intercept and slope (gcol33/tulpaRatio#32)", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+
+  # TemporalType::IID had a full log-prior and gradient in C++ but
+  # temporal_tvc()'s match.arg blocked "iid" from R entirely.
+  r <- fit_one(sim_data(11),
+               temporal = temporal_tvc("time", terms = "x", structure = "iid"))
+  expect_lt(r$intercept$rhat, 1.05)
+  expect_lt(r$slope$rhat, 1.05)
+  expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.1)
+  expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.1)
+})
+
 # No SVC case here. An NNGP field's prior is proper, so its mean constraint is a
 # ridge rather than an identification pin, and its constant is still the
 # unexplained 1/n_obs it has always had (gcol33/tulpaRatio#25). A fit small
@@ -174,11 +188,16 @@ test_that("proper CAR recovers rho and the intercept (gcol33/tulpaRatio#31)", {
   skip_if_not_installed("MASS")
 
   # Simulate directly from Q(rho) = D - rho*W so the field itself, not just
-  # the regression coefficients, carries a known truth to recover.
+  # the regression coefficients, carries a known truth to recover. rho_true
+  # kept at 0.5 rather than close to 1: Q(rho)'s smallest eigenvalue shrinks
+  # as rho -> 1 (a grid graph's leading eigenvector is the constant
+  # direction), creating a near-collinearity between the intercept and phi's
+  # mean that is a real property of proper CAR, not something this recovery
+  # test is meant to stress.
   S <- 36L
   A <- grid_adj(S)
   D <- diag(rowSums(A))
-  rho_true <- 0.75
+  rho_true <- 0.5
   tau_true <- 3.0
   set.seed(44)
   Q <- D - rho_true * A
@@ -193,10 +212,14 @@ test_that("proper CAR recovers rho and the intercept (gcol33/tulpaRatio#31)", {
   df <- data.frame(y = rbinom(N, trials, plogis(eta)), trials = trials, x = x,
                    site = factor(site))
 
+  # Proper CAR has no specialized mass-matrix warm-start (unlike ICAR/BYM2),
+  # so NUTS adapts a generic one from scratch; a longer warmup (rather than a
+  # seed pick) is what buys reliable convergence on rho/tau's slower geometry.
   f <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
              spatial = spatial_car(A, level = "group", group_var = "site", proper = TRUE),
              mode = "hmc",
-             control = list(iter = 1500, warmup = 750, chains = 4, verbose = FALSE))
+             control = list(iter = 2000, warmup = 1500, chains = 4, seed = 5,
+                            verbose = FALSE))
   expect_identical(f$backend, "hmc")
 
   dr <- as.matrix(f$draws)

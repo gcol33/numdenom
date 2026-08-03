@@ -709,12 +709,22 @@ test_that("temporal_tvc supports different structures", {
   tvc_rw1 <- temporal_tvc("year", terms = 1, structure = "rw1")
   tvc_rw2 <- temporal_tvc("year", terms = 1, structure = "rw2")
   tvc_ar1 <- temporal_tvc("year", terms = 1, structure = "ar1")
-  tvc_gp <- temporal_tvc("year", terms = 1, structure = "gp")
+  tvc_iid <- temporal_tvc("year", terms = 1, structure = "iid")
 
   expect_equal(tvc_rw1$structure, "rw1")
   expect_equal(tvc_rw2$structure, "rw2")
   expect_equal(tvc_ar1$structure, "ar1")
-  expect_equal(tvc_gp$structure, "gp")
+  expect_equal(tvc_iid$structure, "iid")
+})
+
+test_that("temporal_tvc rejects structure = 'gp' (gcol33/tulpaRatio#32)", {
+  # C++ has no GP path for TVC at all (no lengthscale field, no branch in
+  # tvc_term_log_prior); accepting the string and silently downgrading to
+  # RW1 in the C++ string parser was the actual bug.
+  expect_error(
+    temporal_tvc("year", terms = 1, structure = "gp"),
+    "not implemented"
+  )
 })
 
 

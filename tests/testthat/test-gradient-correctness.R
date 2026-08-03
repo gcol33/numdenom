@@ -18,7 +18,12 @@ MULTI_FIELDS <- c("icar_ms", "bym2_ms", "icar_st", "bym2_st")
 # allocates for belongs here, so that a structure cannot be added to one density
 # and not the other without a red test.
 STRUCTURE_FIELDS <- c("re", "re_crossed", "re_slopes", "re_slopes_corr",
-                      "hsgp", "tvc")
+                      "hsgp", "tvc",
+                      # TemporalType::IID was implemented for TVC's log-prior
+                      # and gradient in both H and autodiff modes, but blocked
+                      # from R by temporal_tvc()'s match.arg and never checked
+                      # against finite differences (gcol33/tulpaRatio#32).
+                      "tvc_iid")
 # Marginalized out by locating the field's mode and adding a Laplace correction,
 # which is not a closed-form function of the parameters, so the templated density
 # cannot express it and the autodiff modes must refuse rather than differentiate

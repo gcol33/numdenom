@@ -1263,7 +1263,9 @@ validate_temporal_gp <- function(temporal, data) {
 #'   - `"rw1"`: First-order random walk (default)
 #'   - `"rw2"`: Second-order random walk (smoother)
 #'   - `"ar1"`: First-order autoregressive
-#'   - `"gp"`: Gaussian process (for irregular time spacing)
+#'   - `"iid"`: Independent draws at each time point (no temporal smoothing)
+#'   - `"gp"`: Gaussian process (for irregular time spacing). Not yet
+#'     implemented; `temporal_tvc()` errors if selected.
 #' @param group_var Optional name of grouping variable for panel data.
 #' @param shared Logical; if TRUE (default), TVC effects enter both
 #'   numerator and denominator. Set to FALSE for process-specific TVCs
@@ -1339,11 +1341,16 @@ validate_temporal_gp <- function(temporal, data) {
 #' @export
 temporal_tvc <- function(time_var,
                          terms = 1,
-                         structure = c("rw1", "rw2", "ar1", "gp"),
+                         structure = c("rw1", "rw2", "ar1", "iid", "gp"),
                          group_var = NULL,
                          shared = TRUE) {
 
   structure_type <- match.arg(structure)
+
+  if (structure_type == "gp") {
+    stop("`structure = \"gp\"` is not implemented for temporal_tvc(). ",
+         "Use \"rw1\", \"rw2\", \"ar1\", or \"iid\".", call. = FALSE)
+  }
 
   if (!is.character(time_var) || length(time_var) != 1) {
     stop("`time_var` must be a single character string", call. = FALSE)
@@ -1418,6 +1425,7 @@ print.ratiod_tvc <- function(x, ...) {
     rw1 = "RW1 (first-order random walk)",
     rw2 = "RW2 (second-order random walk)",
     ar1 = "AR(1) (autoregressive)",
+    iid = "IID (independent at each time point)",
     gp = "GP (Gaussian process)"
   )
   cat("Structure:", struct_name, "\n")

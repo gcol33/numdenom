@@ -189,6 +189,12 @@ fit_gibbs <- function(formula,
   data_list$has_tvc <- has_tvc
   if (has_tvc) {
     tvc <- validate_tvc(temporal, data, X_num)
+    if (!identical(tvc$structure %||% "rw1", "rw1")) {
+      stop(sprintf(
+        "Gibbs backend supports TVC structure = \"rw1\" only, got \"%s\". ",
+        tvc$structure %||% "rw1"
+      ), "Use `mode = \"hmc\"` for \"rw2\"/\"ar1\"/\"iid\".", call. = FALSE)
+    }
     data_list$tvc_time_index <- as.integer(tvc$time_index)
     data_list$tvc_group_index <- as.integer(tvc$group_index)
     data_list$tvc_X <- as.numeric(t(tvc$X_tvc))  # Row-major

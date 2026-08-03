@@ -14360,18 +14360,11 @@ Rcpp::List cpp_hmc_fit(
     data.tvc_data.group_index = tvc_group_index;
     data.tvc_data.X_tvc = tvc_X_tvc;
 
-    // Parse TVC temporal structure
-    if (tvc_structure_str == "rw1") {
-      data.tvc_data.structure = ratiod_temporal::TemporalType::RW1;
-    } else if (tvc_structure_str == "rw2") {
-      data.tvc_data.structure = ratiod_temporal::TemporalType::RW2;
-    } else if (tvc_structure_str == "ar1") {
-      data.tvc_data.structure = ratiod_temporal::TemporalType::AR1;
-    } else if (tvc_structure_str == "iid") {
-      data.tvc_data.structure = ratiod_temporal::TemporalType::IID;
-    } else {
-      data.tvc_data.structure = ratiod_temporal::TemporalType::RW1;  // Default
-    }
+    // Parse TVC temporal structure. R validates "gp" out at temporal_tvc()
+    // and rejects anything but "rw1" for the Gibbs backend, so every string
+    // reaching here is rw1/rw2/ar1/iid; the RW1 fallback below is for a
+    // literally unrecognized string, not a real, unimplemented choice.
+    data.tvc_data.structure = ratiod_tvc::parse_tvc_structure(tvc_structure_str);
 
     // Prior parameters
     data.tvc_tau_shape = tvc_tau_shape;

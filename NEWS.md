@@ -1,5 +1,33 @@
 # tulpaRatio 1.4.3
 
+* **`temporal_tvc(structure = ...)`: `"iid"` unblocked, `"gp"` now errors
+  instead of silently downgrading to RW1, and the Gibbs backend now rejects
+  anything but `"rw1"` instead of silently ignoring the argument (#32).**
+  `TemporalType::IID` had a complete log-prior and gradient in both the H and
+  autodiff paths (`tvc_term_log_prior`, `tvc_prior_gradients_ws`, and the
+  templated density via `hmc_tvc_autodiff.h`'s `using` declarations), and the
+  C++ string parser already recognized `"iid"` -- but `temporal_tvc()`'s
+  `match.arg` only offered `"rw1"/"rw2"/"ar1"/"gp"`, so no R call could ever
+  reach it. `structure = "iid"` is now accepted, verified against
+  `test_gradient_check.cpp`'s finite-difference harness in both H and A_r
+  modes (0 deviation), and recovers a simulated intercept and slope in
+  `test-recovery-constrained-fields.R`. Separately, `"gp"` was accepted and
+  documented as a first-class option, but `TVCData` has no GP fields at all
+  (no lengthscale, no covariance branch) -- the C++ parser silently mapped
+  any unrecognized string, `"gp"` included, to RW1, so
+  `temporal_tvc(..., structure = "gp")` ran to completion and silently fit an
+  RW1 varying coefficient. `temporal_tvc()` now errors immediately if
+  `structure = "gp"` is requested, rather than reaching the sampler at all.
+  Independently, the Gibbs backend's TVC update
+  (`# ---- 5. Update TVC coefficients via univariate MH with RW1 conditional
+  proposal ----`) is hardcoded to RW1 and never read the `tvc_structure` field
+  R was already sending it, so `mode = "gibbs"` silently ran RW1 regardless of
+  what `structure` asked for; the Gibbs backend now rejects any TVC structure
+  but `"rw1"` with a clear error pointing at `mode = "hmc"`. The C++ side's
+  own duplicated string-to-enum parser in `hmc_sampler.cpp` was replaced with
+  a call to the existing `ratiod_tvc::parse_tvc_structure()`, which had no
+  callers before this.
+
 * **`spatial_car(..., proper = TRUE)` now fits a proper CAR instead of
   silently downgrading to ICAR (#31).** The R object already computed rho
   bounds and printed "Proper CAR"; a complete C++ implementation

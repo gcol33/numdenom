@@ -94,7 +94,7 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1");
   const bool want_rw2  = (field == "rw2");
   const bool want_hsgp = (field == "hsgp");
-  const bool want_tvc  = (field == "tvc");
+  const bool want_tvc  = (field == "tvc" || field == "tvc_iid");
   // Random slopes route through a parameter layout the single-term path does
   // not use: one sigma per coefficient, and for the correlated variant a
   // tanh-Cholesky factor with an LKJ prior and re = diag(sigma) L z.
@@ -240,7 +240,12 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     tvc.n_times = n_times;
     tvc.n_tvc = 1;
     tvc.n_groups = 1;
-    tvc.structure = ratiod_temporal::TemporalType::RW1;
+    // tvc_iid (gcol33/tulpaRatio#32): TemporalType::IID was fully implemented
+    // in tvc_term_log_prior / tvc_prior_gradients_ws and reachable from the
+    // C++ string parser, but blocked by temporal_tvc()'s match.arg in R and
+    // never exercised by this harness.
+    tvc.structure = (field == "tvc_iid") ? ratiod_temporal::TemporalType::IID
+                                          : ratiod_temporal::TemporalType::RW1;
     tvc.shared = true;
     tvc.cyclic = false;
     tvc.time_index.resize(n_obs);
