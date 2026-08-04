@@ -302,6 +302,20 @@ inline std::vector<GaussianPrior> build_gaussian_priors(
         priors.push_back(prior);
     }
 
+    // OI coefficients: beta_oi ~ N(0, oi_prior_sd^2)
+    if (layout.has_oi && layout.beta_oi_end > layout.beta_oi_start) {
+        GaussianPrior prior;
+        for (int j = layout.beta_oi_start; j < layout.beta_oi_end; j++) {
+            prior.param_indices.push_back(j);
+        }
+
+        int n = prior.param_indices.size();
+        prior.mean = Eigen::VectorXd::Zero(n);
+        prior.is_identity_cov = true;
+        prior.scale = data.oi_prior_sd;
+        priors.push_back(prior);
+    }
+
     // Latent factors
     if (layout.has_latent && layout.latent_factor_end > layout.latent_factor_start) {
         GaussianPrior prior;

@@ -158,7 +158,11 @@ fit_ess <- function(formula,
     type = zi_info$type,
     X = zi_info$X_zi,
     p_zi = zi_info$p_zi %||% as.integer(ncol(zi_info$X_zi)),  # Explicit p_zi for OI-only models
-    prior_sd = zi_info$prior_sd %||% 10.0
+    prior_sd = zi_info$prior_sd %||% 10.0,
+    # OI info for OI-binomial and ZOIB models
+    X_oi = zi_info$X_oi,
+    p_oi = zi_info$p_oi %||% 0L,
+    oi_prior_sd = priors$oi_prior_sd %||% priors$zi_prior_sd %||% 10.0
   )
 
   latent_params <- list(

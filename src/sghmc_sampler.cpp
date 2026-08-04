@@ -176,9 +176,26 @@ Rcpp::List cpp_sghmc_fit(
         data.zi_prior_sd = 10.0;
     }
 
-    // OI parameters (not supported yet)
+    // One-inflation (for OI-binomial and ZOIB)
     data.p_oi = 0;
-    data.oi_prior_sd = 10.0;
+    SEXP p_oi_sexp = zi_params["p_oi"];
+    if (!Rf_isNull(p_oi_sexp)) {
+        data.p_oi = Rcpp::as<int>(p_oi_sexp);
+    }
+    if (data.p_oi > 0) {
+        NumericMatrix X_oi = zi_params["X_oi"];
+        data.X_oi_flat.resize(N * data.p_oi);
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < data.p_oi; j++) {
+                data.X_oi_flat[i * data.p_oi + j] = X_oi(i, j);
+            }
+        }
+    }
+    data.oi_prior_sd = data.zi_prior_sd;
+    SEXP oi_prior_sd_sexp = zi_params["oi_prior_sd"];
+    if (!Rf_isNull(oi_prior_sd_sexp)) {
+        data.oi_prior_sd = Rcpp::as<double>(oi_prior_sd_sexp);
+    }
 
     // GP/HSGP not supported in SGHMC yet
     data.has_gp = false;
@@ -310,6 +327,13 @@ Rcpp::List cpp_sghmc_fit(
     if (layout.has_zi) {
         for (int j = 0; j < data.p_zi; j++) {
             param_names[idx++] = "beta_zi[" + std::to_string(j + 1) + "]";
+        }
+    }
+
+    // OI
+    if (layout.has_oi) {
+        for (int j = 0; j < data.p_oi; j++) {
+            param_names[idx++] = "beta_oi[" + std::to_string(j + 1) + "]";
         }
     }
 
@@ -487,9 +511,28 @@ Rcpp::List cpp_sgld_fit(
         data.zi_prior_sd = 10.0;
     }
 
-    // Not supported
+    // One-inflation (for OI-binomial and ZOIB)
     data.p_oi = 0;
-    data.oi_prior_sd = 10.0;
+    SEXP p_oi_sexp = zi_params["p_oi"];
+    if (!Rf_isNull(p_oi_sexp)) {
+        data.p_oi = Rcpp::as<int>(p_oi_sexp);
+    }
+    if (data.p_oi > 0) {
+        NumericMatrix X_oi = zi_params["X_oi"];
+        data.X_oi_flat.resize(N * data.p_oi);
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < data.p_oi; j++) {
+                data.X_oi_flat[i * data.p_oi + j] = X_oi(i, j);
+            }
+        }
+    }
+    data.oi_prior_sd = data.zi_prior_sd;
+    SEXP oi_prior_sd_sexp = zi_params["oi_prior_sd"];
+    if (!Rf_isNull(oi_prior_sd_sexp)) {
+        data.oi_prior_sd = Rcpp::as<double>(oi_prior_sd_sexp);
+    }
+
+    // Not supported
     data.has_gp = false;
     data.has_multiscale_gp = false;
     data.has_hsgp = false;
@@ -600,6 +643,11 @@ Rcpp::List cpp_sgld_fit(
     if (layout.has_zi) {
         for (int j = 0; j < data.p_zi; j++) {
             param_names[idx++] = "beta_zi[" + std::to_string(j + 1) + "]";
+        }
+    }
+    if (layout.has_oi) {
+        for (int j = 0; j < data.p_oi; j++) {
+            param_names[idx++] = "beta_oi[" + std::to_string(j + 1) + "]";
         }
     }
 

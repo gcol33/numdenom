@@ -11,13 +11,9 @@
 #  - reports the correct, specific ZI/OI coefficient (not silently zero or
 #    absent), agreeing with the mode = "hmc" fit on the same data/seed
 #
-# Known, documented exception (see #33's scope note): ESS and SGHMC
-# hardcode `data.p_oi = 0` unconditionally (self-documented "not supported
-# yet" in src/ess_sampler.cpp / src/sghmc_sampler.cpp), so `oi_binomial`
-# and `zoib`'s OI component is not reachable on those two backends. VI is
-# unaffected (its OI/ZOIB data plumbing is fixed here) and is checked
-# fully; ESS/SGHMC are checked only for their ZI component (zoib) or are
-# skipped for the OI-only comparison (oi_binomial).
+# oi_binomial and zoib's OI component is checked on all four backends: VI,
+# ESS, and SGHMC each read data.p_oi/X_oi_flat and expose beta_oi[...] in
+# their draws, matching HMC.
 
 fit_zi_coefs <- function(formula, data, family, mode, zi = NULL, seed = 20260803) {
   args <- list(
@@ -190,14 +186,16 @@ test_that("explicit oi_binomial() workaround fits via vi", {
 
 
 for (backend in c("ess", "sghmc")) {
-  test_that(sprintf("ratiod_oibinomial family auto-detect at least fits without error via %s (OI component not yet supported there, tracked separately in #33)", backend), {
+  test_that(sprintf("ratiod_oibinomial family auto-detect fits a nonzero, HMC-consistent OI logit via %s", backend), {
     skip_on_cran()
     spec <- simulate_oi_binomial()
-    fit <- tratio(
-      spec$formula, data = spec$data, family = ratiod_oibinomial(), mode = backend,
-      control = list(iter = 200L, warmup = 100L, chains = 1L, seed = 1L, verbose = FALSE)
-    )
-    expect_s3_class(fit, "ratiod_fit")
+
+    ref <- fit_zi_coefs(spec$formula, spec$data, ratiod_oibinomial(), "hmc")
+    got <- fit_zi_coefs(spec$formula, spec$data, ratiod_oibinomial(), backend)
+
+    expect_false(is.null(got$oi))
+    expect_true(is.finite(got$oi[[1]]))
+    expect_lt(abs(got$oi[[1]] - ref$oi[[1]]), 1.5)
   })
 }
 
@@ -238,7 +236,7 @@ test_that("ratiod_zoibinomial family auto-detect fits nonzero, HMC-consistent ZI
 
 
 for (backend in c("ess", "sghmc")) {
-  test_that(sprintf("ratiod_zoibinomial family auto-detect fits the ZI component (not the OI component, tracked separately in #33) via %s", backend), {
+  test_that(sprintf("ratiod_zoibinomial family auto-detect fits nonzero, HMC-consistent ZI and OI logits via %s", backend), {
     skip_on_cran()
     spec <- simulate_zoib()
 
@@ -246,7 +244,10 @@ for (backend in c("ess", "sghmc")) {
     got <- fit_zi_coefs(spec$formula, spec$data, ratiod_zoibinomial(), backend)
 
     expect_false(is.null(got$zi))
+    expect_false(is.null(got$oi))
     expect_true(is.finite(got$zi[[1]]))
+    expect_true(is.finite(got$oi[[1]]))
     expect_lt(abs(got$zi[[1]] - ref$zi[[1]]), 1.5)
+    expect_lt(abs(got$oi[[1]] - ref$oi[[1]]), 1.5)
   })
 }
