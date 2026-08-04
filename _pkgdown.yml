@@ -75,8 +75,12 @@ reference:
       - ratiod_zoibinomial
       - hurdle_negbin
       - hurdle_poisson
+      - hurdle_binomial
       - zi_negbin
       - zi_poisson
+      - zi_binomial
+      - oi_binomial
+      - zoib
       - zi_specification
 
   - title: "Ratio Inference"
@@ -161,6 +165,7 @@ reference:
       - check_diagnostics
       - diagnostic_summary
       - mcmc_diagnostics
+      - diagnostics.ratiod_fit
       - geweke_test
       - n_divergent
 
