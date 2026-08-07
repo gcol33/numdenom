@@ -201,6 +201,78 @@ for (field in c("rw1", "rw2", "icar_rw1")) {
   }
 }
 
+# Zero-inflation and hurdle structures on the count-response families. The
+# templated density read zi_type only inside its ModelType::BINOMIAL arm, so
+# NEGBIN_NEGBIN, POISSON_GAMMA and NEGBIN_GAMMA called the plain
+# negbin/poisson likelihood whatever zi_type said (gcol33/tulpaRatio#34): ESS,
+# which evaluates that density directly, and the three autodiff gradient modes,
+# which differentiate it, all sampled a posterior with no ZI term in it while
+# still estimating a ZI coefficient. Nothing built a count-response ZI model
+# here before, so neither density nor the analytic gradient was ever checked on
+# one.
+ZI_COUNT_CASES <- list(
+  list(family = "poisson_gamma", zi = "zi_poisson"),
+  list(family = "poisson_gamma", zi = "hurdle_poisson"),
+  list(family = "negbin_gamma",  zi = "zi_negbin"),
+  list(family = "negbin_gamma",  zi = "hurdle_negbin"),
+  list(family = "negbin_negbin", zi = "zi_negbin"),
+  list(family = "negbin_negbin", zi = "hurdle_negbin")
+)
+
+for (case in ZI_COUNT_CASES) {
+  for (mode in MODES) {
+    test_that(sprintf("analytic gradient matches finite differences (rw1, %s, %s, %s)",
+                      mode, case$family, case$zi), {
+      r <- tulpaRatio:::cpp_gradient_check("rw1", mode = mode,
+                                           family = case$family, zi = case$zi)
+      # A ZI block that was never allocated would leave every assertion below
+      # true of a model with no zero-inflation in it.
+      expect_true("beta_zi" %in% r$block)
+      expect_true(all(r$analytic[r$block == "beta_zi"] != 0))
+      dev <- rel_dev(r$analytic, r$finite_diff)
+      worst <- which.max(dev)
+      expect_lt(
+        max(dev),
+        1e-4,
+        label = sprintf(
+          "%s/%s/%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+          case$family, case$zi, mode, worst, r$block[worst],
+          r$analytic[worst], r$finite_diff[worst]
+        )
+      )
+    })
+  }
+}
+
+test_that("a count-response ZI or hurdle term reaches both log posteriors", {
+  # Before #34 the templated density returned the same number for zi_poisson,
+  # hurdle_poisson and no zero-inflation at all, and differed from the analytic
+  # density by between 1.7 and 46 log units across these six.
+  for (case in ZI_COUNT_CASES) {
+    r <- tulpaRatio:::cpp_gradient_check("rw1", mode = "arena",
+                                         family = case$family, zi = case$zi)
+    info <- sprintf("%s / %s", case$family, case$zi)
+    expect_true(is.na(r$impl_gap), label = info)
+    expect_equal(r$log_post, r$log_post_impl, tolerance = 1e-8, info = info)
+  }
+})
+
+test_that("each count ZI structure is a density of its own", {
+  # Guards the test above. Were the ZI term to reach neither density, all three
+  # of these would return one number and the comparison would hold while
+  # comparing nothing.
+  for (family in c("poisson_gamma", "negbin_gamma", "negbin_negbin")) {
+    poisson <- identical(family, "poisson_gamma")
+    lp <- function(zi) tulpaRatio:::cpp_logpost_at("rw1", family = family, zi = zi)
+    none <- lp("none")
+    inflated <- lp(if (poisson) "zi_poisson" else "zi_negbin")
+    hurdle <- lp(if (poisson) "hurdle_poisson" else "hurdle_negbin")
+    expect_gt(abs(inflated - none), 1.0, label = family)
+    expect_gt(abs(hurdle - none), 1.0, label = family)
+    expect_gt(abs(inflated - hurdle), 1.0, label = family)
+  }
+})
+
 test_that("an unshared temporal effect changes the density it is meant to change", {
   # Guards the test above: if temporal_shared stopped reaching the likelihood
   # altogether, the shared and unshared cases would both pass while testing

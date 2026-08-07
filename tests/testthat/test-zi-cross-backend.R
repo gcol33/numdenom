@@ -251,3 +251,52 @@ for (backend in c("ess", "sghmc")) {
     expect_lt(abs(got$oi[[1]] - ref$oi[[1]]), 1.5)
   })
 }
+
+# ============================================================================
+# The count-response ZI likelihood ESS actually evaluates (#34)
+# ============================================================================
+#
+# The checks above compare a backend's ZI logit against HMC's with a tolerance
+# of 1.5, on data whose true ZI logit is about -1. A backend that ignored the
+# ZI term entirely would sample beta_zi from its N(0, zi_prior_sd) prior and
+# land within that band, so those tests hold either way for ESS. ESS is the one
+# backend that evaluates compute_log_post_impl rather than compute_log_post,
+# and that density branched on zi_type only for binomial responses: a
+# Poisson/NegBin ZI or hurdle term was dropped, and beta_zi was sampled against
+# a likelihood that did not contain it.
+#
+# Separating the two takes a true ZI logit far from the prior mean.
+
+simulate_strong_count_zi <- function(n = 300) {
+  set.seed(4034)
+  x <- rnorm(n)
+  is_zero <- runif(n) < plogis(1.4)  # about 80% structural zeros
+  list(
+    formula = count | total ~ x,
+    data = data.frame(
+      count = ifelse(is_zero, 0L, rnbinom(n, size = 5, mu = 12)),
+      total = rnbinom(n, size = 5, mu = 60),
+      x = x
+    )
+  )
+}
+
+for (variant in list(list(zi = zi_negbin(), name = "zi_negbin"),
+                     list(zi = hurdle_negbin(), name = "hurdle_negbin"))) {
+  test_that(sprintf("ESS fits %s from the likelihood, not from its prior", variant$name), {
+    skip_on_cran()
+    spec <- simulate_strong_count_zi()
+
+    ref <- fit_zi_coefs(spec$formula, spec$data, ratiod_negbin_negbin(), "hmc",
+                        zi = variant$zi)
+    got <- fit_zi_coefs(spec$formula, spec$data, ratiod_negbin_negbin(), "ess",
+                        zi = variant$zi)
+
+    expect_false(is.null(got$zi))
+    # Far from the prior mean the ZI coefficient collapses to when the
+    # likelihood does not contain it, and close to what HMC gets from the same
+    # data.
+    expect_gt(abs(got$zi[[1]]), 0.7)
+    expect_lt(abs(got$zi[[1]] - ref$zi[[1]]), 0.6)
+  })
+}

@@ -7,12 +7,22 @@ ifeq ($(OS),Windows_NT)
   CXX = C:/rtools45/x86_64-w64-mingw32.static.posix/bin/g++.exe
 endif
 
-CXXFLAGS = -std=c++17 -Wall -Wextra -I.. -I.
+# The package headers under test are header-only but not self-contained: they
+# reach for R, Rcpp, RcppEigen and tulpa. Ask the installed R where those live
+# rather than hardcoding a library path, so the suite compiles against the same
+# headers the package is built against.
+RSCRIPT ?= Rscript
+RBIN ?= R
+R_INCLUDE := $(shell $(RSCRIPT) -e "cat(shQuote(R.home('include')))")
+PKG_INCLUDE := $(shell $(RSCRIPT) -e "cat(paste0('-I', shQuote(sapply(c('Rcpp','RcppEigen','tulpa'), function(p) system.file('include', package = p)))), sep=' ')")
+R_LDFLAGS := $(shell $(RBIN) CMD config --ldflags)
+
+CXXFLAGS = -std=c++17 -Wall -Wextra -I.. -I. -I$(R_INCLUDE) $(PKG_INCLUDE)
+LDLIBS = $(R_LDFLAGS)
 
 # Coverage flags
 COV_FLAGS = --coverage -fprofile-arcs -ftest-coverage -O0 -g
 
-# Source files (excluding Rcpp-dependent files)
 TEST_SOURCES = test_main.cpp test_linalg.cpp test_zi.cpp test_temporal.cpp test_svc.cpp
 
 # Output executable
@@ -26,7 +36,7 @@ all: $(TEST_EXE)
 	./$(TEST_EXE)
 
 $(TEST_EXE): $(TEST_SOURCES)
-	$(CXX) $(CXXFLAGS) -O2 -o $@ $^
+	$(CXX) $(CXXFLAGS) -O2 -o $@ $^ $(LDLIBS)
 
 # Build and run tests with coverage
 coverage: $(TEST_EXE_COV)
@@ -38,7 +48,7 @@ coverage: $(TEST_EXE_COV)
 	@echo "Run 'make lcov' to generate HTML report"
 
 $(TEST_EXE_COV): $(TEST_SOURCES)
-	$(CXX) $(CXXFLAGS) $(COV_FLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) $(COV_FLAGS) -o $@ $^ $(LDLIBS)
 
 # Generate HTML coverage report using lcov
 lcov: coverage

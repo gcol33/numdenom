@@ -1,5 +1,32 @@
 # tulpaRatio 1.4.3
 
+* **Zero-inflation and hurdle terms on count responses now reach the templated
+  log posterior, so `mode = "ess"` and the `A`/`A_r`/`A_t` gradient modes stop
+  silently fitting a plain Poisson/NegBin (#34).**
+  `compute_log_post_impl` read `data.zi_type` only inside its
+  `ModelType::BINOMIAL` arm. The three count-response arms --
+  `NEGBIN_NEGBIN`, `POISSON_GAMMA` and `NEGBIN_GAMMA` -- called the plain
+  `log_lik_negbin`/`log_lik_poisson` whatever `zi_type` said, while still
+  allocating and sampling a ZI coefficient against a likelihood that did not
+  contain it. That density is the one ESS evaluates and the one the three
+  autodiff gradient modes differentiate, so
+  `tratio(..., family = ratiod_zinegbin(), mode = "ess")` (and
+  `ratiod_zipois()`, `ratiod_hurdle_negbin()`, `ratiod_hurdle_pois()`, or an
+  explicit `zi = zi_negbin()` and friends) completed with no error and
+  returned a zero-inflation logit drawn from its prior. Measured on the
+  finite-difference harness, the templated density returned the same number
+  for `zi_poisson`, `hurdle_poisson` and no zero-inflation at all, and
+  disagreed with the analytic density by between 1.7 and 46 log units across
+  the six family/structure combinations; both now agree to 1e-11, and the
+  analytic ZI gradient -- which nothing had ever checked on a count response
+  -- matches central differences to machine precision in the `handcoded` and
+  `arena` modes alike. `hmc_zi.h`'s count-response densities are templated on
+  the scalar type rather than duplicated, so `compute_log_post` and
+  `compute_log_post_impl<T>` evaluate one implementation. `make_model()` in
+  `test_gradient_check.cpp` gained a `zi` argument and the `negbin_negbin` and
+  `negbin_gamma` families, since it previously hardcoded `ZIType::NONE` for
+  every call site and no test combined `mode = "ess"` with any ZI family.
+
 * **`temporal_tvc(structure = ...)`: `"iid"` unblocked, `"gp"` now errors
   instead of silently downgrading to RW1, and the Gibbs backend now rejects
   anything but `"rw1"` instead of silently ignoring the argument (#32).**

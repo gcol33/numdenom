@@ -50,19 +50,26 @@ void build_grid_adjacency(int n,
 
 // Synthetic model with an intercept, one covariate, and whichever structured
 // field is under test. `family` selects binomial (no denominator predictors)
-// or poisson_gamma (a continuous denominator with its own predictors), which
+// or one of the count families (a denominator with its own predictors), which
 // is what exercises the paths that treat the two linear predictors
-// differently, `temporal_shared` among them.
+// differently, `temporal_shared` among them. `zi` attaches a zero-inflation or
+// hurdle structure to the numerator, with its own two-column design matrix.
 ModelData make_model(const std::string& field, int n_obs, int n_units,
                      int n_times, unsigned int seed,
                      const std::string& family = "binomial",
-                     bool temporal_shared = true) {
+                     bool temporal_shared = true,
+                     const std::string& zi = "none") {
   ModelData data;
   std::mt19937 rng(seed);
   std::normal_distribution<double> rnorm(0.0, 1.0);
   std::uniform_int_distribution<int> rtrials(10, 50);
 
   const bool is_binomial = (family == "binomial");
+  // NEGBIN_NEGBIN is the only family whose denominator is itself a count; the
+  // other two carry a continuous Gamma denominator.
+  const bool denom_is_count = (family == "negbin_negbin");
+  const ZIType zi_type = ratiod_zi::parse_zi_type(zi);
+  const bool has_zi = (zi_type != ZIType::NONE);
 
   // icar_ms / icar_st / bym2_ms / bym2_st reach the multi-feature gradient
   // paths, which carry the spatial field alongside another structure and are
@@ -102,7 +109,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   const bool want_re = (field == "re" || field == "re_crossed" || want_re_slopes);
 
   data.N = n_obs;
-  data.model_type = is_binomial ? ModelType::BINOMIAL : ModelType::POISSON_GAMMA;
+  data.model_type = is_binomial          ? ModelType::BINOMIAL
+                  : denom_is_count       ? ModelType::NEGBIN_NEGBIN
+                  : family == "negbin_gamma" ? ModelType::NEGBIN_GAMMA
+                                         : ModelType::POISSON_GAMMA;
   data.p_num = 2;
   data.p_denom = is_binomial ? 0 : 2;
   data.n_threads = 1;
@@ -125,8 +135,14 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   data.y_denom.assign(n_obs, 1);
   if (!is_binomial) {
     data.X_denom_flat.resize(static_cast<size_t>(n_obs) * 2);
-    data.y_denom_cont.resize(n_obs);
+    if (denom_is_count) {
+      data.y_denom.assign(n_obs, 0);
+    } else {
+      data.y_denom_cont.resize(n_obs);
+    }
   }
+  if (has_zi) data.X_zi_flat.resize(static_cast<size_t>(n_obs) * 2);
+  std::uniform_real_distribution<double> runif(0.0, 1.0);
   for (int i = 0; i < n_obs; i++) {
     const double x = rnorm(rng);
     data.X_num_flat[static_cast<size_t>(i) * 2 + 0] = 1.0;
@@ -143,8 +159,22 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       data.X_denom_flat[static_cast<size_t>(i) * 2 + 1] = z;
       std::poisson_distribution<int> rpois(std::exp(0.5 + 0.3 * x));
       data.y_num[i] = rpois(rng);
-      std::gamma_distribution<double> rgamma(2.0, std::exp(0.4 + 0.2 * z) / 2.0);
-      data.y_denom_cont[i] = std::max(1e-3, rgamma(rng));
+      if (denom_is_count) {
+        std::poisson_distribution<int> rpois_d(std::exp(0.4 + 0.2 * z));
+        data.y_denom[i] = rpois_d(rng);
+      } else {
+        std::gamma_distribution<double> rgamma(2.0, std::exp(0.4 + 0.2 * z) / 2.0);
+        data.y_denom_cont[i] = std::max(1e-3, rgamma(rng));
+      }
+    }
+    if (has_zi) {
+      data.X_zi_flat[static_cast<size_t>(i) * 2 + 0] = 1.0;
+      data.X_zi_flat[static_cast<size_t>(i) * 2 + 1] = x;
+      // Both arms of every ZI and hurdle density have to be represented in the
+      // data, or a term that only appears at y = 0 (or only at y > 0) never
+      // enters the sum and the check cannot see it. Zeroing at a rate of about
+      // 0.4 leaves both well populated.
+      if (runif(rng) < 1.0 / (1.0 + std::exp(-(-0.4 + 0.6 * x)))) data.y_num[i] = 0;
     }
   }
 
@@ -347,8 +377,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.st_parameterization = (field == "st4_nc") ? 1 : 0;
   }
 
-  data.zi_type = ZIType::NONE;
-  data.p_zi = 0;
+  data.zi_type = zi_type;
+  data.p_zi = has_zi ? 2 : 0;
   data.zi_prior_sd = 1.0;
   data.p_oi = 0;
   data.oi_prior_sd = 1.0;
@@ -371,9 +401,10 @@ Rcpp::List cpp_gradient_check(std::string field,
                               bool precenter = false,
                               std::string family = "binomial",
                               bool temporal_shared = true,
-                              std::string reference = "analytic") {
+                              std::string reference = "analytic",
+                              std::string zi = "none") {
   ModelData data = make_model(field, n_obs, n_units, n_times, seed,
-                              family, temporal_shared);
+                              family, temporal_shared, zi);
   ParamLayout layout = compute_param_layout(data);
   const int n_params = get_n_params(data);
 
@@ -428,6 +459,8 @@ Rcpp::List cpp_gradient_check(std::string field,
   Rcpp::CharacterVector block(n_params, "other");
   for (int i = 0; i < n_params; i++) {
     if (i >= layout.beta_num_start && i < layout.beta_num_end) block[i] = "beta_num";
+    if (layout.beta_zi_start >= 0 && i >= layout.beta_zi_start && i < layout.beta_zi_end)
+      block[i] = "beta_zi";
     if (layout.spatial_start >= 0 && i >= layout.spatial_start && i < layout.spatial_end)
       block[i] = "spatial";
     if (layout.theta_bym2_start >= 0 && i >= layout.theta_bym2_start && i < layout.theta_bym2_end)
@@ -481,9 +514,10 @@ double cpp_logpost_at(std::string field,
                       int n_times = 10,
                       unsigned int seed = 42,
                       std::string family = "binomial",
-                      bool temporal_shared = true) {
+                      bool temporal_shared = true,
+                      std::string zi = "none") {
   ModelData data = make_model(field, n_obs, n_units, n_times, seed,
-                              family, temporal_shared);
+                              family, temporal_shared, zi);
   ParamLayout layout = compute_param_layout(data);
   const int n_params = get_n_params(data);
   std::mt19937 rng(seed + 1000u);

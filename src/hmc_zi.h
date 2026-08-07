@@ -4,11 +4,25 @@
 // Zero-inflation and hurdle model support for ratiod HMC
 // Provides log-likelihood functions for ZI-Poisson, ZI-NegBin,
 // and hurdle variants
+//
+// The count-response densities below are templated on the scalar type, so
+// compute_log_post (T = double) and compute_log_post_impl<T> (double for
+// evaluation, an autodiff scalar for the arena/forward/tape gradient modes)
+// evaluate the same expression rather than two transcriptions of it.
 
 #include <cmath>
 #include <algorithm>
+#include "autodiff_utils.h"
 
 namespace ratiod_zi {
+
+using ratiod::math::safe_exp;
+using ratiod::math::safe_log;
+using ratiod::math::safe_max;
+using ratiod::math::log1p_fn;
+using ratiod::math::lgamma_fn;
+using ratiod::math::inv_logit;
+using ratiod::math::get_value;
 
 // Enum for ZI model types
 enum class ZIType {
@@ -49,38 +63,33 @@ inline ZIType parse_zi_type(const std::string& zi_type_str) {
 }
 
 // Log of 1 + exp(x), numerically stable
-inline double log1pexp(double x) {
-  if (x > 35.0) return x;
-  if (x < -10.0) return std::exp(x);
-  return std::log1p(std::exp(x));
+template<typename T>
+inline T log1pexp(const T& x) {
+  const double xv = get_value(x);
+  if (xv > 35.0) return x;
+  if (xv < -10.0) return safe_exp(x);
+  return log1p_fn(safe_exp(x));
 }
 
 // Logistic sigmoid function
-inline double logistic(double x) {
-  if (x > 0) {
-    return 1.0 / (1.0 + std::exp(-x));
-  } else {
-    double ex = std::exp(x);
-    return ex / (1.0 + ex);
-  }
+template<typename T>
+inline T logistic(const T& x) {
+  return inv_logit(x);
 }
 
 // Log of logistic sigmoid (log(1/(1+exp(-x))))
-inline double log_logistic(double x) {
+template<typename T>
+inline T log_logistic(const T& x) {
   return -log1pexp(-x);
 }
 
 // Log of 1 - logistic(x) = log(exp(-x)/(1+exp(-x))) = -x - log(1+exp(-x))
-inline double log1m_logistic(double x) {
+template<typename T>
+inline T log1m_logistic(const T& x) {
   return -log1pexp(x);
 }
 
-// Log-gamma function
-inline double lgamma_fn(double x) {
-  return std::lgamma(x);
-}
-
-// Log factorial
+// Log factorial. Constant in the parameters, so it stays a double on every path.
 inline double lfactorial(int n) {
   return lgamma_fn(n + 1.0);
 }
@@ -90,19 +99,21 @@ inline double lfactorial(int n) {
 // ============================================================================
 
 // Poisson log-PMF: y ~ Poisson(mu)
-inline double poisson_lpmf(int y, double mu) {
-  if (mu <= 0) return -1e10;
-  return y * std::log(mu) - mu - lfactorial(y);
+template<typename T>
+inline T poisson_lpmf(int y, const T& mu) {
+  if (get_value(mu) <= 0) return T(-1e10);
+  return y * safe_log(mu) - mu - lfactorial(y);
 }
 
 // Negative binomial log-PMF: y ~ NegBin(mu, phi)
 // Using NB2 parameterization: Var(Y) = mu + mu^2/phi
-inline double negbin_lpmf(int y, double mu, double phi) {
-  if (mu <= 0 || phi <= 0) return -1e10;
-  double r = phi;  // size parameter
-  double p = phi / (phi + mu);  // success probability
-  return lgamma_fn(y + r) - lgamma_fn(r) - lfactorial(y) +
-         r * std::log(p) + y * std::log(1 - p);
+template<typename T>
+inline T negbin_lpmf(int y, const T& mu, const T& phi) {
+  if (get_value(mu) <= 0 || get_value(phi) <= 0) return T(-1e10);
+  T r = phi;                // size parameter
+  T p = phi / (phi + mu);   // success probability
+  return lgamma_fn(T(y) + r) - lgamma_fn(r) - lfactorial(y) +
+         r * safe_log(p) + y * safe_log(T(1.0) - p);
 }
 
 // Binomial log-PMF: y ~ Binomial(n, p)
@@ -142,36 +153,38 @@ inline double zi_poisson_lpmf(int y, double mu, double zi_prob) {
 
 // Zero-inflated Poisson log-PMF (logit scale for zi)
 // logit_zi: logit of zero-inflation probability
-inline double zi_poisson_lpmf_logit(int y, double mu, double logit_zi) {
+template<typename T>
+inline T zi_poisson_lpmf_logit(int y, const T& mu, const T& logit_zi) {
   if (y == 0) {
     // log(P(Y=0)) = log(sigmoid(logit_zi) + sigmoid(-logit_zi) * exp(-mu))
-    double log_zi = log_logistic(logit_zi);
-    double log_1m_zi = log1m_logistic(logit_zi);
-    double log_p0_count = -mu;
+    T log_zi = log_logistic(logit_zi);
+    T log_1m_zi = log1m_logistic(logit_zi);
+    T log_p0_count = -mu;
 
-    double a = log_zi;
-    double b = log_1m_zi + log_p0_count;
-    double max_ab = std::max(a, b);
-    return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
+    T a = log_zi;
+    T b = log_1m_zi + log_p0_count;
+    T max_ab = safe_max(a, b);
+    return max_ab + safe_log(safe_exp(a - max_ab) + safe_exp(b - max_ab));
   } else {
     return log1m_logistic(logit_zi) + poisson_lpmf(y, mu);
   }
 }
 
 // Zero-inflated negative binomial log-PMF (logit scale for zi)
-inline double zi_negbin_lpmf_logit(int y, double mu, double phi, double logit_zi) {
+template<typename T>
+inline T zi_negbin_lpmf_logit(int y, const T& mu, const T& phi, const T& logit_zi) {
   if (y == 0) {
     // log(P(Y=0)) = log(sigmoid(logit_zi) + sigmoid(-logit_zi) * P_NB(0))
-    double log_zi = log_logistic(logit_zi);
-    double log_1m_zi = log1m_logistic(logit_zi);
+    T log_zi = log_logistic(logit_zi);
+    T log_1m_zi = log1m_logistic(logit_zi);
 
     // P_NB(0) = (phi / (phi + mu))^phi
-    double log_p0_count = phi * std::log(phi / (phi + mu));
+    T log_p0_count = phi * safe_log(phi / (phi + mu));
 
-    double a = log_zi;
-    double b = log_1m_zi + log_p0_count;
-    double max_ab = std::max(a, b);
-    return max_ab + std::log(std::exp(a - max_ab) + std::exp(b - max_ab));
+    T a = log_zi;
+    T b = log_1m_zi + log_p0_count;
+    T max_ab = safe_max(a, b);
+    return max_ab + safe_log(safe_exp(a - max_ab) + safe_exp(b - max_ab));
   } else {
     return log1m_logistic(logit_zi) + negbin_lpmf(y, mu, phi);
   }
@@ -247,26 +260,29 @@ inline double zoib_lpmf_logit(int y, int n, double p, double logit_zi, double lo
 
 // Truncated Poisson log-PMF (conditional on y > 0)
 // P(Y=y|Y>0) = Poisson(y|mu) / (1 - exp(-mu))
-inline double truncated_poisson_lpmf(int y, double mu) {
-  if (y <= 0) return -1e10;
-  double log_p_untrunc = poisson_lpmf(y, mu);
-  double log_p_zero = -mu;
-  double log_normalizer = std::log(1.0 - std::exp(log_p_zero));
+template<typename T>
+inline T truncated_poisson_lpmf(int y, const T& mu) {
+  if (y <= 0) return T(-1e10);
+  T log_p_untrunc = poisson_lpmf(y, mu);
+  T log_p_zero = -mu;
+  T log_normalizer = safe_log(T(1.0) - safe_exp(log_p_zero));
   return log_p_untrunc - log_normalizer;
 }
 
 // Truncated negative binomial log-PMF (conditional on y > 0)
-inline double truncated_negbin_lpmf(int y, double mu, double phi) {
-  if (y <= 0) return -1e10;
-  double log_p_untrunc = negbin_lpmf(y, mu, phi);
-  double log_p_zero = phi * std::log(phi / (phi + mu));
-  double log_normalizer = std::log(1.0 - std::exp(log_p_zero));
+template<typename T>
+inline T truncated_negbin_lpmf(int y, const T& mu, const T& phi) {
+  if (y <= 0) return T(-1e10);
+  T log_p_untrunc = negbin_lpmf(y, mu, phi);
+  T log_p_zero = phi * safe_log(phi / (phi + mu));
+  T log_normalizer = safe_log(T(1.0) - safe_exp(log_p_zero));
   return log_p_untrunc - log_normalizer;
 }
 
 // Hurdle Poisson log-PMF (logit scale for hurdle)
 // logit_theta: logit of P(Y > 0)
-inline double hurdle_poisson_lpmf_logit(int y, double mu, double logit_theta) {
+template<typename T>
+inline T hurdle_poisson_lpmf_logit(int y, const T& mu, const T& logit_theta) {
   if (y == 0) {
     // P(Y=0) = 1 - theta = sigmoid(-logit_theta)
     return log1m_logistic(logit_theta);
@@ -277,7 +293,8 @@ inline double hurdle_poisson_lpmf_logit(int y, double mu, double logit_theta) {
 }
 
 // Hurdle negative binomial log-PMF (logit scale for hurdle)
-inline double hurdle_negbin_lpmf_logit(int y, double mu, double phi, double logit_theta) {
+template<typename T>
+inline T hurdle_negbin_lpmf_logit(int y, const T& mu, const T& phi, const T& logit_theta) {
   if (y == 0) {
     return log1m_logistic(logit_theta);
   } else {
@@ -314,8 +331,9 @@ inline double hurdle_binomial_lpmf_logit(int y, int n, double p, double logit_th
 // Compute ZI/hurdle log-likelihood for a single observation
 // logit_zi_or_theta: logit-scale parameter for ZI prob or hurdle prob
 // phi: overdispersion (only used for negbin variants)
-inline double zi_log_likelihood(
-    int y, double mu, double phi, double logit_zi_or_theta,
+template<typename T>
+inline T zi_log_likelihood(
+    int y, const T& mu, const T& phi, const T& logit_zi_or_theta,
     ZIType zi_type) {
 
   switch (zi_type) {
@@ -334,7 +352,7 @@ inline double zi_log_likelihood(
     case ZIType::NONE:
     default:
       // No ZI, return standard likelihood
-      if (phi > 0) {
+      if (get_value(phi) > 0) {
         return negbin_lpmf(y, mu, phi);
       } else {
         return poisson_lpmf(y, mu);

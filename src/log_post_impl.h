@@ -1322,21 +1322,41 @@ T compute_log_post_impl(
             }
 
         } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
+            // Zero-inflation and hurdle structures attach to the numerator only;
+            // the denominator count is always the plain family. Both densities
+            // route through ratiod_zi::zi_log_likelihood so a count-response
+            // ZI/hurdle term cannot be carried by one and dropped by the other
+            // (gcol33/tulpaRatio#34).
             T mu_num = safe_exp(eta_num);
             T mu_denom = safe_exp(eta_denom);
-            ll_i = log_lik_negbin(data.y_num[i], mu_num, phi_num);
+            if (layout.has_zi) {
+                ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
+                                                    logit_zi, data.zi_type);
+            } else {
+                ll_i = log_lik_negbin(data.y_num[i], mu_num, phi_num);
+            }
             ll_i = ll_i + log_lik_negbin(data.y_denom[i], mu_denom, phi_denom);
 
         } else if (data.model_type == ModelType::POISSON_GAMMA) {
             T mu_num = safe_exp(eta_num);
             T mu_denom = safe_exp(eta_denom);
-            ll_i = log_lik_poisson(data.y_num[i], mu_num);
+            if (layout.has_zi) {
+                ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
+                                                    logit_zi, data.zi_type);
+            } else {
+                ll_i = log_lik_poisson(data.y_num[i], mu_num);
+            }
             ll_i = ll_i + log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
 
         } else if (data.model_type == ModelType::NEGBIN_GAMMA) {
             T mu_num = safe_exp(eta_num);
             T mu_denom = safe_exp(eta_denom);
-            ll_i = log_lik_negbin(data.y_num[i], mu_num, phi_num);
+            if (layout.has_zi) {
+                ll_i = ratiod_zi::zi_log_likelihood(data.y_num[i], mu_num, phi_num,
+                                                    logit_zi, data.zi_type);
+            } else {
+                ll_i = log_lik_negbin(data.y_num[i], mu_num, phi_num);
+            }
             ll_i = ll_i + log_lik_gamma(data.y_denom_cont[i], phi_denom, mu_denom);
 
         } else if (data.model_type == ModelType::GAMMA_GAMMA) {

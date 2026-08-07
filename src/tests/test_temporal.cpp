@@ -212,21 +212,28 @@ TEST_CASE("temporal_log_prior dispatches to correct model", "[temporal]") {
 TEST_CASE("sum_to_zero_penalty", "[temporal]") {
   SECTION("zero-sum vector has zero penalty") {
     double phi[] = {-1.0, 0.0, 1.0};
-    REQUIRE(sum_to_zero_penalty(phi, 3, 100.0) == Approx(0.0));
+    REQUIRE(sum_to_zero_penalty(phi, 3) == Approx(0.0));
   }
 
   SECTION("non-zero sum incurs penalty") {
     double phi[] = {1.0, 2.0, 3.0};  // sum = 6
-    double lambda = 10.0;
-    double expected = -0.5 * lambda * 36.0;  // -0.5 * lambda * sum^2
-    REQUIRE(sum_to_zero_penalty(phi, 3, lambda) == Approx(expected));
+    double expected = -0.5 * tulpa::s2z_precision(3) * 36.0;
+    REQUIRE(sum_to_zero_penalty(phi, 3) == Approx(expected));
   }
 
-  SECTION("higher lambda = stronger penalty") {
-    double phi[] = {1.0, 1.0, 1.0};  // sum = 3
-    double penalty_low = sum_to_zero_penalty(phi, 3, 1.0);
-    double penalty_high = sum_to_zero_penalty(phi, 3, 100.0);
-    REQUIRE(penalty_high < penalty_low);  // More negative
+  SECTION("penalty is quadratic in the sum") {
+    double one[] = {1.0, 0.0, 0.0};
+    double two[] = {2.0, 0.0, 0.0};
+    REQUIRE(sum_to_zero_penalty(two, 3) == Approx(4.0 * sum_to_zero_penalty(one, 3)));
+  }
+
+  SECTION("the same sum is pinned less tightly as the field grows") {
+    // The precision comes from s2z_precision(T_len), which holds the field
+    // MEAN at sd = kappa: the sd allowed for the sum scales with the field
+    // length, so the same sum costs less over a longer field.
+    double short_field[] = {1.0, 1.0, 1.0};                    // sum = 3, T = 3
+    double long_field[] = {0.5, 0.5, 0.5, 0.5, 0.5, 0.5};      // sum = 3, T = 6
+    REQUIRE(sum_to_zero_penalty(short_field, 3) < sum_to_zero_penalty(long_field, 6));
   }
 }
 
