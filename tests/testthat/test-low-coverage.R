@@ -67,8 +67,8 @@ test_that("print.ratiod_benchmark handles NA diagnostics", {
 # validate.R coverage
 # -----------------------------------------------------------------------------
 
-test_that("prior_predict throws not implemented error", {
-  expect_error(prior_predict(NULL, NULL, NULL), "not yet implemented")
+test_that("prior_predict refuses a family it cannot simulate from", {
+  expect_error(prior_predict(NULL, NULL, NULL), "ratiod_family")
 })
 
 test_that("ratiod_compare requires at least two models", {
