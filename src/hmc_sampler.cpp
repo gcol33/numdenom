@@ -692,7 +692,12 @@ inline double compute_obs_ll(
     double phi_num, double phi_denom
 ) {
   if (data.model_type == ModelType::BINOMIAL) {
-    return log_lik_binomial(data.y_num[i], data.y_denom[i], eta_num);
+    // The eta-form likelihood drops the binomial coefficient, which is
+    // constant in eta but not in the data. compute_log_post's own
+    // observation loop adds it back, so a fused value without it reports a
+    // different density than the one the gradient beside it describes.
+    return log_lik_binomial(data.y_num[i], data.y_denom[i], eta_num)
+         + ratiod::math::portable_lchoose(data.y_denom[i], data.y_num[i]);
   } else if (data.model_type == ModelType::NEGBIN_NEGBIN) {
     double mu_num = std::exp(eta_num);
     double mu_denom = std::exp(eta_denom);
@@ -4234,11 +4239,51 @@ bool verify_gradient(
   return true;
 }
 
-// Runtime gradient check: compare compute_gradient() dispatcher output
-// against numerical gradients at the first warmup iteration.
-// Catches log-post/gradient mismatches in ALL specialized gradient functions
-// (GP, HSGP, SVC, TVC, MSGP, spatiotemporal, etc.), not just the main
-// compute_gradient_analytical().
+// Move every structured field off zero, deterministically.
+//
+// initialize_hmc_params_full() starts each field block at exactly 0.0, and a
+// quadratic-form prior -tau/2 phi' Q phi contributes nothing to any gradient
+// there: a wrong Q, a sign error on it, a missing quadratic term and an absent
+// sum-to-zero penalty are all invisible, because the analytic and the numerical
+// gradient agree on the same zero. The offline harness evaluates away from the
+// origin for exactly this reason (src/test_gradient_check.cpp). The offset is
+// small, bounded and a function of the index alone, so the check point is
+// reproducible and stays inside any prior's support.
+std::vector<double> offset_structured_blocks(const std::vector<double>& q,
+                                             const ParamLayout& layout) {
+  std::vector<double> out = q;
+  auto jitter = [&](int start, int end) {
+    if (start < 0 || end <= start) return;
+    for (int i = start; i < end && i < static_cast<int>(out.size()); i++) {
+      out[i] += 0.1 * std::sin(1.7 * static_cast<double>(i) + 0.3);
+    }
+  };
+
+  jitter(layout.spatial_start, layout.spatial_end);
+  jitter(layout.theta_bym2_start, layout.theta_bym2_end);
+  jitter(layout.temporal_start, layout.temporal_end);
+  jitter(layout.hsgp_beta_start, layout.hsgp_beta_end);
+  jitter(layout.tvc_w_start, layout.tvc_w_end);
+  jitter(layout.svc_w_start, layout.svc_w_end);
+  jitter(layout.gp_w_start, layout.gp_w_end);
+  jitter(layout.gp_local_start, layout.gp_local_end);
+  jitter(layout.gp_regional_start, layout.gp_regional_end);
+  jitter(layout.trend_start, layout.trend_end);
+  jitter(layout.seasonal_start, layout.seasonal_end);
+  jitter(layout.short_term_start, layout.short_term_end);
+  jitter(layout.st_delta_start, layout.st_delta_end);
+  jitter(layout.latent_factor_start, layout.latent_factor_end);
+  for (size_t t = 0; t < layout.re_start_multi.size(); t++) {
+    jitter(layout.re_start_multi[t], layout.re_end_multi[t]);
+  }
+  return out;
+}
+
+// Runtime gradient check: compare compute_gradient() dispatcher output against
+// numerical gradients of the density it is supposed to be the gradient of,
+// once, before sampling starts. Covers every specialized gradient function the
+// dispatcher can select (GP, HSGP, SVC, TVC, MSGP, spatiotemporal, ...), at a
+// point where the structured fields are nonzero.
 bool verify_gradient_runtime(
     const std::vector<double>& params,
     const ModelData& data,
@@ -4286,6 +4331,28 @@ bool verify_gradient_runtime(
     return false;
   }
   return true;
+}
+
+// Run the runtime check and fall back to numerical gradients if it fails.
+// Both the single-chain and the multi-chain entry points call this, so a
+// mismatch is reported the same way at either -- an R-level warning, which is
+// what an expect_warning(..., NA) guard in the tests can see. Both call sites
+// are on the R thread, before any parallel region opens.
+void verify_gradient_or_fallback(const std::vector<double>& q_init,
+                                 const ModelData& data,
+                                 const ParamLayout& layout) {
+  if (g_gradient_mode == GradientMode::NUMERICAL) return;
+
+  const std::vector<double> probe = offset_structured_blocks(q_init, layout);
+  if (verify_gradient_runtime(probe, data, layout, 1e-4)) return;
+
+  g_gradient_mode = GradientMode::NUMERICAL;
+  Rcpp::warning(
+    "Gradient mismatch detected: active gradient function disagrees with "
+    "numerical gradients (max rel diff > 1e-4). Falling back to numerical "
+    "gradients (mode='N'). This is slower but correct. Please report this "
+    "as a bug at https://github.com/gcol33/tulpaRatio/issues"
+  );
 }
 
 // =====================================================================
@@ -13576,18 +13643,7 @@ HMCResult run_hmc_chain(
     int riemannian
 ) {
   // Runtime gradient check: compare active gradient function against numerical
-  if (g_gradient_mode != GradientMode::NUMERICAL) {
-    bool grad_ok = verify_gradient_runtime(q_init, data, layout, 1e-4);
-    if (!grad_ok) {
-      g_gradient_mode = GradientMode::NUMERICAL;
-      Rcpp::warning(
-        "Gradient mismatch detected: active gradient function disagrees with "
-        "numerical gradients (max rel diff > 1e-4). Falling back to numerical "
-        "gradients (mode='N'). This is slower but correct. Please report this "
-        "as a bug at https://github.com/gcol33/tulpaRatio/issues"
-      );
-    }
-  }
+  verify_gradient_or_fallback(q_init, data, layout);
 
   // Run C++ version - pass verbose through for debugging
   HMCResultCpp cpp_result = run_hmc_chain_cpp(
@@ -13634,13 +13690,7 @@ std::vector<HMCResult> run_hmc_parallel_chains(
   // Runtime gradient check: compare active gradient function against numerical
   // BEFORE spawning parallel chains. This is single-threaded, so R API and
   // g_gradient_mode modification are safe.
-  if (g_gradient_mode != GradientMode::NUMERICAL) {
-    bool grad_ok = verify_gradient_runtime(q_init, data, layout, 1e-4);
-    if (!grad_ok) {
-      g_gradient_mode = GradientMode::NUMERICAL;
-      REprintf("[tulpaRatio] Falling back to numerical gradients for all chains.\n");
-    }
-  }
+  verify_gradient_or_fallback(q_init, data, layout);
 
   // Use pure C++ containers in parallel region
   std::vector<HMCResultCpp> cpp_results(n_chains);

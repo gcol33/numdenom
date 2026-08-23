@@ -10,6 +10,8 @@
 #include <vector>
 #include <cmath>
 #include <random>
+#include <algorithm>
+#include <utility>
 #include "hmc_sampler.h"
 #include "hmc_temporal.h"
 #include "log_post_impl.h"
@@ -48,6 +50,103 @@ void build_grid_adjacency(int n,
   row_ptr[n] = static_cast<int>(col_idx.size());
 }
 
+// Nearest-neighbour sets for an NNGP, mirroring compute_nngp_neighbors() in
+// R/spatial.R: order the locations by coordinate, then give each one the k
+// nearest among its predecessors in that order. nn_idx is 1-based within the
+// ordering with 0 marking an absent neighbour, and nn_order / nn_order_inv are
+// 0-based, which is the convention the sampler entry converts R's inputs to.
+struct NNGPNeighbors {
+  int k = 0;
+  std::vector<double> coords;          // reordered coordinates
+  std::vector<int> nn_idx;
+  std::vector<double> nn_dist;
+  std::vector<double> nn_neighbor_dist;
+  std::vector<int> nn_order;
+  std::vector<int> nn_order_inv;
+};
+
+NNGPNeighbors build_nngp(const std::vector<double>& coords, int n, int k) {
+  NNGPNeighbors out;
+  out.k = k;
+
+  std::vector<int> order(n);
+  for (int i = 0; i < n; i++) order[i] = i;
+  std::sort(order.begin(), order.end(), [&](int a, int b) {
+    if (coords[static_cast<size_t>(a) * 2] != coords[static_cast<size_t>(b) * 2])
+      return coords[static_cast<size_t>(a) * 2] < coords[static_cast<size_t>(b) * 2];
+    return coords[static_cast<size_t>(a) * 2 + 1] < coords[static_cast<size_t>(b) * 2 + 1];
+  });
+
+  out.coords.resize(static_cast<size_t>(n) * 2);
+  for (int i = 0; i < n; i++) {
+    out.coords[static_cast<size_t>(i) * 2 + 0] = coords[static_cast<size_t>(order[i]) * 2 + 0];
+    out.coords[static_cast<size_t>(i) * 2 + 1] = coords[static_cast<size_t>(order[i]) * 2 + 1];
+  }
+
+  auto dist = [&](int a, int b) {
+    const double dx = out.coords[static_cast<size_t>(a) * 2] - out.coords[static_cast<size_t>(b) * 2];
+    const double dy = out.coords[static_cast<size_t>(a) * 2 + 1] - out.coords[static_cast<size_t>(b) * 2 + 1];
+    return std::sqrt(dx * dx + dy * dy);
+  };
+
+  out.nn_idx.assign(static_cast<size_t>(n) * k, 0);
+  out.nn_dist.assign(static_cast<size_t>(n) * k, 0.0);
+  out.nn_neighbor_dist.assign(static_cast<size_t>(n) * k * k, 0.0);
+
+  for (int i = 1; i < n; i++) {
+    std::vector<std::pair<double, int>> cand;
+    cand.reserve(i);
+    for (int j = 0; j < i; j++) cand.emplace_back(dist(i, j), j);
+    std::sort(cand.begin(), cand.end());
+    const int m = std::min(static_cast<int>(cand.size()), k);
+    for (int c = 0; c < m; c++) {
+      out.nn_idx[static_cast<size_t>(i) * k + c] = cand[c].second + 1;  // 1-based
+      out.nn_dist[static_cast<size_t>(i) * k + c] = cand[c].first;
+    }
+    for (int a = 0; a < m; a++) {
+      for (int b = 0; b < m; b++) {
+        out.nn_neighbor_dist[(static_cast<size_t>(i) * k + a) * k + b] =
+            (a == b) ? 0.0 : dist(cand[a].second, cand[b].second);
+      }
+    }
+  }
+
+  out.nn_order.resize(n);
+  out.nn_order_inv.resize(n);
+  for (int i = 0; i < n; i++) {
+    out.nn_order[i] = order[i];       // 0-based
+    out.nn_order_inv[order[i]] = i;
+  }
+  return out;
+}
+
+// Every field name make_model() builds a structure for. A name outside this
+// list would fall through every branch and yield a model with no structured
+// field at all, so the check would pass while testing nothing.
+const char* const KNOWN_FIELDS[] = {
+  "none",
+  "icar", "bym2", "car_proper",
+  "rw1", "rw2", "icar_rw1",
+  "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc",
+  "icar_collapsed", "bym2_collapsed",
+  "icar_collapsed_rw1", "bym2_collapsed_rw1",
+  "hsgp",
+  "tvc", "tvc_iid", "tvc_ar1",
+  "re", "re_crossed", "re_slopes", "re_slopes_corr",
+  "gp", "gp_matern", "gp_gaussian", "gp_spherical",
+  "gp_collapsed", "gp_temporal",
+  "msgp", "msgp_temporal",
+  "svc", "svc_hsgp",
+  "temporal_gp", "ms_temporal", "latent"
+};
+
+bool is_known_field(const std::string& field) {
+  for (const char* known : KNOWN_FIELDS) {
+    if (field == known) return true;
+  }
+  return false;
+}
+
 // Synthetic model with an intercept, one covariate, and whichever structured
 // field is under test. `family` selects binomial (no denominator predictors)
 // or one of the count families (a denominator with its own predictors), which
@@ -59,6 +158,13 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                      const std::string& family = "binomial",
                      bool temporal_shared = true,
                      const std::string& zi = "none") {
+  if (!is_known_field(field)) {
+    Rcpp::stop("cpp_gradient_check: unknown field '" + field +
+               "'. A name make_model() does not build a structure for would "
+               "yield a model with no structured field, and the check would "
+               "pass while testing nothing.");
+  }
+
   ModelData data;
   std::mt19937 rng(seed);
   std::normal_distribution<double> rnorm(0.0, 1.0);
@@ -75,7 +181,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // paths, which carry the spatial field alongside another structure and are
   // therefore the ones that must agree with the log posterior about how that
   // field is identified.
-  const bool want_ms = (field == "icar_ms" || field == "bym2_ms");
+  const bool want_ms = (field == "icar_ms" || field == "bym2_ms" ||
+                        field == "ms_temporal");
   const bool want_st = (field == "icar_st" || field == "bym2_st");
   // st4: a spatiotemporal Type IV (Kronecker) interaction with NO accompanying
   // additive spatial or temporal field -- the only structured term is the
@@ -98,10 +205,22 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // path it reaches under H/AUTO (can_use_analytical_gradient excludes it).
   const bool want_car_proper = (field == "car_proper");
   const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st ||
-                          field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1");
+                          field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1" ||
+                          field == "gp_temporal" || field == "msgp_temporal");
   const bool want_rw2  = (field == "rw2");
   const bool want_hsgp = (field == "hsgp");
-  const bool want_tvc  = (field == "tvc" || field == "tvc_iid");
+  const bool want_tvc  = (field == "tvc" || field == "tvc_iid" || field == "tvc_ar1");
+  // The NNGP / spectral fields. Each reaches a gradient kernel of its own that
+  // no areal field visits: see resolve_gradient_fn in hmc_sampler.cpp.
+  const bool want_gp_collapsed = (field == "gp_collapsed");
+  const bool want_gp = (field == "gp" || field == "gp_matern" ||
+                        field == "gp_gaussian" || field == "gp_spherical" ||
+                        field == "gp_temporal" || want_gp_collapsed);
+  const bool want_msgp = (field == "msgp" || field == "msgp_temporal");
+  const bool want_svc_hsgp = (field == "svc_hsgp");
+  const bool want_svc = (field == "svc" || want_svc_hsgp);
+  const bool want_temporal_gp = (field == "temporal_gp");
+  const bool want_latent = (field == "latent");
   // Random slopes route through a parameter layout the single-term path does
   // not use: one sigma per coefficient, and for the correlated variant a
   // tanh-Cholesky factor with an LKJ prior and re = diag(sigma) L z.
@@ -257,10 +376,146 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                                data.hsgp_data);
     data.n_spatial_units = 0;
     data.bym2_scale_factor = 1.0;
+  } else if (want_gp || want_msgp) {
+    // NNGP field over n_units unique locations, with several observations per
+    // location so obs_to_loc is exercised rather than being the identity.
+    std::vector<double> gp_coords(static_cast<size_t>(n_units) * 2);
+    std::uniform_real_distribution<double> runif_c(0.0, 1.0);
+    for (int i = 0; i < n_units; i++) {
+      gp_coords[static_cast<size_t>(i) * 2 + 0] = runif_c(rng);
+      gp_coords[static_cast<size_t>(i) * 2 + 1] = runif_c(rng);
+    }
+    const int nn = std::min(5, n_units - 1);
+    NNGPNeighbors nb = build_nngp(gp_coords, n_units, nn);
+
+    ratiod_svc::CovType cov = ratiod_svc::CovType::EXPONENTIAL;
+    if (field == "gp_matern")    cov = ratiod_svc::CovType::MATERN;
+    if (field == "gp_gaussian")  cov = ratiod_svc::CovType::GAUSSIAN;
+    if (field == "gp_spherical") cov = ratiod_svc::CovType::SPHERICAL;
+
+    std::vector<int> obs_to_loc(n_obs);
+    for (int i = 0; i < n_obs; i++) obs_to_loc[i] = i % n_units;
+
+    if (want_gp) {
+      data.spatial_type = SpatialType::GP;
+      data.has_gp = true;
+      data.gp_collapsed = want_gp_collapsed;
+      auto& gp = data.gp_data;
+      gp.n_obs = n_units;
+      gp.nn = nn;
+      gp.coords = gp_coords;
+      gp.nn_idx = nb.nn_idx;
+      gp.nn_dist = nb.nn_dist;
+      gp.nn_neighbor_dist = nb.nn_neighbor_dist;
+      gp.nn_order = nb.nn_order;
+      gp.nn_order_inv = nb.nn_order_inv;
+      gp.obs_to_loc = obs_to_loc;
+      gp.cov_type = cov;
+      gp.nu = 1.5;
+      gp.shared = true;
+      gp.solver_config.solver = ratiod_gp::GPSolver::CHOLESKY;
+      gp.solver_config.n_obs = n_units;
+      // spatial_gp() offers "centered", "noncentered" and "collapsed" and
+      // defaults to centered, which is the parameterization these fields
+      // build.
+      data.gp_parameterization = 0;
+      data.gp_sigma2_prior_U = 1.0;
+      data.gp_sigma2_prior_alpha = 0.01;
+      data.gp_phi_prior_lower = 0.01;
+      data.gp_phi_prior_upper = 100.0;
+    } else {
+      data.spatial_type = SpatialType::MULTISCALE_GP;
+      data.has_multiscale_gp = true;
+      data.msgp_is_hsgp = false;
+      auto& ms = data.multiscale_gp_data;
+      ms.n_obs = n_units;
+      ms.coords = gp_coords;
+      ms.obs_to_loc = obs_to_loc;
+      ms.nn_local = nn;
+      ms.nn_idx_local = nb.nn_idx;
+      ms.nn_dist_local = nb.nn_dist;
+      ms.nn_neighbor_dist_local = nb.nn_neighbor_dist;
+      ms.nn_order_local = nb.nn_order;
+      ms.nn_order_inv_local = nb.nn_order_inv;
+      ms.nn_regional = nn;
+      ms.nn_idx_regional = nb.nn_idx;
+      ms.nn_dist_regional = nb.nn_dist;
+      ms.nn_neighbor_dist_regional = nb.nn_neighbor_dist;
+      ms.nn_order_regional = nb.nn_order;
+      ms.nn_order_inv_regional = nb.nn_order_inv;
+      // Both ranges have to contain the point the sweep evaluates at, or the
+      // uniform prior returns -inf and the difference measures nothing.
+      ms.range_local_lower = 0.001;
+      ms.range_local_upper = 100.0;
+      ms.range_regional_lower = 0.001;
+      ms.range_regional_upper = 100.0;
+      ms.cov_type = cov;
+      ms.nu = 1.5;
+      ms.shared = true;
+      ms.sampler = ratiod_gp::MSGPSampler::NONCENTERED;
+    }
+    data.n_spatial_units = 0;
+    data.bym2_scale_factor = 1.0;
   } else {
     data.spatial_type = SpatialType::NONE;
     data.n_spatial_units = 0;
     data.bym2_scale_factor = 1.0;
+  }
+
+  // SVC: one spatially-varying slope on the covariate, either as an NNGP field
+  // over the observation locations or on an HSGP spectral basis.
+  if (want_svc) {
+    std::vector<double> coords(static_cast<size_t>(n_obs) * 2);
+    std::uniform_real_distribution<double> runif_c(0.0, 1.0);
+    for (int i = 0; i < n_obs; i++) {
+      coords[static_cast<size_t>(i) * 2 + 0] = runif_c(rng);
+      coords[static_cast<size_t>(i) * 2 + 1] = runif_c(rng);
+    }
+    auto& svc = data.svc_data;
+    svc.n_obs = n_obs;
+    svc.n_svc = 1;
+    svc.shared = true;
+    svc.coords = coords;
+    svc.svc_indices.assign(1, 1);
+    svc.X_svc.resize(n_obs);
+    for (int i = 0; i < n_obs; i++) {
+      svc.X_svc[i] = data.X_num_flat[static_cast<size_t>(i) * 2 + 1];
+    }
+    svc.cov_type = ratiod_svc::CovType::EXPONENTIAL;
+
+    data.has_svc = true;
+    data.svc_is_hsgp = want_svc_hsgp;
+    if (want_svc_hsgp) {
+      svc.nn = 0;
+      data.svc_hsgp_m_per_dim = 3;
+      data.svc_hsgp_boundary_factor = 1.5;
+      ratiod_hsgp::setup_hsgp_2d(coords, n_obs, 3, 1.5, /*shared=*/true,
+                                 data.svc_hsgp_data);
+    } else {
+      const int nn = std::min(5, n_obs - 1);
+      NNGPNeighbors nb = build_nngp(coords, n_obs, nn);
+      svc.nn = nn;
+      // coords stay in their original order; nn_order maps into them
+      svc.nn_idx = nb.nn_idx;
+      svc.nn_dist = nb.nn_dist;
+      svc.nn_order = nb.nn_order;
+      svc.nn_order_inv = nb.nn_order_inv;
+    }
+    data.svc_sigma2_prior_scale = 1.0;
+    data.svc_phi_prior_lower = 0.001;
+    data.svc_phi_prior_upper = 100.0;
+    svc.init_workspace();
+  }
+
+  // Latent factors: observation-level effects shared by both arms, which is
+  // the only structure compute_gradient_latent_handcoded serves.
+  if (want_latent) {
+    data.has_latent = true;
+    data.latent_n_factors = 1;
+    data.latent_shared = true;
+    data.latent_scale = true;
+    data.latent_constraint = 0;  // sum-to-zero
+    data.latent_sigma_prior_rate = 1.0;
   }
 
   // TVC: one RW1 trajectory per (group, term) over the time axis.
@@ -275,6 +530,7 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     // temporal_tvc()'s match.arg in R does not offer it, so this harness is
     // where it is exercised.
     tvc.structure = (field == "tvc_iid") ? ratiod_temporal::TemporalType::IID
+                  : (field == "tvc_ar1") ? ratiod_temporal::TemporalType::AR1
                                           : ratiod_temporal::TemporalType::RW1;
     tvc.shared = true;
     tvc.cyclic = false;
@@ -291,7 +547,40 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.tvc_tau_rate = 0.01;
   }
 
-  if (want_rw1 || want_rw2) {
+  if (want_temporal_gp) {
+    // A continuous-time GP over the distinct time instants, at irregular
+    // spacing so the state-space recursion's dt varies from step to step.
+    data.temporal_type = TemporalType::GP;
+    data.has_temporal_gp = true;
+    data.n_times = n_times;
+    data.n_temporal_groups = 1;
+    data.n_temporal_params = n_times;
+    data.temporal_cyclic = false;
+    data.temporal_shared = temporal_shared;
+    data.temporal_time_idx.resize(n_obs);
+    data.temporal_group_idx.assign(n_obs, 1);
+    for (int i = 0; i < n_obs; i++) data.temporal_time_idx[i] = (i % n_times) + 1;
+
+    auto& tgp = data.temporal_gp_data;
+    tgp.n_obs = n_times;
+    tgp.n_groups = 1;
+    tgp.time_values.resize(n_times);
+    double t_val = 0.0;
+    for (int t = 0; t < n_times; t++) {
+      t_val += 0.6 + 0.4 * static_cast<double>((t * 7) % 5) / 4.0;
+      tgp.time_values[t] = t_val;
+    }
+    tgp.group_index = data.temporal_group_idx;
+    tgp.cov_type = ratiod_temporal_gp::TemporalCovType::EXPONENTIAL;
+    tgp.nu = 1.5;
+    tgp.period = 1.0;
+    tgp.shared = temporal_shared;
+    data.temporal_gp_sigma2_prior_U = 1.0;
+    data.temporal_gp_sigma2_prior_alpha = 0.01;
+    data.temporal_gp_phi_prior_lower = 0.01;
+    data.temporal_gp_phi_prior_upper = 10.0;
+    data.temporal_gp_parameterization = 1;
+  } else if (want_rw1 || want_rw2) {
     data.temporal_type = want_rw2 ? TemporalType::RW2 : TemporalType::RW1;
     data.n_times = n_times;
     data.n_temporal_groups = 1;

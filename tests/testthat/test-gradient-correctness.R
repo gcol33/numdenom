@@ -51,7 +51,34 @@ CAR_PROPER_FIELDS <- c("car_proper")
 # branch (both its centered and non-centered forms) had never been checked
 # against finite differences before #24.
 ST_IV_FIELDS <- c("st4", "st4_nc")
-ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS)
+# The kernels resolve_gradient_fn can select that make_model() could not build a
+# model for at all: the GP, the multi-scale GP, the SVC pair, the temporal GP,
+# multi-scale temporal and latent factors (gcol33/tulpaRatio#45). Under the
+# default gradient mode NUTS runs on these with no offline check, which is how
+# the GP covariance derivative (gcol33/tulpaRatio#42) and the AR1 precision
+# gradient (gcol33/tulpaRatio#43) both reached a release.
+KERNEL_FIELDS <- c("gp", "gp_temporal", "msgp", "msgp_temporal", "svc_hsgp",
+                   "temporal_gp", "ms_temporal", "latent")
+# The collapsed GP marginalizes its field out the way the collapsed areal
+# fields do, so like them it has no autodiff case.
+KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed")
+# The NNGP SVC: its analytic gradient reproduces its own density to 4e-10, but
+# that density and the templated one are 30 nats apart and nothing declares it
+# (gcol33/tulpaRatio#56), so it joins the sweep in handcoded mode only and stays
+# out of ALL_FIELDS, whose density-equality assertion it fails.
+KERNEL_H_ONLY_FIELDS <- c("svc")
+# Cases the harness can now build whose gradient does not match the density it
+# reports. Each names the defect it is blocked on; the case is written out so
+# the fix has a test to turn green, and the deviation each measures today is
+# recorded in the issue.
+BLOCKED_FIELDS <- c(
+  gp_matern    = "gcol33/tulpaRatio#55",
+  gp_gaussian  = "gcol33/tulpaRatio#42",
+  gp_spherical = "gcol33/tulpaRatio#42",
+  tvc_ar1      = "gcol33/tulpaRatio#43"
+)
+ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
+                KERNEL_FIELDS)
 MODES <- c("handcoded", "arena")
 AUTODIFF_MODES <- c("arena", "forward", "tape")
 # The same three under the names the front door takes.
@@ -317,11 +344,74 @@ test_that("the value each mode reports is the density its gradient describes", {
   }
 })
 
+for (field in KERNEL_FIELDS) {
+  for (mode in MODES) {
+    test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
+      r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
+      expect_gt(r$n_params, 0)
+      dev <- rel_dev(r$analytic, r$finite_diff)
+      worst <- which.max(dev)
+      expect_lt(
+        max(dev),
+        1e-4,
+        label = sprintf(
+          "%s/%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+          field, mode, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+        )
+      )
+    })
+  }
+}
+
+for (field in c(KERNEL_COLLAPSED_FIELDS, KERNEL_H_ONLY_FIELDS)) {
+  test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
+    expect_gt(r$n_params, 0)
+    dev <- rel_dev(r$analytic, r$finite_diff)
+    worst <- which.max(dev)
+    expect_lt(
+      max(dev),
+      1e-4,
+      label = sprintf(
+        "%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+        field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+      )
+    )
+  })
+}
+
+for (field in names(BLOCKED_FIELDS)) {
+  test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
+    skip(paste("blocked on", BLOCKED_FIELDS[[field]]))
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
+    dev <- rel_dev(r$analytic, r$finite_diff)
+    worst <- which.max(dev)
+    expect_lt(
+      max(dev),
+      1e-4,
+      label = sprintf(
+        "%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+        field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+      )
+    )
+  })
+}
+
+test_that("a field the harness builds no structure for is an error, not a pass", {
+  # Every branch in make_model() tests the field name, so an unrecognised one
+  # falls through all of them and yields a model with no structured field: the
+  # check would then compare the gradient of a plain GLM and report success for
+  # a kernel it never reached.
+  expect_error(tulpaRatio:::cpp_gradient_check("no_such_field"), "unknown field")
+  expect_error(tulpaRatio:::cpp_logpost_at("no_such_field"), "unknown field")
+})
+
 test_that("the collapsed parameterizations are declared, not silently mis-differentiated", {
   # The templated density cannot express them, so it must say so and the
   # autodiff modes must refuse. Left undeclared, the gradient of every parameter
   # is taken against a posterior with no spatial marginal in it.
-  for (field in c(COLLAPSED_FIELDS, COLLAPSED_TEMPORAL_FIELDS)) {
+  for (field in c(COLLAPSED_FIELDS, COLLAPSED_TEMPORAL_FIELDS,
+                  KERNEL_COLLAPSED_FIELDS)) {
     r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
     expect_false(is.na(r$impl_gap), label = sprintf("field = %s", field))
   }
