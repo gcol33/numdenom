@@ -1,3 +1,96 @@
+# tulpaRatio 1.5.0
+
+* **One walk of the sampler's parameter vector now feeds `fitted()`,
+  `predict()`, `ratio()`, the draws matrix and the per-structure extractors
+  (#44).** There were four copies of that walk. Three of them were thinner than
+  the fourth: on the default non-centred parameterization they added the raw
+  `z` to the linear predictor instead of `sigma_re * z`, so every fitted value
+  and every prediction on a model with random effects was off by the posterior
+  draw of `sigma_re`; they recognised one intercept-only random-effect term, so
+  a crossed or slope-carrying model read parameters that were not random
+  effects at all; they recognised `icar` and `bym2` among the spatial types and
+  dropped every other field from the predictor without saying so; and they
+  applied the logistic link to every family, reporting a number in (0, 1) where
+  a count ratio belongs. `fitted(fit, component = "ratio")` and `ratio(fit)`
+  now return the same draws, and so does `predict(fit, newdata = fit$data)`.
+
+* **The block order the R side reads is the order the sampler writes (#44).**
+  `hmc_param_layout()` (`R/hmc_unpack.R`) mirrors `compute_param_layout()` in
+  `src/hmc_sampler.cpp` block for block, and is the only place an offset is
+  computed. The previous walk placed SVC before the areal field, the GP before
+  the temporal block, TVC before zero-inflation and HSGP among the spatial
+  types, where the sampler lays them out in a different order; a fit combining
+  two of those structures had its columns named after the wrong parameters from
+  the first mismatch onward. It also walked a temporal block for a multiscale
+  temporal model, which the sampler allocates none for. Every fit now checks
+  that its layout accounts for exactly the columns the sampler returned, and
+  errors rather than mislabelling them.
+
+* **`svc()`, `tvc()`, `temporal()` and `spatiotemporal_effects()` return their
+  draws instead of erroring on every fit (#46).** No backend stored the draws
+  they read. The converter now stores each structure's own draws, shaped the
+  way its extractor indexes them, and the `svc()` / `tvc()` error text names the
+  argument that routes them (`spatial = spatial_svc(...)`,
+  `temporal = temporal_tvc(...)`) rather than an argument `tratio()` does not
+  have. The four `\dontrun{}` examples that showed the wrong spelling are
+  fixed. `tvc()` gained a `group` argument, since the draws carry one
+  trajectory per grouping level.
+
+* **`pp_check()` plots a fit (#48).** It read `object$draws$y_num_rep`, and
+  `object$draws` is a matrix on every backend, so the call raised
+  `$ operator is invalid for atomic vectors` on its second executable line and
+  never reached the guard written to explain the missing draws. The replicates
+  are now drawn rather than looked up: `posterior_predict()` simulates a
+  numerator and a denominator response from each posterior draw's fitted means
+  and that draw's dispersion, through the same family machinery
+  `prior_predict()` uses.
+
+* **`as_draws()`, `pp_check()` and `posterior_predict()` are methods on the
+  generics that own them, not new generics (#52).** They were bare
+  `UseMethod()` calls, so attaching tulpaRatio after posterior or bayesplot
+  masked their generic and a user's `as_draws()` on a `draws_matrix` or
+  `pp_check(y, yrep)` on plain vectors dispatched into this package and found
+  no method. `posterior::as_draws`, `bayesplot::pp_check` and
+  `tulpa::posterior_predict` are imported and re-exported instead; bayesplot
+  moves from Suggests to Imports.
+
+* **`spread_draws()`, `gather_draws()` and `point_interval()` are renamed to
+  `draws_wide()`, `draws_long()` and `draws_interval()` (#52).** tidybayes owns
+  those three names and takes different arguments under them (`variable[index]`
+  specifications rather than bare parameter names), so a method on its generic
+  would not have honoured the contract. The old names are removed.
+
+* **The offline gradient check can build a model for every kernel the
+  dispatcher can select (#45).** `cpp_gradient_check` covered the areal fields,
+  the random-effect layouts, HSGP and TVC; it could not build a GP, multi-scale
+  GP, SVC, temporal-GP, multiscale-temporal or latent-factor model, so the
+  handcoded gradients those run on under the default mode had no
+  finite-difference case. `make_model()` now builds `gp`, `gp_collapsed`,
+  `gp_temporal`, `msgp`, `msgp_temporal`, `svc`, `svc_hsgp`, `temporal_gp`,
+  `ms_temporal`, `latent` and `tvc_ar1`, and an unrecognised field name is an
+  error rather than a model with no structured field in it, which would pass
+  while testing nothing.
+
+* **The runtime gradient check differences away from the origin (#45).** Every
+  structured block starts at exactly zero, where a quadratic-form prior
+  contributes nothing to any gradient: a wrong precision matrix, a sign error
+  on it and an absent sum-to-zero penalty are all invisible there. The check
+  now moves each field block off zero by a small deterministic offset first.
+  Both call sites share one function, so a mismatch raises an R-level warning
+  from the multi-chain path as well as the single-chain one.
+
+* **The fused log posterior of the multi-scale GP and latent-factor gradients
+  carries the binomial coefficient.** `compute_obs_ll()` dropped it while
+  `compute_log_post()` adds it back, so those two kernels reported a value
+  7156 nats away from the density their gradient describes on a binomial fit.
+  NUTS consumes that value as `log_prob`.
+
+* Prediction maps a new data set onto the fit's own grouping levels through the
+  same construction the formula parser used (`as.factor()`, or `interaction()`
+  for a nested term). It previously matched against `unique()` order, which
+  differs from the factor's level order whenever the levels are not in order of
+  first appearance, and attached the wrong group's effect.
+
 # tulpaRatio 1.4.3
 
 * **Zero-inflation and hurdle terms on count responses now reach the templated
