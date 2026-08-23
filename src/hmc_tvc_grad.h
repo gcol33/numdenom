@@ -38,6 +38,13 @@ struct TVCGradientWS {
 //           = -tau * (w[t] - w[t+1]) for t=0
 //           = -tau * (w[t] - w[t-1]) for t=T-1
 inline void rw1_grad_w(const double* w, int n_times, double tau, double* grad_w) {
+    // A single level has no increment, so the RW1 prior is flat in it. Without
+    // this guard the t == 0 branch below wins over t == n_times - 1 and reads
+    // w[1] past the end.
+    if (n_times < 2) {
+        for (int t = 0; t < n_times; t++) grad_w[t] = 0.0;
+        return;
+    }
     for (int t = 0; t < n_times; t++) {
         if (t == 0) {
             grad_w[t] = -tau * (w[0] - w[1]);
@@ -76,6 +83,13 @@ inline double rw1_grad_log_tau(const double* w, int n_times, double tau) {
 // So d/d(w[k]) = 2 * (d[k+2] * 1 - 2 * d[k+1] + d[k] * 1) if k >= 2
 inline void rw2_grad_w(const double* w, int n_times, double tau, double* grad_w,
                        double* d_buf = nullptr) {
+    // Fewer than three levels admit no second difference, so the RW2 prior is
+    // flat. Guarding here also keeps the d[0] / d[1] initialisation below from
+    // writing past a buffer sized n_times.
+    if (n_times < 3) {
+        for (int k = 0; k < n_times; k++) grad_w[k] = 0.0;
+        return;
+    }
     // Compute second differences (use pre-allocated buffer if provided)
     std::vector<double> d_local;
     double* d;
@@ -131,6 +145,9 @@ inline double rw2_grad_log_tau(const double* w, int n_times, double tau) {
 // t>0, t<T-1: d/d(w[t]) = -tau * (w[t] - rho*w[t-1]) + tau * rho * (w[t+1] - rho*w[t])
 // t=T-1: d/d(w[T-1]) = -tau * (w[T-1] - rho*w[T-2])
 inline void ar1_grad_w(const double* w, int n_times, double tau, double rho, double* grad_w) {
+    // An empty field has no w[0]; the AR1 density is flat there too.
+    if (n_times < 1) return;
+
     double one_m_rho2 = 1.0 - rho * rho;
 
     if (n_times == 1) {
@@ -156,11 +173,14 @@ inline void ar1_grad_w(const double* w, int n_times, double tau, double rho, dou
 
 // Gradient w.r.t. log(tau)
 inline double ar1_grad_log_tau(const double* w, int n_times, double tau, double rho) {
+    if (n_times < 1) return 0.0;
+
     double one_m_rho2 = 1.0 - rho * rho;
 
-    // Stationary part
-    double grad = -0.5;  // From -0.5*log(2*pi*var_stationary)
-    grad += 0.5 * (n_times - 1);  // From normalization constants for t>0
+    // Stationary part. var_stationary = 1/(tau*(1-rho^2)) is the precision
+    // parameterization, so d/d(log tau)[-0.5*log(2*pi*var_stationary)] = +0.5.
+    double grad = 0.5;
+    grad += 0.5 * (n_times - 1);  // From the t>0 conditional normalizers (1/tau)
 
     // Quadratic terms
     double quad = one_m_rho2 * w[0] * w[0];
@@ -177,6 +197,8 @@ inline double ar1_grad_log_tau(const double* w, int n_times, double tau, double 
 // d/d(logit_rho) = d/d(rho) * d(rho)/d(u) * d(u)/d(logit_rho)
 //                = d/d(rho) * 2 * u * (1-u)
 inline double ar1_grad_logit_rho(const double* w, int n_times, double tau, double rho) {
+    if (n_times < 1) return 0.0;
+
     double one_m_rho2 = 1.0 - rho * rho;
 
     // d log p / d rho from stationary distribution:

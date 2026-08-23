@@ -126,7 +126,7 @@ NNGPNeighbors build_nngp(const std::vector<double>& coords, int n, int k) {
 const char* const KNOWN_FIELDS[] = {
   "none",
   "icar", "bym2", "car_proper",
-  "rw1", "rw2", "icar_rw1",
+  "rw1", "rw2", "temporal_ar1", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc",
   "icar_collapsed", "bym2_collapsed",
   "icar_collapsed_rw1", "bym2_collapsed_rw1",
@@ -208,6 +208,9 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1" ||
                           field == "gp_temporal" || field == "msgp_temporal");
   const bool want_rw2  = (field == "rw2");
+  // The temporal block's own AR1 arm, which carries a rho of its own. rw1 and
+  // rw2 reach the same kernels without it.
+  const bool want_temporal_ar1 = (field == "temporal_ar1");
   const bool want_hsgp = (field == "hsgp");
   const bool want_tvc  = (field == "tvc" || field == "tvc_iid" || field == "tvc_ar1");
   // The NNGP / spectral fields. Each reaches a gradient kernel of its own that
@@ -580,8 +583,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.temporal_gp_phi_prior_lower = 0.01;
     data.temporal_gp_phi_prior_upper = 10.0;
     data.temporal_gp_parameterization = 1;
-  } else if (want_rw1 || want_rw2) {
-    data.temporal_type = want_rw2 ? TemporalType::RW2 : TemporalType::RW1;
+  } else if (want_rw1 || want_rw2 || want_temporal_ar1) {
+    data.temporal_type = want_temporal_ar1 ? TemporalType::AR1
+                       : want_rw2          ? TemporalType::RW2
+                                           : TemporalType::RW1;
     data.n_times = n_times;
     data.n_temporal_groups = 1;
     data.n_temporal_params = n_times;

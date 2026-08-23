@@ -5,7 +5,10 @@
 # assertions cannot see that. These compare the analytic gradient against
 # central differences of the log posterior it is supposed to be the gradient of.
 
-FIELDS <- c("icar", "bym2", "rw1", "rw2", "icar_rw1")
+# temporal_ar1 is the temporal block's own AR1 arm, which carries a rho the rw1
+# and rw2 arms have no counterpart for and so reaches gradient terms neither of
+# them does.
+FIELDS <- c("icar", "bym2", "rw1", "rw2", "temporal_ar1", "icar_rw1")
 # The spatial field carried alongside a second structure, which routes to the
 # multi-feature gradient paths rather than the main one. Those paths identified
 # the field by a soft penalty while the log posterior hard-centred it, so their
@@ -62,11 +65,17 @@ KERNEL_FIELDS <- c("gp", "gp_temporal", "msgp", "msgp_temporal", "svc_hsgp",
 # The collapsed GP marginalizes its field out the way the collapsed areal
 # fields do, so like them it has no autodiff case.
 KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed")
-# The NNGP SVC: its analytic gradient reproduces its own density to 4e-10, but
-# that density and the templated one are 30 nats apart and nothing declares it
-# (gcol33/tulpaRatio#56), so it joins the sweep in handcoded mode only and stays
-# out of ALL_FIELDS, whose density-equality assertion it fails.
-KERNEL_H_ONLY_FIELDS <- c("svc")
+# Fields whose analytic gradient reproduces their own density exactly while that
+# density and the templated one are different, so they join the sweep in
+# handcoded mode only and stay out of ALL_FIELDS, whose density-equality
+# assertion they fail.
+#   svc     -- the NNGP SVC, whose two densities are 30 nats apart with
+#              log_post_impl_gap() declaring nothing (gcol33/tulpaRatio#56).
+#   tvc_ar1 -- rho carries a Uniform(-1, 1) prior in compute_log_post and a
+#              Beta(2, 2) one in compute_log_post_impl, one extra
+#              log(u) + log(1-u) apart (gcol33/tulpaRatio#58). Its gradient
+#              matches the Uniform density to 0.
+KERNEL_H_ONLY_FIELDS <- c("svc", "tvc_ar1")
 # Cases the harness can now build whose gradient does not match the density it
 # reports. Each names the defect it is blocked on; the case is written out so
 # the fix has a test to turn green, and the deviation each measures today is
@@ -74,8 +83,7 @@ KERNEL_H_ONLY_FIELDS <- c("svc")
 BLOCKED_FIELDS <- c(
   gp_matern    = "gcol33/tulpaRatio#55",
   gp_gaussian  = "gcol33/tulpaRatio#42",
-  gp_spherical = "gcol33/tulpaRatio#42",
-  tvc_ar1      = "gcol33/tulpaRatio#43"
+  gp_spherical = "gcol33/tulpaRatio#42"
 )
 ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
                 KERNEL_FIELDS)

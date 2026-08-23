@@ -67,9 +67,11 @@
   handcoded gradients those run on under the default mode had no
   finite-difference case. `make_model()` now builds `gp`, `gp_collapsed`,
   `gp_temporal`, `msgp`, `msgp_temporal`, `svc`, `svc_hsgp`, `temporal_gp`,
-  `ms_temporal`, `latent` and `tvc_ar1`, and an unrecognised field name is an
-  error rather than a model with no structured field in it, which would pass
-  while testing nothing.
+  `ms_temporal`, `latent`, `tvc_ar1` and `temporal_ar1`, and an unrecognised
+  field name is an error rather than a model with no structured field in it,
+  which would pass while testing nothing. The temporal block's AR1 arm carries
+  a rho that its RW1 and RW2 siblings have no counterpart for, so the two cases
+  that reached it before covered none of the terms that rho enters.
 
 * **The runtime gradient check differences away from the origin (#45).** Every
   structured block starts at exactly zero, where a quadratic-form prior
@@ -78,6 +80,16 @@
   now moves each field block off zero by a small deterministic offset first.
   Both call sites share one function, so a mismatch raises an R-level warning
   from the multi-chain path as well as the single-chain one.
+
+* **A TVC AR1 field's `log tau` gradient had the wrong sign on its stationary
+  normalizer (#43).** The AR1 prior parameterizes the stationary variance as
+  `1 / (tau (1 - rho^2))`, so `-0.5 log(2 pi var)` differentiates to `+0.5` in
+  `log tau`; `ar1_grad_log_tau` seeded the sum at `-0.5`, leaving the reported
+  gradient short by exactly 1 at every value of every parameter (4.46185
+  against a finite difference of 5.46185 on the harness fixture). The three
+  AR1 gradient functions, `rw1_grad_w` and `rw2_grad_w` also read past their
+  field on a block too short to carry an increment or a second difference;
+  those priors are flat there, and they now return that instead.
 
 * **The fused log posterior of the multi-scale GP and latent-factor gradients
   carries the binomial coefficient.** `compute_obs_ll()` dropped it while
