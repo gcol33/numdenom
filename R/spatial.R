@@ -1350,7 +1350,7 @@ validate_gp <- function(gp, data) {
 #'   count | effort ~ depth,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   svc = spatial_svc(~ lon + lat, terms = 1),
+#'   spatial = spatial_svc(~ lon + lat, terms = 1),
 #'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #' summary(fit)
@@ -1737,7 +1737,7 @@ compute_nngp_neighbors <- function(coords, k) {
 #'   count | effort ~ depth,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   svc = spatial_svc(~ lon + lat, terms = c(1, 2)),
+#'   spatial = spatial_svc(~ lon + lat, terms = c(1, 2)),
 #'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
 #'
@@ -1763,11 +1763,11 @@ svc.ratiod_fit <- function(object, terms = NULL, summary = FALSE,
   # Check if model has SVCs
   if (is.null(object$svc) || !inherits(object$svc, "ratiod_svc")) {
     stop("Model was not fitted with spatially-varying coefficients.\n",
-         "Use `svc` argument in tratio() to specify SVCs.", call. = FALSE)
+         "Pass `spatial = spatial_svc(...)` to tratio() to specify SVCs.",
+         call. = FALSE)
   }
 
   svc_info <- object$svc
-  n_obs <- svc_info$n_obs
   n_svc <- svc_info$n_svc
   svc_names <- svc_info$svc_names
 
@@ -1795,6 +1795,8 @@ svc.ratiod_fit <- function(object, terms = NULL, summary = FALSE,
     svc_names <- svc_names[term_idx]
     n_svc <- length(term_idx)
   }
+
+  n_obs <- dim(svc_draws)[2]
 
   result <- structure(
     list(

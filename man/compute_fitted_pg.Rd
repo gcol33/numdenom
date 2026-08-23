@@ -7,6 +7,7 @@
 compute_fitted_pg(object)
 }
 \description{
-Compute fitted values for PG backend
+The Gibbs sweep records the linear predictor it sampled, so the fitted
+values are that predictor on the response scale of the family.
 }
 \keyword{internal}

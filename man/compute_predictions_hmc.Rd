@@ -7,6 +7,8 @@
 compute_predictions_hmc(object, pred_data, type)
 }
 \description{
-Compute predictions for HMC backend
+Fixed effects and random effects, remapped onto the new data. The structured
+blocks are added by \code{predict_spatial_hmc()}, which knows how to carry a field
+to locations the fit did not see.
 }
 \keyword{internal}

@@ -500,178 +500,90 @@ compute_fitted_values <- function(object) {
 }
 
 
+#' Model type of a fitted object
+#'
+#' The HMC converter records it; every other backend carries the family it was
+#' fitted with, which is what the response transform is taken from.
+#'
+#' @keywords internal
+fit_model_type <- function(object) {
+  object$.internal$model_type %||% get_hmc_model_type(object$family)
+}
+
+
 #' Compute fitted values for HMC backend
 #' @keywords internal
 compute_fitted_hmc <- function(object) {
-  hmc_data <- object$.internal$hmc_data
-  model_type <- object$.internal$model_type
-  samples <- object$.internal$samples
-
-  n_samples <- nrow(samples)
-  N <- hmc_data$N
-
-  # Extract parameters
-  beta_num <- samples[, seq_len(hmc_data$p_num), drop = FALSE]
-  beta_denom <- samples[, hmc_data$p_num + seq_len(hmc_data$p_denom), drop = FALSE]
-
-  idx <- hmc_data$p_num + hmc_data$p_denom + 1
-
-  # Random effects
-  re <- NULL
-  if (hmc_data$n_re_groups > 0) {
-    idx <- idx + 1  # Skip log_sigma_re
-    re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
-    idx <- idx + hmc_data$n_re_groups
-  }
-
-  # Skip overdispersion params
-  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
-    idx <- idx + 2
-  } else if (model_type == "poisson_gamma") {
-    idx <- idx + 1
-  }
-
-  # Spatial
-  spatial_info <- object$spatial
-  spatial_effect <- NULL
-  if (!is.null(spatial_info) && spatial_info$type != "none") {
-    if (spatial_info$type == "icar") {
-      idx <- idx + 1
-      phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      spatial_effect <- phi_spatial
-    } else if (spatial_info$type == "bym2") {
-      sigma_spatial <- exp(samples[, idx])
-      idx <- idx + 1
-      logit_rho <- samples[, idx]
-      rho <- 1 / (1 + exp(-logit_rho))
-      idx <- idx + 1
-
-      phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-      theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-
-      spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
-      for (s in seq_len(n_samples)) {
-        spatial_effect[s, ] <- sigma_spatial[s] * (
-          sqrt(rho[s]) * phi_scaled[s, ] * spatial_info$bym2_scale +
-          sqrt(1 - rho[s]) * theta[s, ]
-        )
-      }
-    }
-  }
-
-  # Compute fitted values
-  mu_num <- matrix(NA_real_, nrow = n_samples, ncol = N)
-  mu_denom <- matrix(NA_real_, nrow = n_samples, ncol = N)
-
-  for (s in seq_len(n_samples)) {
-    eta_num <- as.numeric(hmc_data$X_num %*% beta_num[s, ])
-    eta_denom <- as.numeric(hmc_data$X_denom %*% beta_denom[s, ])
-
-    if (!is.null(re)) {
-      for (i in seq_len(N)) {
-        g <- hmc_data$re_group[i]
-        if (g > 0) {
-          eta_num[i] <- eta_num[i] + re[s, g]
-          eta_denom[i] <- eta_denom[i] + re[s, g]
-        }
-      }
-    }
-
-    if (!is.null(spatial_effect) && !is.null(spatial_info)) {
-      for (i in seq_len(N)) {
-        sp_g <- spatial_info$group[i]
-        if (sp_g > 0) {
-          eta_num[i] <- eta_num[i] + spatial_effect[s, sp_g]
-          eta_denom[i] <- eta_denom[i] + spatial_effect[s, sp_g]
-        }
-      }
-    }
-
-    # Transform to response scale
-    if (model_type == "binomial") {
-      mu_num[s, ] <- 1 / (1 + exp(-eta_num))
-      mu_denom[s, ] <- rep(1, N)  # Trials are data, not fitted
-    } else {
-      mu_num[s, ] <- exp(eta_num)
-      mu_denom[s, ] <- exp(eta_denom)
-    }
-  }
-
-  # Compute ratio
-  if (model_type == "binomial") {
-    ratio <- mu_num  # For binomial, ratio is just the probability
-  } else {
-    ratio <- mu_num / mu_denom
-  }
-
-  list(
-    numerator = mu_num,
-    denominator = mu_denom,
-    ratio = ratio
-  )
+  unpacked <- hmc_fit_unpack(object)
+  eta <- hmc_eta_draws(unpacked, hmc_fit_design(object))
+  warn_dropped_structures(eta$dropped)
+  hmc_response_draws(eta, fit_model_type(object))
 }
 
 
 #' Compute fitted values for PG backend
+#'
+#' The Gibbs sweep records the linear predictor it sampled, so the fitted
+#' values are that predictor on the response scale of the family.
+#'
 #' @keywords internal
 compute_fitted_pg <- function(object) {
-  # PG backend stores eta (linear predictor) directly
-  eta <- object$.internal$eta
+  internal <- object$.internal
+  eta_num <- internal$eta_num %||% internal$eta
+  if (is.null(eta_num)) {
+    stop("This Polya-Gamma fit stores no linear predictor, so fitted values ",
+         "cannot be computed from it.", call. = FALSE)
+  }
+  eta_denom <- internal$eta_denom %||% matrix(0, nrow(eta_num), ncol(eta_num))
+  hmc_response_draws(list(eta_num = eta_num, eta_denom = eta_denom),
+                     fit_model_type(object))
+}
 
-  # For PG (binomial), fitted value is logistic(eta)
-  p <- 1 / (1 + exp(-eta))
 
-  list(
-    numerator = p,
-    denominator = matrix(1, nrow = nrow(p), ncol = ncol(p)),
-    ratio = p
-  )
+#' Linear predictor draws of a Laplace fit
+#'
+#' The Laplace sample matrix is laid out `[beta, re, spatial]`.
+#'
+#' @keywords internal
+laplace_eta_draws <- function(object) {
+  internal <- object$.internal
+  samples <- internal$samples
+  X <- internal$X
+  if (is.null(samples) || is.null(X)) {
+    stop("This Laplace fit stores no posterior samples.", call. = FALSE)
+  }
+  p <- ncol(X)
+  N <- nrow(X)
+
+  eta <- samples[, seq_len(p), drop = FALSE] %*% t(X)
+
+  re_info <- internal$re_info
+  n_re <- re_info$n_groups %||% 0L
+  if (n_re > 0L) {
+    re <- samples[, p + seq_len(n_re), drop = FALSE]
+    eta <- eta + spread_effect(re, re_info$group_idx, N)
+  }
+
+  spatial_info <- internal$spatial_info
+  n_spatial <- spatial_info$n_units %||% 0L
+  if (n_spatial > 0L && ncol(samples) >= p + n_re + n_spatial) {
+    field <- samples[, p + n_re + seq_len(n_spatial), drop = FALSE]
+    group <- spatial_info$group %||% seq_len(N)
+    eta <- eta + spread_effect(field, group, N)
+  } else if (!is.null(internal$w_gp)) {
+    field <- internal$w_gp
+    group <- if (ncol(field) == N) seq_len(N) else internal$spatial$group
+    eta <- eta + spread_effect(field, group, N)
+  }
+
+  list(eta_num = eta, eta_denom = matrix(0, nrow(eta), ncol(eta)))
 }
 
 
 #' Compute fitted values for Laplace backend
 #' @keywords internal
 compute_fitted_laplace <- function(object) {
-  samples <- object$.internal$samples
-  X <- object$.internal$X
-  re_info <- object$.internal$re_info
-
-  n_samples <- nrow(samples)
-  p <- ncol(X)
-  N <- nrow(X)
-
-  # Extract beta samples
-  beta <- samples[, seq_len(p), drop = FALSE]
-
-  # Compute linear predictor
-  eta <- matrix(NA_real_, nrow = n_samples, ncol = N)
-  for (s in seq_len(n_samples)) {
-    eta[s, ] <- as.numeric(X %*% beta[s, ])
-  }
-
-  # Add RE if present
-  if (re_info$n_groups > 0) {
-    re_start <- p + 1
-    re <- samples[, re_start:(re_start + re_info$n_groups - 1), drop = FALSE]
-    for (s in seq_len(n_samples)) {
-      for (i in seq_len(N)) {
-        g <- as.integer(re_info$group_idx[i])
-        if (g > 0 && g <= re_info$n_groups) {
-          eta[s, i] <- eta[s, i] + re[s, g]
-        }
-      }
-    }
-  }
-
-  # Transform (assumes binomial for Laplace - could extend)
-  p_fitted <- 1 / (1 + exp(-eta))
-
-  list(
-    numerator = p_fitted,
-    denominator = matrix(1, nrow = n_samples, ncol = N),
-    ratio = p_fitted
-  )
+  hmc_response_draws(laplace_eta_draws(object), fit_model_type(object))
 }
 
 
@@ -919,43 +831,87 @@ build_prediction_data <- function(object, newdata, re_formula, allow_new_levels)
     }
   }
 
-  # Handle random effects
+  # Random effects, remapped onto the new data
   include_re <- !isTRUE(is.na(re_formula)) && !identical(re_formula, ~ 0)
-  re_group <- rep(0L, nrow(newdata))
-
-  if (include_re && object$.internal$hmc_data$n_re_groups > 0) {
-    # Get RE grouping variable
-    re_info <- formula$numerator$random_effects
-    if (!is.null(re_info) && length(re_info) > 0) {
-      re_var <- re_info[[1]]$group_var
-      if (re_var %in% names(newdata)) {
-        # Map new levels to original levels
-        orig_data <- object$data
-        orig_levels <- unique(orig_data[[re_var]])
-
-        for (i in seq_len(nrow(newdata))) {
-          new_level <- newdata[[re_var]][i]
-          match_idx <- match(new_level, orig_levels)
-          if (!is.na(match_idx)) {
-            re_group[i] <- match_idx
-          } else if (!allow_new_levels) {
-            stop("New level '", new_level, "' found in '", re_var,
-                 "'. Set allow_new_levels = TRUE to predict at population level.",
-                 call. = FALSE)
-          }
-          # If allow_new_levels and no match, re_group stays 0 (no RE contribution)
-        }
-      }
-    }
-  }
+  re_design <- prediction_re_design(object, newdata, include_re, allow_new_levels)
 
   list(
     X_num = X_num,
     X_denom = X_denom,
-    re_group = re_group,
+    re_group = re_design$re_group,
+    re_group_matrix = re_design$re_group_matrix,
+    slope_matrices = re_design$slope_matrices,
     N = nrow(newdata),
     include_re = include_re
   )
+}
+
+
+#' Random-effect design of a prediction
+#'
+#' Rebuilds each term's grouping factor the way the formula parser built it, so
+#' a level maps to the group the fit gave it, and rebuilds the slope covariates
+#' from the new data.
+#'
+#' @keywords internal
+prediction_re_design <- function(object, newdata, include_re, allow_new_levels) {
+  n <- nrow(newdata)
+  re_terms <- object$formula$numerator$random_effects
+  n_terms <- length(re_terms %||% list())
+
+  empty <- list(re_group = rep(0L, n), re_group_matrix = NULL,
+                slope_matrices = NULL)
+  if (!include_re || n_terms == 0L) return(empty)
+
+  group_matrix <- matrix(0L, n, n_terms)
+  slope_matrices <- vector("list", n_terms)
+
+  for (t in seq_len(n_terms)) {
+    term <- re_terms[[t]]
+    group_matrix[, t] <- prediction_group_index(term, object$data, newdata,
+                                                allow_new_levels)
+    if (length(term$slope_vars %||% character(0)) > 0L) {
+      expanded <- expand_re_slopes(
+        strsplit(term$slope_vars_raw, " + ", fixed = TRUE)[[1]],
+        newdata, include_intercept = FALSE
+      )
+      slope_matrices[[t]] <- expanded$slope_matrix[, term$slope_vars, drop = FALSE]
+    }
+  }
+
+  list(re_group = group_matrix[, 1],
+       re_group_matrix = group_matrix,
+       slope_matrices = slope_matrices)
+}
+
+
+#' Group index of one random-effect term on new data
+#' @keywords internal
+prediction_group_index <- function(term, orig_data, newdata, allow_new_levels) {
+  nested_vars <- term$nested_vars
+  if (!is.null(nested_vars) && length(nested_vars) > 1L) {
+    orig <- interaction(orig_data[nested_vars], drop = TRUE)
+    new_levels <- interaction(newdata[nested_vars], drop = TRUE)
+    levs <- levels(orig)
+    labels <- as.character(new_levels)
+  } else {
+    var <- if (!is.null(nested_vars)) nested_vars[1] else term$group_var
+    if (!var %in% names(newdata)) {
+      stop("Grouping variable '", var, "' not found in newdata.", call. = FALSE)
+    }
+    levs <- levels(as.factor(orig_data[[var]]))
+    labels <- as.character(newdata[[var]])
+  }
+
+  idx <- match(labels, levs)
+  unseen <- is.na(idx)
+  if (any(unseen) && !allow_new_levels) {
+    stop("New level '", labels[which(unseen)[1]], "' found in '",
+         term$group_var, "'. Set allow_new_levels = TRUE to predict at the ",
+         "population level.", call. = FALSE)
+  }
+  idx[unseen] <- 0L
+  as.integer(idx)
 }
 
 
@@ -1843,83 +1799,25 @@ sample_vi_posterior <- function(vi_params, n_samples) {
 
 
 #' Compute predictions for HMC backend
+#'
+#' Fixed effects and random effects, remapped onto the new data. The structured
+#' blocks are added by `predict_spatial_hmc()`, which knows how to carry a field
+#' to locations the fit did not see.
+#'
 #' @keywords internal
 compute_predictions_hmc <- function(object, pred_data, type) {
-  samples <- object$.internal$samples
-  hmc_data <- object$.internal$hmc_data
-  model_type <- object$.internal$model_type
-
-  n_samples <- nrow(samples)
-  N <- pred_data$N
-
-  # Extract parameters
-  beta_num <- samples[, seq_len(hmc_data$p_num), drop = FALSE]
-  beta_denom <- samples[, hmc_data$p_num + seq_len(hmc_data$p_denom), drop = FALSE]
-
-  idx <- hmc_data$p_num + hmc_data$p_denom + 1
-
-  # Random effects
-  re <- NULL
-  if (hmc_data$n_re_groups > 0 && pred_data$include_re) {
-    idx <- idx + 1  # Skip log_sigma_re
-    re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
-  }
-
-  # Compute predictions
-  eta_num <- matrix(NA_real_, nrow = n_samples, ncol = N)
-  eta_denom <- matrix(NA_real_, nrow = n_samples, ncol = N)
-
-  for (s in seq_len(n_samples)) {
-    eta_num[s, ] <- as.numeric(pred_data$X_num %*% beta_num[s, ])
-    if (hmc_data$p_denom > 0) {
-      eta_denom[s, ] <- as.numeric(pred_data$X_denom %*% beta_denom[s, ])
-    } else {
-      eta_denom[s, ] <- 0
-    }
-
-    if (!is.null(re)) {
-      for (i in seq_len(N)) {
-        g <- pred_data$re_group[i]
-        if (g > 0) {
-          eta_num[s, i] <- eta_num[s, i] + re[s, g]
-          if (hmc_data$p_denom > 0) {
-            eta_denom[s, i] <- eta_denom[s, i] + re[s, g]
-          }
-        }
-      }
-    }
-  }
-
-  if (type == "link") {
-    # Return on linear predictor scale
-    if (model_type == "binomial") {
-      ratio <- eta_num
-    } else {
-      ratio <- eta_num - eta_denom
-    }
-    return(list(
-      numerator = eta_num,
-      denominator = eta_denom,
-      ratio = ratio
-    ))
-  }
-
-  # Transform to response scale
-  if (model_type == "binomial") {
-    mu_num <- 1 / (1 + exp(-eta_num))
-    mu_denom <- matrix(1, nrow = n_samples, ncol = N)
-    ratio <- mu_num
-  } else {
-    mu_num <- exp(eta_num)
-    mu_denom <- exp(eta_denom)
-    ratio <- mu_num / mu_denom
-  }
-
-  list(
-    numerator = mu_num,
-    denominator = mu_denom,
-    ratio = ratio
+  unpacked <- hmc_fit_unpack(object)
+  design <- hmc_eta_design(
+    X_num = pred_data$X_num,
+    X_denom = pred_data$X_denom,
+    re_group = pred_data$re_group,
+    re_group_matrix = pred_data$re_group_matrix,
+    slope_matrices = pred_data$slope_matrices,
+    include_re = isTRUE(pred_data$include_re),
+    structures = FALSE
   )
+  eta <- hmc_eta_draws(unpacked, design)
+  hmc_response_draws(eta, fit_model_type(object), type)
 }
 
 
@@ -1969,7 +1867,7 @@ print.ratiod_prediction <- function(x, n = 10, ...) {
 
 
 # -----------------------------------------------------------------------------
-# tidybayes compatibility
+# Tidy draws
 # -----------------------------------------------------------------------------
 
 #' Convert ratiod_fit to posterior draws format
@@ -1990,8 +1888,8 @@ print.ratiod_prediction <- function(x, n = 10, ...) {
 #' - **tidybayes** package functions (`spread_draws`, `gather_draws`, etc.)
 #' - **bayesplot** package visualization functions
 #'
-#' For tidybayes integration, use this function to extract draws, then
-#' apply tidybayes functions for posterior analysis.
+#' To work in tidybayes, extract the draws with this function and pass them on
+#' to its verbs.
 #'
 #' @examples
 #' \donttest{
@@ -2025,12 +1923,6 @@ print.ratiod_prediction <- function(x, n = 10, ...) {
 #'
 #' @seealso [posterior::as_draws_df()], [ratio()] for ratio-specific extraction
 #'
-#' @export
-as_draws <- function(x, ...) {
-  UseMethod("as_draws")
-}
-
-
 #' @rdname as_draws
 #' @export
 as_draws.ratiod_fit <- function(x, ...) {
@@ -2067,12 +1959,15 @@ as_draws.ratiod_fit <- function(x, ...) {
 }
 
 
-#' Spread draws into wide format (tidybayes-style)
+#' Draws for selected parameters, one column per parameter
 #'
 #' @description
-#' Extract posterior draws for specified parameters and spread them into
-#' a wide format data frame. This function provides tidybayes-style syntax
-#' without requiring the tidybayes package.
+#' Extract posterior draws for the named parameters into a wide data frame,
+#' one row per draw and one column per parameter, alongside the `.chain`,
+#' `.iteration` and `.draw` bookkeeping columns.
+#'
+#' Parameters are named unquoted, and a name matches every indexed element it
+#' prefixes, so `beta_num` reaches `beta_num[1]`, `beta_num[2]` and so on.
 #'
 #' @param object A `ratiod_fit` object
 #' @param ... Parameter names to extract (unquoted). Supports patterns like
@@ -2105,21 +2000,21 @@ as_draws.ratiod_fit <- function(x, ...) {
 #' )
 #'
 #' # Extract fixed effects
-#' spread_draws(fit, beta_num, beta_denom)
+#' draws_wide(fit, beta_num, beta_denom)
 #'
 #' # Subsample draws
-#' spread_draws(fit, sigma_re, ndraws = 100)
+#' draws_wide(fit, sigma_re, ndraws = 100)
 #' }
 #'
 #' @export
-spread_draws <- function(object, ..., regex = FALSE, ndraws = NULL) {
-  UseMethod("spread_draws")
+draws_wide <- function(object, ..., regex = FALSE, ndraws = NULL) {
+  UseMethod("draws_wide")
 }
 
 
-#' @rdname spread_draws
+#' @rdname draws_wide
 #' @export
-spread_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
+draws_wide.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 
   # Get all parameter names
   all_pars <- colnames(object$draws)
@@ -2179,11 +2074,11 @@ spread_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 }
 
 
-#' Gather draws into long format (tidybayes-style)
+#' Draws for selected parameters, one row per parameter per draw
 #'
 #' @description
-#' Extract posterior draws for specified parameters and gather them into
-#' a long format data frame with one row per draw per parameter.
+#' The long counterpart of [draws_wide()]: one row per draw per parameter,
+#' with the parameter in `.variable` and its value in `.value`.
 #'
 #' @param object A `ratiod_fit` object
 #' @param ... Parameter names to extract (unquoted).
@@ -2215,12 +2110,12 @@ spread_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 #' )
 #'
 #' # Gather all fixed effects
-#' gather_draws(fit, beta_num, beta_denom)
+#' draws_long(fit, beta_num, beta_denom)
 #'
 #' # Use for plotting
 #' if (requireNamespace("ggplot2", quietly = TRUE)) {
 #'   library(ggplot2)
-#'   gather_draws(fit, beta_num) |>
+#'   draws_long(fit, beta_num) |>
 #'     ggplot(aes(x = .value)) +
 #'     geom_histogram() +
 #'     facet_wrap(~ .variable)
@@ -2228,17 +2123,17 @@ spread_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 #' }
 #'
 #' @export
-gather_draws <- function(object, ..., regex = FALSE, ndraws = NULL) {
-  UseMethod("gather_draws")
+draws_long <- function(object, ..., regex = FALSE, ndraws = NULL) {
+  UseMethod("draws_long")
 }
 
 
-#' @rdname gather_draws
+#' @rdname draws_long
 #' @export
-gather_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
+draws_long.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 
   # Get wide format first
-  wide <- spread_draws(object, ..., regex = regex, ndraws = ndraws)
+  wide <- draws_wide(object, ..., regex = regex, ndraws = ndraws)
 
   # Get parameter columns (exclude metadata)
   meta_cols <- c(".chain", ".iteration", ".draw")
@@ -2263,11 +2158,12 @@ gather_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 }
 
 
-#' Point estimates and intervals (tidybayes-style)
+#' Point estimates and credible intervals for selected parameters
 #'
 #' @description
-#' Compute point estimates (median, mean) and credible intervals for
-#' parameters, returning a tidy data frame.
+#' Summarize the draws of the named parameters as a point estimate (median or
+#' mean) and a credible interval (quantile or highest-density), one row per
+#' parameter per interval width.
 #'
 #' @param object A `ratiod_fit` object
 #' @param ... Parameter names to summarize (unquoted).
@@ -2301,23 +2197,23 @@ gather_draws.ratiod_fit <- function(object, ..., regex = FALSE, ndraws = NULL) {
 #' )
 #'
 #' # Get point estimates and 95% intervals
-#' point_interval(fit, beta_num, beta_denom)
+#' draws_interval(fit, beta_num, beta_denom)
 #'
 #' # Multiple interval widths
-#' point_interval(fit, beta_num, .width = c(0.5, 0.9, 0.95))
+#' draws_interval(fit, beta_num, .width = c(0.5, 0.9, 0.95))
 #' }
 #'
 #' @export
-point_interval <- function(object, ..., .width = 0.95,
+draws_interval <- function(object, ..., .width = 0.95,
                            .point = c("median", "mean"),
                            .interval = c("qi", "hdi")) {
-  UseMethod("point_interval")
+  UseMethod("draws_interval")
 }
 
 
-#' @rdname point_interval
+#' @rdname draws_interval
 #' @export
-point_interval.ratiod_fit <- function(object, ..., .width = 0.95,
+draws_interval.ratiod_fit <- function(object, ..., .width = 0.95,
                                       .point = c("median", "mean"),
                                       .interval = c("qi", "hdi")) {
 
@@ -2325,7 +2221,7 @@ point_interval.ratiod_fit <- function(object, ..., .width = 0.95,
   .interval <- match.arg(.interval)
 
   # Get draws
-  draws_wide <- spread_draws(object, ...)
+  draws_wide <- draws_wide(object, ...)
   meta_cols <- c(".chain", ".iteration", ".draw")
   par_cols <- setdiff(names(draws_wide), meta_cols)
 
@@ -2373,6 +2269,6 @@ point_interval.ratiod_fit <- function(object, ..., .width = 0.95,
 
   result <- do.call(rbind, results)
   rownames(result) <- NULL
-  class(result) <- c("ratiod_point_interval", "data.frame")
+  class(result) <- c("ratiod_draws_interval", "data.frame")
   result
 }

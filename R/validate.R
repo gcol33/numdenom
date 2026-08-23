@@ -18,15 +18,12 @@ NULL
 #' @param type Type of check: "dens_overlay", "scatter", "intervals", "stat"
 #' @param component Which component: "numerator", "denominator", or "both"
 #' @param stat Function for "stat" type (default: mean)
-#' @param ndraws Number of posterior draws to use (default: 50 for plots)
+#' @param ndraws Number of posterior draws to replicate (default: 50)
 #' @param ... Additional arguments passed to bayesplot functions
 #'
 #' @return A ggplot object
 #'
 #' @examples
-#' # pp_check requires a fitted model with posterior predictive draws
-#' # See tratio() examples for fitting models
-#'
 #' \donttest{
 #' # Simulate data and fit model (slow, not run on CRAN)
 #' set.seed(123)
@@ -43,15 +40,10 @@ NULL
 #'   family = ratiod_negbin_negbin(),
 #'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
-#' # Density overlay (requires bayesplot package)
-#' # pp_check(fit, type = "dens_overlay")
+#' # Density overlay of replicated against observed numerators
+#' pp_check(fit, type = "dens_overlay")
 #' }
 #'
-#' @export
-pp_check <- function(object, ...) {
-  UseMethod("pp_check")
-}
-
 #' @export
 #' @rdname pp_check
 pp_check.ratiod_fit <- function(object, type = c("dens_overlay", "scatter", "intervals", "stat"),
@@ -61,27 +53,12 @@ pp_check.ratiod_fit <- function(object, type = c("dens_overlay", "scatter", "int
   type <- match.arg(type)
   component <- match.arg(component)
 
-  if (!requireNamespace("bayesplot", quietly = TRUE)) {
-    stop("Package 'bayesplot' is required for pp_check. Install with:\n",
-         "  install.packages('bayesplot')", call. = FALSE)
-  }
-
-
-  # Check if posterior predictive draws are available
-  if (is.null(object$draws$y_num_rep) || is.null(object$draws$y_denom_rep)) {
-    stop("Posterior predictive draws not available: no backend stores ",
-         "`y_num_rep` / `y_denom_rep` on the fit.\n",
-         "  Draw from the posterior with `predict()` and compare against the ",
-         "response directly.", call. = FALSE)
-  }
-
-  # Extract posterior predictive draws from HMC backend
-  y_rep_num <- object$draws$y_num_rep
-  y_rep_denom <- object$draws$y_denom_rep
-
-  # Observed data
-  y_num <- object$.internal$hmc_data$y_num
-  y_denom <- object$.internal$hmc_data$y_denom
+  # Replicate the response at each posterior draw
+  replicates <- posterior_predict(object, ndraws = ndraws)
+  y_rep_num <- replicates$y_num_rep
+  y_rep_denom <- replicates$y_denom_rep
+  y_num <- replicates$y_num
+  y_denom <- replicates$y_denom
 
   # Select which to plot
   if (component == "numerator") {

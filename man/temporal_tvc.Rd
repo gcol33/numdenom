@@ -89,7 +89,7 @@ fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
-  tvc = temporal_tvc("year", terms = 1),
+  temporal = temporal_tvc("year", terms = 1),
   mode = "hmc",
   control = list(iter = 200, warmup = 100, chains = 1)
 )
@@ -100,7 +100,7 @@ fit2 <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
-  tvc = temporal_tvc("year", terms = c("(Intercept)", "x"), structure = "rw2"),
+  temporal = temporal_tvc("year", terms = c("(Intercept)", "x"), structure = "rw2"),
   mode = "hmc",
   control = list(iter = 200, warmup = 100, chains = 1)
 )

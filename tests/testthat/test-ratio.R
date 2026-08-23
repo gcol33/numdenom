@@ -291,11 +291,11 @@ test_that("as_draws.ratiod_fit works", {
   expect_true(inherits(draws, "draws_df") || inherits(draws, "draws"))
 })
 
-test_that("spread_draws.ratiod_fit works", {
+test_that("draws_wide.ratiod_fit works", {
   skip_on_cran()
 
   fit <- make_test_fit()
-  sp <- spread_draws(fit, beta_num)
+  sp <- draws_wide(fit, beta_num)
 
   expect_s3_class(sp, "ratiod_draws")
   expect_true(".chain" %in% names(sp))
@@ -304,31 +304,31 @@ test_that("spread_draws.ratiod_fit works", {
   expect_true(any(grepl("beta_num", names(sp))))
 })
 
-test_that("spread_draws subsamples when requested", {
+test_that("draws_wide subsamples when requested", {
   skip_on_cran()
 
   fit <- make_test_fit()
-  sp <- spread_draws(fit, beta_num, ndraws = 50)
+  sp <- draws_wide(fit, beta_num, ndraws = 50)
 
   expect_equal(nrow(sp), 50)
 })
 
-test_that("spread_draws errors on no matches", {
+test_that("draws_wide errors on no matches", {
   skip_on_cran()
 
   fit <- make_test_fit()
 
   expect_error(
-    spread_draws(fit, nonexistent_param),
+    draws_wide(fit, nonexistent_param),
     "No parameters matched"
   )
 })
 
-test_that("gather_draws.ratiod_fit works", {
+test_that("draws_long.ratiod_fit works", {
   skip_on_cran()
 
   fit <- make_test_fit()
-  gd <- gather_draws(fit, beta_num)
+  gd <- draws_long(fit, beta_num)
 
   expect_s3_class(gd, "ratiod_draws_long")
   expect_true(".variable" %in% names(gd))
@@ -336,13 +336,13 @@ test_that("gather_draws.ratiod_fit works", {
   expect_true(all(grepl("beta_num", gd$.variable)))
 })
 
-test_that("point_interval.ratiod_fit works", {
+test_that("draws_interval.ratiod_fit works", {
   skip_on_cran()
 
   fit <- make_test_fit()
-  pi <- point_interval(fit, beta_num, beta_denom)
+  pi <- draws_interval(fit, beta_num, beta_denom)
 
-  expect_s3_class(pi, "ratiod_point_interval")
+  expect_s3_class(pi, "ratiod_draws_interval")
   expect_true(".variable" %in% names(pi))
   expect_true(".value" %in% names(pi))
   expect_true(".lower" %in% names(pi))
@@ -350,23 +350,23 @@ test_that("point_interval.ratiod_fit works", {
   expect_true(".width" %in% names(pi))
 })
 
-test_that("point_interval supports multiple widths", {
+test_that("draws_interval supports multiple widths", {
   skip_on_cran()
 
   fit <- make_test_fit()
-  pi <- point_interval(fit, beta_num, .width = c(0.5, 0.9))
+  pi <- draws_interval(fit, beta_num, .width = c(0.5, 0.9))
 
   widths <- unique(pi$.width)
   expect_true(0.5 %in% widths)
   expect_true(0.9 %in% widths)
 })
 
-test_that("point_interval supports mean point estimate", {
+test_that("draws_interval supports mean point estimate", {
   skip_on_cran()
 
   fit <- make_test_fit()
-  pi_median <- point_interval(fit, beta_num, .point = "median")
-  pi_mean <- point_interval(fit, beta_num, .point = "mean")
+  pi_median <- draws_interval(fit, beta_num, .point = "median")
+  pi_mean <- draws_interval(fit, beta_num, .point = "mean")
 
   expect_equal(unique(pi_median$.point), "median")
   expect_equal(unique(pi_mean$.point), "mean")
@@ -375,12 +375,12 @@ test_that("point_interval supports mean point estimate", {
   expect_false(identical(pi_median$.value[1], pi_mean$.value[1]))
 })
 
-test_that("point_interval supports HDI", {
+test_that("draws_interval supports HDI", {
   skip_on_cran()
 
   fit <- make_test_fit()
-  pi_qi <- point_interval(fit, beta_num, .interval = "qi")
-  pi_hdi <- point_interval(fit, beta_num, .interval = "hdi")
+  pi_qi <- draws_interval(fit, beta_num, .interval = "qi")
+  pi_hdi <- draws_interval(fit, beta_num, .interval = "hdi")
 
   expect_equal(unique(pi_qi$.interval), "qi")
   expect_equal(unique(pi_hdi$.interval), "hdi")

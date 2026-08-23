@@ -136,32 +136,16 @@ fit_hmc <- function(formula,
     gp_info <- prepare_gp_for_hmc(spatial, data, hmc_data$N)
     gp_n_units <- if (gp_info$n_unique > 0L) gp_info$n_unique else hmc_data$N
     gp_group <- if (length(gp_info$gp_obs_to_loc) > 0) gp_info$gp_obs_to_loc else seq_len(hmc_data$N)
-    # Precompute HSGP basis matrix for HSGP-MSGP ratio reconstruction
-    msgp_hsgp_Phi <- NULL
-    msgp_hsgp_eigenvalues <- NULL
-    if (isTRUE(gp_info$msgp_approx == "hsgp")) {
-      hsgp_m <- as.integer(gp_info$hsgp_m %||% 6L)
-      c_bnd <- gp_info$hsgp_c %||% 1.5
-      coords_mat <- as.matrix(data[, spatial$coord_vars, drop = FALSE])
-      if (isTRUE(spatial$scale_coords)) coords_mat <- scale(coords_mat)
-      N_obs <- nrow(coords_mat)
-      x_range <- diff(range(coords_mat[, 1]))
-      y_range <- diff(range(coords_mat[, 2]))
-      x_center <- mean(range(coords_mat[, 1]))
-      y_center <- mean(range(coords_mat[, 2]))
-      L1 <- max(c_bnd * x_range / 2, 0.1)
-      L2 <- max(c_bnd * y_range / 2, 0.1)
-      m_total <- hsgp_m * hsgp_m
-      msgp_hsgp_eigenvalues <- numeric(m_total)
-      msgp_hsgp_Phi <- matrix(0, N_obs, m_total)
-      for (j1 in seq_len(hsgp_m)) {
-        for (j2 in seq_len(hsgp_m)) {
-          j_idx <- (j1 - 1) * hsgp_m + j2
-          msgp_hsgp_eigenvalues[j_idx] <- (pi * j1 / (2 * L1))^2 + (pi * j2 / (2 * L2))^2
-          msgp_hsgp_Phi[, j_idx] <- sin(pi * j1 * (coords_mat[, 1] - x_center + L1) / (2 * L1)) / sqrt(L1) *
-            sin(pi * j2 * (coords_mat[, 2] - y_center + L2) / (2 * L2)) / sqrt(L2)
-        }
-      }
+    # HSGP basis for reconstructing the field from its coefficients, built
+    # from the coordinates the sampler itself was handed
+    hsgp_basis <- NULL
+    if (isTRUE(gp_info$msgp_approx == "hsgp") ||
+        identical(gp_info$gp_type, "hsgp")) {
+      hsgp_basis <- hsgp_basis_2d(
+        coords = matrix(gp_info$coords, ncol = 2, byrow = TRUE),
+        m = as.integer(gp_info$hsgp_m %||% 6L),
+        c_boundary = gp_info$hsgp_c %||% 1.5
+      )
     }
 
     spatial_info <- list(type = gp_info$gp_type, n_units = gp_n_units,
@@ -171,8 +155,11 @@ fit_hmc <- function(formula,
                          hsgp_m = gp_info$hsgp_m,  # HSGP: basis functions per dim
                          hsgp_c = gp_info$hsgp_c,
                          msgp_approx = gp_info$msgp_approx,
-                         msgp_hsgp_Phi = msgp_hsgp_Phi,
-                         msgp_hsgp_eigenvalues = msgp_hsgp_eigenvalues,
+                         shared = gp_info$shared %||% TRUE,
+                         msgp_hsgp_Phi = hsgp_basis$phi,
+                         msgp_hsgp_eigenvalues = hsgp_basis$eigenvalues,
+                         hsgp_Phi = hsgp_basis$phi,
+                         hsgp_eigenvalues = hsgp_basis$eigenvalues,
                          coord_vars = if (!is.null(spatial)) spatial$coord_vars else NULL,
                          parameterization = gp_info$parameterization,
                          # Range bounds for proper initialization (from prepare_gp_for_hmc)
@@ -201,6 +188,7 @@ fit_hmc <- function(formula,
 
   # Prepare temporal structure
   temporal_info <- prepare_temporal_for_hmc(temporal, data, hmc_data$N)
+  temporal_info$time_levels <- temporal$time_levels
 
   # Prepare zero-inflation structure. Handles both an explicit `zi = `
   # argument and auto-detection from a ZI/hurdle/OI/ZOIB family (e.g.
@@ -212,6 +200,9 @@ fit_hmc <- function(formula,
 
   # Prepare spatiotemporal structure
   spatiotemporal_info <- prepare_spatiotemporal_for_hmc(spatiotemporal, data)
+
+  # Prepare multiscale temporal structure (both sampler paths allocate it)
+  ms_temporal_info <- prepare_multiscale_temporal_for_hmc(temporal, data, hmc_data$N)
 
   # Prepare SVC structure (if spatial is an SVC specification)
   svc_info <- prepare_svc_for_hmc(spatial, data, hmc_data$N, hmc_data$X_num)
@@ -327,9 +318,6 @@ fit_hmc <- function(formula,
 
   # Run sampler - branch based on GP vs non-GP spatial
   if (use_gp_sampler) {
-    # Prepare multiscale temporal if present
-    ms_temporal_info <- prepare_multiscale_temporal_for_hmc(temporal, data, hmc_data$N)
-
     # Prepare RSR if present
     rsr_info <- prepare_rsr_for_hmc(spatial, data)
 
@@ -645,6 +633,8 @@ fit_hmc <- function(formula,
     # Populate spatial_info with SVC details for output conversion
     if (svc_info$has_svc) {
       spatial_info$n_svc <- svc_info$n_svc
+      spatial_info$svc_shared <- svc_info$shared %||% TRUE
+      spatial_info$svc_spec <- svc_info$spec
       spatial_info$svc_names <- svc_info$svc_names
       spatial_info$svc_approx <- svc_info$svc_approx %||% "nngp"
       spatial_info$svc_hsgp_m <- svc_info$hsgp_m %||% 0L
@@ -915,7 +905,7 @@ fit_hmc <- function(formula,
       # Reorder samples columns from tulpa's generic layout
       # ([betas | re | spatial | temporal | zi | oi | extras]) back to legacy
       # ordering ([betas | re | extras | spatial | temporal | zi | oi]) so
-      # build_draws_list_full reads each block from the slot it expects.
+      # hmc_param_layout() reads each block from the slot it expects.
       if (need_reorder) {
         S <- fit_raw$samples
         n_total <- ncol(S)
@@ -987,6 +977,8 @@ fit_hmc <- function(formula,
     spatiotemporal_info = spatiotemporal_info,
     zi_info = zi_info,
     latent_info = latent_info,
+    ms_temporal_info = ms_temporal_info,
+    tvc_spec = if (inherits(temporal, "ratiod_tvc")) temporal else NULL,
     formula = formula,
     data = data,
     family = family,
@@ -1425,462 +1417,6 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
 }
 
 
-#' Initialize parameters for HMC with spatial
-#' @keywords internal
-initialize_hmc_params_spatial <- function(hmc_data, model_type, spatial_info) {
-  n_params <- hmc_data$p_num + hmc_data$p_denom
-
-  # Random effects
-  if (hmc_data$n_re_groups > 0) {
-    n_params <- n_params + 1 + hmc_data$n_re_groups
-  }
-
-  # Overdispersion
-  if (model_type == "negbin_negbin") {
-    n_params <- n_params + 2
-  } else if (model_type == "poisson_gamma") {
-    n_params <- n_params + 1
-  } else if (model_type == "negbin_gamma") {
-    n_params <- n_params + 2
-  }
-
-  # Spatial
-  is_collapsed <- identical(spatial_info$parameterization, "collapsed")
-  if (spatial_info$type == "icar") {
-    if (is_collapsed) {
-      n_params <- n_params + 1  # log_tau only (phi marginalized)
-    } else {
-      n_params <- n_params + 1 + spatial_info$n_units  # log_tau + phi
-    }
-  } else if (spatial_info$type == "bym2") {
-    if (is_collapsed) {
-      n_params <- n_params + 2  # log_sigma_total + logit_rho only
-    } else {
-      # log_sigma_total + logit_rho + phi_scaled + theta
-      n_params <- n_params + 2 + 2 * spatial_info$n_units
-    }
-  } else if (spatial_info$type == "car_proper") {
-    n_params <- n_params + 2 + spatial_info$n_units  # log_tau + logit_rho + phi
-  }
-
-  rep(0.0, n_params)
-}
-
-
-#' Convert HMC output to ratiod_fit (with spatial support)
-#' @keywords internal
-convert_hmc_to_ratiod_fit_spatial <- function(fit_raw, hmc_data, spatial_info,
-                                              formula, data, family,
-                                              model_type, iter, warmup, chains,
-                                              temporal_info = NULL,
-                                              spatiotemporal_info = NULL,
-                                              re_param = "noncentered") {
-  # Handle multi-chain case
-  if (chains > 1) {
-    # Combine chains
-    all_samples <- do.call(rbind, fit_raw$samples)
-    all_log_prob <- unlist(fit_raw$log_prob)
-    all_accept <- unlist(fit_raw$accept_prob)
-    all_n_leapfrog <- unlist(fit_raw$n_leapfrog)
-    all_treedepth <- unlist(fit_raw$treedepth)
-    all_divergent <- unlist(fit_raw$divergent)
-    epsilon <- mean(fit_raw$epsilon)
-  } else {
-    all_samples <- fit_raw$samples
-    all_log_prob <- fit_raw$log_prob
-    all_accept <- fit_raw$accept_prob
-    all_n_leapfrog <- fit_raw$n_leapfrog
-    all_treedepth <- fit_raw$treedepth
-    all_divergent <- fit_raw$divergent
-    epsilon <- fit_raw$epsilon
-  }
-
-  n_samples <- nrow(all_samples)
-
-  # Build parameter names and extract draws
-  draws_list <- build_draws_list_spatial(
-    all_samples, hmc_data, spatial_info, model_type, re_param = re_param
-  )
-
-  draws <- do.call(cbind, draws_list)
-  colnames(draws) <- names(draws_list)
-
-  # Compute ratios
-  ratio_draws <- compute_ratio_draws_hmc_spatial(
-    all_samples, hmc_data, spatial_info, model_type, re_param = re_param
-  )
-
-  # Diagnostics
-  n_divergent <- sum(all_divergent)
-  avg_accept <- mean(all_accept)
-
-  fit <- list(
-    draws = draws,
-    ratio_draws = ratio_draws,
-    formula = formula,
-    data = data,
-    family = family,
-    spatial = spatial_info,
-    temporal = temporal_info,
-    spatiotemporal = spatiotemporal_info,
-    backend = "hmc",
-    algorithm = fit_raw$sampler %||% "HMC",
-    re_param = re_param,
-    iter = iter,
-    warmup = warmup,
-    chains = chains,
-    n_save = n_samples,
-    epsilon = epsilon,
-    diagnostics = list(
-      algorithm = fit_raw$sampler %||% "HMC",
-      n_divergent = n_divergent,
-      avg_accept_prob = avg_accept,
-      n_leapfrog = all_n_leapfrog,
-      treedepth = all_treedepth,
-      divergent = all_divergent,
-      log_posterior = all_log_prob
-    ),
-    log_prob = all_log_prob,
-    .internal = list(
-      samples = all_samples,
-      hmc_data = hmc_data,
-      model_type = model_type
-    )
-  )
-
-  class(fit) <- "ratiod_fit"
-  return(fit)
-}
-
-
-#' Extract spatial draws from HMC samples into draws_list
-#'
-#' Shared helper for build_draws_list_spatial and build_draws_list_full.
-#' Handles ICAR, BYM2, GP, multiscale GP, and HSGP spatial types,
-#' including collapsed parameterization (where phi/theta/w are marginalized out).
-#'
-#' @param samples Matrix of HMC samples
-#' @param idx Current column index into samples
-#' @param spatial_info Spatial configuration list
-#' @return List with `draws` (named list of draws) and `idx` (updated column index)
-#' @keywords internal
-extract_spatial_draws <- function(samples, idx, spatial_info) {
-  draws <- list()
-
-  if (spatial_info$type == "icar") {
-    param <- spatial_info$parameterization %||% "standard"
-    draws[["tau_spatial"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    if (param != "collapsed") {
-      for (s in seq_len(spatial_info$n_units)) {
-        draws[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "car_proper") {
-    draws[["tau_spatial"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    rho_lower <- spatial_info$rho_lower %||% 0.0
-    rho_upper <- spatial_info$rho_upper %||% 1.0
-    draws[["rho_spatial"]] <- rho_lower + (rho_upper - rho_lower) / (1 + exp(-samples[, idx]))
-    idx <- idx + 1
-    for (s in seq_len(spatial_info$n_units)) {
-      draws[[paste0("phi_spatial[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  } else if (spatial_info$type == "bym2") {
-    param <- spatial_info$parameterization %||% "standard"
-    sigma_total <- exp(samples[, idx])
-    idx <- idx + 1
-    rho <- 1 / (1 + exp(-samples[, idx]))
-    idx <- idx + 1
-
-    sigma_s <- sigma_total * sqrt(rho)
-    sigma_u <- sigma_total * sqrt(1 - rho)
-
-    draws[["sigma_spatial"]] <- sigma_total
-    draws[["rho_spatial"]] <- rho
-    draws[["sigma_s_spatial"]] <- sigma_s
-    draws[["sigma_u_spatial"]] <- sigma_u
-
-    if (param != "collapsed") {
-      for (s in seq_len(spatial_info$n_units)) {
-        draws[[paste0("phi_scaled[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-      for (s in seq_len(spatial_info$n_units)) {
-        draws[[paste0("theta[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "gp") {
-    draws[["sigma2_gp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws[["phi_gp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    param <- spatial_info$parameterization %||% "centered"
-    if (param != "collapsed") {
-      for (s in seq_len(spatial_info$n_units)) {
-        draws[[paste0("gp_w[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "multiscale_gp") {
-    msgp_approx <- spatial_info$msgp_approx %||% "nngp"
-    if (msgp_approx == "hsgp") {
-      # HSGP-MSGP: hyperparams + basis coefficients per scale
-      hsgp_m <- spatial_info$hsgp_m %||% 6L
-      m_total <- hsgp_m * hsgp_m
-
-      draws[["sigma2_hsgp_local"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      draws[["lengthscale_hsgp_local"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      for (s in seq_len(m_total)) {
-        draws[[paste0("hsgp_beta_local[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-      draws[["sigma2_hsgp_regional"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      draws[["lengthscale_hsgp_regional"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      for (s in seq_len(m_total)) {
-        draws[[paste0("hsgp_beta_regional[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    } else {
-      # NNGP-MSGP: spatial effects per location
-      draws[["sigma2_gp_local"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      draws[["phi_gp_local"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      for (s in seq_len(spatial_info$n_units)) {
-        draws[[paste0("gp_local_w[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-      draws[["sigma2_gp_regional"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      draws[["phi_gp_regional"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      for (s in seq_len(spatial_info$n_units)) {
-        draws[[paste0("gp_regional_w[", s, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  } else if (spatial_info$type == "hsgp") {
-    draws[["sigma2_hsgp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws[["lengthscale_hsgp"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    hsgp_m <- spatial_info$hsgp_m %||% 8L
-    for (s in seq_len(hsgp_m * hsgp_m)) {
-      draws[[paste0("hsgp_beta[", s, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  }
-
-  list(draws = draws, idx = idx)
-}
-
-
-#' Build draws list with spatial parameters
-#' @keywords internal
-build_draws_list_spatial <- function(samples, hmc_data, spatial_info, model_type,
-                                      re_param = "noncentered") {
-  draws_list <- list()
-  idx <- 1
-
-  # Fixed effects numerator
-  for (j in seq_len(hmc_data$p_num)) {
-    name <- paste0("beta_num[", j, "]")
-    draws_list[[name]] <- samples[, idx]
-    idx <- idx + 1
-  }
-
-  # Fixed effects denominator
-  for (j in seq_len(hmc_data$p_denom)) {
-    name <- paste0("beta_denom[", j, "]")
-    draws_list[[name]] <- samples[, idx]
-    idx <- idx + 1
-  }
-
-  # Random effects - transform z to re if noncentered
-  if (hmc_data$n_re_groups > 0) {
-    sigma_re <- exp(samples[, idx])
-    draws_list[["sigma_re"]] <- sigma_re
-    idx <- idx + 1
-    for (g in seq_len(hmc_data$n_re_groups)) {
-      z_or_re <- samples[, idx]
-      if (re_param == "noncentered") {
-        draws_list[[paste0("re[", g, "]")]] <- sigma_re * z_or_re
-      } else {
-        draws_list[[paste0("re[", g, "]")]] <- z_or_re
-      }
-      idx <- idx + 1
-    }
-  }
-
-  # Overdispersion
-  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
-    draws_list[["phi_num"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_denom"]] <- exp(samples[, idx])
-    idx <- idx + 1
-  } else if (model_type == "poisson_gamma") {
-    draws_list[["shape"]] <- exp(samples[, idx])
-    idx <- idx + 1
-  }
-
-  # Spatial
-  sp_result <- extract_spatial_draws(samples, idx, spatial_info)
-  draws_list <- c(draws_list, sp_result$draws)
-  idx <- sp_result$idx
-
-  draws_list
-}
-
-
-#' Compute ratio draws from HMC samples (with spatial)
-#' @keywords internal
-compute_ratio_draws_hmc_spatial <- function(samples, hmc_data, spatial_info,
-                                             model_type, re_param = "noncentered") {
-  n_samples <- nrow(samples)
-  N <- hmc_data$N
-
-  # Extract fixed effects
-  beta_num <- samples[, seq_len(hmc_data$p_num), drop = FALSE]
-  beta_denom <- samples[, hmc_data$p_num + seq_len(hmc_data$p_denom), drop = FALSE]
-
-  idx <- hmc_data$p_num + hmc_data$p_denom + 1
-
-  # Random effects - transform z to re if noncentered
-  re <- NULL
-  if (hmc_data$n_re_groups > 0) {
-    sigma_re <- exp(samples[, idx])
-    idx <- idx + 1
-    z_or_re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
-    if (re_param == "noncentered") {
-      # Transform: re = sigma * z
-      re <- sweep(z_or_re, 1, sigma_re, "*")
-    } else {
-      re <- z_or_re
-    }
-    idx <- idx + hmc_data$n_re_groups
-  }
-
-  # Overdispersion indices (skip for ratio computation)
-  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
-    idx <- idx + 2
-  } else if (model_type == "poisson_gamma") {
-    idx <- idx + 1
-  }
-
-  # Spatial effects
-  spatial_effect <- NULL
-  if (spatial_info$type == "icar") {
-    icar_param_ratio <- spatial_info$parameterization %||% "standard"
-    idx <- idx + 1  # Skip log_tau
-    if (icar_param_ratio == "collapsed") {
-      # Collapsed: no phi in samples, would need phi_star from C++ (not available in spatial-only path)
-      # For now, spatial_effect remains NULL — collapsed should use full path
-    } else {
-      phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      spatial_effect <- phi_spatial
-    }
-  } else if (spatial_info$type == "car_proper") {
-    idx <- idx + 1  # Skip logit_rho (log_tau already skipped above)
-    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-  } else if (spatial_info$type == "bym2") {
-    bym2_param_ratio <- spatial_info$parameterization %||% "standard"
-    # Riebler parameterization: log_sigma_total, logit_rho
-    sigma_total <- exp(samples[, idx])
-    idx <- idx + 1
-    rho <- 1 / (1 + exp(-samples[, idx]))
-    idx <- idx + 1
-    sigma_s <- sigma_total * sqrt(rho)
-    sigma_u <- sigma_total * sqrt(1 - rho)
-
-    if (bym2_param_ratio == "collapsed") {
-      # Collapsed: no phi/theta in samples — use full path
-    } else {
-      phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-      theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-
-      # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
-      spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
-      for (s in seq_len(n_samples)) {
-        spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
-          sigma_u[s] * theta[s, ]
-      }
-    }
-  } else if (spatial_info$type == "gp") {
-    gp_param_ratio <- spatial_info$parameterization %||% "centered"
-    idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp
-    if (gp_param_ratio != "collapsed") {
-      spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-    }
-  } else if (spatial_info$type == "multiscale_gp") {
-    msgp_approx <- spatial_info$msgp_approx %||% "nngp"
-    if (msgp_approx == "hsgp") {
-      # HSGP-MSGP: skip all params (handled in full ratio computation)
-      hsgp_m <- spatial_info$hsgp_m %||% 6L
-      m_total <- hsgp_m * hsgp_m
-      idx <- idx + 2 + m_total + 2 + m_total  # 2 hyperparams + m^2 beta per scale
-    } else {
-      idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
-      gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-      idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
-      gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-      spatial_effect <- gp_local_w + gp_regional_w
-    }
-  }
-
-  # Compute ratios
-  ratio_draws <- matrix(NA_real_, nrow = n_samples, ncol = N)
-
-  for (s in seq_len(n_samples)) {
-    eta_num <- as.numeric(hmc_data$X_num %*% beta_num[s, ])
-    eta_denom <- as.numeric(hmc_data$X_denom %*% beta_denom[s, ])
-
-    # Add RE
-    if (!is.null(re)) {
-      for (i in seq_len(N)) {
-        g <- hmc_data$re_group[i]
-        if (g > 0) {
-          eta_num[i] <- eta_num[i] + re[s, g]
-          eta_denom[i] <- eta_denom[i] + re[s, g]
-        }
-      }
-    }
-
-    # Add spatial (GP/MSGP use spatial_info$group for obs_to_loc mapping)
-    if (!is.null(spatial_effect)) {
-      for (i in seq_len(N)) {
-        sp_g <- spatial_info$group[i]
-        if (sp_g > 0) {
-          eta_num[i] <- eta_num[i] + spatial_effect[s, sp_g]
-          eta_denom[i] <- eta_denom[i] + spatial_effect[s, sp_g]
-        }
-      }
-    }
-
-    # Compute ratio
-    if (model_type == "binomial" || model_type == "beta_binomial") {
-      ratio_draws[s, ] <- 1 / (1 + exp(-eta_num))  # inv_logit(eta)
-    } else {
-      ratio_draws[s, ] <- exp(eta_num - eta_denom)  # exp(log(mu_num/mu_denom))
-    }
-  }
-
-  colnames(ratio_draws) <- paste0("ratio[", seq_len(N), "]")
-  ratio_draws
-}
-
-
 #' Prepare temporal structure for HMC
 #' @keywords internal
 prepare_temporal_for_hmc <- function(temporal, data, N) {
@@ -2087,6 +1623,7 @@ prepare_svc_for_hmc <- function(svc, data, N, X_num) {
   if (approx == "hsgp") {
     list(
       has_svc = TRUE,
+      spec = svc,
       svc_approx = "hsgp",
       n_svc = as.integer(n_svc),
       n_obs = as.integer(N),
@@ -2115,6 +1652,7 @@ prepare_svc_for_hmc <- function(svc, data, N, X_num) {
 
     list(
       has_svc = TRUE,
+      spec = svc,
       svc_approx = "nngp",
       n_svc = as.integer(n_svc),
       n_obs = as.integer(N),
@@ -2581,6 +2119,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
                                            spatiotemporal_info = NULL,
                                            zi_info,
                                            latent_info = NULL,
+                                           ms_temporal_info = NULL,
+                                           tvc_spec = NULL,
                                            formula, data, family,
                                            model_type, iter, warmup, chains,
                                            re_param = "noncentered") {
@@ -2606,38 +2146,66 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
 
   n_samples <- nrow(all_samples)
 
-  # Build parameter names and extract draws
-  draws_list <- build_draws_list_full(
-    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info,
-    re_param = re_param
+  # One layout, read by every consumer of the sample matrix
+  layout <- hmc_param_layout(
+    hmc_data = hmc_data, spatial_info = spatial_info,
+    temporal_info = temporal_info, zi_info = zi_info,
+    model_type = model_type, latent_info = latent_info,
+    st_info = spatiotemporal_info, ms_temporal_info = ms_temporal_info
   )
+  if (layout$total != ncol(all_samples)) {
+    stop("Parameter layout describes ", layout$total, " parameters but the ",
+         "sampler returned ", ncol(all_samples), ". The layout in ",
+         "hmc_param_layout() and compute_param_layout() in ",
+         "src/hmc_sampler.cpp have diverged.", call. = FALSE)
+  }
 
+  # Fields the inner Laplace optimization of a collapsed parameterization
+  # leaves behind (NULL otherwise)
+  gp_w_star <- fit_raw$gp_w_star
+  icar_phi_star <- fit_raw$icar_phi_star
+  bym2_theta_star <- fit_raw$bym2_theta_star
+
+  unpack <- function(samples) {
+    hmc_unpack_draws(
+      samples = samples, layout = layout, hmc_data = hmc_data,
+      spatial_info = spatial_info, temporal_info = temporal_info,
+      model_type = model_type, re_param = re_param,
+      latent_info = latent_info, st_info = spatiotemporal_info,
+      ms_temporal_info = ms_temporal_info,
+      gp_w_star = gp_w_star, icar_phi_star = icar_phi_star,
+      bym2_theta_star = bym2_theta_star
+    )
+  }
+
+  unpacked <- unpack(all_samples)
+  draws_list <- hmc_draws_list(unpacked)
   draws <- do.call(cbind, draws_list)
   colnames(draws) <- names(draws_list)
 
-  # Compute ratios
-  gp_w_star <- fit_raw$gp_w_star  # NULL if not collapsed GP
-  icar_phi_star <- fit_raw$icar_phi_star  # NULL if not collapsed ICAR/BYM2
-  bym2_theta_star <- fit_raw$bym2_theta_star  # NULL if not collapsed BYM2
-  ratio_draws <- compute_ratio_draws_hmc_full(
-    all_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type,
-    re_param = re_param, gp_w_star = gp_w_star,
-    icar_phi_star = icar_phi_star, bym2_theta_star = bym2_theta_star
+  design <- hmc_eta_design(
+    X_num = hmc_data$X_num, X_denom = hmc_data$X_denom,
+    re_group = hmc_data$re_group,
+    re_group_matrix = hmc_data$re_group_matrix,
+    slope_matrices = hmc_data$slope_matrices,
+    spatial_info = spatial_info, temporal_info = temporal_info,
+    latent_info = latent_info, st_info = spatiotemporal_info,
+    ms_temporal_info = ms_temporal_info
   )
+  eta <- hmc_eta_draws(unpacked, design)
+  warn_dropped_structures(eta$dropped)
+
+  ratio_draws <- hmc_response_draws(eta, model_type)$ratio
+  colnames(ratio_draws) <- paste0("ratio[", seq_len(ncol(ratio_draws)), "]")
 
   # Diagnostics
   n_divergent <- sum(all_divergent)
   avg_accept <- mean(all_accept)
 
-  # Create samples list (one matrix per chain) for compatibility
-  # Each matrix has named columns for parameters
+  # One matrix of named draws per chain
   if (chains > 1) {
     samples_list <- lapply(seq_len(chains), function(c) {
-      chain_samples <- fit_raw$samples[[c]]
-      chain_draws <- build_draws_list_full(
-        chain_samples, hmc_data, spatial_info, temporal_info, zi_info, model_type, latent_info,
-        re_param = re_param
-      )
+      chain_draws <- hmc_draws_list(unpack(fit_raw$samples[[c]]))
       chain_mat <- do.call(cbind, chain_draws)
       colnames(chain_mat) <- names(chain_draws)
       chain_mat
@@ -2645,6 +2213,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
   } else {
     samples_list <- list(draws)
   }
+
+  structure_draws <- hmc_structure_draws(unpacked)
 
   fit <- list(
     draws = draws,
@@ -2656,6 +2226,8 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
     spatial = spatial_info,
     temporal = temporal_info,
     spatiotemporal = spatiotemporal_info,
+    svc = if (!is.null(unpacked$svc)) spatial_info$svc_spec else NULL,
+    tvc = if (!is.null(unpacked$tvc)) tvc_spec else NULL,
     zi = zi_info,
     latent = latent_info,
     backend = "hmc",
@@ -2676,964 +2248,25 @@ convert_hmc_to_ratiod_fit_full <- function(fit_raw, hmc_data, spatial_info,
       log_posterior = all_log_prob
     ),
     log_prob = all_log_prob,
-    .internal = list(
-      samples = all_samples,
-      hmc_data = hmc_data,
-      model_type = model_type,
-      latent_info = latent_info
+    .internal = c(
+      list(
+        samples = all_samples,
+        hmc_data = hmc_data,
+        model_type = model_type,
+        latent_info = latent_info,
+        ms_temporal_info = ms_temporal_info,
+        layout = layout,
+        eta_dropped = eta$dropped,
+        gp_w_star = gp_w_star,
+        icar_phi_star = icar_phi_star,
+        bym2_theta_star = bym2_theta_star
+      ),
+      structure_draws
     )
   )
 
   class(fit) <- "ratiod_fit"
   return(fit)
-}
-
-
-#' Build draws list with full feature support
-#' @keywords internal
-build_draws_list_full <- function(samples, hmc_data, spatial_info, temporal_info,
-                                   zi_info, model_type, latent_info = NULL,
-                                   re_param = "noncentered") {
-  draws_list <- list()
-  idx <- 1
-
-  # Fixed effects numerator
-  for (j in seq_len(hmc_data$p_num)) {
-    name <- paste0("beta_num[", j, "]")
-    draws_list[[name]] <- samples[, idx]
-    idx <- idx + 1
-  }
-
-  # Fixed effects denominator
-  for (j in seq_len(hmc_data$p_denom)) {
-    name <- paste0("beta_denom[", j, "]")
-    draws_list[[name]] <- samples[, idx]
-    idx <- idx + 1
-  }
-
-  # Random effects (supports multi-term RE with slopes)
-  # When re_param == "noncentered", samples contain z values that need transformation to actual RE
-  # When re_param == "centered", samples contain actual RE values
-  n_re_terms <- hmc_data$n_re_terms %||% 0L
-  has_slopes <- hmc_data$has_slopes %||% FALSE
-  has_correlated_slopes <- hmc_data$has_correlated_slopes %||% FALSE
-
-  if (n_re_terms > 0 && has_slopes) {
-    # With random slopes: each term has n_coefs sigma parameters and n_groups * n_coefs RE params
-    # Layout: [sigmas for all terms] [chol params for correlated terms] [RE for all terms]
-
-    # Store sigma values for later transformation (if non-centered)
-    sigma_values <- list()
-    chol_values <- list()
-
-    # First extract all sigma parameters
-    for (t in seq_len(n_re_terms)) {
-      term <- hmc_data$re_terms[[t]]
-      n_coefs <- term$n_coefs
-      # Use cleaned slope names for output if available
-      slope_names <- term$slope_vars_clean %||% term$slope_vars
-
-      if (n_coefs == 1) {
-        sigma_t <- exp(samples[, idx])
-        draws_list[[paste0("sigma_re[", t, "]")]] <- sigma_t
-        sigma_values[[t]] <- list(sigma_t)
-        idx <- idx + 1
-      } else {
-        # Multiple sigmas: intercept + slopes
-        sigma_values[[t]] <- list()
-        coef_idx <- 1
-        if (isTRUE(term$has_intercept)) {
-          sigma_t <- exp(samples[, idx])
-          draws_list[[paste0("sigma_re[", t, ",intercept]")]] <- sigma_t
-          sigma_values[[t]][[coef_idx]] <- sigma_t
-          idx <- idx + 1
-          coef_idx <- coef_idx + 1
-        }
-        for (s in seq_along(slope_names)) {
-          sigma_t <- exp(samples[, idx])
-          draws_list[[paste0("sigma_re[", t, ",", slope_names[s], "]")]] <- sigma_t
-          sigma_values[[t]][[coef_idx]] <- sigma_t
-          idx <- idx + 1
-          coef_idx <- coef_idx + 1
-        }
-      }
-    }
-
-    # Extract Cholesky parameters for correlated terms
-    for (t in seq_len(n_re_terms)) {
-      term <- hmc_data$re_terms[[t]]
-      n_chol <- term$n_chol %||% 0L
-      if (n_chol > 0 && isTRUE(term$correlated)) {
-        chol_values[[t]] <- list()
-        # Store raw Cholesky parameters (off-diagonal elements)
-        for (c in seq_len(n_chol)) {
-          chol_val <- samples[, idx]
-          draws_list[[paste0("L_chol[", t, ",", c, "]")]] <- chol_val
-          chol_values[[t]][[c]] <- chol_val
-          idx <- idx + 1
-        }
-      }
-    }
-
-    # Then extract all RE effects, transforming z to re if non-centered
-    for (t in seq_len(n_re_terms)) {
-      term <- hmc_data$re_terms[[t]]
-      n_groups_t <- term$n_groups
-      n_coefs <- term$n_coefs
-      # Use cleaned slope names for output if available
-      slope_names <- term$slope_vars_clean %||% term$slope_vars
-
-      for (g in seq_len(n_groups_t)) {
-        if (n_coefs == 1) {
-          z_or_re <- samples[, idx]
-          if (re_param == "noncentered") {
-            # Transform: re = sigma * z
-            draws_list[[paste0("re[", t, ",", g, "]")]] <- sigma_values[[t]][[1]] * z_or_re
-          } else {
-            draws_list[[paste0("re[", t, ",", g, "]")]] <- z_or_re
-          }
-          idx <- idx + 1
-        } else {
-          # Multiple coefficients per group - need matrix transformation for correlated
-          # Extract all z values for this group first
-          z_vals <- list()
-          re_indices <- list()
-          coef_idx <- 1
-          if (isTRUE(term$has_intercept)) {
-            z_vals[[coef_idx]] <- samples[, idx]
-            re_indices[[coef_idx]] <- list(name = paste0("re[", t, ",", g, ",intercept]"), idx = idx)
-            idx <- idx + 1
-            coef_idx <- coef_idx + 1
-          }
-          for (s in seq_along(slope_names)) {
-            z_vals[[coef_idx]] <- samples[, idx]
-            re_indices[[coef_idx]] <- list(name = paste0("re[", t, ",", g, ",", slope_names[s], "]"), idx = idx)
-            idx <- idx + 1
-            coef_idx <- coef_idx + 1
-          }
-
-          if (re_param == "noncentered" && isTRUE(term$correlated) && n_coefs == 2) {
-            # For 2x2 correlated case: re = diag(sigma) * L * z
-            # L = [[1, 0], [L21, sqrt(1-L21^2)]]
-            sigma1 <- sigma_values[[t]][[1]]
-            sigma2 <- sigma_values[[t]][[2]]
-            L21 <- tanh(chol_values[[t]][[1]])  # tanh parameterization: raw -> L
-            L22 <- sqrt(1 - L21^2)
-            z1 <- z_vals[[1]]
-            z2 <- z_vals[[2]]
-            # re1 = sigma1 * (1 * z1 + 0 * z2) = sigma1 * z1
-            # re2 = sigma2 * (L21 * z1 + L22 * z2)
-            draws_list[[re_indices[[1]]$name]] <- sigma1 * z1
-            draws_list[[re_indices[[2]]$name]] <- sigma2 * (L21 * z1 + L22 * z2)
-          } else if (re_param == "noncentered") {
-            # Uncorrelated or >2 coefs: re_j = sigma_j * z_j
-            for (j in seq_along(z_vals)) {
-              draws_list[[re_indices[[j]]$name]] <- sigma_values[[t]][[j]] * z_vals[[j]]
-            }
-          } else {
-            # Centered: store as-is
-            for (j in seq_along(z_vals)) {
-              draws_list[[re_indices[[j]]$name]] <- z_vals[[j]]
-            }
-          }
-        }
-      }
-    }
-  } else if (n_re_terms > 1) {
-    # Multiple RE terms (intercept only): extract sigma_re for each term
-    sigma_values <- list()
-    for (t in seq_len(n_re_terms)) {
-      sigma_t <- exp(samples[, idx])
-      draws_list[[paste0("sigma_re[", t, "]")]] <- sigma_t
-      sigma_values[[t]] <- sigma_t
-      idx <- idx + 1
-    }
-    # Extract RE effects for each term
-    for (t in seq_len(n_re_terms)) {
-      n_groups_t <- hmc_data$re_terms[[t]]$n_groups
-      for (g in seq_len(n_groups_t)) {
-        z_or_re <- samples[, idx]
-        if (re_param == "noncentered") {
-          draws_list[[paste0("re[", t, ",", g, "]")]] <- sigma_values[[t]] * z_or_re
-        } else {
-          draws_list[[paste0("re[", t, ",", g, "]")]] <- z_or_re
-        }
-        idx <- idx + 1
-      }
-    }
-  } else if (hmc_data$n_re_groups > 0) {
-    # Single RE term (intercept only)
-    sigma_re <- exp(samples[, idx])
-    draws_list[["sigma_re"]] <- sigma_re
-    idx <- idx + 1
-    for (g in seq_len(hmc_data$n_re_groups)) {
-      z_or_re <- samples[, idx]
-      if (re_param == "noncentered") {
-        draws_list[[paste0("re[", g, "]")]] <- sigma_re * z_or_re
-      } else {
-        draws_list[[paste0("re[", g, "]")]] <- z_or_re
-      }
-      idx <- idx + 1
-    }
-  }
-
-  # Overdispersion
-  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
-    draws_list[["phi_num"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["phi_denom"]] <- exp(samples[, idx])
-    idx <- idx + 1
-  } else if (model_type == "poisson_gamma") {
-    draws_list[["shape"]] <- exp(samples[, idx])
-    idx <- idx + 1
-  } else if (model_type == "gamma_gamma") {
-    draws_list[["shape_num"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["shape_denom"]] <- exp(samples[, idx])
-    idx <- idx + 1
-  } else if (model_type == "lognormal") {
-    draws_list[["sigma_num"]] <- exp(samples[, idx])
-    idx <- idx + 1
-    draws_list[["sigma_denom"]] <- exp(samples[, idx])
-    idx <- idx + 1
-  } else if (model_type == "beta_binomial") {
-    draws_list[["phi"]] <- exp(samples[, idx])  # precision parameter
-    idx <- idx + 1
-  }
-
-  # SVC (Spatially Varying Coefficients) - must come before other spatial types
-  # C++ order: fixed -> RE -> overdispersion -> SVC -> spatial -> temporal
-  if (spatial_info$type == "svc") {
-    n_svc <- spatial_info$n_svc %||% 0L
-    N_obs <- spatial_info$n_units %||% 0L
-    svc_names <- spatial_info$svc_names
-    svc_approx <- spatial_info$svc_approx %||% "nngp"
-
-    if (n_svc > 0 && N_obs > 0) {
-      # Extract log_sigma2 for each SVC term (variance parameter)
-      for (j in seq_len(n_svc)) {
-        name <- if (!is.null(svc_names) && j <= length(svc_names)) {
-          paste0("sigma2_svc[", svc_names[j], "]")
-        } else {
-          paste0("sigma2_svc[", j, "]")
-        }
-        draws_list[[name]] <- exp(samples[, idx])
-        idx <- idx + 1
-      }
-
-      # Extract log_phi/log_lengthscale for each SVC term
-      for (j in seq_len(n_svc)) {
-        param_name <- if (svc_approx == "hsgp") "lengthscale_svc" else "phi_svc"
-        name <- if (!is.null(svc_names) && j <= length(svc_names)) {
-          paste0(param_name, "[", svc_names[j], "]")
-        } else {
-          paste0(param_name, "[", j, "]")
-        }
-        draws_list[[name]] <- exp(samples[, idx])
-        idx <- idx + 1
-      }
-
-      if (svc_approx == "hsgp") {
-        # HSGP-SVC: extract basis coefficients (m^2 per term)
-        m_total <- as.integer(spatial_info$svc_hsgp_m)^2
-        for (j in seq_len(n_svc)) {
-          term_name <- if (!is.null(svc_names) && j <= length(svc_names)) {
-            svc_names[j]
-          } else {
-            as.character(j)
-          }
-          for (k in seq_len(m_total)) {
-            draws_list[[paste0("svc_beta[", term_name, ",", k, "]")]] <- samples[, idx]
-            idx <- idx + 1
-          }
-        }
-      } else {
-        # NNGP-SVC: extract spatial coefficients (N per term)
-        for (j in seq_len(n_svc)) {
-          term_name <- if (!is.null(svc_names) && j <= length(svc_names)) {
-            svc_names[j]
-          } else {
-            as.character(j)
-          }
-          for (i in seq_len(N_obs)) {
-            draws_list[[paste0("svc[", term_name, ",", i, "]")]] <- samples[, idx]
-            idx <- idx + 1
-          }
-        }
-      }
-    }
-  }
-
-  # Spatial (ICAR, BYM2, GP, multiscale GP, HSGP)
-  sp_result <- extract_spatial_draws(samples, idx, spatial_info)
-  draws_list <- c(draws_list, sp_result$draws)
-  idx <- sp_result$idx
-
-  # Temporal
-  if (temporal_info$type != "none" && temporal_info$type != "tvc") {
-    if (temporal_info$type == "gp") {
-      # Temporal GP: sigma2 and phi instead of tau
-      draws_list[["sigma2_temporal_gp"]] <- exp(samples[, idx])
-      idx <- idx + 1
-      # Logit-bounded phi: phi = lower + range * sigmoid(logit_phi)
-      phi_lower <- temporal_info$phi_prior_lower %||% 0.01
-      phi_upper <- temporal_info$phi_prior_upper %||% 10.0
-      phi_range <- phi_upper - phi_lower
-      draws_list[["phi_temporal_gp"]] <- phi_lower + phi_range / (1 + exp(-samples[, idx]))
-      idx <- idx + 1
-
-      # Temporal GP effects — extract z params, transform to f if NC
-      z_start_idx <- idx
-      z_samples <- matrix(NA_real_, nrow = nrow(samples),
-                          ncol = temporal_info$n_temporal_params)
-      for (i in seq_len(temporal_info$n_temporal_params)) {
-        z_samples[, i] <- samples[, idx]
-        idx <- idx + 1
-      }
-
-      gp_param <- temporal_info$parameterization %||% "noncentered"
-      if (gp_param == "noncentered") {
-        # Transform z -> f using state-space forward pass (vectorized over MCMC samples)
-        sigma2_draws <- draws_list[["sigma2_temporal_gp"]]
-        phi_draws <- draws_list[["phi_temporal_gp"]]
-        T_times <- temporal_info$n_times
-        n_groups <- temporal_info$n_groups
-        time_vals <- temporal_info$time_values
-
-        f_samples <- z_samples  # Same dimensions, will overwrite
-        for (s in seq_len(nrow(samples))) {
-          sigma_s <- sqrt(sigma2_draws[s])
-          phi_s <- phi_draws[s]
-
-          for (g in seq_len(n_groups)) {
-            off <- (g - 1L) * T_times
-            # f[0] = sigma * z[0]
-            f_samples[s, off + 1L] <- sigma_s * z_samples[s, off + 1L]
-            for (tt in seq(2L, T_times)) {
-              dt <- time_vals[tt] - time_vals[tt - 1L]
-              rho_t <- exp(-dt / phi_s)
-              one_minus_rho2 <- max(1.0 - rho_t^2, 1e-10)
-              a_t <- sigma_s * sqrt(one_minus_rho2)
-              f_samples[s, off + tt] <- rho_t * f_samples[s, off + tt - 1L] +
-                                        a_t * z_samples[s, off + tt]
-            }
-          }
-        }
-        # Store f (actual temporal effects) in draws
-        for (i in seq_len(temporal_info$n_temporal_params)) {
-          draws_list[[paste0("temporal_gp[", i, "]")]] <- f_samples[, i]
-        }
-      } else {
-        # Centered: z == f, store directly
-        for (i in seq_len(temporal_info$n_temporal_params)) {
-          draws_list[[paste0("temporal_gp[", i, "]")]] <- z_samples[, i]
-        }
-      }
-    } else {
-      # Regular temporal (RW1, RW2, AR1)
-      draws_list[["tau_temporal"]] <- exp(samples[, idx])
-      idx <- idx + 1
-
-      # AR1 rho parameter
-      if (temporal_info$type == "ar1") {
-        logit_rho_ar1 <- samples[, idx]
-        draws_list[["rho_ar1"]] <- 1 / (1 + exp(-logit_rho_ar1))
-        idx <- idx + 1
-      }
-
-      # Temporal effects (all types: extract directly)
-      for (t in seq_len(temporal_info$n_temporal_params)) {
-        draws_list[[paste0("temporal[", t, "]")]] <- samples[, idx]
-        idx <- idx + 1
-      }
-    }
-  }
-
-  # TVC (Temporally-Varying Coefficients)
-  if (temporal_info$type == "tvc") {
-    n_tvc <- temporal_info$n_tvc %||% 0L
-    n_times <- temporal_info$n_times %||% 0L
-    n_groups <- temporal_info$n_groups %||% 1L
-    structure <- temporal_info$structure %||% "rw1"
-    tvc_names <- temporal_info$tvc_names
-
-    # TVC precision parameters (one per TVC term)
-    for (j in seq_len(n_tvc)) {
-      name <- if (!is.null(tvc_names) && j <= length(tvc_names)) {
-        paste0("tau_tvc[", tvc_names[j], "]")
-      } else {
-        paste0("tau_tvc[", j, "]")
-      }
-      draws_list[[name]] <- exp(samples[, idx])
-      idx <- idx + 1
-    }
-
-    # AR1 rho for TVC
-    if (structure == "ar1") {
-      logit_rho <- samples[, idx]
-      draws_list[["rho_tvc"]] <- 1 / (1 + exp(-logit_rho))
-      idx <- idx + 1
-    }
-
-    # TVC values: w[g, j, t]
-    for (g in seq_len(n_groups)) {
-      for (j in seq_len(n_tvc)) {
-        term_name <- if (!is.null(tvc_names) && j <= length(tvc_names)) {
-          tvc_names[j]
-        } else {
-          as.character(j)
-        }
-        for (t in seq_len(n_times)) {
-          if (n_groups > 1) {
-            draws_list[[paste0("tvc[", term_name, ",g", g, ",t", t, "]")]] <- samples[, idx]
-          } else {
-            draws_list[[paste0("tvc[", term_name, ",t", t, "]")]] <- samples[, idx]
-          }
-          idx <- idx + 1
-        }
-      }
-    }
-  }
-
-  # Zero-inflation coefficients
-  if (zi_info$type != "none") {
-    for (j in seq_len(zi_info$p_zi)) {
-      coef_name <- if (!is.null(zi_info$coef_names)) {
-        zi_info$coef_names[j]
-      } else {
-        paste0("beta_zi[", j, "]")
-      }
-      draws_list[[paste0("beta_zi[", j, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  }
-
-  # One-inflation coefficients (for OI-binomial and ZOIB models)
-  if (!is.null(zi_info$p_oi) && zi_info$p_oi > 0) {
-    for (j in seq_len(zi_info$p_oi)) {
-      coef_name <- if (!is.null(zi_info$coef_names_oi)) {
-        zi_info$coef_names_oi[j]
-      } else {
-        paste0("beta_oi[", j, "]")
-      }
-      draws_list[[paste0("beta_oi[", j, "]")]] <- samples[, idx]
-      idx <- idx + 1
-    }
-  }
-
-  # Latent factors
-  if (!is.null(latent_info) && latent_info$type != "none" && latent_info$n_factors > 0) {
-    n_factors <- latent_info$n_factors
-    n_obs <- latent_info$n_obs
-
-    # Extract log_sigma for each factor (transform to sigma)
-    for (k in seq_len(n_factors)) {
-      draws_list[[paste0("sigma_latent[", k, "]")]] <- exp(samples[, idx])
-      idx <- idx + 1
-    }
-
-    # Extract factor scores (N x K)
-    # Store only a summary (mean per factor) to avoid huge output
-    # The raw factors are high-dimensional (N x K parameters)
-    for (k in seq_len(n_factors)) {
-      # Compute mean factor score across observations for each draw
-      factor_cols <- idx:(idx + n_obs - 1)
-      factor_mat <- samples[, factor_cols, drop = FALSE]
-      draws_list[[paste0("latent_mean[", k, "]")]] <- rowMeans(factor_mat)
-      idx <- idx + n_obs
-    }
-  }
-
-  draws_list
-}
-
-
-#' Compute ratio draws from HMC samples (full feature support)
-#' @keywords internal
-compute_ratio_draws_hmc_full <- function(samples, hmc_data, spatial_info,
-                                          temporal_info, zi_info, model_type,
-                                          re_param = "noncentered",
-                                          gp_w_star = NULL,
-                                          icar_phi_star = NULL,
-                                          bym2_theta_star = NULL) {
-  n_samples <- nrow(samples)
-  N <- hmc_data$N
-
-  # Extract fixed effects
-  beta_num <- samples[, seq_len(hmc_data$p_num), drop = FALSE]
-  beta_denom <- samples[, hmc_data$p_num + seq_len(hmc_data$p_denom), drop = FALSE]
-
-  idx <- hmc_data$p_num + hmc_data$p_denom + 1
-
-  # Random effects (supports multi-term RE with slopes)
-  # When re_param == "noncentered", samples contain z values that need transformation
-  re <- NULL
-  re_multi <- NULL
-  re_slopes_multi <- NULL
-  n_re_terms <- hmc_data$n_re_terms %||% 0L
-  has_slopes <- hmc_data$has_slopes %||% FALSE
-  has_correlated_slopes <- hmc_data$has_correlated_slopes %||% FALSE
-
-  if (n_re_terms > 0 && has_slopes) {
-    # With random slopes - extract sigma, cholesky, then RE and transform
-
-    # Extract all sigma_re parameters (one per coefficient type per term)
-    sigma_values <- list()
-    for (t in seq_len(n_re_terms)) {
-      term <- hmc_data$re_terms[[t]]
-      n_coefs <- term$n_coefs
-      sigma_values[[t]] <- list()
-      for (c in seq_len(n_coefs)) {
-        sigma_values[[t]][[c]] <- exp(samples[, idx])
-        idx <- idx + 1
-      }
-    }
-
-    # Extract Cholesky parameters for correlated terms
-    chol_values <- list()
-    if (has_correlated_slopes) {
-      for (t in seq_len(n_re_terms)) {
-        term <- hmc_data$re_terms[[t]]
-        n_chol <- term$n_chol %||% 0L
-        if (n_chol > 0 && isTRUE(term$correlated)) {
-          chol_values[[t]] <- list()
-          for (c in seq_len(n_chol)) {
-            chol_values[[t]][[c]] <- samples[, idx]
-            idx <- idx + 1
-          }
-        }
-      }
-    }
-
-    # Extract RE for all terms (including slopes) and transform if noncentered
-    re_multi <- list()
-    re_slopes_multi <- list()
-
-    for (t in seq_len(n_re_terms)) {
-      term <- hmc_data$re_terms[[t]]
-      n_groups_t <- term$n_groups
-      n_coefs <- term$n_coefs
-
-      # For each term: extract [intercept, slope1, slope2, ...] for each group
-      # Total params = n_groups * n_coefs
-      n_params_t <- n_groups_t * n_coefs
-      re_params <- samples[, idx:(idx + n_params_t - 1), drop = FALSE]
-      idx <- idx + n_params_t
-
-      # Reshape to [samples, groups, coefs]
-      # Store intercepts separately for backward compatibility
-      re_multi[[t]] <- matrix(0, nrow = n_samples, ncol = n_groups_t)
-      if (n_coefs > 1) {
-        re_slopes_multi[[t]] <- array(0, dim = c(n_samples, n_groups_t, n_coefs - 1))
-      }
-
-      for (g in seq_len(n_groups_t)) {
-        base_col <- (g - 1) * n_coefs + 1
-
-        if (re_param == "noncentered") {
-          # Transform z to actual RE
-          if (n_coefs == 1) {
-            # Simple case: re = sigma * z
-            re_multi[[t]][, g] <- sigma_values[[t]][[1]] * re_params[, base_col]
-          } else if (n_coefs == 2 && isTRUE(term$correlated) && !is.null(chol_values[[t]])) {
-            # Correlated 2x2 case: re = diag(sigma) * L * z
-            # L = [[1, 0], [L21, sqrt(1-L21^2)]]
-            z1 <- re_params[, base_col]
-            z2 <- re_params[, base_col + 1]
-            sigma1 <- sigma_values[[t]][[1]]
-            sigma2 <- sigma_values[[t]][[2]]
-            L21 <- tanh(chol_values[[t]][[1]])  # tanh parameterization: raw -> L
-            L22 <- sqrt(pmax(0, 1 - L21^2))  # pmax to avoid numerical issues
-            re_multi[[t]][, g] <- sigma1 * z1  # Intercept
-            re_slopes_multi[[t]][, g, 1] <- sigma2 * (L21 * z1 + L22 * z2)  # Slope
-          } else {
-            # Uncorrelated or >2 coefs: re_j = sigma_j * z_j
-            re_multi[[t]][, g] <- sigma_values[[t]][[1]] * re_params[, base_col]
-            if (n_coefs > 1) {
-              for (s in seq_len(n_coefs - 1)) {
-                re_slopes_multi[[t]][, g, s] <- sigma_values[[t]][[s + 1]] * re_params[, base_col + s]
-              }
-            }
-          }
-        } else {
-          # Centered: use values as-is
-          re_multi[[t]][, g] <- re_params[, base_col]  # Intercept
-          if (n_coefs > 1) {
-            for (s in seq_len(n_coefs - 1)) {
-              re_slopes_multi[[t]][, g, s] <- re_params[, base_col + s]
-            }
-          }
-        }
-      }
-    }
-  } else if (n_re_terms > 1) {
-    # Multiple RE terms (intercept only): extract sigma_re for each term
-    sigma_values <- list()
-    for (t in seq_len(n_re_terms)) {
-      sigma_values[[t]] <- exp(samples[, idx])
-      idx <- idx + 1
-    }
-    # Extract RE for all terms
-    re_multi <- list()
-    for (t in seq_len(n_re_terms)) {
-      n_groups_t <- hmc_data$re_terms[[t]]$n_groups
-      z_or_re <- samples[, idx:(idx + n_groups_t - 1), drop = FALSE]
-      if (re_param == "noncentered") {
-        # Transform: re = sigma * z
-        re_multi[[t]] <- sweep(z_or_re, 1, sigma_values[[t]], "*")
-      } else {
-        re_multi[[t]] <- z_or_re
-      }
-      idx <- idx + n_groups_t
-    }
-  } else if (hmc_data$n_re_groups > 0) {
-    # Single RE term (intercept only)
-    sigma_re <- exp(samples[, idx])
-    idx <- idx + 1
-    z_or_re <- samples[, idx:(idx + hmc_data$n_re_groups - 1), drop = FALSE]
-    if (re_param == "noncentered") {
-      # Transform: re = sigma * z
-      re <- sweep(z_or_re, 1, sigma_re, "*")
-    } else {
-      re <- z_or_re
-    }
-    idx <- idx + hmc_data$n_re_groups
-  }
-
-  # Overdispersion indices (skip for ratio computation)
-  if (model_type == "negbin_negbin" || model_type == "negbin_gamma") {
-    idx <- idx + 2
-  } else if (model_type == "poisson_gamma") {
-    idx <- idx + 1
-  } else if (model_type == "gamma_gamma") {
-    idx <- idx + 2
-  } else if (model_type == "lognormal") {
-    idx <- idx + 2
-  } else if (model_type == "beta_binomial") {
-    idx <- idx + 1
-  }
-
-  # SVC (Spatially Varying Coefficients) - must come before other spatial types
-  # C++ order: fixed -> RE -> overdispersion -> SVC -> spatial -> temporal
-  svc_effect <- NULL
-  if (spatial_info$type == "svc") {
-    n_svc <- spatial_info$n_svc %||% 0L
-    N_obs <- spatial_info$n_units %||% 0L
-    svc_approx <- spatial_info$svc_approx %||% "nngp"
-
-    if (n_svc > 0 && N_obs > 0) {
-      # Extract hyperparameters
-      log_sigma2_svc <- samples[, idx:(idx + n_svc - 1), drop = FALSE]
-      idx <- idx + n_svc  # log_sigma2
-      log_ls_svc <- samples[, idx:(idx + n_svc - 1), drop = FALSE]
-      idx <- idx + n_svc  # log_phi / log_lengthscale
-
-      if (svc_approx == "hsgp") {
-        # HSGP-SVC: extract basis coefficients
-        m_total <- as.integer(spatial_info$svc_hsgp_m)^2
-        n_svc_params <- n_svc * m_total
-      } else {
-        # NNGP-SVC: extract w values
-        n_svc_params <- n_svc * N_obs
-      }
-      svc_w <- samples[, idx:(idx + n_svc_params - 1), drop = FALSE]
-      idx <- idx + n_svc_params
-
-      svc_effect <- list(
-        w = svc_w,
-        log_sigma2 = log_sigma2_svc,
-        log_ls = log_ls_svc,
-        n_svc = n_svc,
-        N_obs = N_obs,
-        X_svc = spatial_info$X_svc,
-        approx = svc_approx,
-        hsgp_m = spatial_info$svc_hsgp_m %||% 0L,
-        coords = spatial_info$svc_coords
-      )
-    }
-  }
-
-  # Spatial effects (ICAR, BYM2)
-  spatial_effect <- NULL
-  if (spatial_info$type == "icar") {
-    icar_param_ratio <- spatial_info$parameterization %||% "standard"
-    idx <- idx + 1  # Skip log_tau
-    if (icar_param_ratio == "collapsed") {
-      # Use phi* from inner Laplace optimization (stored during sampling)
-      if (!is.null(icar_phi_star)) {
-        spatial_effect <- icar_phi_star
-      }
-    } else {
-      phi_spatial <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      spatial_effect <- phi_spatial
-      idx <- idx + spatial_info$n_units
-    }
-  } else if (spatial_info$type == "car_proper") {
-    idx <- idx + 1  # Skip logit_rho (log_tau already skipped above)
-    spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-    idx <- idx + spatial_info$n_units
-  } else if (spatial_info$type == "bym2") {
-    bym2_param_ratio <- spatial_info$parameterization %||% "standard"
-    # Riebler parameterization: log_sigma_total, logit_rho
-    sigma_total <- exp(samples[, idx])
-    idx <- idx + 1
-    rho <- 1 / (1 + exp(-samples[, idx]))
-    idx <- idx + 1
-    sigma_s <- sigma_total * sqrt(rho)
-    sigma_u <- sigma_total * sqrt(1 - rho)
-
-    if (bym2_param_ratio == "collapsed") {
-      # Use phi* and theta* from inner Laplace optimization
-      if (!is.null(icar_phi_star) && !is.null(bym2_theta_star)) {
-        spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
-        for (s in seq_len(n_samples)) {
-          spatial_effect[s, ] <- sigma_s[s] * icar_phi_star[s, ] * spatial_info$bym2_scale +
-            sigma_u[s] * bym2_theta_star[s, ]
-        }
-      }
-    } else {
-      phi_scaled <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-      theta <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-
-      # Compute combined spatial effect: sigma_s * scale * phi + sigma_u * theta
-      spatial_effect <- matrix(0, nrow = n_samples, ncol = spatial_info$n_units)
-      for (s in seq_len(n_samples)) {
-        spatial_effect[s, ] <- sigma_s[s] * phi_scaled[s, ] * spatial_info$bym2_scale +
-          sigma_u[s] * theta[s, ]
-      }
-    }
-  } else if (spatial_info$type == "gp") {
-    gp_param_ratio <- spatial_info$parameterization %||% "centered"
-    idx <- idx + 2  # Skip log_sigma2_gp, log_phi_gp
-    if (gp_param_ratio == "collapsed") {
-      # Use w* from inner Laplace optimization (stored during sampling)
-      if (!is.null(gp_w_star)) {
-        spatial_effect <- gp_w_star
-      }
-    } else {
-      spatial_effect <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-    }
-  } else if (spatial_info$type == "multiscale_gp") {
-    msgp_approx <- spatial_info$msgp_approx %||% "nngp"
-    if (msgp_approx == "hsgp") {
-      # HSGP-MSGP: reconstruct spatial field from basis coefficients
-      hsgp_m <- spatial_info$hsgp_m %||% 6L
-      m_total <- hsgp_m * hsgp_m
-      Phi <- spatial_info$msgp_hsgp_Phi
-      eigenvalues <- spatial_info$msgp_hsgp_eigenvalues
-      N <- nrow(Phi)
-
-      sigma2_local <- exp(samples[, idx])
-      idx <- idx + 1
-      ls_local <- exp(samples[, idx])
-      idx <- idx + 1
-      beta_local <- samples[, idx:(idx + m_total - 1), drop = FALSE]
-      idx <- idx + m_total
-
-      sigma2_regional <- exp(samples[, idx])
-      idx <- idx + 1
-      ls_regional <- exp(samples[, idx])
-      idx <- idx + 1
-      beta_regional <- samples[, idx:(idx + m_total - 1), drop = FALSE]
-      idx <- idx + m_total
-
-      spatial_effect <- matrix(0, n_samples, N)
-      for (s in seq_len(n_samples)) {
-        S_local <- sigma2_local[s] * sqrt(2 * pi) * ls_local[s] *
-          exp(-0.5 * ls_local[s]^2 * eigenvalues)
-        S_regional <- sigma2_regional[s] * sqrt(2 * pi) * ls_regional[s] *
-          exp(-0.5 * ls_regional[s]^2 * eigenvalues)
-        spatial_effect[s, ] <- Phi %*% (sqrt(S_local) * beta_local[s, ]) +
-          Phi %*% (sqrt(S_regional) * beta_regional[s, ])
-      }
-    } else {
-      idx <- idx + 2  # Skip log_sigma2_local, log_phi_local
-      gp_local_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-      idx <- idx + 2  # Skip log_sigma2_regional, log_phi_regional
-      gp_regional_w <- samples[, idx:(idx + spatial_info$n_units - 1), drop = FALSE]
-      idx <- idx + spatial_info$n_units
-      spatial_effect <- gp_local_w + gp_regional_w
-    }
-  }
-
-  # Temporal effects
-  temporal_effect <- NULL
-  if (temporal_info$type != "none" && temporal_info$type != "tvc") {
-    if (temporal_info$type == "gp") {
-      idx <- idx + 2  # Skip log_sigma2_temporal_gp, logit_phi_temporal_gp
-    } else {
-      idx <- idx + 1  # Skip log_tau_temporal
-      if (temporal_info$type == "ar1") {
-        idx <- idx + 1  # Skip logit_rho_ar1
-      }
-    }
-
-    temporal_effect <- samples[, idx:(idx + temporal_info$n_temporal_params - 1), drop = FALSE]
-    idx <- idx + temporal_info$n_temporal_params
-  }
-
-  # ZI coefficients (skip for ratio computation - they affect likelihood, not ratio)
-  # ZI parameters are used for P(Y=0) vs P(Y>0), not the mean ratio
-
-  # Precompute HSGP-SVC basis matrix (if needed)
-  svc_hsgp_basis <- NULL
-  if (!is.null(svc_effect) && (svc_effect$approx %||% "nngp") == "hsgp") {
-    m_per_dim <- as.integer(svc_effect$hsgp_m)
-    m_total <- m_per_dim^2
-    coords <- svc_effect$coords
-    c_val <- spatial_info$svc_hsgp_c %||% 1.5
-    L1 <- c_val * (max(coords[, 1]) - min(coords[, 1])) / 2
-    L2 <- c_val * (max(coords[, 2]) - min(coords[, 2])) / 2
-    center1 <- (max(coords[, 1]) + min(coords[, 1])) / 2
-    center2 <- (max(coords[, 2]) + min(coords[, 2])) / 2
-    eigenvals <- numeric(m_total)
-    phi_basis <- matrix(0, N, m_total)
-    k <- 0
-    for (m1 in seq_len(m_per_dim)) {
-      for (m2 in seq_len(m_per_dim)) {
-        k <- k + 1
-        lam1 <- (pi * m1 / (2 * L1))^2
-        lam2 <- (pi * m2 / (2 * L2))^2
-        eigenvals[k] <- lam1 + lam2
-        phi1 <- sin(pi * m1 * (coords[, 1] - center1 + L1) / (2 * L1)) / sqrt(L1)
-        phi2 <- sin(pi * m2 * (coords[, 2] - center2 + L2) / (2 * L2)) / sqrt(L2)
-        phi_basis[, k] <- phi1 * phi2
-      }
-    }
-    svc_hsgp_basis <- list(phi = phi_basis, eigenvals = eigenvals, m_total = m_total)
-  }
-
-  # Compute ratios
-  ratio_draws <- matrix(NA_real_, nrow = n_samples, ncol = N)
-
-  for (s in seq_len(n_samples)) {
-    eta_num <- as.numeric(hmc_data$X_num %*% beta_num[s, ])
-    eta_denom <- as.numeric(hmc_data$X_denom %*% beta_denom[s, ])
-
-    # Add RE (supports multi-term with slopes)
-    if (!is.null(re_multi)) {
-      # Multi-term RE (possibly with slopes)
-      for (i in seq_len(N)) {
-        for (t in seq_along(re_multi)) {
-          g <- hmc_data$re_group_matrix[i, t]
-          if (g > 0) {
-            # Add intercept contribution
-            re_contrib <- re_multi[[t]][s, g]
-
-            # Add slope contributions if present
-            if (!is.null(re_slopes_multi) && !is.null(re_slopes_multi[[t]])) {
-              term <- hmc_data$re_terms[[t]]
-              n_slopes <- length(term$slope_vars)
-              if (n_slopes > 0 && !is.null(hmc_data$slope_matrices[[t]])) {
-                for (slope_idx in seq_len(n_slopes)) {
-                  x_slope <- hmc_data$slope_matrices[[t]][i, slope_idx]
-                  re_slope <- re_slopes_multi[[t]][s, g, slope_idx]
-                  re_contrib <- re_contrib + re_slope * x_slope
-                }
-              }
-            }
-
-            eta_num[i] <- eta_num[i] + re_contrib
-            eta_denom[i] <- eta_denom[i] + re_contrib
-          }
-        }
-      }
-    } else if (!is.null(re)) {
-      # Single-term RE (no slopes)
-      for (i in seq_len(N)) {
-        g <- hmc_data$re_group[i]
-        if (g > 0) {
-          eta_num[i] <- eta_num[i] + re[s, g]
-          eta_denom[i] <- eta_denom[i] + re[s, g]
-        }
-      }
-    }
-
-    # Add spatial
-    if (!is.null(spatial_effect)) {
-      for (i in seq_len(N)) {
-        sp_g <- spatial_info$group[i]
-        if (sp_g > 0) {
-          eta_num[i] <- eta_num[i] + spatial_effect[s, sp_g]
-          eta_denom[i] <- eta_denom[i] + spatial_effect[s, sp_g]
-        }
-      }
-    }
-
-    # Add temporal
-    if (!is.null(temporal_effect) && temporal_info$shared) {
-      for (i in seq_len(N)) {
-        t_idx <- temporal_info$time_index[i]
-        g_idx <- temporal_info$group_index[i]
-        if (t_idx > 0) {
-          # Map to flat temporal parameter index
-          param_idx <- if (temporal_info$n_groups > 1) {
-            (g_idx - 1) * temporal_info$n_times + t_idx
-          } else {
-            t_idx
-          }
-          if (param_idx <= ncol(temporal_effect)) {
-            eta_num[i] <- eta_num[i] + temporal_effect[s, param_idx]
-            eta_denom[i] <- eta_denom[i] + temporal_effect[s, param_idx]
-          }
-        }
-      }
-    }
-
-    # Add SVC effect: sum_j(w_j[i] * x_j[i])
-    if (!is.null(svc_effect)) {
-      n_svc <- svc_effect$n_svc
-      N_obs <- svc_effect$N_obs
-      X_svc <- svc_effect$X_svc
-      svc_w <- svc_effect$w
-      svc_approx_local <- svc_effect$approx %||% "nngp"
-
-      if (svc_approx_local == "hsgp" && !is.null(svc_hsgp_basis)) {
-        # HSGP-SVC: reconstruct spatial field from basis coefficients
-        m_total <- svc_hsgp_basis$m_total
-        for (j in seq_len(n_svc)) {
-          sigma2_j <- exp(svc_effect$log_sigma2[s, j])
-          ls_j <- exp(svc_effect$log_ls[s, j])
-          beta_j <- svc_w[s, ((j - 1) * m_total + 1):(j * m_total)]
-          # Spectral density: S(w) = sigma2 * sqrt(2*pi) * ls * exp(-0.5*ls^2*w)
-          S_k <- sigma2_j * sqrt(2 * pi) * ls_j *
-                 exp(-0.5 * ls_j^2 * svc_hsgp_basis$eigenvals)
-          sqrt_S_k <- sqrt(pmax(S_k, 0))
-          # f_j = Phi %*% (sqrt_S_k * beta_j)
-          f_j <- svc_hsgp_basis$phi %*% (sqrt_S_k * beta_j)
-          x_j <- if (!is.null(X_svc)) X_svc[, j] else rep(1.0, N)
-          eta_num <- eta_num + as.numeric(f_j) * x_j
-          eta_denom <- eta_denom + as.numeric(f_j) * x_j
-        }
-      } else {
-        # NNGP-SVC: direct w values
-        for (i in seq_len(N)) {
-          svc_contrib <- 0
-          for (j in seq_len(n_svc)) {
-            w_ji <- svc_w[s, (j - 1) * N_obs + i]
-            x_ji <- if (!is.null(X_svc)) X_svc[i, j] else 1.0
-            svc_contrib <- svc_contrib + w_ji * x_ji
-          }
-          eta_num[i] <- eta_num[i] + svc_contrib
-          eta_denom[i] <- eta_denom[i] + svc_contrib
-        }
-      }
-    }
-
-    # Compute ratio
-    if (model_type == "binomial" || model_type == "beta_binomial") {
-      ratio_draws[s, ] <- 1 / (1 + exp(-eta_num))  # inv_logit(eta)
-    } else {
-      ratio_draws[s, ] <- exp(eta_num - eta_denom)  # exp(log(mu_num/mu_denom))
-    }
-  }
-
-  colnames(ratio_draws) <- paste0("ratio[", seq_len(N), "]")
-  ratio_draws
 }
 
 

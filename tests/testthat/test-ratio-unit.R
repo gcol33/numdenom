@@ -298,11 +298,11 @@ test_that("as_draws errors without posterior package", {
   expect_true("as_draws.ratiod_fit" %in% methods("as_draws"))
 })
 
-# Test spread_draws
-test_that("spread_draws.ratiod_fit works", {
+# Test draws_wide
+test_that("draws_wide.ratiod_fit works", {
   fit <- make_mock_ratio_fit()
 
-  sp <- spread_draws(fit, beta_num)
+  sp <- draws_wide(fit, beta_num)
 
   expect_s3_class(sp, "ratiod_draws")
   expect_true(".chain" %in% names(sp))
@@ -310,69 +310,69 @@ test_that("spread_draws.ratiod_fit works", {
   expect_true(".draw" %in% names(sp))
 })
 
-test_that("spread_draws subsamples when requested", {
+test_that("draws_wide subsamples when requested", {
   fit <- make_mock_ratio_fit()
 
-  sp <- spread_draws(fit, beta_num, ndraws = 50)
+  sp <- draws_wide(fit, beta_num, ndraws = 50)
 
   expect_equal(nrow(sp), 50)
 })
 
-test_that("spread_draws errors on no matches", {
+test_that("draws_wide errors on no matches", {
   fit <- make_mock_ratio_fit()
 
-  expect_error(spread_draws(fit, nonexistent_param), "No parameters matched")
+  expect_error(draws_wide(fit, nonexistent_param), "No parameters matched")
 })
 
-# Test gather_draws
-test_that("gather_draws.ratiod_fit works", {
+# Test draws_long
+test_that("draws_long.ratiod_fit works", {
   fit <- make_mock_ratio_fit()
 
-  gd <- gather_draws(fit, beta_num)
+  gd <- draws_long(fit, beta_num)
 
   expect_s3_class(gd, "ratiod_draws_long")
   expect_true(".variable" %in% names(gd))
   expect_true(".value" %in% names(gd))
 })
 
-# Test point_interval
-test_that("point_interval.ratiod_fit works", {
+# Test draws_interval
+test_that("draws_interval.ratiod_fit works", {
   fit <- make_mock_ratio_fit()
 
-  pi <- point_interval(fit, beta_num, beta_denom)
+  pi <- draws_interval(fit, beta_num, beta_denom)
 
-  expect_s3_class(pi, "ratiod_point_interval")
+  expect_s3_class(pi, "ratiod_draws_interval")
   expect_true(".variable" %in% names(pi))
   expect_true(".value" %in% names(pi))
   expect_true(".lower" %in% names(pi))
   expect_true(".upper" %in% names(pi))
 })
 
-test_that("point_interval supports multiple widths", {
+test_that("draws_interval supports multiple widths", {
   fit <- make_mock_ratio_fit()
 
-  pi <- point_interval(fit, beta_num, .width = c(0.5, 0.9))
+  pi <- draws_interval(fit, beta_num, .width = c(0.5, 0.9))
 
   widths <- unique(pi$.width)
   expect_true(0.5 %in% widths)
   expect_true(0.9 %in% widths)
 })
 
-test_that("point_interval supports mean point estimate", {
+test_that("draws_interval supports mean point estimate", {
   fit <- make_mock_ratio_fit()
 
-  pi_median <- point_interval(fit, beta_num, .point = "median")
-  pi_mean <- point_interval(fit, beta_num, .point = "mean")
+  pi_median <- draws_interval(fit, beta_num, .point = "median")
+  pi_mean <- draws_interval(fit, beta_num, .point = "mean")
 
   expect_equal(unique(pi_median$.point), "median")
   expect_equal(unique(pi_mean$.point), "mean")
 })
 
-test_that("point_interval supports HDI", {
+test_that("draws_interval supports HDI", {
   fit <- make_mock_ratio_fit()
 
-  pi_qi <- point_interval(fit, beta_num, .interval = "qi")
-  pi_hdi <- point_interval(fit, beta_num, .interval = "hdi")
+  pi_qi <- draws_interval(fit, beta_num, .interval = "qi")
+  pi_hdi <- draws_interval(fit, beta_num, .interval = "hdi")
 
   expect_equal(unique(pi_qi$.interval), "qi")
   expect_equal(unique(pi_hdi$.interval), "hdi")

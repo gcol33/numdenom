@@ -12,6 +12,8 @@ convert_hmc_to_ratiod_fit_full(
   spatiotemporal_info = NULL,
   zi_info,
   latent_info = NULL,
+  ms_temporal_info = NULL,
+  tvc_spec = NULL,
   formula,
   data,
   family,

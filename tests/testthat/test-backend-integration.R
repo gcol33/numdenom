@@ -257,43 +257,43 @@ test_that("as_draws.ratiod_fit converts to draws format", {
   expect_true(inherits(draws, "draws"))
 })
 
-# Test spread_draws
-test_that("spread_draws.ratiod_fit works", {
+# Test draws_wide
+test_that("draws_wide.ratiod_fit works", {
   fit <- quick_fit()
 
-  sp <- spread_draws(fit, beta_num)
+  sp <- draws_wide(fit, beta_num)
   expect_s3_class(sp, "ratiod_draws")
   expect_true(".chain" %in% names(sp))
   expect_true(".draw" %in% names(sp))
 })
 
-# Test gather_draws
-test_that("gather_draws.ratiod_fit works", {
+# Test draws_long
+test_that("draws_long.ratiod_fit works", {
   fit <- quick_fit()
 
-  gd <- gather_draws(fit, beta_num)
+  gd <- draws_long(fit, beta_num)
   expect_s3_class(gd, "ratiod_draws_long")
   expect_true(".variable" %in% names(gd))
   expect_true(".value" %in% names(gd))
 })
 
-# Test point_interval
-test_that("point_interval.ratiod_fit works", {
+# Test draws_interval
+test_that("draws_interval.ratiod_fit works", {
   fit <- quick_fit()
 
-  pi <- point_interval(fit, beta_num)
-  expect_s3_class(pi, "ratiod_point_interval")
+  pi <- draws_interval(fit, beta_num)
+  expect_s3_class(pi, "ratiod_draws_interval")
   expect_true(".value" %in% names(pi))
   expect_true(".lower" %in% names(pi))
   expect_true(".upper" %in% names(pi))
 })
 
-# Test point_interval with HDI
-test_that("point_interval supports HDI", {
+# Test draws_interval with HDI
+test_that("draws_interval supports HDI", {
   fit <- quick_fit()
 
-  pi_qi <- point_interval(fit, beta_num, .interval = "qi")
-  pi_hdi <- point_interval(fit, beta_num, .interval = "hdi")
+  pi_qi <- draws_interval(fit, beta_num, .interval = "qi")
+  pi_hdi <- draws_interval(fit, beta_num, .interval = "hdi")
 
   expect_equal(unique(pi_qi$.interval), "qi")
   expect_equal(unique(pi_hdi$.interval), "hdi")

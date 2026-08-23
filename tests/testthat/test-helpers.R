@@ -395,7 +395,7 @@ test_that("family objects have required components", {
   expect_equal(fam_bin$name, "binomial_fixed")
 })
 
-# Test HDI computation (from point_interval)
+# Test HDI computation (from draws_interval)
 test_that("HDI computation works correctly", {
   set.seed(42)
   # Test with normal distribution - HDI should be centered around mean

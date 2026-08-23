@@ -159,7 +159,8 @@ reference:
   - title: "Model Checking"
     desc: "Posterior predictive checks and model comparison"
     contents:
-      - pp_check
+      - pp_check.ratiod_fit
+      - posterior_predict.ratiod_fit
       - loo.ratiod_fit
       - waic.ratiod_fit
       - check_diagnostics
@@ -178,10 +179,10 @@ reference:
   - title: "Posterior Draws"
     desc: "Extract and manipulate posterior samples"
     contents:
-      - as_draws
-      - gather_draws
-      - spread_draws
-      - point_interval
+      - as_draws.ratiod_fit
+      - draws_long
+      - draws_wide
+      - draws_interval
 
   - title: "Simulation"
     desc: "Data simulation for testing"

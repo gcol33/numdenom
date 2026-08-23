@@ -5,9 +5,23 @@
 \alias{tvc.ratiod_fit}
 \title{Extract temporally-varying coefficients from a fitted model}
 \usage{
-tvc(object, terms = NULL, summary = FALSE, probs = c(0.025, 0.5, 0.975), ...)
+tvc(
+  object,
+  terms = NULL,
+  group = 1L,
+  summary = FALSE,
+  probs = c(0.025, 0.5, 0.975),
+  ...
+)
 
-\method{tvc}{ratiod_fit}(object, terms = NULL, summary = FALSE, probs = c(0.025, 0.5, 0.975), ...)
+\method{tvc}{ratiod_fit}(
+  object,
+  terms = NULL,
+  group = 1L,
+  summary = FALSE,
+  probs = c(0.025, 0.5, 0.975),
+  ...
+)
 }
 \arguments{
 \item{object}{A \code{ratiod_fit} object fitted with \code{tvc} argument}
@@ -49,7 +63,7 @@ fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
-  tvc = temporal_tvc("year", terms = c(1, 2)),
+  temporal = temporal_tvc("year", terms = c(1, 2)),
   mode = "hmc",
   control = list(iter = 200, warmup = 100, chains = 1)
 )

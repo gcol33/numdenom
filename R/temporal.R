@@ -1313,7 +1313,7 @@ validate_temporal_gp <- function(temporal, data) {
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   tvc = temporal_tvc("year", terms = 1),
+#'   temporal = temporal_tvc("year", terms = 1),
 #'   mode = "hmc",
 #'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
@@ -1324,7 +1324,7 @@ validate_temporal_gp <- function(temporal, data) {
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   tvc = temporal_tvc("year", terms = c("(Intercept)", "x"), structure = "rw2"),
+#'   temporal = temporal_tvc("year", terms = c("(Intercept)", "x"), structure = "rw2"),
 #'   mode = "hmc",
 #'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
@@ -1596,7 +1596,7 @@ validate_tvc <- function(tvc, data, X) {
 #'   count | effort ~ x,
 #'   data = df,
 #'   family = ratiod_poisson_gamma(),
-#'   tvc = temporal_tvc("year", terms = c(1, 2)),
+#'   temporal = temporal_tvc("year", terms = c(1, 2)),
 #'   mode = "hmc",
 #'   control = list(iter = 200, warmup = 100, chains = 1)
 #' )
@@ -1612,7 +1612,7 @@ validate_tvc <- function(tvc, data, X) {
 #' @seealso [temporal_tvc()], [plot.ratiod_tvc_posterior()]
 #'
 #' @export
-tvc <- function(object, terms = NULL, summary = FALSE,
+tvc <- function(object, terms = NULL, group = 1L, summary = FALSE,
                 probs = c(0.025, 0.5, 0.975), ...) {
   UseMethod("tvc")
 }
@@ -1620,13 +1620,14 @@ tvc <- function(object, terms = NULL, summary = FALSE,
 
 #' @rdname tvc
 #' @export
-tvc.ratiod_fit <- function(object, terms = NULL, summary = FALSE,
+tvc.ratiod_fit <- function(object, terms = NULL, group = 1L, summary = FALSE,
                            probs = c(0.025, 0.5, 0.975), ...) {
 
   # Check if model has TVCs
   if (is.null(object$tvc) || !inherits(object$tvc, "ratiod_tvc")) {
     stop("Model was not fitted with temporally-varying coefficients.\n",
-         "Use `tvc` argument in tratio() to specify TVCs.", call. = FALSE)
+         "Pass `temporal = temporal_tvc(...)` to tratio() to specify TVCs.",
+         call. = FALSE)
   }
 
   tvc_info <- object$tvc
@@ -1639,6 +1640,17 @@ tvc.ratiod_fit <- function(object, terms = NULL, summary = FALSE,
 
   if (is.null(tvc_draws)) {
     stop("TVC draws not found in model output", call. = FALSE)
+  }
+
+  # Draws are [draw, time, term, group]; report one grouping level at a
+  # time. A three-dimensional array is the single-group case already.
+  n_groups <- if (length(dim(tvc_draws)) >= 4L) dim(tvc_draws)[4] else 1L
+  if (length(group) != 1L || is.na(group) || group < 1L || group > n_groups) {
+    stop("`group` must be one of 1:", n_groups, ".", call. = FALSE)
+  }
+  if (length(dim(tvc_draws)) >= 4L) {
+    tvc_draws <- tvc_draws[, , , group, drop = FALSE]
+    dim(tvc_draws) <- dim(tvc_draws)[1:3]
   }
 
   # Subset terms if requested
@@ -2109,7 +2121,7 @@ temporal.ratiod_fit <- function(object, component = "all", summary = FALSE,
   }
 
   # Handle multi-scale vs single-component
-  if (inherits(temp_info, "ratiod_temporal_multiscale")) {
+  if (identical(temp_info$type, "multiscale")) {
     available_components <- temp_info$components
 
     if (component != "all" && !(component %in% available_components)) {
@@ -2132,7 +2144,7 @@ temporal.ratiod_fit <- function(object, component = "all", summary = FALSE,
       n_groups = temp_info$n_groups,
       n_draws = if (is.list(temp_draws)) dim(temp_draws[[1]])[1] else dim(temp_draws)[1],
       type = temp_info$type,
-      components = if (inherits(temp_info, "ratiod_temporal_multiscale"))
+      components = if (identical(temp_info$type, "multiscale"))
         temp_info$components else temp_info$type,
       component_requested = component
     ),
