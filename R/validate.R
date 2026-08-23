@@ -136,28 +136,6 @@ pp_check_single <- function(y, yrep, type, stat, ndraws, title_suffix, ...) {
   p + ggplot2::ggtitle(paste0("Posterior predictive check", title_suffix))
 }
 
-#' Prior predictive simulation
-#'
-#' @description
-#' Simulate data from the prior predictive distribution to check
-#' whether priors are reasonable.
-#'
-#' @param formula A ratiod_formula object or formula components
-#' @param family A ratiod_family object
-#' @param data Data frame (structure used for dimensions)
-#' @param priors Prior specification
-#' @param n Number of prior predictive datasets to simulate
-#'
-#' @return A list with simulated datasets
-#'
-#' @examples
-#' # prior_predict is not yet implemented
-#' # See sim_ratiod() for data simulation
-#'
-#' @export
-prior_predict <- function(formula, family, data, priors = NULL, n = 100) {
-  stop("prior_predict not yet implemented", call. = FALSE)
-}
 
 # ============================================================================
 # Pointwise log-likelihood
