@@ -379,6 +379,10 @@ tratio <- function(formula,
     data = data
   )
 
+  # Every backend reads its responses off this object, so the family's
+  # requirements on them are checked here rather than once per backend.
+  validate_ratio_responses(formula_spec, family)
+
   # Set default priors
   if (is.null(priors)) {
     priors <- ratiod_priors()

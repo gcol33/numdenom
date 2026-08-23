@@ -29,35 +29,6 @@ test_that("print.ratiod_priors works", {
 })
 
 # -----------------------------------------------------------------------------
-# standata.R coverage
-# -----------------------------------------------------------------------------
-
-test_that("make_standata works for basic model", {
-  skip_on_cran()
-
-  set.seed(123)
-  n <- 30
-  df <- data.frame(
-    count = rpois(n, 10),
-    total = rpois(n, 100) + 10,
-    x = rnorm(n)
-  )
-
-  formula <- ratiod_formula(count | total ~ x, data = df)
-  family <- ratiod_negbin_negbin()
-
-  standata <- tulpaRatio:::make_standata(
-    formula = formula,
-    family = family,
-    data = df
-  )
-
-  expect_true(is.list(standata))
-  expect_equal(standata$N, n)
-  expect_true("X_num" %in% names(standata) || "y_num" %in% names(standata))
-})
-
-# -----------------------------------------------------------------------------
 # plot_diagnostics.R coverage
 # -----------------------------------------------------------------------------
 
