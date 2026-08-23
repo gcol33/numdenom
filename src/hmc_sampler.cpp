@@ -12515,9 +12515,9 @@ HMCResultCpp run_hmc_chain_cpp(
   int softabs_successes = 0;
   constexpr int SOFTABS_MAX_RETRIES = 3;  // Up to 3 retry attempts per divergence
 
-  // Persistent SoftAbs metric (improvement #2): once computed, reuse for
+  // Persistent SoftAbs metric: once computed, reuse for
   // all subsequent trajectories. Initialized at warmup→sampling transition
-  // (improvement #4) or on first divergence, whichever comes first.
+  // or on first divergence, whichever comes first.
   bool softabs_metric_active = false;
   DenseMassMatrix softabs_persistent_mass;
   double softabs_persistent_eps = 0.0;
@@ -12697,7 +12697,7 @@ HMCResultCpp run_hmc_chain_cpp(
 
       auto& p = _nuts_p;
 
-      // Step size jitter (improvement #5): ±20% random noise per trajectory
+      // Step size jitter: ±20% random noise per trajectory
       // Prevents systematic step-size resonances that cause divergences.
       // Only during post-warmup sampling — warmup needs stable epsilon for adaptation.
       double eps_iter = epsilon;
@@ -12885,7 +12885,7 @@ HMCResultCpp run_hmc_chain_cpp(
         if (!persist) break;
       }
 
-      // SoftAbs divergence retry (improvements #1, #2): if trajectory diverged,
+      // SoftAbs divergence retry: if trajectory diverged,
       // compute local Hessian-based metric and retry up to SOFTABS_MAX_RETRIES
       // times, halving step size each attempt. On first successful metric
       // computation, persist it for all subsequent trajectories.
@@ -12903,7 +12903,7 @@ HMCResultCpp run_hmc_chain_cpp(
         );
 
         if (metric_ok) {
-          // Update persistent SoftAbs metric for retry use only (improvement #2).
+          // Update persistent SoftAbs metric for retry use only.
           // Do NOT override main mass/epsilon — warmup-adapted values work better
           // for general trajectories. SoftAbs is rescue-only.
           softabs_persistent_mass.set_from_metric(G_inv_buf, L_G_inv_buf);
@@ -12912,8 +12912,8 @@ HMCResultCpp run_hmc_chain_cpp(
           softabs_persistent_eps = eps_base;
           softabs_metric_active = true;
 
-          // Multiple retry attempts (improvement #1): try up to 3 times
-          // with halving step size each attempt
+          // Try up to SOFTABS_MAX_RETRIES times, halving the step size
+          // each attempt
           for (int retry_attempt = 0; retry_attempt < SOFTABS_MAX_RETRIES; retry_attempt++) {
             double eps_retry = eps_base * std::pow(0.5, retry_attempt);
 
@@ -13273,7 +13273,7 @@ HMCResultCpp run_hmc_chain_cpp(
             REprintf("  [METRIC] Warmup done: epsilon=%.6f, mass.type=%s, mass.adapted=%d\n",
                      epsilon, metric_name(mass.type), (int)mass.adapted);
           }
-          // Proactive SoftAbs at warmup→sampling transition (improvement #4):
+          // Proactive SoftAbs metric at the warmup→sampling transition:
           // Pre-compute SoftAbs metric so it's ready for retry attempts.
           // Do NOT override main mass/epsilon — warmup-adapted values are better
           // for general sampling. SoftAbs is only used as rescue on divergences.

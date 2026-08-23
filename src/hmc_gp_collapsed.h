@@ -585,9 +585,6 @@ inline LocLikResult compute_loc_lik(
     LocLikResult res = {0.0, 0.0, 0.0};
     int N_iter = (n_obs >= 0) ? n_obs : data.N;
 
-    // DEBUG: per-obs NaN tracking
-    static thread_local int loc_lik_debug = 0;
-
     for (int idx = 0; idx < N_iter; idx++) {
         int i = (obs_list != nullptr) ? obs_list[idx] : idx;
         if (obs_list == nullptr && data.gp_data.obs_to_loc[i] != loc) continue;
@@ -610,32 +607,6 @@ inline LocLikResult compute_loc_lik(
         // Per-family likelihood, gradient, Hessian
         double mu_num = std::exp(eta_num_i);
         int y_num = data.y_num[i];
-
-        // DEBUG: print first obs details if NaN
-        if (loc_lik_debug < 3 && data.N >= 100) {
-            double y_dc = (data.y_denom_cont.size() > (size_t)i) ? data.y_denom_cont[i] : -999.0;
-            int y_d = (data.y_denom.size() > (size_t)i) ? data.y_denom[i] : -999;
-            Rprintf("[LOC_LIK] i=%d loc=%d eta_num=%.4f eta_den=%.4f mu_num=%.4f y_num=%d "
-                    "y_denom=%d y_denom_cont=%.6f phi_num=%.4f phi_den=%.4f shared=%d model=%d\n",
-                    i, loc, eta_num_i, eta_denom_i, mu_num, y_num,
-                    y_d, y_dc, phi_num, phi_denom,
-                    (int)data.gp_data.shared, (int)data.model_type);
-            // Print beta and X values
-            Rprintf("  p_num=%d p_denom=%d X_flat_size=%d w[%d]=%.6f\n",
-                    data.p_num, data.p_denom, (int)data.X_num_flat.size(), loc, w[loc]);
-            // Recompute eta from scratch
-            double eta_check = 0.0;
-            for (int p = 0; p < std::min(data.p_num, 4); p++) {
-                int idx = i * data.p_num + p;
-                double x_val = (idx < (int)data.X_num_flat.size()) ? data.X_num_flat[idx] : -9999.0;
-                eta_check += x_val * beta_num[p];
-                Rprintf("  beta_num[%d]=%.6f X_num[%d,%d]=%.6f partial_eta=%.6f\n",
-                        p, beta_num[p], i, p, x_val, eta_check);
-            }
-            eta_check += w[loc];
-            Rprintf("  eta_check=%.6f (should match eta_num=%.6f)\n", eta_check, eta_num_i);
-            loc_lik_debug++;
-        }
 
         switch (data.model_type) {
             case ModelType::POISSON_GAMMA: {
@@ -845,17 +816,12 @@ inline double collapsed_gp_find_mode(
     std::vector<double> Qw(N_gp);
     std::vector<double> delta_w(N_gp, 0.0);
 
-    // DEBUG: Newton iteration tracking
-    static thread_local int newton_debug_count = 0;
-    bool newton_debug = (newton_debug_count < 3 && N_gp >= 20);
-
     for (int newton_iter = 0; newton_iter < max_newton; newton_iter++) {
         // Compute data gradient and Hessian per location
         std::fill(ws.grad_w.begin(), ws.grad_w.end(), 0.0);
         std::fill(ws.hess_diag.begin(), ws.hess_diag.end(), 0.0);
 
         double data_ll = 0.0;
-        int obs_count = 0;
         for (int loc = 0; loc < N_gp; loc++) {
             int n_obs_loc = ws.loc_obs_ptr[loc + 1] - ws.loc_obs_ptr[loc];
             const int* obs_loc = &ws.loc_obs_idx[ws.loc_obs_ptr[loc]];
@@ -867,22 +833,6 @@ inline double collapsed_gp_find_mode(
             ws.grad_w[loc] = lr.grad;
             ws.hess_diag[loc] = std::max(lr.neg_hess, 1e-8);  // Ensure positive
             data_ll += lr.ll;
-            if (newton_debug && newton_iter == 0) {
-                obs_count += n_obs_loc;
-                if (std::isnan(lr.ll) || std::isnan(lr.grad) || n_obs_loc == 0) {
-                    Rprintf("  [NEWTON] loc=%d cnt=%d ll=%.4f grad=%.4f hess=%.8f\n",
-                            loc, n_obs_loc, lr.ll, lr.grad, lr.neg_hess);
-                }
-            }
-        }
-        if (newton_debug && newton_iter == 0) {
-            // Print obs_to_loc range
-            int otl_min = data.N, otl_max = -1;
-            for (int i = 0; i < data.N; i++) {
-                otl_min = std::min(otl_min, data.gp_data.obs_to_loc[i]);
-                otl_max = std::max(otl_max, data.gp_data.obs_to_loc[i]);
-            }
-            Rprintf("  obs_to_loc range=[%d,%d] N_gp=%d\n", otl_min, otl_max, N_gp);
         }
 
         // Add NNGP prior gradient: d/dw log p_NNGP(w|sigma2,phi) = -Q w
@@ -896,43 +846,19 @@ inline double collapsed_gp_find_mode(
         for (int i = 0; i < N_gp; i++) grad_norm += ws.grad_w[i] * ws.grad_w[i];
         grad_norm = std::sqrt(grad_norm);
 
-        if (newton_debug) {
-            double w_min = 1e30, w_max = -1e30;
-            double dw_min = 1e30, dw_max = -1e30;
-            for (int i = 0; i < N_gp; i++) {
-                w_min = std::min(w_min, ws.w_star[i]);
-                w_max = std::max(w_max, ws.w_star[i]);
-            }
-            Rprintf("[NEWTON iter=%d] grad_norm=%.6e data_ll=%.4f w=[%.4f,%.4f]",
-                    newton_iter, grad_norm, data_ll, w_min, w_max);
-            if (newton_iter == 0)
-                Rprintf(" obs_count=%d N_gp=%d N=%d", obs_count, N_gp, data.N);
-            Rprintf("\n");
-        }
-
         if (grad_norm < newton_tol) {
             break;
         }
 
         // Solve (W + Q) delta_w = grad_w using CG
         std::fill(delta_w.begin(), delta_w.end(), 0.0);
-        int cg_iters = cg_solve(delta_w.data(), ws.grad_w.data(), ws.hess_diag.data(), ws, 100, 1e-8);
-
-        if (newton_debug) {
-            double dw_min = 1e30, dw_max = -1e30;
-            for (int i = 0; i < N_gp; i++) {
-                dw_min = std::min(dw_min, delta_w[i]);
-                dw_max = std::max(dw_max, delta_w[i]);
-            }
-            Rprintf("  CG iters=%d delta_w=[%.4f,%.4f]\n", cg_iters, dw_min, dw_max);
-        }
+        cg_solve(delta_w.data(), ws.grad_w.data(), ws.hess_diag.data(), ws, 100, 1e-8);
 
         // Newton update: w <- w + delta_w
         for (int i = 0; i < N_gp; i++) {
             ws.w_star[i] += delta_w[i];
         }
     }
-    if (newton_debug) newton_debug_count++;
 
     ws.mode_found = true;
 

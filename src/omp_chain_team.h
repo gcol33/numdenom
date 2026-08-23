@@ -51,8 +51,8 @@ inline void for_each_chain(int n_chains, int max_concurrent, Fn fn) {
   // but OpenMP still runs any parallel region a worker starts at width 1
   // unless nesting is enabled: the default max-active-levels is 1. Without
   // this, a chain running concurrently with others could never also get
-  // within-chain width, and `cores` (#17) could not express a budget split
-  // across both dimensions at once.
+  // within-chain width, and `cores` could not express a budget split across
+  // both dimensions at once.
   omp_set_max_active_levels(2);
   const int width = std::max(1, std::min(max_concurrent, n_chains));
   const int team = chain_team_size(width);

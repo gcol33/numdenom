@@ -1597,10 +1597,9 @@ inline LaplaceGradFullResult compute_laplace_gradient_icar_H(
     // Companion temporal GMRF (e.g. RW1): same additive-in-eta structure as
     // RE above, so the Laplace log-det picks it up the same way. Without
     // this the envelope-theorem term in compute_gradient_icar_collapsed is
-    // the only contribution the temporal block gets, which is what left
-    // gcol33/tulpaRatio#27's fix still disagreeing with the numerical
-    // reference: log det(H) depends on eta (hence on the temporal offset)
-    // through the curvature W_data, not only through phi*'s value.
+    // the only contribution the temporal block gets, and log det(H) depends
+    // on eta (hence on the temporal offset) through the curvature W_data,
+    // not only through phi*'s value.
     if (obs_offset_num != nullptr) {
         for (int i = 0; i < N; i++) {
             if (data.temporal_time_idx.empty() || data.temporal_time_idx[i] <= 0) continue;
@@ -1917,7 +1916,7 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
 
     // Companion temporal GMRF (e.g. RW1): same additive-in-eta structure as
     // RE above -- see the ICAR version of this function for why log det(H)
-    // needs this (gcol33/tulpaRatio#27).
+    // needs this.
     if (obs_offset_num != nullptr) {
         for (int i = 0; i < N; i++) {
             if (data.temporal_time_idx.empty() || data.temporal_time_idx[i] <= 0) continue;
@@ -2042,10 +2041,10 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
 // re_vals and this offset identically -- all held fixed while phi*/theta* is
 // found -- so a companion temporal effect has to enter eta there the same
 // way, or phi* is the mode of the wrong conditional and the Laplace
-// correction is evaluated at the wrong point (gcol33/tulpaRatio#27). This is
-// the only companion structure threaded through today; TVC, a spatiotemporal
-// interaction, a temporal GP, multiscale temporal, latent factors and HSGP
-// remain untouched (tracked separately).
+// correction is evaluated at the wrong point. This is the only companion
+// structure threaded through today; TVC, a spatiotemporal interaction, a
+// temporal GP, multiscale temporal, latent factors and HSGP remain
+// untouched.
 // =========================================================================
 
 struct CollapsedTemporalOffset {

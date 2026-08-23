@@ -41,8 +41,7 @@ struct TVCData {
 // RATIOD_TLS_WORKSPACE at the call site), never as members of TVCData: TVCData
 // hangs off the single ModelData that every chain thread shares, so buffers
 // living there are the same memory for every chain and a concurrent write from
-// one chain overwrites what another chain's gradient evaluation is reading
-// (gcol33/tulpaRatio#23).
+// one chain overwrites what another chain's gradient evaluation is reading.
 struct TVCGradWorkspace {
   std::vector<double> tau;           // size n_tvc
   std::vector<double> rho;           // size n_tvc

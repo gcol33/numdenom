@@ -9,7 +9,6 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-#include <Rcpp.h>  // For Rcpp::Rcout in debug
 
 #include <tulpa/soft_sum_to_zero.h>  // s2z_precision
 
@@ -285,8 +284,7 @@ inline void compute_svc_eta(
 // stiffness the sampler stops moving: same data, same code, only the constant
 // changed, 4 chains x 1000 iterations returns in 9s with per-chain posterior SD
 // 0, Rhat 15 and the slope at 0.095 against a truth of 0.3, where the ridge
-// runs for minutes and samples. Deriving the right constant for a proper field
-// on its own terms is gcol33/tulpaRatio#25.
+// runs for minutes and samples.
 inline double svc_sum_to_zero_ridge(int n_obs) {
   return 1.0 / static_cast<double>(n_obs > 0 ? n_obs : 1);
 }
@@ -392,9 +390,6 @@ inline double dcov_dphi_svc(double d, double phi, double cov_val, CovType cov_ty
   }
 }
 
-// Debug counter for SVC gradient diagnostics
-static int svc_debug_counter = 0;
-
 // Fully analytical NNGP gradients for SVC - single pass, no redundant function calls
 // Complexity: O(N * nn²) - ~4x faster than numerical
 inline void svc_nngp_gradients(
@@ -406,51 +401,25 @@ inline void svc_nngp_gradients(
 ) {
   int N = svc_data.n_obs;
   int nn = svc_data.nn;
-  bool debug = (svc_debug_counter == 0);  // Only debug first call
 
   grads.grad_w.assign(N, 0.0);
   grads.grad_log_sigma2 = 0.0;
   grads.grad_log_phi = 0.0;
 
-  // Validate - with debug output
-  bool val_fail = false;
-  if ((int)svc_data.nn_order.size() < N) {
-    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: nn_order.size()=" << svc_data.nn_order.size() << " < N=" << N << "\n";
-    val_fail = true;
-  }
-  if ((int)svc_data.nn_idx.size() < N * nn) {
-    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: nn_idx.size()=" << svc_data.nn_idx.size() << " < N*nn=" << N*nn << "\n";
-    val_fail = true;
-  }
-  if ((int)svc_data.nn_dist.size() < N * nn) {
-    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: nn_dist.size()=" << svc_data.nn_dist.size() << " < N*nn=" << N*nn << "\n";
-    val_fail = true;
-  }
-  if ((int)w.size() < N) {
-    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: w.size()=" << w.size() << " < N=" << N << "\n";
-    val_fail = true;
-  }
-  if ((int)svc_data.coords.size() < 2 * N) {
-    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: coords.size()=" << svc_data.coords.size() << " < 2*N=" << 2*N << "\n";
-    val_fail = true;
-  }
-  if (val_fail) {
-    svc_debug_counter++;
-    return;
-  }
-
-  if (debug) {
-    Rcpp::Rcout << "[SVC DEBUG] Validation passed: N=" << N << ", nn=" << nn
-                << ", sigma2=" << sigma2 << ", phi=" << phi << "\n";
-  }
+  // Size preconditions on the NNGP neighbour structure. This runs on a chain
+  // worker thread inside the OpenMP region, so a violation cannot raise from
+  // here; the gradients stay at the zero they were just assigned. Sizes come
+  // from svc_nngp_precompute and do not vary across gradient evaluations, so
+  // the check is a structural guard rather than a per-draw condition.
+  if ((int)svc_data.nn_order.size() < N) return;
+  if ((int)svc_data.nn_idx.size() < N * nn) return;
+  if ((int)svc_data.nn_dist.size() < N * nn) return;
+  if ((int)w.size() < N) return;
+  if ((int)svc_data.coords.size() < 2 * N) return;
 
   // First observation: marginal N(0, sigma2)
   int first_idx = svc_data.nn_order[0];
-  if (first_idx < 0 || first_idx >= N) {
-    if (debug) Rcpp::Rcout << "[SVC DEBUG] FAIL: first_idx=" << first_idx << " out of bounds [0," << N << ")\n";
-    svc_debug_counter++;
-    return;
-  }
+  if (first_idx < 0 || first_idx >= N) return;
   double w0 = w[first_idx];
   grads.grad_w[first_idx] = -w0 / sigma2;
   grads.grad_log_sigma2 += 0.5 * (w0 * w0 / sigma2 - 1.0);  // Will multiply by sigma2 at end
@@ -589,19 +558,6 @@ inline void svc_nngp_gradients(
     double dv_dphi = -2.0 * alpha_dc + alpha_dC_alpha;
     double dr_dphi = -dc_beta + alpha_dC_beta;
     grads.grad_log_phi += (dll_dv * dv_dphi + (-r / v) * dr_dphi) * phi;
-  }
-
-  // Debug output for first call
-  if (debug) {
-    // Compute gradient summary stats
-    double sum_abs_grad_w = 0.0;
-    for (int i = 0; i < N; i++) {
-      sum_abs_grad_w += std::abs(grads.grad_w[i]);
-    }
-    Rcpp::Rcout << "[SVC DEBUG] Output: sum|grad_w|=" << sum_abs_grad_w
-                << ", grad_log_sigma2=" << grads.grad_log_sigma2
-                << ", grad_log_phi=" << grads.grad_log_phi << "\n";
-    svc_debug_counter++;
   }
 }
 

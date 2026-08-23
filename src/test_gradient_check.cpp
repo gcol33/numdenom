@@ -78,22 +78,22 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   const bool want_ms = (field == "icar_ms" || field == "bym2_ms");
   const bool want_st = (field == "icar_st" || field == "bym2_st");
   // st4: a spatiotemporal Type IV (Kronecker) interaction with NO accompanying
-  // additive spatial or temporal field -- matching gcol33/tulpaRatio#24's repro,
-  // where the only structured term is the interaction itself. icar_st/bym2_st
-  // above exercise compute_gradient_spatiotemporal_handcoded's multi-feature
-  // path but only ever build a Type I interaction; this is the first field to
-  // check the handcoded Type IV Kronecker block against finite differences.
+  // additive spatial or temporal field -- the only structured term is the
+  // interaction itself. icar_st/bym2_st above exercise
+  // compute_gradient_spatiotemporal_handcoded's multi-feature path but only
+  // ever build a Type I interaction; this is the field that checks the
+  // handcoded Type IV Kronecker block against finite differences.
   const bool want_st4 = (field == "st4" || field == "st4_nc");
   // icar_collapsed_rw1 / bym2_collapsed_rw1 pair a collapsed spatial field
-  // with a companion temporal RW1 term -- the combination gcol33/tulpaRatio#27
-  // found the specialized collapsed gradient silently dropping.
+  // with a companion temporal RW1 term -- the combination the specialized
+  // collapsed gradient has to carry into its inner Laplace.
   const bool want_icar = (field == "icar" || field == "icar_rw1" ||
                           field == "icar_ms" || field == "icar_st" ||
                           field == "icar_collapsed" || field == "icar_collapsed_rw1");
   const bool want_bym2 = (field == "bym2" || field == "bym2_ms" ||
                           field == "bym2_st" || field == "bym2_collapsed" ||
                           field == "bym2_collapsed_rw1");
-  // Proper CAR (rho estimated, gcol33/tulpaRatio#31): exercises
+  // Proper CAR (rho estimated): exercises
   // compute_gradient_composite's is_car_proper branch, the only gradient
   // path it reaches under H/AUTO (can_use_analytical_gradient excludes it).
   const bool want_car_proper = (field == "car_proper");
@@ -270,10 +270,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     tvc.n_times = n_times;
     tvc.n_tvc = 1;
     tvc.n_groups = 1;
-    // tvc_iid (gcol33/tulpaRatio#32): TemporalType::IID was fully implemented
-    // in tvc_term_log_prior / tvc_prior_gradients_ws and reachable from the
-    // C++ string parser, but blocked by temporal_tvc()'s match.arg in R and
-    // never exercised by this harness.
+    // tvc_iid: TemporalType::IID is implemented in tvc_term_log_prior /
+    // tvc_prior_gradients_ws and reachable from the C++ string parser.
+    // temporal_tvc()'s match.arg in R does not offer it, so this harness is
+    // where it is exercised.
     tvc.structure = (field == "tvc_iid") ? ratiod_temporal::TemporalType::IID
                                           : ratiod_temporal::TemporalType::RW1;
     tvc.shared = true;
@@ -371,9 +371,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.has_spatiotemporal = true;
     data.st_is_hsgp = false;
     // st4_nc exercises the non-centered branch of compute_gradient_spatiotemporal_
-    // handcoded's Type IV block (st_use_nc): params store z, delta = z/sqrt(tau_st).
-    // Like st4's centered path, this has never been checked against finite
-    // differences (gcol33/tulpaRatio#24).
+    // handcoded's Type IV block (st_use_nc): params store z,
+    // delta = z/sqrt(tau_st).
     data.st_parameterization = (field == "st4_nc") ? 1 : 0;
   }
 

@@ -54,12 +54,12 @@ inline const char* log_post_impl_gap(const ModelData& data,
     if (layout.is_icar_collapsed) return "collapsed ICAR";
     if (layout.is_bym2_collapsed) return "collapsed BYM2";
     if (data.gp_collapsed) return "collapsed GP";
-    // Proper CAR's log-determinant needs a dense Cholesky (gcol33/tulpaRatio#31);
-    // not written here, and not verified differentiable through autodiff either.
+    // Proper CAR's log-determinant needs a dense Cholesky; not written here,
+    // and not verified differentiable through autodiff either.
     if (layout.is_car_proper) return "proper CAR";
     // Expressible, but not written here yet, and the finite-difference harness
     // cannot build either one to check a transcription against. Named rather
-    // than guessed at (gcol33/tulpaRatio#26).
+    // than guessed at.
     if (data.msgp_is_hsgp) return "HSGP multi-scale GP";
     if (data.has_gp && data.gp_parameterization == 1) return "non-centred GP";
     return nullptr;
@@ -1325,8 +1325,8 @@ T compute_log_post_impl(
             // Zero-inflation and hurdle structures attach to the numerator only;
             // the denominator count is always the plain family. Both densities
             // route through ratiod_zi::zi_log_likelihood so a count-response
-            // ZI/hurdle term cannot be carried by one and dropped by the other
-            // (gcol33/tulpaRatio#34).
+            // ZI/hurdle term cannot be carried by one and dropped by the
+            // other.
             T mu_num = safe_exp(eta_num);
             T mu_denom = safe_exp(eta_denom);
             if (layout.has_zi) {

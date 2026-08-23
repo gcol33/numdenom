@@ -15,7 +15,7 @@ namespace ratiod_omp {
 // after it, in fits it knows nothing about. The backends here all take a
 // per-fit thread count, which makes that a fit's private business; leaving it
 // moved published it. Reading it to size the chain team was enough to serialize
-// the chains of every fit following a single-threaded Laplace fit (#8).
+// the chains of every fit following a single-threaded Laplace fit.
 //
 // The regions inside a fit still read the nthreads-var, which is what they
 // should do: within the scope it holds this fit's budget.
