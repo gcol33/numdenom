@@ -27,7 +27,7 @@ Imports:
     lifecycle,
     loo,
     stats,
-    tulpa (>= 0.0.109),
+    tulpa (>= 0.1.12),
     Rcpp (>= 1.0.0)
 LinkingTo:
     Rcpp,

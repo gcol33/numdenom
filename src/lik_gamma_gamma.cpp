@@ -36,7 +36,6 @@
 #include <tulpa/model_data.h>
 #include <tulpa/param_layout.h>
 #include <tulpa/autodiff_arena.h>
-#include <tulpa/autodiff_fwd.h>
 
 #include "lik_specs/ratio_config.h"
 #include "lik_specs/lik_helpers.h"
@@ -109,7 +108,6 @@ tulpa::LikelihoodSpec build_gamma_gamma_spec(const RatioConfig& cfg) {
     }
     spec.ll_double = gamma_gamma_log_likelihood<double>;
     spec.ll_arena  = gamma_gamma_log_likelihood<tulpa::arena::Var>;
-    spec.ll_fwd    = gamma_gamma_log_likelihood<::fwd::Dual>;
     spec.gradient_fn = &grad_h_gamma_gamma;
     return spec;
 }

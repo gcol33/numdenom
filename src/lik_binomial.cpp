@@ -38,7 +38,6 @@
 #include <tulpa/model_data.h>
 #include <tulpa/param_layout.h>
 #include <tulpa/autodiff_arena.h>
-#include <tulpa/autodiff_fwd.h>
 
 #include "lik_specs/ratio_config.h"
 #include "lik_specs/lik_helpers.h"
@@ -106,7 +105,6 @@ tulpa::LikelihoodSpec build_binomial_spec(const RatioConfig& cfg) {
 
     spec.ll_double = binomial_log_likelihood<double>;
     spec.ll_arena  = binomial_log_likelihood<tulpa::arena::Var>;
-    spec.ll_fwd    = binomial_log_likelihood<::fwd::Dual>;
 
     // Hand-coded H-mode gradient (B2) covers only the plain Binomial. ZI/OI
     // variants flow through autodiff (A_r/A) — leave gradient_fn unset so the

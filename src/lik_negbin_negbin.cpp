@@ -34,7 +34,6 @@
 #include <tulpa/model_data.h>
 #include <tulpa/param_layout.h>
 #include <tulpa/autodiff_arena.h>
-#include <tulpa/autodiff_fwd.h>
 
 #include "lik_specs/ratio_config.h"
 #include "lik_specs/lik_helpers.h"
@@ -119,7 +118,6 @@ tulpa::LikelihoodSpec build_negbin_negbin_spec(const RatioConfig& cfg) {
     }
     spec.ll_double = negbin_negbin_log_likelihood<double>;
     spec.ll_arena  = negbin_negbin_log_likelihood<tulpa::arena::Var>;
-    spec.ll_fwd    = negbin_negbin_log_likelihood<::fwd::Dual>;
     if (cfg.zi == "none") {
         spec.gradient_fn = &grad_h_negbin_negbin;
     }
