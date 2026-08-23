@@ -9,6 +9,7 @@
 #include <cmath>
 #include <random>
 #include <RcppEigen.h>
+#include "hmc_cov.h"  // Shared kernels and neighbour-block factorization
 #include "hmc_svc.h"  // Reuse covariance functions and NNGP infrastructure
 
 // Verbose debug output (set to false for production)
@@ -507,10 +508,9 @@ inline double gp_nngp_log_lik(
     Eigen::MatrixXd C_sub = C_mat.topLeftCorner(n_neighbors, n_neighbors);
     Eigen::VectorXd c_sub = c_vec.head(n_neighbors);
 
-    // Add small jitter to diagonal for numerical stability
-    // This prevents ill-conditioning when phi is very small or sigma2 is near zero
+    // The same ridge every other NNGP neighbour block gets.
     for (int j = 0; j < n_neighbors; j++) {
-      C_sub(j, j) += 1e-8;
+      C_sub(j, j) += ratiod_cov::NNGP_RIDGE;
     }
 
     Eigen::LLT<Eigen::MatrixXd> llt(C_sub);
@@ -559,7 +559,7 @@ inline double gp_nngp_log_lik(
     for (int j = 0; j < n_neighbors; j++) {
       c_Cinv_c += c_vec(j) * alpha(j);
     }
-    double cond_var = std::max(1e-10, sigma2 - c_Cinv_c);
+    double cond_var = ratiod_cov::nngp_floor_cond_var(sigma2 - c_Cinv_c);
 
     // Log-likelihood contribution
     double resid = w[obs_idx] - cond_mean;
@@ -771,45 +771,11 @@ inline void gp_nngp_gradient_w_analytical(
       continue;
     }
 
-    // Cholesky decomposition of C_mat
-    std::vector<double> L(n_neighbors * n_neighbors, 0.0);
-    for (int j = 0; j < n_neighbors; j++) {
-      double sum = 0.0;
-      for (int k = 0; k < j; k++) {
-        sum += L[j * n_neighbors + k] * L[j * n_neighbors + k];
-      }
-      double diag = C_mat[j * n_neighbors + j] - sum;
-      if (diag <= 0) diag = 1e-10;
-      L[j * n_neighbors + j] = std::sqrt(diag);
-
-      for (int k = j + 1; k < n_neighbors; k++) {
-        double s = 0.0;
-        for (int m = 0; m < j; m++) {
-          s += L[k * n_neighbors + m] * L[j * n_neighbors + m];
-        }
-        L[k * n_neighbors + j] = (C_mat[k * n_neighbors + j] - s) / L[j * n_neighbors + j];
-      }
-    }
-
-    // Forward solve: L * y = c_vec
-    std::vector<double> y(n_neighbors);
-    for (int j = 0; j < n_neighbors; j++) {
-      double s = 0.0;
-      for (int k = 0; k < j; k++) {
-        s += L[j * n_neighbors + k] * y[k];
-      }
-      y[j] = (c_vec[j] - s) / L[j * n_neighbors + j];
-    }
-
-    // Backward solve: L^T * alpha = y
-    std::vector<double> alpha(n_neighbors);
-    for (int j = n_neighbors - 1; j >= 0; j--) {
-      double s = 0.0;
-      for (int k = j + 1; k < n_neighbors; k++) {
-        s += L[k * n_neighbors + j] * alpha[k];
-      }
-      alpha[j] = (y[j] - s) / L[j * n_neighbors + j];
-    }
+    // Cholesky decomposition of C_mat, through the shared factorization.
+    std::vector<double> L, y, alpha;
+    if (!ratiod_cov::nngp_chol(C_mat, n_neighbors, L)) continue;
+    ratiod_cov::nngp_forward_solve(L, n_neighbors, c_vec, y);
+    ratiod_cov::nngp_back_solve(L, n_neighbors, y, alpha);
 
     // Conditional mean: mu = alpha' * w_neighbors
     double cond_mean = 0.0;
@@ -825,7 +791,7 @@ inline void gp_nngp_gradient_w_analytical(
     for (int j = 0; j < n_neighbors; j++) {
       c_Cinv_c += c_vec[j] * alpha[j];
     }
-    double cond_var = std::max(sigma2 - c_Cinv_c, 1e-10);
+    double cond_var = ratiod_cov::nngp_floor_cond_var(sigma2 - c_Cinv_c);
 
     // Residual
     double resid = w[obs_idx] - cond_mean;
@@ -846,22 +812,7 @@ inline void gp_nngp_gradient_w_analytical(
   }
 }
 
-// Covariance derivative w.r.t. phi: dk(d)/dphi
-inline double dcov_dphi(double d, double phi, double cov_val, ratiod_svc::CovType cov_type) {
-  if (d < 1e-10) return 0.0;
-  switch (cov_type) {
-    case ratiod_svc::CovType::EXPONENTIAL:
-      return cov_val * d / (phi * phi);
-    case ratiod_svc::CovType::MATERN: {
-      double u = 1.732050808 * d / phi;
-      return (1.0 + u > 1e-10) ? cov_val * u * u / (phi * (1.0 + u)) : 0.0;
-    }
-    case ratiod_svc::CovType::GAUSSIAN:
-      return cov_val * d * d / (phi * phi * phi);
-    default:
-      return cov_val * d / (phi * phi);
-  }
-}
+using ratiod_cov::dcov_dphi;
 
 // Fully analytical NNGP gradients - single pass, no redundant function calls
 // Complexity: O(N * nn²) vs 4 * O(N * nn²) for numerical => ~4x faster
@@ -916,7 +867,7 @@ inline void gp_nngp_gradients(
     for (int j = 0; j < n_nb; j++) {
       double d = gp_data.nn_dist[i * nn + j];
       c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
-      dc_vec[j] = dcov_dphi(d, phi, c_vec[j], gp_data.cov_type);
+      dc_vec[j] = dcov_dphi(d, sigma2, phi, c_vec[j], gp_data.cov_type);
     }
 
     // Build C_mat and get neighbor indices
@@ -948,49 +899,22 @@ inline void gp_nngp_gradients(
       continue;
     }
 
-    // Cholesky: C = LL'
-    std::fill(L.begin(), L.begin() + n_nb * n_nb, 0.0);
-    for (int j = 0; j < n_nb; j++) {
-      double s = 0.0;
-      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * L[j * n_nb + k];
-      double diag = C_mat[j * n_nb + j] - s;
-      L[j * n_nb + j] = (diag > 0) ? std::sqrt(diag) : 1e-5;
-      for (int k = j + 1; k < n_nb; k++) {
-        double t = 0.0;
-        for (int m = 0; m < j; m++) t += L[k * n_nb + m] * L[j * n_nb + m];
-        L[k * n_nb + j] = (C_mat[k * n_nb + j] - t) / L[j * n_nb + j];
-      }
-    }
+    // Cholesky: C = LL', through the same factorization the density uses.
+    if (!ratiod_cov::nngp_chol(C_mat.data(), n_nb, L.data())) continue;
 
-    // Solve L*y = c, L'*alpha = y => alpha = C^{-1}c
-    for (int j = 0; j < n_nb; j++) {
-      double s = 0.0;
-      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
-      y_vec[j] = (c_vec[j] - s) / L[j * n_nb + j];
-    }
-    for (int j = n_nb - 1; j >= 0; j--) {
-      double s = 0.0;
-      for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
-      alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
-    }
+    // alpha = C^{-1} c
+    ratiod_cov::nngp_forward_solve(L.data(), n_nb, c_vec.data(), y_vec.data());
+    ratiod_cov::nngp_back_solve(L.data(), n_nb, y_vec.data(), alpha.data());
 
-    // Get w_neighbors and solve for beta = C^{-1}w_nb
+    // beta = C^{-1} w_nb
     for (int j = 0; j < n_nb; j++) w_nb[j] = w[nb_idx[j]];
-    for (int j = 0; j < n_nb; j++) {
-      double s = 0.0;
-      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y2[k];
-      y2[j] = (w_nb[j] - s) / L[j * n_nb + j];
-    }
-    for (int j = n_nb - 1; j >= 0; j--) {
-      double s = 0.0;
-      for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * beta[k];
-      beta[j] = (y2[j] - s) / L[j * n_nb + j];
-    }
+    ratiod_cov::nngp_forward_solve(L.data(), n_nb, w_nb.data(), y2.data());
+    ratiod_cov::nngp_back_solve(L.data(), n_nb, y2.data(), beta.data());
 
     // Conditional mean and variance
     double mu = 0.0, c_alpha = 0.0;
     for (int j = 0; j < n_nb; j++) { mu += alpha[j] * w_nb[j]; c_alpha += c_vec[j] * alpha[j]; }
-    double v = std::max(sigma2 - c_alpha, 1e-10);
+    double v = ratiod_cov::nngp_floor_cond_var(sigma2 - c_alpha);
     double r = w[obs_idx] - mu;
 
     // Gradient w.r.t. w
@@ -1014,7 +938,8 @@ inline void gp_nngp_gradients(
           double dx = gp_data.coords[nb_idx[j1] * 2] - gp_data.coords[nb_idx[j2] * 2];
           double dy = gp_data.coords[nb_idx[j1] * 2 + 1] - gp_data.coords[nb_idx[j2] * 2 + 1];
           double d12 = std::sqrt(dx*dx + dy*dy);
-          dC_jk = dcov_dphi(d12, phi, C_mat[j1 * n_nb + j2], gp_data.cov_type);
+          dC_jk = dcov_dphi(d12, sigma2, phi, C_mat[j1 * n_nb + j2],
+                            gp_data.cov_type);
         }
         alpha_dC_alpha += alpha[j1] * dC_jk * alpha[j2];
         alpha_dC_beta += alpha[j1] * dC_jk * beta[j2];
@@ -1164,31 +1089,16 @@ inline void nngp_nc_forward(
             continue;
         }
 
-        // Cholesky: C = LL'
-        std::fill(L.begin(), L.begin() + n_nb * n_nb, 0.0);
-        for (int j = 0; j < n_nb; j++) {
-            double s = 0.0;
-            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * L[j * n_nb + k];
-            double diag = C_mat[j * n_nb + j] - s;
-            L[j * n_nb + j] = (diag > 0) ? std::sqrt(diag) : 1e-5;
-            for (int k = j + 1; k < n_nb; k++) {
-                double t = 0.0;
-                for (int m = 0; m < j; m++) t += L[k * n_nb + m] * L[j * n_nb + m];
-                L[k * n_nb + j] = (C_mat[k * n_nb + j] - t) / L[j * n_nb + j];
-            }
+        // Cholesky: C = LL', and alpha = C^{-1} c (the regression coefficients
+        // B[i,:]), through the same factorization the density uses.
+        if (!ratiod_cov::nngp_chol(C_mat.data(), n_nb, L.data())) {
+            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
+            ws.B_n_nb[i] = 0;
+            continue;
         }
-
-        // Solve L*y = c, L'*alpha = y => alpha = C^{-1}c (regression coefficients B[i,:])
-        for (int j = 0; j < n_nb; j++) {
-            double s = 0.0;
-            for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
-            y_vec[j] = (c_vec[j] - s) / L[j * n_nb + j];
-        }
-        for (int j = n_nb - 1; j >= 0; j--) {
-            double s = 0.0;
-            for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
-            alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
-        }
+        ratiod_cov::nngp_forward_solve(L.data(), n_nb, c_vec.data(), y_vec.data());
+        ratiod_cov::nngp_back_solve(L.data(), n_nb, y_vec.data(), alpha.data());
 
         // Cache Cholesky factor L for backward phi gradient
         for (int j1 = 0; j1 < n_nb; j1++) {
@@ -1308,7 +1218,7 @@ inline void nngp_nc_backward(
         for (int j = 0; j < n_nb; j++) {
             double d = gp_data.nn_dist[i * nn + j];
             c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
-            dc_vec[j] = dcov_dphi(d, phi, c_vec[j], gp_data.cov_type);
+            dc_vec[j] = dcov_dphi(d, sigma2, phi, c_vec[j], gp_data.cov_type);
         }
 
         // Restore cached Cholesky factor L and alpha from forward pass
@@ -1326,7 +1236,8 @@ inline void nngp_nc_backward(
                 double dC_jk = 0.0;
                 if (j1 != j2) {
                     double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
-                    dC_jk = dcov_dphi(d12, phi, C_mat[j1 * n_nb + j2], gp_data.cov_type);
+                    dC_jk = dcov_dphi(d12, sigma2, phi, C_mat[j1 * n_nb + j2],
+                                      gp_data.cov_type);
                 }
                 dC_alpha[j1] += dC_jk * alpha[j2];
             }

@@ -78,18 +78,20 @@ TEST_CASE("cov_gaussian computes squared exponential covariance", "[svc]") {
   }
 
   SECTION("rapid decay") {
-    // Gaussian covariance decays faster than exponential
-    double d = 2.0;
-    double c_exp = cov_exponential(d, sigma2, phi);
-    double c_gau = cov_gaussian(d, sigma2, phi);
+    // exp(-0.5 d^2/phi^2) falls below exp(-d/phi) once d > 2 phi, and the two
+    // are equal at d = 2 phi exactly.
+    double c_exp = cov_exponential(3.0, sigma2, phi);
+    double c_gau = cov_gaussian(3.0, sigma2, phi);
     REQUIRE(c_gau < c_exp);
+    REQUIRE(cov_gaussian(2.0, sigma2, phi) ==
+            Approx(cov_exponential(2.0, sigma2, phi)));
   }
 
   SECTION("expected value at d=phi") {
     double d = 1.0;
     double c = cov_gaussian(d, 1.0, 1.0);
-    // exp(-d^2 / phi^2) = exp(-1) ≈ 0.368
-    REQUIRE(c == Approx(std::exp(-1.0)));
+    // exp(-0.5 * d^2 / phi^2) = exp(-0.5)
+    REQUIRE(c == Approx(std::exp(-0.5)));
   }
 }
 

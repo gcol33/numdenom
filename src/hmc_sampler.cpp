@@ -14487,7 +14487,9 @@ Rcpp::List cpp_hmc_fit(
       } else if (svc_cov_type_str == "spherical") {
         data.svc_data.cov_type = ratiod_svc::CovType::SPHERICAL;
       } else {
-        data.svc_data.cov_type = ratiod_svc::CovType::EXPONENTIAL;
+        Rcpp::stop("Unknown SVC covariance type '%s'. Expected one of "
+                   "exponential, matern, gaussian, spherical.",
+                   svc_cov_type_str);
       }
     }
 
@@ -14801,8 +14803,11 @@ Rcpp::List cpp_hmc_fit_gp(
     cov_type = ratiod_gp::CovType::MATERN;
   } else if (cov_type_str == "gaussian") {
     cov_type = ratiod_gp::CovType::GAUSSIAN;
-  } else {
+  } else if (cov_type_str == "spherical") {
     cov_type = ratiod_gp::CovType::SPHERICAL;
+  } else {
+    Rcpp::stop("Unknown covariance type '%s'. Expected one of exponential, "
+               "matern, gaussian, spherical.", cov_type_str);
   }
 
   // GP spatial structure

@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include <tulpa/soft_sum_to_zero.h>  // s2z_precision
+#include "hmc_cov.h"
 
 // Fallback definition of M_PI if not provided by <cmath>
 #ifndef M_PI
@@ -19,8 +20,10 @@
 
 namespace ratiod_svc {
 
-// Covariance function types
-enum class CovType { EXPONENTIAL, MATERN, GAUSSIAN, SPHERICAL };
+// The covariance family lives in ratiod_cov, templated once for the double
+// evaluation and the autodiff types alike. These names are the spelling every
+// call site here and in hmc_gp.h already used.
+using ratiod_cov::CovType;
 
 // SVC data structure
 struct SVCData {
@@ -62,45 +65,11 @@ struct SVCData {
 // Covariance functions
 // -----------------------------------------------------------------------------
 
-// Exponential covariance: sigma^2 * exp(-d / phi)
-inline double cov_exponential(double d, double sigma2, double phi) {
-  return sigma2 * std::exp(-d / phi);
-}
-
-// Matern 3/2 covariance: sigma^2 * (1 + sqrt(3)*d/phi) * exp(-sqrt(3)*d/phi)
-inline double cov_matern32(double d, double sigma2, double phi) {
-  double r = std::sqrt(3.0) * d / phi;
-  return sigma2 * (1.0 + r) * std::exp(-r);
-}
-
-// Gaussian (squared exponential) covariance: sigma^2 * exp(-(d/phi)^2)
-inline double cov_gaussian(double d, double sigma2, double phi) {
-  double r = d / phi;
-  return sigma2 * std::exp(-r * r);
-}
-
-// Spherical covariance
-inline double cov_spherical(double d, double sigma2, double phi) {
-  if (d >= phi) return 0.0;
-  double r = d / phi;
-  return sigma2 * (1.0 - 1.5 * r + 0.5 * r * r * r);
-}
-
-// Generic covariance function dispatcher
-inline double compute_cov(double d, double sigma2, double phi, CovType cov_type) {
-  switch (cov_type) {
-    case CovType::EXPONENTIAL:
-      return cov_exponential(d, sigma2, phi);
-    case CovType::MATERN:
-      return cov_matern32(d, sigma2, phi);
-    case CovType::GAUSSIAN:
-      return cov_gaussian(d, sigma2, phi);
-    case CovType::SPHERICAL:
-      return cov_spherical(d, sigma2, phi);
-    default:
-      return cov_exponential(d, sigma2, phi);
-  }
-}
+using ratiod_cov::cov_exponential;
+using ratiod_cov::cov_matern32;
+using ratiod_cov::cov_gaussian;
+using ratiod_cov::cov_spherical;
+using ratiod_cov::compute_cov;
 
 // -----------------------------------------------------------------------------
 // NNGP likelihood computation
@@ -177,45 +146,11 @@ inline double nngp_log_lik(
       }
     }
 
-    // Solve C_mat * alpha = c_vec using Cholesky decomposition
-    // Simple implementation for small matrices (nn typically 15-30)
-    std::vector<double> L(n_neighbors * n_neighbors, 0.0);
-
-    // Cholesky decomposition: C = L * L^T
-    for (int j = 0; j < n_neighbors; j++) {
-      for (int k = 0; k <= j; k++) {
-        double sum = C_mat[j * n_neighbors + k];
-        for (int m = 0; m < k; m++) {
-          sum -= L[j * n_neighbors + m] * L[k * n_neighbors + m];
-        }
-        if (j == k) {
-          // Numerical stability: use larger jitter to prevent ill-conditioning
-          L[j * n_neighbors + j] = std::sqrt(std::max(1e-6, sum));
-        } else {
-          L[j * n_neighbors + k] = sum / L[k * n_neighbors + k];
-        }
-      }
-    }
-
-    // Solve L * y = c_vec
-    std::vector<double> y(n_neighbors);
-    for (int j = 0; j < n_neighbors; j++) {
-      double sum = c_vec[j];
-      for (int k = 0; k < j; k++) {
-        sum -= L[j * n_neighbors + k] * y[k];
-      }
-      y[j] = sum / L[j * n_neighbors + j];
-    }
-
-    // Solve L^T * alpha = y
-    std::vector<double> alpha(n_neighbors);
-    for (int j = n_neighbors - 1; j >= 0; j--) {
-      double sum = y[j];
-      for (int k = j + 1; k < n_neighbors; k++) {
-        sum -= L[k * n_neighbors + j] * alpha[k];
-      }
-      alpha[j] = sum / L[j * n_neighbors + j];
-    }
+    // Solve C_mat * alpha = c_vec through the shared neighbour-block Cholesky.
+    std::vector<double> L, y, alpha;
+    if (!ratiod_cov::nngp_chol(C_mat, n_neighbors, L)) return -INFINITY;
+    ratiod_cov::nngp_forward_solve(L, n_neighbors, c_vec, y);
+    ratiod_cov::nngp_back_solve(L, n_neighbors, y, alpha);
 
     // Conditional mean: mu_i = c^T * C^{-1} * w_{N(i)} = c^T * alpha
     double cond_mean = 0.0;
@@ -229,8 +164,7 @@ inline double nngp_log_lik(
     for (int j = 0; j < n_neighbors; j++) {
       c_Cinv_c += c_vec[j] * alpha[j];
     }
-    // Numerical stability: larger floor to prevent near-zero variance
-    double cond_var = std::max(1e-6, sigma2 - c_Cinv_c);
+    double cond_var = ratiod_cov::nngp_floor_cond_var(sigma2 - c_Cinv_c);
 
     // Log-likelihood contribution
     double resid = w[obs_idx] - cond_mean;
@@ -373,22 +307,7 @@ struct SVCGradients {
   double grad_log_phi;                // Gradient w.r.t. log(phi)
 };
 
-// Covariance derivative w.r.t. phi: dk(d)/dphi
-inline double dcov_dphi_svc(double d, double phi, double cov_val, CovType cov_type) {
-  if (d < 1e-10) return 0.0;
-  switch (cov_type) {
-    case CovType::EXPONENTIAL:
-      return cov_val * d / (phi * phi);
-    case CovType::MATERN: {
-      double u = 1.732050808 * d / phi;  // sqrt(3) * d / phi
-      return (1.0 + u > 1e-10) ? cov_val * u * u / (phi * (1.0 + u)) : 0.0;
-    }
-    case CovType::GAUSSIAN:
-      return cov_val * 2.0 * d * d / (phi * phi * phi);
-    default:
-      return cov_val * d / (phi * phi);
-  }
-}
+using ratiod_cov::dcov_dphi;
 
 // Fully analytical NNGP gradients for SVC - single pass, no redundant function calls
 // Complexity: O(N * nn²) - ~4x faster than numerical
@@ -448,7 +367,7 @@ inline void svc_nngp_gradients(
     for (int j = 0; j < n_nb; j++) {
       double d = svc_data.nn_dist[i * nn + j];
       c_vec[j] = compute_cov(d, sigma2, phi, svc_data.cov_type);
-      dc_vec[j] = dcov_dphi_svc(d, phi, c_vec[j], svc_data.cov_type);
+      dc_vec[j] = dcov_dphi(d, sigma2, phi, c_vec[j], svc_data.cov_type);
     }
 
     // Build C_mat and get neighbor indices
@@ -480,51 +399,22 @@ inline void svc_nngp_gradients(
       continue;
     }
 
-    // Cholesky: C = LL'
-    std::fill(L.begin(), L.begin() + n_nb * n_nb, 0.0);
-    for (int j = 0; j < n_nb; j++) {
-      double s = 0.0;
-      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * L[j * n_nb + k];
-      double diag = C_mat[j * n_nb + j] - s;
-      // Numerical stability: larger minimum diagonal for better conditioning
-      L[j * n_nb + j] = (diag > 1e-6) ? std::sqrt(diag) : 1e-3;
-      for (int k = j + 1; k < n_nb; k++) {
-        double t = 0.0;
-        for (int m = 0; m < j; m++) t += L[k * n_nb + m] * L[j * n_nb + m];
-        L[k * n_nb + j] = (C_mat[k * n_nb + j] - t) / L[j * n_nb + j];
-      }
-    }
+    // Cholesky: C = LL', through the same factorization the density uses.
+    if (!ratiod_cov::nngp_chol(C_mat.data(), n_nb, L.data())) continue;
 
-    // Solve L*y = c, L'*alpha = y => alpha = C^{-1}c
-    for (int j = 0; j < n_nb; j++) {
-      double s = 0.0;
-      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y_vec[k];
-      y_vec[j] = (c_vec[j] - s) / L[j * n_nb + j];
-    }
-    for (int j = n_nb - 1; j >= 0; j--) {
-      double s = 0.0;
-      for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * alpha[k];
-      alpha[j] = (y_vec[j] - s) / L[j * n_nb + j];
-    }
+    // alpha = C^{-1} c
+    ratiod_cov::nngp_forward_solve(L.data(), n_nb, c_vec.data(), y_vec.data());
+    ratiod_cov::nngp_back_solve(L.data(), n_nb, y_vec.data(), alpha.data());
 
-    // Get w_neighbors and solve for beta = C^{-1}w_nb
+    // beta = C^{-1} w_nb
     for (int j = 0; j < n_nb; j++) w_nb[j] = w[nb_idx[j]];
-    for (int j = 0; j < n_nb; j++) {
-      double s = 0.0;
-      for (int k = 0; k < j; k++) s += L[j * n_nb + k] * y2[k];
-      y2[j] = (w_nb[j] - s) / L[j * n_nb + j];
-    }
-    for (int j = n_nb - 1; j >= 0; j--) {
-      double s = 0.0;
-      for (int k = j + 1; k < n_nb; k++) s += L[k * n_nb + j] * beta[k];
-      beta[j] = (y2[j] - s) / L[j * n_nb + j];
-    }
+    ratiod_cov::nngp_forward_solve(L.data(), n_nb, w_nb.data(), y2.data());
+    ratiod_cov::nngp_back_solve(L.data(), n_nb, y2.data(), beta.data());
 
     // Conditional mean and variance
     double mu = 0.0, c_alpha = 0.0;
     for (int j = 0; j < n_nb; j++) { mu += alpha[j] * w_nb[j]; c_alpha += c_vec[j] * alpha[j]; }
-    // Numerical stability: larger floor for conditional variance
-    double v = std::max(sigma2 - c_alpha, 1e-6);
+    double v = ratiod_cov::nngp_floor_cond_var(sigma2 - c_alpha);
     double r = w[obs_idx] - mu;
 
     // Gradient w.r.t. w
@@ -548,7 +438,8 @@ inline void svc_nngp_gradients(
           double dx = svc_data.coords[nb_idx[j1] * 2] - svc_data.coords[nb_idx[j2] * 2];
           double dy = svc_data.coords[nb_idx[j1] * 2 + 1] - svc_data.coords[nb_idx[j2] * 2 + 1];
           double d12 = std::sqrt(dx*dx + dy*dy);
-          dC_jk = dcov_dphi_svc(d12, phi, C_mat[j1 * n_nb + j2], svc_data.cov_type);
+          dC_jk = dcov_dphi(d12, sigma2, phi, C_mat[j1 * n_nb + j2],
+                            svc_data.cov_type);
         }
         alpha_dC_alpha += alpha[j1] * dC_jk * alpha[j2];
         alpha_dC_beta += alpha[j1] * dC_jk * beta[j2];

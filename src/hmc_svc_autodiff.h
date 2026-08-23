@@ -10,6 +10,7 @@
 #include <cmath>
 #include <algorithm>
 #include "autodiff_utils.h"
+#include "hmc_cov.h"  // Shared kernels and neighbour-block factorization
 #include "hmc_svc.h"  // For SVCData and CovType
 
 #ifndef M_PI
@@ -22,120 +23,17 @@ using ratiod_svc::SVCData;
 using ratiod_svc::CovType;
 using namespace ratiod::math;
 
-// =============================================================================
-// Templated covariance functions
-// =============================================================================
-
-// Exponential covariance: sigma^2 * exp(-d / phi)
-template<typename T>
-inline T cov_exponential(double d, const T& sigma2, const T& phi) {
-    return sigma2 * safe_exp(-T(d) / phi);
-}
-
-// Matern 3/2 covariance: sigma^2 * (1 + sqrt(3)*d/phi) * exp(-sqrt(3)*d/phi)
-template<typename T>
-inline T cov_matern32(double d, const T& sigma2, const T& phi) {
-    T r = T(std::sqrt(3.0) * d) / phi;
-    return sigma2 * (T(1.0) + r) * safe_exp(-r);
-}
-
-// Gaussian (squared exponential) covariance: sigma^2 * exp(-(d/phi)^2)
-template<typename T>
-inline T cov_gaussian(double d, const T& sigma2, const T& phi) {
-    T r = T(d) / phi;
-    return sigma2 * safe_exp(-r * r);
-}
-
-// Spherical covariance
-template<typename T>
-inline T cov_spherical(double d, const T& sigma2, const T& phi) {
-    double phi_val = get_value(phi);
-    if (d >= phi_val) return T(0.0);
-    T r = T(d) / phi;
-    return sigma2 * (T(1.0) - T(1.5) * r + T(0.5) * r * r * r);
-}
-
-// Generic covariance function dispatcher
-template<typename T>
-inline T compute_cov(double d, const T& sigma2, const T& phi, CovType cov_type) {
-    switch (cov_type) {
-        case CovType::EXPONENTIAL:
-            return cov_exponential(d, sigma2, phi);
-        case CovType::MATERN:
-            return cov_matern32(d, sigma2, phi);
-        case CovType::GAUSSIAN:
-            return cov_gaussian(d, sigma2, phi);
-        case CovType::SPHERICAL:
-            return cov_spherical(d, sigma2, phi);
-        default:
-            return cov_exponential(d, sigma2, phi);
-    }
-}
-
-// =============================================================================
-// Templated Cholesky decomposition for small matrices
-// =============================================================================
-
-// Cholesky decomposition: A = L * L^T
-// Returns false if decomposition fails (matrix not positive definite)
-// Uses larger jitter (1e-5) for numerical stability in HMC
-template<typename T>
-inline bool cholesky_decomp(const std::vector<T>& A, int n, std::vector<T>& L) {
-    L.assign(n * n, T(0.0));
-
-    // Pre-add diagonal jitter for numerical stability
-    // Increased to 1e-4 to reduce divergences in HMC
-    constexpr double JITTER = 1e-4;
-
-    for (int j = 0; j < n; j++) {
-        for (int k = 0; k <= j; k++) {
-            T sum = A[j * n + k];
-            // Add jitter to diagonal
-            if (j == k) {
-                sum = sum + T(JITTER);
-            }
-            for (int m = 0; m < k; m++) {
-                sum = sum - L[j * n + m] * L[k * n + m];
-            }
-            if (j == k) {
-                // Check for positive definiteness
-                if (get_value(sum) <= 1e-12) {
-                    return false;  // Matrix is not positive definite
-                }
-                L[j * n + j] = safe_sqrt(sum);
-            } else {
-                L[j * n + k] = sum / L[k * n + k];
-            }
-        }
-    }
-    return true;
-}
-
-// Solve L * y = b (forward substitution)
-template<typename T>
-inline void solve_lower(const std::vector<T>& L, int n, const std::vector<T>& b, std::vector<T>& y) {
-    y.resize(n);
-    for (int j = 0; j < n; j++) {
-        T sum = b[j];
-        for (int k = 0; k < j; k++) {
-            sum = sum - L[j * n + k] * y[k];
-        }
-        y[j] = sum / L[j * n + j];
-    }
-}
-
-// Solve L^T * x = y (backward substitution)
-template<typename T>
-inline void solve_upper(const std::vector<T>& L, int n, const std::vector<T>& y, std::vector<T>& x) {
-    x.resize(n);
-    for (int j = n - 1; j >= 0; j--) {
-        T sum = y[j];
-        for (int k = j + 1; k < n; k++) {
-            sum = sum - L[k * n + j] * x[k];
-        }
-        x[j] = sum / L[j * n + j];
-    }
-}
+// The kernels, the neighbour-block Cholesky and its two solves are the shared
+// ones in ratiod_cov, templated on the scalar type exactly as this file needs
+// them. The copies that used to sit here carried their own Gaussian
+// parameterization, their own 1e-4 diagonal ridge and their own 1e-4 blended
+// conditional-variance floor, none of which the double path it is supposed to
+// reproduce applied.
+using ratiod_cov::compute_cov;
+using ratiod_cov::nngp_chol;
+using ratiod_cov::nngp_forward_solve;
+using ratiod_cov::nngp_back_solve;
+using ratiod_cov::nngp_floor_cond_var;
 
 // =============================================================================
 // Templated NNGP log-likelihood
@@ -215,19 +113,15 @@ T nngp_log_lik(
 
         // Cholesky decomposition: C = L * L^T
         std::vector<T> L;
-        if (!cholesky_decomp(C_mat, n_neighbors, L)) {
+        if (!nngp_chol(C_mat, n_neighbors, L)) {
             // Decomposition failed - return -infinity
             return T(-INFINITY);
         }
 
         // Solve C * alpha = c_vec via L * L^T * alpha = c_vec
-        // First: L * y = c_vec
-        std::vector<T> y;
-        solve_lower(L, n_neighbors, c_vec, y);
-
-        // Second: L^T * alpha = y
-        std::vector<T> alpha;
-        solve_upper(L, n_neighbors, y, alpha);
+        std::vector<T> y, alpha;
+        nngp_forward_solve(L, n_neighbors, c_vec, y);
+        nngp_back_solve(L, n_neighbors, y, alpha);
 
         // Conditional mean: mu_i = c^T * C^{-1} * w_{N(i)} = alpha^T * w_{N(i)}
         T cond_mean = T(0.0);
@@ -241,18 +135,7 @@ T nngp_log_lik(
         for (int j = 0; j < n_neighbors; j++) {
             c_Cinv_c = c_Cinv_c + c_vec[j] * alpha[j];
         }
-        T cond_var = sigma2 - c_Cinv_c;
-
-        // Ensure positive variance with smooth transition for differentiability
-        // Use max(MIN_VAR, cond_var) but with smooth gradient near boundary
-        // Increased to 1e-4 to reduce HMC divergences
-        constexpr double MIN_VAR = 1e-4;
-        double cv_val = get_value(cond_var);
-
-        if (cv_val < MIN_VAR) {
-            // Blend smoothly: keep most of MIN_VAR but maintain some gradient information
-            cond_var = T(MIN_VAR * 0.99) + cond_var * T(0.01);
-        }
+        T cond_var = nngp_floor_cond_var(sigma2 - c_Cinv_c);
 
         // Log-likelihood contribution
         T resid = w[obs_idx] - cond_mean;

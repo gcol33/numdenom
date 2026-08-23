@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <cmath>
+#include "hmc_cov.h"
 #include "hmc_gp.h"
 #include "autodiff_utils.h"
 
@@ -14,115 +15,17 @@ namespace ratiod_gp {
 
 using namespace ratiod::math;
 
-// =============================================================================
-// Templated covariance functions
-// =============================================================================
-
-// Exponential covariance: sigma2 * exp(-d/phi)
-template<typename T>
-inline T cov_exponential_t(double d, const T& sigma2, const T& phi) {
-    return sigma2 * safe_exp(-d / phi);
-}
-
-// Matern 3/2 covariance: sigma2 * (1 + sqrt(3)*d/phi) * exp(-sqrt(3)*d/phi)
-template<typename T>
-inline T cov_matern32_t(double d, const T& sigma2, const T& phi) {
-    T r = d / phi;
-    T sqrt3_r = 1.732050808 * r;  // sqrt(3) * r
-    return sigma2 * (T(1.0) + sqrt3_r) * safe_exp(-sqrt3_r);
-}
-
-// Gaussian (squared exponential) covariance: sigma2 * exp(-0.5 * (d/phi)^2)
-template<typename T>
-inline T cov_gaussian_t(double d, const T& sigma2, const T& phi) {
-    T r = d / phi;
-    return sigma2 * safe_exp(T(-0.5) * r * r);
-}
-
-// Generic covariance dispatcher
-template<typename T>
-inline T compute_cov_t(double d, const T& sigma2, const T& phi,
-                       ratiod_svc::CovType cov_type) {
-    switch (cov_type) {
-        case ratiod_svc::CovType::EXPONENTIAL:
-            return cov_exponential_t(d, sigma2, phi);
-        case ratiod_svc::CovType::MATERN:
-            return cov_matern32_t(d, sigma2, phi);
-        case ratiod_svc::CovType::GAUSSIAN:
-            return cov_gaussian_t(d, sigma2, phi);
-        default:
-            return cov_exponential_t(d, sigma2, phi);
-    }
-}
-
-// =============================================================================
-// Templated Cholesky decomposition and solve
-// For small matrices (nn typically 5-30)
-// =============================================================================
-
-// Cholesky decomposition: A = L * L^T
-// Returns false if not positive definite
-template<typename T>
-inline bool cholesky_decompose_t(const std::vector<T>& A, int n, std::vector<T>& L) {
-    L.assign(n * n, T(0.0));
-
-    for (int j = 0; j < n; j++) {
-        T sum = A[j * n + j];
-        for (int k = 0; k < j; k++) {
-            sum = sum - L[j * n + k] * L[j * n + k];
-        }
-
-        // Check positive definiteness
-        if (get_value(sum) < 1e-10) {
-            // Add small jitter and try again
-            sum = sum + T(1e-8);
-            if (get_value(sum) < 1e-10) {
-                return false;
-            }
-        }
-
-        L[j * n + j] = safe_sqrt(sum);
-
-        // Off-diagonal elements
-        for (int i = j + 1; i < n; i++) {
-            T sum_ij = A[i * n + j];
-            for (int k = 0; k < j; k++) {
-                sum_ij = sum_ij - L[i * n + k] * L[j * n + k];
-            }
-            L[i * n + j] = sum_ij / L[j * n + j];
-        }
-    }
-
-    return true;
-}
-
-// Forward substitution: solve L * y = b
-template<typename T>
-inline void forward_solve_t(const std::vector<T>& L, int n,
-                            const std::vector<T>& b, std::vector<T>& y) {
-    y.resize(n);
-    for (int i = 0; i < n; i++) {
-        T sum = b[i];
-        for (int j = 0; j < i; j++) {
-            sum = sum - L[i * n + j] * y[j];
-        }
-        y[i] = sum / L[i * n + i];
-    }
-}
-
-// Backward substitution: solve L^T * x = y
-template<typename T>
-inline void backward_solve_t(const std::vector<T>& L, int n,
-                             const std::vector<T>& y, std::vector<T>& x) {
-    x.resize(n);
-    for (int i = n - 1; i >= 0; i--) {
-        T sum = y[i];
-        for (int j = i + 1; j < n; j++) {
-            sum = sum - L[j * n + i] * x[j];
-        }
-        x[i] = sum / L[i * n + i];
-    }
-}
+// The kernels, the neighbour-block Cholesky and its two solves are the shared
+// ones in ratiod_cov. The copies that used to sit here carried sqrt(3) rounded
+// to a typed-out literal, no spherical case at all (it fell through to
+// exponential), and a ridge applied only once a pivot had already gone
+// non-positive, where the double path this is supposed to reproduce adds one
+// unconditionally.
+using ratiod_cov::compute_cov;
+using ratiod_cov::nngp_chol;
+using ratiod_cov::nngp_forward_solve;
+using ratiod_cov::nngp_back_solve;
+using ratiod_cov::nngp_floor_cond_var;
 
 // =============================================================================
 // Templated NNGP log-likelihood
@@ -218,7 +121,7 @@ T gp_nngp_log_lik_t(
         for (int j = 0; j < n_neighbors; j++) {
             int nn_flat_idx = i * nn + j;
             double d = gp_data.nn_dist[nn_flat_idx];
-            c_vec[j] = compute_cov_t(d, sigma2, phi, gp_data.cov_type);
+            c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
         }
 
         // C_mat: covariances among neighbors
@@ -250,25 +153,21 @@ T gp_nngp_log_lik_t(
                 } else {
                     // Phase 1.3: Use cached pairwise neighbor distances
                     double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
-                    C_mat[j1 * n_neighbors + j2] = compute_cov_t(d12, sigma2, phi, gp_data.cov_type);
+                    C_mat[j1 * n_neighbors + j2] = compute_cov(d12, sigma2, phi, gp_data.cov_type);
                 }
             }
         }
 
         // Cholesky decomposition
-        std::vector<T> L_small(n_neighbors * n_neighbors);
-        if (!cholesky_decompose_t(C_mat, n_neighbors, L_small)) {
+        std::vector<T> L_small;
+        if (!nngp_chol(C_mat, n_neighbors, L_small)) {
             return T(-1e10);  // Not positive definite
         }
 
-        // Solve L * y = c_vec (forward substitution)
         std::vector<T> c_small(c_vec.begin(), c_vec.begin() + n_neighbors);
-        std::vector<T> y_small;
-        forward_solve_t(L_small, n_neighbors, c_small, y_small);
-
-        // Solve L^T * alpha = y (backward substitution)
-        std::vector<T> alpha_small;
-        backward_solve_t(L_small, n_neighbors, y_small, alpha_small);
+        std::vector<T> y_small, alpha_small;
+        nngp_forward_solve(L_small, n_neighbors, c_small, y_small);
+        nngp_back_solve(L_small, n_neighbors, y_small, alpha_small);
 
         // Conditional mean
         T cond_mean = T(0.0);
@@ -293,12 +192,7 @@ T gp_nngp_log_lik_t(
         for (int j = 0; j < n_neighbors; j++) {
             c_Cinv_c = c_Cinv_c + c_small[j] * alpha_small[j];
         }
-        T cond_var = sigma2 - c_Cinv_c;
-
-        // Ensure positive variance
-        if (get_value(cond_var) < 1e-10) {
-            cond_var = T(1e-10);
-        }
+        T cond_var = nngp_floor_cond_var(sigma2 - c_Cinv_c);
 
         // Log-likelihood contribution
         T resid = w[obs_idx] - cond_mean;

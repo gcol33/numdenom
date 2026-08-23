@@ -718,6 +718,26 @@ Rcpp::List cpp_gradient_check(std::string field,
   std::vector<double> params(n_params);
   for (int i = 0; i < n_params; i++) params[i] = rnorm(rng);
 
+  // The GP locations sit in the unit square, so a draw centred on log phi = 0
+  // asks for a correlation range the size of the whole domain. Every neighbour
+  // block is then numerically singular, the conditional variance sits on its
+  // floor, and the density is not differentiable in sigma2 there -- the
+  // comparison would measure the floor rather than the gradient. Centre the
+  // range on a tenth of the domain instead, which the random draw still moves.
+  // The floor binds harder the smoother the kernel: measured relative deviation
+  // on log_sigma2 at log phi = 0 was 2e-07 exponential, 2.4e-05 Matern 3/2 and
+  // 7.0e-02 Gaussian, all flat in the difference step.
+  const double log_phi_center = std::log(0.1);
+  for (int idx : {layout.log_phi_gp_idx, layout.log_phi_gp_local_idx,
+                  layout.log_phi_gp_regional_idx}) {
+    if (idx >= 0 && idx < n_params) params[idx] += log_phi_center;
+  }
+  if (layout.log_phi_svc_start >= 0) {
+    for (int j = layout.log_phi_svc_start; j < layout.log_phi_svc_end; j++) {
+      if (j < n_params) params[j] += log_phi_center;
+    }
+  }
+
   if (precenter && layout.spatial_start >= 0) {
     double m = 0.0;
     for (int i = layout.spatial_start; i < layout.spatial_end; i++) m += params[i];

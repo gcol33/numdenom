@@ -60,7 +60,8 @@ ST_IV_FIELDS <- c("st4", "st4_nc")
 # default gradient mode NUTS runs on these with no offline check, which is how
 # the GP covariance derivative (gcol33/tulpaRatio#42) and the AR1 precision
 # gradient (gcol33/tulpaRatio#43) both reached a release.
-KERNEL_FIELDS <- c("gp", "gp_temporal", "msgp", "msgp_temporal", "svc_hsgp",
+KERNEL_FIELDS <- c("gp", "gp_matern", "gp_gaussian", "gp_spherical",
+                   "gp_temporal", "msgp", "msgp_temporal", "svc", "svc_hsgp",
                    "temporal_gp", "ms_temporal", "latent")
 # The collapsed GP marginalizes its field out the way the collapsed areal
 # fields do, so like them it has no autodiff case.
@@ -68,23 +69,16 @@ KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed")
 # Fields whose analytic gradient reproduces their own density exactly while that
 # density and the templated one are different, so they join the sweep in
 # handcoded mode only and stay out of ALL_FIELDS, whose density-equality
-# assertion they fail.
-#   svc     -- the NNGP SVC, whose two densities are 30 nats apart with
-#              log_post_impl_gap() declaring nothing (gcol33/tulpaRatio#56).
-#   tvc_ar1 -- rho carries a Uniform(-1, 1) prior in compute_log_post and a
-#              Beta(2, 2) one in compute_log_post_impl, one extra
-#              log(u) + log(1-u) apart (gcol33/tulpaRatio#58). Its gradient
-#              matches the Uniform density to 0.
-KERNEL_H_ONLY_FIELDS <- c("svc", "tvc_ar1")
-# Cases the harness can now build whose gradient does not match the density it
+# assertion they fail. tvc_ar1's rho carries a Uniform(-1, 1) prior in
+# compute_log_post and a Beta(2, 2) one in compute_log_post_impl, one extra
+# log(u) + log(1-u) apart (gcol33/tulpaRatio#58); its gradient matches the
+# Uniform density to 0.
+KERNEL_H_ONLY_FIELDS <- c("tvc_ar1")
+# Cases the harness can build whose gradient does not match the density it
 # reports. Each names the defect it is blocked on; the case is written out so
 # the fix has a test to turn green, and the deviation each measures today is
 # recorded in the issue.
-BLOCKED_FIELDS <- c(
-  gp_matern    = "gcol33/tulpaRatio#55",
-  gp_gaussian  = "gcol33/tulpaRatio#42",
-  gp_spherical = "gcol33/tulpaRatio#42"
-)
+BLOCKED_FIELDS <- character(0)
 ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
                 KERNEL_FIELDS)
 MODES <- c("handcoded", "arena")

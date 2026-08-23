@@ -81,6 +81,48 @@
   Both call sites share one function, so a mismatch raises an R-level warning
   from the multi-chain path as well as the single-chain one.
 
+* **One covariance family and one neighbour-block factorization behind every
+  NNGP path (#42, #55, #56).** The GP path, the SVC path and their two
+  templated twins each carried a copy of the four kernels and of the small
+  dense Cholesky over a neighbour set, and the copies had drifted apart on four
+  separate numbers: the Gaussian kernel was written with and without the 0.5 in
+  its exponent, Matern 3/2 carried `sqrt(3)` exactly in two of them and rounded
+  to `1.732050808` in the third, one had no spherical case and fell through to
+  exponential, and the neighbour block was regularized four different ways
+  (`1e-8` always, `1e-8` only once a pivot had already gone non-positive, a
+  `1e-6` floor substituted into the pivot, `1e-4` always) with the conditional
+  variance floored three more (`1e-10`, `1e-6`, and a `1e-4` blend keeping 1%
+  of the gradient). The analytic gradient paths factorized the block a third
+  time again, with no ridge and a pivot replaced by `1e-5`. So the value a fit
+  reported and the gradient it moved on came from different copies. Measured
+  before: the two densities were 30 nats apart on the NNGP SVC and 0.086 apart
+  on a Matern GP, with the deviation flat across difference steps from 1e-3 to
+  1e-7. Everything now routes through `src/hmc_cov.h`, templated once for the
+  double evaluation and the `ad::Var` / `fwd::Dual` / `arena::Var` gradients
+  alike; across `gp`, `gp_matern`, `gp_gaussian`, `gp_spherical`, `gp_temporal`,
+  `msgp`, `msgp_temporal`, `svc` and `svc_hsgp` the two densities now agree to
+  the printed digit and every gradient matches central differences of both to
+  2e-06 or better.
+
+* **`cov = "gaussian"` is `exp(-0.5 (d / phi)^2)` on every path.** The analytic
+  path evaluated `exp(-(d / phi)^2)` while taking its `phi` derivative from the
+  other form, so it was running on half the derivative of the density it
+  reported; the templated path already used the 0.5. The 0.5 is what makes
+  `phi` a lengthscale here as it is for the other three kernels -- it is the
+  standard squared-exponential and the `nu -> infinity` limit of Matern at a
+  fixed `phi` -- so the shared kernel keeps it. A `phi` estimated by a previous
+  `cov = "gaussian"` fit under a handcoded gradient mode corresponds to
+  `phi / sqrt(2)` now; a fit under `A`, `A_r` or `A_t` is unchanged.
+
+* **`cov = "spherical"` is differentiated rather than silently run as
+  exponential (#42).** Neither analytic derivative had a spherical case and the
+  templated dispatcher had no spherical kernel, so both fell through to the
+  exponential arm. `dk/dphi = 1.5 sigma2 (r - r^3) / phi` is written out, which
+  is why `dcov_dphi` now takes `sigma2` -- it is the one case not expressible
+  through the covariance value. An unrecognised covariance name is an error at
+  both string parsers, where the GP one used to map anything it did not
+  recognise to spherical and the SVC one to exponential.
+
 * **A TVC AR1 field's `log tau` gradient had the wrong sign on its stationary
   normalizer (#43).** The AR1 prior parameterizes the stationary variance as
   `1 / (tau (1 - rho^2))`, so `-0.5 log(2 pi var)` differentiates to `+0.5` in
