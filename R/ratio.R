@@ -84,6 +84,18 @@ ratio.ratiod_fit <- function(object, newdata = NULL, type = c("response", "log",
     }
   }
 
+  # Ensure column names
+  if (is.null(colnames(ratio_draws))) {
+    colnames(ratio_draws) <- paste0("ratio[", seq_len(ncol(ratio_draws)), "]")
+  }
+
+  # Aggregate by group if requested. The group value is a geometric mean of
+  # ratios, which is defined on the natural scale, so aggregation happens
+  # before the requested transform is applied to the result.
+  if (!is.null(by)) {
+    ratio_draws <- aggregate_by_group(ratio_draws, object$data, by)
+  }
+
   # Transform to requested scale
   if (type == "log") {
     ratio_draws <- log(ratio_draws)
@@ -94,16 +106,6 @@ ratio.ratiod_fit <- function(object, newdata = NULL, type = c("response", "log",
               "Results may include Inf/-Inf.", call. = FALSE)
     }
     ratio_draws <- log(ratio_draws / (1 - ratio_draws))
-  }
-
-  # Ensure column names
-  if (is.null(colnames(ratio_draws))) {
-    colnames(ratio_draws) <- paste0("ratio[", seq_len(ncol(ratio_draws)), "]")
-  }
-
-  # Aggregate by group if requested
-  if (!is.null(by)) {
-    ratio_draws <- aggregate_by_group(ratio_draws, object$data, by)
   }
 
   # Create result object
