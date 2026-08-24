@@ -1214,11 +1214,27 @@ inline void nngp_nc_backward(
         int n_nb = ws.B_n_nb[i];
         if (n_nb == 0 || obs_loc < 0 || obs_loc >= N) continue;
 
-        // Rebuild c_vec, dc_vec for phi derivatives (but NOT C_mat or Cholesky)
+        // Rebuild c_vec, dc_vec and C_mat for the phi derivatives. The
+        // Cholesky itself is restored from the forward pass below, but C_mat
+        // has to be rebuilt: dC/dphi is a function of the covariance value at
+        // each neighbour pair, so an unfilled C_mat makes every dC entry zero
+        // and silently drops both the -dC*alpha term from dalpha and the
+        // alpha'dC*alpha term from dd_dphi.
         for (int j = 0; j < n_nb; j++) {
             double d = gp_data.nn_dist[i * nn + j];
             c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
             dc_vec[j] = dcov_dphi(d, sigma2, phi, c_vec[j], gp_data.cov_type);
+        }
+        for (int j1 = 0; j1 < n_nb; j1++) {
+            for (int j2 = 0; j2 < n_nb; j2++) {
+                if (j1 == j2) {
+                    C_mat[j1 * n_nb + j2] = sigma2;
+                } else {
+                    double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
+                    C_mat[j1 * n_nb + j2] =
+                        compute_cov(d12, sigma2, phi, gp_data.cov_type);
+                }
+            }
         }
 
         // Restore cached Cholesky factor L and alpha from forward pass

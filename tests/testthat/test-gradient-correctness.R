@@ -63,9 +63,16 @@ ST_IV_FIELDS <- c("st4", "st4_nc")
 KERNEL_FIELDS <- c("gp", "gp_matern", "gp_gaussian", "gp_spherical",
                    "gp_temporal", "msgp", "msgp_temporal", "svc", "svc_hsgp",
                    "temporal_gp", "ms_temporal", "latent")
-# The collapsed GP marginalizes its field out the way the collapsed areal
-# fields do, so like them it has no autodiff case.
-KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed")
+# Fields the templated density declares a gap for, so like the collapsed areal
+# fields they have no autodiff case and are checked against compute_log_post
+# alone.
+#   gp_collapsed -- marginalizes its field out, as the collapsed areal fields do.
+#   gp_nc        -- spatial_gp(parameterization = "noncentered"): the sampled
+#                   parameters are z ~ N(0, I) and the field is
+#                   w = L(sigma2, phi) z, so both hyperparameters reach eta
+#                   through the transform. compute_log_post_impl has no
+#                   non-centred branch and says so (gcol33/tulpaRatio#26).
+KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc")
 # Fields whose analytic gradient reproduces their own density exactly while that
 # density and the templated one are different, so they join the sweep in
 # handcoded mode only and stay out of ALL_FIELDS, whose density-equality
@@ -517,5 +524,41 @@ test_that("centring makes the spatial field's mean invisible to the likelihood",
     beta <- which(raw$block == "beta_num")
     expect_equal(raw$analytic[beta], cen$analytic[beta], tolerance = 1e-8,
                  info = sprintf("field = %s", field))
+  }
+})
+
+test_that("a non-centred GP fit keeps its handcoded gradient (gcol33/tulpaRatio#57)", {
+  skip_on_cran()
+  # resolve_gradient_fn sends any GP model at the default gradient mode to
+  # compute_gradient_gp_handcoded, so the non-centred parameterization is the
+  # default path for these fits and not an opt-in kernel. Two defects made that
+  # gradient disagree with its density: nngp_nc_backward read a C_mat it never
+  # filled, which zeroed dC/dphi and so dropped both the -dC*alpha term from
+  # dalpha and the alpha'dC*alpha term from dd_dphi; and the caller subtracted
+  # z after nngp_nc_backward had already seeded grad_z with -z, applying the
+  # N(0, 1) prior twice. The runtime check caught the first at log_phi and fell
+  # back to numerical gradients, so the fits were slow rather than wrong -- this
+  # asserts there is nothing left to fall back from.
+  set.seed(11)
+  n_loc <- 30L
+  reps <- 4L
+  co <- cbind(runif(n_loc), runif(n_loc))
+  S <- 0.8 * exp(-as.matrix(dist(co)) / 0.25)
+  w <- as.vector(t(chol(S + diag(1e-8, n_loc))) %*% rnorm(n_loc))
+  loc <- rep(seq_len(n_loc), each = reps)
+  x <- rnorm(n_loc * reps)
+  n <- rep(25L, n_loc * reps)
+  df <- data.frame(
+    y = rbinom(n_loc * reps, n, plogis(-0.3 + 0.6 * x + w[loc])),
+    n = n, x = x, lon = co[loc, 1], lat = co[loc, 2]
+  )
+  for (par in c("centered", "noncentered")) {
+    expect_warning(
+      tratio(y | n ~ x, data = df, family = ratiod_binomial(), mode = "hmc",
+             spatial = spatial_gp(~ lon + lat, parameterization = par, nn = 5),
+             control = list(iter = 60, warmup = 30, chains = 1,
+                            verbose = FALSE, seed = 7)),
+      NA
+    )
   }
 })

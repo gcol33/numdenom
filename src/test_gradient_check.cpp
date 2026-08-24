@@ -134,7 +134,7 @@ const char* const KNOWN_FIELDS[] = {
   "tvc", "tvc_iid", "tvc_ar1",
   "re", "re_crossed", "re_slopes", "re_slopes_corr",
   "gp", "gp_matern", "gp_gaussian", "gp_spherical",
-  "gp_collapsed", "gp_temporal",
+  "gp_nc", "gp_collapsed", "gp_temporal",
   "msgp", "msgp_temporal",
   "svc", "svc_hsgp",
   "temporal_gp", "ms_temporal", "latent"
@@ -216,9 +216,14 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // The NNGP / spectral fields. Each reaches a gradient kernel of its own that
   // no areal field visits: see resolve_gradient_fn in hmc_sampler.cpp.
   const bool want_gp_collapsed = (field == "gp_collapsed");
+  // spatial_gp(parameterization = "noncentered"): the sampled parameters are
+  // z ~ N(0, I) and the field is w = L(sigma2, phi) z, so both hyperparameters
+  // reach eta through the transform as well as through the prior.
+  const bool want_gp_nc = (field == "gp_nc");
   const bool want_gp = (field == "gp" || field == "gp_matern" ||
                         field == "gp_gaussian" || field == "gp_spherical" ||
-                        field == "gp_temporal" || want_gp_collapsed);
+                        field == "gp_temporal" || want_gp_nc ||
+                        want_gp_collapsed);
   const bool want_msgp = (field == "msgp" || field == "msgp_temporal");
   const bool want_svc_hsgp = (field == "svc_hsgp");
   const bool want_svc = (field == "svc" || want_svc_hsgp);
@@ -420,8 +425,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       gp.solver_config.n_obs = n_units;
       // spatial_gp() offers "centered", "noncentered" and "collapsed" and
       // defaults to centered, which is the parameterization these fields
-      // build.
-      data.gp_parameterization = 0;
+      // build; gp_nc is the non-centred one.
+      data.gp_parameterization = want_gp_nc ? 1 : 0;
       data.gp_sigma2_prior_U = 1.0;
       data.gp_sigma2_prior_alpha = 0.01;
       data.gp_phi_prior_lower = 0.01;
@@ -808,6 +813,7 @@ Rcpp::List cpp_gradient_check(std::string field,
     Rcpp::Named("analytic") = Rcpp::wrap(grad_analytic),
     Rcpp::Named("finite_diff") = Rcpp::wrap(grad_fd),
     Rcpp::Named("block") = block,
+    Rcpp::Named("params") = Rcpp::wrap(params),
     Rcpp::Named("n_params") = n_params,
     Rcpp::Named("log_post") = compute_log_post(params, data, layout),
     Rcpp::Named("log_post_impl") = ratiod::compute_log_post_impl(params, data, layout),

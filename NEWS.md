@@ -81,6 +81,28 @@
   Both call sites share one function, so a mismatch raises an R-level warning
   from the multi-chain path as well as the single-chain one.
 
+* **`spatial_gp(parameterization = "noncentered")` gets its handcoded gradient
+  back (#57).** Two defects made it disagree with the density it reports, and
+  `resolve_gradient_fn` sends every GP model at the default gradient mode to
+  `compute_gradient_gp_handcoded`, so this was the ordinary path for such a fit
+  rather than an opt-in kernel. `nngp_nc_backward` read a `C_mat` it never
+  filled -- the comment beside it said it deliberately did not rebuild one --
+  which made every `dC/dphi` entry zero and so dropped both the `-dC * alpha`
+  term from `dalpha` and the `alpha' dC alpha` term from `dd_dphi`; and the
+  caller subtracted `z` after `nngp_nc_backward` had already seeded `grad_z`
+  with `-z`, applying the `N(0, 1)` prior twice. Measured on the harness: worst
+  relative deviation `4.610e-01` at `log_phi_gp`, flat across difference steps
+  from 1e-3 to 1e-7, and the residual on every one of the 25 `z` entries equal
+  to `-z` to 1.1e-07 with a fitted slope of 0.99999997. Both now measure
+  `0.000e+00` with a V-shaped sweep.
+
+  The fits themselves were slow rather than wrong: the runtime gradient check
+  introduced in this release catches the `log_phi` mismatch at its probe point
+  and falls back to numerical gradients, which is what a non-centred GP fit had
+  been running on. That fallback no longer fires. Before this release the check
+  differenced at the origin, where `z = 0` makes `w = 0` and both defects
+  contribute exactly nothing, so it saw neither.
+
 * **One covariance family and one neighbour-block factorization behind every
   NNGP path (#42, #55, #56).** The GP path, the SVC path and their two
   templated twins each carried a copy of the four kernels and of the small

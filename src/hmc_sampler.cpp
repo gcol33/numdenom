@@ -5202,9 +5202,12 @@ void compute_gradient_gp_handcoded(
             dL_dw.data(), grad_z.data(),
             grad_log_sigma2_lik, grad_log_phi_lik, grad_log_phi_jac);
 
-        // Write z gradients to grad: likelihood (from backward pass) + N(0,1) prior (-z_i)
+        // nngp_nc_backward returns the FULL z gradient -- its own contract is
+        // "prior + likelihood", and it seeds each entry with -z[loc] before
+        // adding sqrt(d_i) * adj_i. Subtracting z_params here as well applied
+        // the N(0,1) prior twice.
         for (int i = 0; i < N_gp; i++) {
-            grad[layout.gp_w_start + i] += grad_z[i] - z_params[i];
+            grad[layout.gp_w_start + i] += grad_z[i];
         }
 
         // Add likelihood contributions to hyperparameters
