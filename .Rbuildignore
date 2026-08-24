@@ -40,3 +40,4 @@
 ^test_spatial_temporal\.R$
 ^test_zi\.R$
 ^debug_gp_crash\.md$
+^\.git-blame-ignore-revs$
