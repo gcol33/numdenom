@@ -9,8 +9,11 @@
 #'   P(sigma > 1) = 0.01.
 #' @param phi Prior for overdispersion parameter. Default: PC prior with
 #'   P(phi > 10) = 0.01.
-#' @param rho_temporal Prior for temporal autocorrelation. Default:
-#'   `prior_beta(2, 2)` centered at 0.5.
+#' @param rho_temporal Prior for a temporal autocorrelation, placed on
+#'   `(rho + 1) / 2` so `rho` lives on (-1, 1). Default: `prior_beta(2, 2)`,
+#'   symmetric about `rho = 0`. Applies to `temporal_ar1()`, a
+#'   `spatiotemporal()` interaction's AR1 time margin, the TVC arm and the
+#'   multi-scale short-term arm; each block's own `rho_prior` overrides it.
 #' @param rho_spatial Prior for spatial proportion (BYM2). Default:
 #'   `prior_beta(1, 1)` (uniform).
 #'
@@ -268,6 +271,45 @@ prior_beta <- function(alpha = 1, beta = 1) {
 }
 
 
+#' Validate a Beta prior on an AR1 correlation
+#'
+#' The correlation is sampled as `logit((rho + 1) / 2)`, so its prior is a Beta
+#' on `(rho + 1) / 2`. `NULL` defers to the model-wide `rho_temporal` default.
+#'
+#' @param rho_prior A `prior_beta()` object, or `NULL`.
+#' @param arg Name to report in an error message.
+#'
+#' @return `rho_prior`, unchanged.
+#' @keywords internal
+validate_rho_prior <- function(rho_prior, arg = "rho_prior") {
+  if (is.null(rho_prior)) return(NULL)
+  if (!inherits(rho_prior, "ratiod_prior") ||
+      !identical(rho_prior$distribution, "beta")) {
+    stop("`", arg, "` must be a Beta prior from prior_beta(alpha, beta).",
+         call. = FALSE)
+  }
+  rho_prior
+}
+
+
+#' Beta anchors for an AR1 correlation
+#'
+#' Resolves the block's own `rho_prior` against the model-wide
+#' `ratiod_priors(rho_temporal = )`, falling back to Beta(2, 2).
+#'
+#' @param block_prior The block's `rho_prior`, or `NULL`.
+#' @param default_prior The model-wide prior, or `NULL`.
+#'
+#' @return Numeric vector with elements `a` and `b`.
+#' @keywords internal
+rho_prior_anchors <- function(block_prior, default_prior = NULL) {
+  p <- validate_rho_prior(block_prior) %||%
+       validate_rho_prior(default_prior, "rho_temporal") %||%
+       prior_beta(2, 2)
+  c(a = p$alpha, b = p$beta)
+}
+
+
 #' Penalized complexity (PC) prior
 #'
 #' @description
@@ -462,8 +504,8 @@ print_prior <- function(prior, indent = "") {
 #' - **Overdispersion (phi)**: PC prior with P(phi > 10) = 0.01 - regularizes
 #'   toward Poisson (phi -> Inf means less overdispersion in NB2).
 #'
-#' - **Temporal correlation (rho)**: Beta(2, 2) - symmetric prior centered
-#'   at 0.5, appropriate for AR(1) correlation.
+#' - **Temporal correlation (rho)**: Beta(2, 2) on `(rho + 1) / 2`, i.e.
+#'   symmetric about `rho = 0` on (-1, 1), appropriate for AR(1) correlation.
 #'
 #' - **Spatial mixing (rho_spatial)**: Beta(1, 1) = Uniform(0, 1) - no
 #'   prior preference for structured vs. unstructured spatial variation.

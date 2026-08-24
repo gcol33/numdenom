@@ -190,6 +190,10 @@ struct ModelData {
   bool temporal_shared = true;          // Whether effect is shared between num/denom
   double tau_temporal_shape = 1.0;      // Gamma shape for temporal precision
   double tau_temporal_rate = 0.01;      // Gamma rate for temporal precision
+  // Beta(a, b) on u = (rho + 1) / 2 for an AR1 temporal correlation, which is
+  // what priors_default() documents and temporal_ar1(rho_prior =) overrides.
+  double temporal_rho_prior_a = ratiod_ar1::RHO_PRIOR_A;
+  double temporal_rho_prior_b = ratiod_ar1::RHO_PRIOR_B;
 
   // Zero-inflation structure
   ZIType zi_type = ZIType::NONE;

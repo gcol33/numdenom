@@ -21,8 +21,11 @@ P(sigma > 1) = 0.01.}
 \item{phi}{Prior for overdispersion parameter. Default: PC prior with
 P(phi > 10) = 0.01.}
 
-\item{rho_temporal}{Prior for temporal autocorrelation. Default:
-\code{prior_beta(2, 2)} centered at 0.5.}
+\item{rho_temporal}{Prior for a temporal autocorrelation, placed on
+\code{(rho + 1) / 2} so \code{rho} lives on (-1, 1). Default: \code{prior_beta(2, 2)},
+symmetric about \code{rho = 0}. Applies to \code{temporal_ar1()}, a
+\code{spatiotemporal()} interaction's AR1 time margin, the TVC arm and the
+multi-scale short-term arm; each block's own \code{rho_prior} overrides it.}
 
 \item{rho_spatial}{Prior for spatial proportion (BYM2). Default:
 \code{prior_beta(1, 1)} (uniform).}

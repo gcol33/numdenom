@@ -112,30 +112,16 @@ inline double rw2_quadratic_form(
 // Compute log-density for AR1 process
 // phi[t] | phi[t-1] ~ N(rho * phi[t-1], sigma^2)
 // Marginal variance: sigma^2 / (1 - rho^2)
+//
+// The exponent and the normalizer are ratiod_ar1's precision R(rho), the same
+// matrix the spatiotemporal interaction reads as a Kronecker margin.
 inline double ar1_log_density(
     const double* phi,
     int T,
     double rho,
     double tau  // precision = 1/sigma^2
 ) {
-  if (T < 2) return 0.0;
-
-  double log_dens = 0.0;
-
-  // First observation: phi[0] ~ N(0, sigma^2 / (1 - rho^2))
-  double marginal_var = 1.0 / (tau * ratiod_ar1::one_minus_rho2(rho));
-  log_dens -= 0.5 * phi[0] * phi[0] / marginal_var;
-  log_dens -= 0.5 * std::log(2.0 * M_PI * marginal_var);
-
-  // Conditional: phi[t] | phi[t-1] ~ N(rho * phi[t-1], sigma^2)
-  double sigma2 = 1.0 / tau;
-  for (int t = 1; t < T; t++) {
-    double resid = phi[t] - rho * phi[t - 1];
-    log_dens -= 0.5 * resid * resid / sigma2;
-    log_dens -= 0.5 * std::log(2.0 * M_PI * sigma2);
-  }
-
-  return log_dens;
+  return ratiod_ar1::ar1_log_density(phi, T, rho, tau);
 }
 
 // =====================================================================
@@ -196,7 +182,7 @@ inline std::pair<double, double> ar1_nc_gradient(
     double glt = grad_phi_lik[0] * (-0.5 * phi[0]);
     // rho gradient: d(phi[0])/d(rho) = phi[0] * rho / (1-rho^2)
     double gr = grad_phi_lik[0] * (phi[0] * rho / omr2);
-    double glr = gr * rho * (1.0 - rho);
+    double glr = gr * ratiod_ar1::drho_dlogit(rho);
     return {glt, glr};
   }
 
@@ -237,8 +223,8 @@ inline std::pair<double, double> ar1_nc_gradient(
     dphi_drho = phi[t - 1] + rho * dphi_drho;
     grad_rho += adj[t] * dphi_drho;
   }
-  // Chain rule: d/d(logit_rho) = d/d(rho) * rho * (1-rho)
-  double grad_logit_rho = grad_rho * rho * (1.0 - rho);
+  // Chain rule from rho on (-1, 1) to its sampled logit coordinate.
+  double grad_logit_rho = grad_rho * ratiod_ar1::drho_dlogit(rho);
 
   return {grad_log_tau, grad_logit_rho};
 }

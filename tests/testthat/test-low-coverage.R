@@ -448,9 +448,10 @@ test_that("temporal_rw2 creates valid object", {
   expect_equal(temp$type, "rw2")
 })
 
-test_that("temporal_ar1 creates valid object with rho", {
-  temp <- temporal_ar1(time_var = "year", rho = 0.9)
-  expect_equal(temp$rho, 0.9)
+test_that("temporal_ar1 creates valid object with a correlation prior", {
+  temp <- temporal_ar1(time_var = "year", rho_prior = prior_beta(9, 1))
+  expect_s3_class(temp$rho_prior, "ratiod_prior")
+  expect_equal(temp$rho_prior$alpha, 9)
 })
 
 # -----------------------------------------------------------------------------

@@ -10,6 +10,7 @@
 #include "hmc_temporal.h"
 #include "hmc_svc.h"
 #include "autodiff_utils.h"
+#include "ar1_shared.h"
 #include "hmc_temporal_autodiff.h"
 #include "hmc_svc_autodiff.h"
 
@@ -33,6 +34,36 @@ enum class STType {
   SEPARABLE,   // Separable GP
   NONSEP_GP    // Non-separable GP
 };
+
+// The rank the interaction's time margin contributes to the GMRF normalizer,
+// which is what multiplies log(tau). RW1 and RW2 are improper and contribute
+// their own rank; AR1 is proper on (-1, 1) and contributes the full T, with its
+// rho-dependent log|R| carried alongside rather than folded in here. Every site
+// that normalizes an interaction reads this one function -- the density, the
+// non-centered rank correction and both hand-coded gradients -- because a rank
+// the density and its gradient disagree on is a tau posterior that moves under
+// a Hamiltonian nothing scores. A margin the interaction cannot express
+// contributes no quadratic form, so it contributes no normalizer either --
+// the two halves of the same prior.
+inline int st_time_rank(TemporalType type, int T, bool cyclic) {
+  switch (type) {
+    case TemporalType::RW1: return tulpa::rw1_rank(T, cyclic);
+    case TemporalType::RW2: return tulpa::rw2_rank(T, cyclic);
+    case TemporalType::AR1: return (T >= 2) ? T : 0;
+    default:                return 0;
+  }
+}
+
+// Whether the interaction's time margin carries a correlation to estimate.
+// Type II applies the temporal precision within each spatial unit and Type IV
+// carries it as a Kronecker margin, so both read rho. Type I is iid over the
+// whole grid and Type III's time margin is unstructured, so neither has one;
+// the GP types carry a range instead. HSGP-ST reads the margin per basis
+// function, which the caller adds since it is a property of the data, not the
+// interaction type.
+inline bool st_time_margin_is_structured(STType type) {
+  return type == STType::TYPE_II || type == STType::TYPE_IV;
+}
 
 // Non-separability types for GP
 enum class NonsepType {
@@ -89,6 +120,10 @@ struct SpatiotemporalData {
   // Prior parameters
   double sigma2_prior_U;           // PC prior: P(sigma > U) = alpha
   double sigma2_prior_alpha;
+  // Beta(a, b) on u = (rho + 1) / 2 for an AR1 time margin, the same
+  // parameterization ratiod_ar1 reads everywhere else.
+  double rho_prior_a = ratiod_ar1::RHO_PRIOR_A;
+  double rho_prior_b = ratiod_ar1::RHO_PRIOR_B;
   double phi_space_prior_lower;    // Uniform bounds for spatial range
   double phi_space_prior_upper;
   double phi_time_prior_lower;     // Uniform bounds for temporal range
@@ -135,6 +170,7 @@ inline Scalar type_ii_log_prior(
     int S,
     int T,
     const Scalar& tau,
+    const Scalar& rho,    // AR1 autocorrelation; unread by the RW margins
     TemporalType temp_type,
     bool cyclic
 ) {
@@ -159,8 +195,12 @@ inline Scalar type_ii_log_prior(
       int rank = tulpa::rw2_rank(T, cyclic);
       log_prior = log_prior + Scalar(0.5 * rank) * safe_log(tau)
                             - Scalar(0.5) * tau * quad;
+    } else if (temp_type == TemporalType::AR1) {
+      // Proper on (-1, 1), so the whole T-dimensional normalizer applies and
+      // carries log|R(rho)| with it.
+      log_prior = log_prior +
+                  ratiod_ar1::ar1_log_prior(delta_s.data(), T, rho, tau);
     }
-    // AR1 would need rho parameter
   }
 
   return log_prior;
@@ -240,6 +280,7 @@ inline Scalar type_iv_log_prior(
     int T,
     const Scalar& tau_space,
     const Scalar& tau_time,
+    const Scalar& rho,    // AR1 autocorrelation of the time margin
     const std::vector<int>& adj_row_ptr,
     const std::vector<int>& adj_col_idx,
     TemporalType temp_type,
@@ -316,19 +357,36 @@ inline Scalar type_iv_log_prior(
       }
     }
     // Cyclic extension if needed
+  } else if (temp_type == TemporalType::AR1 && T >= 2) {
+    // R(rho) contracted against the spatial inner products. R is tridiagonal,
+    // so only the diagonal, its interior, and the first off-diagonal of
+    // inner_prods survive -- the same two sums ratiod_ar1's scalar quadratic
+    // form takes over x[t]^2 and x[t] x[t-1].
+    Scalar interior = Scalar(0.0);
+    for (int t = 1; t < T - 1; t++) interior = interior + inner_prods[t][t];
+    Scalar cross = Scalar(0.0);
+    for (int t = 1; t < T; t++) cross = cross + inner_prods[t][t - 1];
+    quad = inner_prods[0][0] + inner_prods[T - 1][T - 1]
+         + (Scalar(1.0) + rho * rho) * interior
+         - Scalar(2.0) * rho * cross;
   }
 
   // Compute log-determinant contribution
-  // For Kronecker: log|Q_s (x) Q_t| = T*log|Q_s| + S*log|Q_t|
-  // But for improper priors (ICAR, RW), we use rank instead
+  // For Kronecker: log|Q_s (x) Q_t| = rank(Q_t)*log|Q_s|_+ + rank(Q_s)*log|Q_t|_+
+  // The spatial factor's own log-determinant is free of both hyperparameters and
+  // is dropped with the other constants; the AR1 time margin's is not, since
+  // log|R(rho)| = log(1 - rho^2) moves with the sampled correlation.
 
   int rank_space = S - 1;  // ICAR rank deficiency
-  int rank_time = (temp_type == TemporalType::RW1) ? tulpa::rw1_rank(T, cyclic)
-                                                   : tulpa::rw2_rank(T, cyclic);
+  int rank_time = st_time_rank(temp_type, T, cyclic);
 
   int total_rank = rank_space * rank_time;
 
   Scalar log_prior = Scalar(0.5 * total_rank) * safe_log(tau_space * tau_time);
+  if (temp_type == TemporalType::AR1 && T >= 2) {
+    log_prior = log_prior + Scalar(0.5 * rank_space) *
+                            safe_log(ratiod_ar1::one_minus_rho2(rho));
+  }
   log_prior = log_prior - Scalar(0.5) * tau_space * tau_time * quad;
 
   return log_prior;
@@ -583,8 +641,6 @@ inline Scalar spatiotemporal_log_prior(
     const Scalar& phi_time,
     const SpatiotemporalData& st_data
 ) {
-  (void)rho;
-
   if (st_data.type == STType::NONE) {
     return Scalar(0.0);
   }
@@ -597,7 +653,7 @@ inline Scalar spatiotemporal_log_prior(
       return type_i_log_prior(delta, S, T, tau);
 
     case STType::TYPE_II:
-      return type_ii_log_prior(delta, S, T, tau,
+      return type_ii_log_prior(delta, S, T, tau, rho,
                                st_data.temporal_type, st_data.temporal_cyclic);
 
     case STType::TYPE_III:
@@ -605,7 +661,7 @@ inline Scalar spatiotemporal_log_prior(
                                 st_data.adj_row_ptr, st_data.adj_col_idx);
 
     case STType::TYPE_IV:
-      return type_iv_log_prior(delta, S, T, tau, tau2,
+      return type_iv_log_prior(delta, S, T, tau, tau2, rho,
                                st_data.adj_row_ptr, st_data.adj_col_idx,
                                st_data.temporal_type, st_data.temporal_cyclic);
 

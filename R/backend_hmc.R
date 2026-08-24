@@ -284,6 +284,10 @@ fit_hmc <- function(formula,
   # Get temporal prior parameters
   tau_temporal_shape <- priors$tau_temporal_shape %||% 1.0
   tau_temporal_rate <- priors$tau_temporal_rate %||% 0.01
+  # Beta anchors on u = (rho + 1) / 2 for an AR1 correlation. The block's own
+  # rho_prior wins over the model-wide one; both default to Beta(2, 2).
+  rho_temporal_ab <- rho_prior_anchors(temporal_info$rho_prior,
+                                       priors$rho_temporal)
 
   # Prepare multi-term RE data
   n_re_terms <- hmc_data$n_re_terms %||% 0L
@@ -417,7 +421,9 @@ fit_hmc <- function(formula,
       cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
       shared = temporal_info$shared %||% TRUE,
       tau_shape = tau_temporal_shape,
-      tau_rate = tau_temporal_rate
+      tau_rate = tau_temporal_rate,
+      rho_prior_a = rho_temporal_ab[["a"]],
+      rho_prior_b = rho_temporal_ab[["b"]]
     )
 
     # Use O2-safe interface with single List parameter
@@ -505,6 +511,8 @@ fit_hmc <- function(formula,
       shared = temporal_info$shared %||% TRUE,
       tau_shape = tau_temporal_shape,
       tau_rate = tau_temporal_rate,
+      rho_prior_a = rho_temporal_ab[["a"]],
+      rho_prior_b = rho_temporal_ab[["b"]],
       # GP-specific fields (only used when type = "gp")
       time_values = temporal_info$time_values %||% numeric(0),
       cov_type = temporal_info$cov_type %||% "exponential",
@@ -555,6 +563,8 @@ fit_hmc <- function(formula,
     )
 
     st_is_hsgp <- isTRUE(spatiotemporal_info$spatial_is_hsgp)
+    st_rho_ab <- rho_prior_anchors(spatiotemporal_info$rho_prior,
+                                   priors$rho_temporal)
     st_params <- list(
       has_spatiotemporal = spatiotemporal_info$has_spatiotemporal %||% FALSE,
       type = spatiotemporal_info$type %||% "none",
@@ -572,6 +582,8 @@ fit_hmc <- function(formula,
       adj_col_idx = as.integer(spatiotemporal_info$spatial_Q$adj_col_idx %||% integer(0)),
       sigma2_prior_U = priors$st_sigma2_prior_U %||% 1.0,
       sigma2_prior_alpha = priors$st_sigma2_prior_alpha %||% 0.01,
+      rho_prior_a = st_rho_ab[["a"]],
+      rho_prior_b = st_rho_ab[["b"]],
       # Kronecker precision mass data
       Qs_inv = spatiotemporal_info$spatial_Q$Q_inv,
       Ls = spatiotemporal_info$spatial_Q$L_Q,
@@ -874,7 +886,9 @@ fit_hmc <- function(formula,
           cyclic    = isTRUE(temporal_info$precision_structure$cyclic),
           shared    = isTRUE(temporal_info$shared %||% TRUE),
           tau_shape = tau_temporal_shape,
-          tau_rate  = tau_temporal_rate
+          tau_rate  = tau_temporal_rate,
+          rho_prior_a = rho_temporal_ab[["a"]],
+          rho_prior_b = rho_temporal_ab[["b"]]
         )
       } else list()
 
@@ -1516,6 +1530,7 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
     n_temporal_params = temporal$n_temporal_params,
     precision_structure = temporal$precision_structure,
     shared = temporal$shared,
+    rho_prior = temporal$rho_prior,
     # TVC fields (not used for regular temporal)
     n_tvc = 0L,
     structure = temporal$type  # Use type as structure for consistency
@@ -2075,9 +2090,8 @@ initialize_hmc_params_full <- function(hmc_data, model_type, spatial_info,
 
       # tau_st2 removed — single tau for all ST types
 
-      # logit_rho_st for AR1 temporal in ST
-      st_temporal_type <- spatiotemporal_info$temporal_type %||% "rw1"
-      if (st_temporal_type == "ar1") {
+      # logit_rho_st, where the interaction's time margin reads one
+      if (st_has_rho(spatiotemporal_info)) {
         q_init <- c(q_init, 0.0)
       }
 

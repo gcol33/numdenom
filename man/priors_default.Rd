@@ -32,8 +32,8 @@ coefficients roughly in [-5, 5] on the link scale.
 simpler models with smaller variance components.
 \item \strong{Overdispersion (phi)}: PC prior with P(phi > 10) = 0.01 - regularizes
 toward Poisson (phi -> Inf means less overdispersion in NB2).
-\item \strong{Temporal correlation (rho)}: Beta(2, 2) - symmetric prior centered
-at 0.5, appropriate for AR(1) correlation.
+\item \strong{Temporal correlation (rho)}: Beta(2, 2) on \code{(rho + 1) / 2}, i.e.
+symmetric about \code{rho = 0} on (-1, 1), appropriate for AR(1) correlation.
 \item \strong{Spatial mixing (rho_spatial)}: Beta(1, 1) = Uniform(0, 1) - no
 prior preference for structured vs. unstructured spatial variation.
 }

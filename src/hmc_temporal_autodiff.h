@@ -98,24 +98,7 @@ T ar1_log_density_t(
     const T& rho,
     const T& tau  // precision = 1/sigma^2
 ) {
-    if (T_len < 2) return T(0.0);
-
-    T log_dens = T(0.0);
-
-    // First observation: phi[0] ~ N(0, sigma^2 / (1 - rho^2))
-    T marginal_var = T(1.0) / (tau * ratiod_ar1::one_minus_rho2(rho));
-    log_dens = log_dens - T(0.5) * phi[0] * phi[0] / marginal_var;
-    log_dens = log_dens - T(0.5) * safe_log(T(2.0 * M_PI) * marginal_var);
-
-    // Conditional: phi[t] | phi[t-1] ~ N(rho * phi[t-1], sigma^2)
-    T sigma2 = T(1.0) / tau;
-    for (int t = 1; t < T_len; t++) {
-        T resid = phi[t] - rho * phi[t - 1];
-        log_dens = log_dens - T(0.5) * resid * resid / sigma2;
-        log_dens = log_dens - T(0.5) * safe_log(T(2.0 * M_PI) * sigma2);
-    }
-
-    return log_dens;
+    return ratiod_ar1::ar1_log_density(phi, T_len, rho, tau);
 }
 
 template<typename T>

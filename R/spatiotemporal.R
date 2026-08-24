@@ -455,6 +455,7 @@ prepare_spatiotemporal_for_hmc <- function(st, data) {
 
     # Temporal structure
     temporal_type = st$temporal$type,
+    rho_prior = st$temporal$rho_prior,
     temporal_Q = temporal_Q_info,
     temporal_cyclic = isTRUE(st$temporal$cyclic)
   )
@@ -469,6 +470,28 @@ prepare_spatiotemporal_for_hmc <- function(st, data) {
   }
 
   result
+}
+
+
+#' Does a spatiotemporal interaction estimate a time-margin correlation?
+#'
+#' Type II applies the temporal precision within each spatial unit, Type IV
+#' carries it as a Kronecker margin and HSGP-ST reads it per basis function, so
+#' all three estimate an AR1 `rho`. Type I is iid over the whole grid and Type
+#' III's time margin is unstructured, so neither has one; the GP types carry a
+#' range instead. This mirrors `st_time_margin_is_structured()` in
+#' `src/hmc_spatiotemporal.h`, which the parameter layout reads -- a parameter
+#' allocated on one side and not the other shifts every index after it.
+#'
+#' @param st_info Output of [prepare_spatiotemporal_for_hmc()].
+#'
+#' @return `TRUE` if the interaction carries a `logit_rho_st` parameter.
+#' @keywords internal
+st_has_rho <- function(st_info) {
+  if (is.null(st_info)) return(FALSE)
+  if (!identical(st_info$temporal_type %||% "rw1", "ar1")) return(FALSE)
+  (st_info$type %||% "none") %in% c("II", "IV") ||
+    isTRUE(st_info$spatial_is_hsgp)
 }
 
 

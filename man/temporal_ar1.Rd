@@ -16,9 +16,9 @@ If provided, separate random walks are estimated for each group.}
 \item{shared}{Logical; if TRUE (default), temporal effect enters both
 numerator and denominator linear predictors identically.}
 
-\item{rho_prior}{Prior for the autocorrelation parameter. Default is
-\code{NULL} which uses a Uniform(-1, 1) prior. Can specify a Beta prior
-on (rho+1)/2 for more informative priors.}
+\item{rho_prior}{Prior on the autocorrelation, as a \code{\link[=prior_beta]{prior_beta()}} on
+\code{(rho + 1) / 2}. \code{NULL} takes the model-wide
+\code{ratiod_priors(rho_temporal = )}, which defaults to \code{Beta(2, 2)}.}
 }
 \value{
 A \code{ratiod_temporal} object
@@ -37,6 +37,11 @@ correlation between time points t and s of rho^|t-s|.
 
 The precision matrix is tridiagonal and full rank, so no constraints
 are needed.
+
+\code{rho} is estimated on (-1, 1), the range every AR1 correlation in the
+package is sampled on, so an alternating series is reachable. The sampled
+coordinate is \code{logit((rho + 1) / 2)}, which is what \code{rho_prior} places its
+Beta on.
 }
 \examples{
 # Create temporal AR1 specification

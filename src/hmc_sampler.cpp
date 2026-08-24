@@ -20,6 +20,7 @@
 #include "hmc_temporal_autodiff.h"
 #include "hmc_tvc_grad.h"
 #include "hmc_multiscale_temporal_grad.h"
+#include "st_prior_grad.h"
 #include <Rcpp.h>
 
 // Include log_post_impl.h AFTER hmc_sampler.h so types are defined
@@ -549,8 +550,16 @@ ParamLayout compute_param_layout(const ModelData& data) {
     // Second precision removed for Type IV (single tau suffices)
     layout.log_tau_st2_idx = -1;
 
-    // AR1 rho if temporal uses AR1
-    if (data.spatiotemporal_data.temporal_type == TemporalType::AR1) {
+    // AR1 rho, where the interaction's time margin is one it reads. A Type I
+    // interaction is iid over the whole grid and a Type III's time margin is
+    // unstructured, so neither has a correlation to estimate; allocating one
+    // there leaves a coordinate the sampler moves against nothing but its own
+    // prior.
+    const bool st_reads_time_margin =
+        ratiod_spatiotemporal::st_time_margin_is_structured(
+            data.spatiotemporal_data.type) || data.st_is_hsgp;
+    if (data.spatiotemporal_data.temporal_type == TemporalType::AR1 &&
+        st_reads_time_margin) {
       layout.logit_rho_st_idx = idx++;
     } else {
       layout.logit_rho_st_idx = -1;
@@ -1173,7 +1182,7 @@ double compute_log_post(
 
   // Temporal priors
   double tau_temporal = 1.0, log_tau_temporal = 0.0;
-  double rho_ar1 = 0.5;
+  double rho_ar1 = 0.0;
   const double* phi_temporal = nullptr;
   double sigma2_temporal_gp = 1.0, phi_temporal_gp = 1.0;
   std::vector<double> temporal_f_nc;  // Reconstructed f for NC temporal GP
@@ -1270,12 +1279,11 @@ double compute_log_post(
 
       // AR1: also estimate rho
       if (layout.is_ar1) {
-        double logit_rho = params[layout.logit_rho_ar1_idx];
-        rho_ar1 = 1.0 / (1.0 + std::exp(-logit_rho));
+        rho_ar1 = ratiod_ar1::rho_from_logit(params[layout.logit_rho_ar1_idx]);
 
-        // Uniform(0, 1) on rho, logit Jacobian folded in
-        log_post += ratiod_ar1::log_prior_logit_rho(
-            rho_ar1, ratiod_ar1::RHO_UNIT_PRIOR_A, ratiod_ar1::RHO_UNIT_PRIOR_B);
+        // Beta(a, b) on u = (rho + 1) / 2, logit Jacobian folded in
+        log_post += ratiod_ar1::log_prior_rho(
+            rho_ar1, data.temporal_rho_prior_a, data.temporal_rho_prior_b);
       }
 
       // Temporal effects prior (per group)
@@ -1679,13 +1687,12 @@ double compute_log_post(
 
     // AR1 rho parameter
     if (layout.logit_rho_st_idx >= 0) {
-      double logit_rho_st = params[layout.logit_rho_st_idx];
-      rho_st = 2.0 / (1.0 + std::exp(-logit_rho_st)) - 1.0;  // Map to (-1, 1)
+      rho_st = ratiod_ar1::rho_from_logit(params[layout.logit_rho_st_idx]);
 
-      // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
-      double u = (rho_st + 1.0) / 2.0;
-      log_post += ratiod_ar1::log_prior_logit_rho(
-          u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
+      // Beta(a, b) on u = (rho + 1) / 2, logit Jacobian folded in
+      log_post += ratiod_ar1::log_prior_rho(
+          rho_st, data.spatiotemporal_data.rho_prior_a,
+          data.spatiotemporal_data.rho_prior_b);
     }
 
     // GP range parameters
@@ -1744,9 +1751,9 @@ double compute_log_post(
 
         // Add the rank term with actual tau and Jacobian correction
         int rank_space = S - 1;
-        int rank_time = (data.spatiotemporal_data.temporal_type == TemporalType::RW1)
-            ? tulpa::rw1_rank(T, data.spatiotemporal_data.temporal_cyclic)
-            : tulpa::rw2_rank(T, data.spatiotemporal_data.temporal_cyclic);
+        int rank_time = ratiod_spatiotemporal::st_time_rank(
+            data.spatiotemporal_data.temporal_type, T,
+            data.spatiotemporal_data.temporal_cyclic);
         int total_rank = rank_space * rank_time;
         // GMRF normalization: 0.5 * rank * log(tau)
         // NC Jacobian: -ST/2 * log(tau)
@@ -1777,8 +1784,14 @@ double compute_log_post(
 
         // Per-basis-function temporal GMRF prior
         const bool st_cyc = data.spatiotemporal_data.temporal_cyclic;
-        int rank_t = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T, st_cyc) :
-                     (data.spatiotemporal_data.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T, st_cyc) : T;
+        int rank_t = ratiod_spatiotemporal::st_time_rank(
+            data.spatiotemporal_data.temporal_type, T, st_cyc);
+        const bool st_hsgp_ar1 =
+            (data.spatiotemporal_data.temporal_type == TemporalType::AR1 && T >= 2);
+        if (st_hsgp_ar1) {
+          // One log|R(rho)| per basis function.
+          log_post += 0.5 * M * std::log(ratiod_ar1::one_minus_rho2(rho_st));
+        }
 
         for (int j = 0; j < M; j++) {
           double S_j = ratiod_hsgp::spectral_density_se(
@@ -1795,6 +1808,8 @@ double compute_log_post(
               double d2 = dj[t] - 2.0*dj[t-1] + dj[t-2];
               qf += d2 * d2;
             }
+          } else if (st_hsgp_ar1) {
+            qf = ratiod_ar1::ar1_quadratic_form(dj, T, rho_st);
           }
           log_post += 0.5 * rank_t * std::log(prec_j) - 0.5 * prec_j * qf;
 
@@ -2433,6 +2448,12 @@ static inline void temporal_gmrf_prior_grad(
     double tau_temporal, double rho_ar1,
     const double* phi_temporal, int T_len,
     const double* grad_temporal_lik, double* grad);
+static inline double read_temporal_rho_ar1(
+    const std::vector<double>& params, const ModelData& data,
+    const ParamLayout& layout);
+static inline void temporal_rho_prior_grad(
+    const ModelData& data, const ParamLayout& layout,
+    double rho_ar1, double* grad);
 static inline double gp_pc_prior_grad_log_sigma2(
     double sigma2, double U, double alpha);
 static inline std::pair<GPData, GPData> make_msgp_gp_views(
@@ -2759,7 +2780,7 @@ void compute_gradient_analytical(
 
   // ============ Temporal prior gradients ============
   double log_tau_temporal = 0.0, tau_temporal = 1.0;
-  double logit_rho_ar1 = 0.0, rho_ar1 = 0.5;
+  double logit_rho_ar1 = 0.0, rho_ar1 = 0.0;
   int T_len = 0;
   const double* phi_temporal = nullptr;
   std::vector<double> grad_temporal_lik;  // Likelihood contribution
@@ -2777,9 +2798,8 @@ void compute_gradient_analytical(
     // AR1: extract rho and add prior
     if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
       logit_rho_ar1 = params[layout.logit_rho_ar1_idx];
-      rho_ar1 = 1.0 / (1.0 + std::exp(-logit_rho_ar1));
-      grad[layout.logit_rho_ar1_idx] = ratiod_ar1::log_prior_logit_rho_grad(
-          rho_ar1, ratiod_ar1::RHO_UNIT_PRIOR_A, ratiod_ar1::RHO_UNIT_PRIOR_B);
+      rho_ar1 = ratiod_ar1::rho_from_logit(logit_rho_ar1);
+      temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
     }
   }
 
@@ -4734,6 +4754,29 @@ static inline void tau_temporal_prior_grad(
                                         - data.tau_temporal_rate * tau_temporal;
 }
 
+// The temporal AR1 correlation at this parameter vector, on (-1, 1). A model
+// without one reads 0, which leaves every term depending on it inert.
+static inline double read_temporal_rho_ar1(
+    const std::vector<double>& params, const ModelData& data,
+    const ParamLayout& layout
+) {
+    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
+        return ratiod_ar1::rho_from_logit(params[layout.logit_rho_ar1_idx]);
+    return 0.0;
+}
+
+// Its Beta prior's gradient in the sampled coordinate. Assigns rather than
+// accumulates, like tau_temporal_prior_grad beside it, so it runs before
+// temporal_gmrf_prior_grad's +=.
+static inline void temporal_rho_prior_grad(
+    const ModelData& data, const ParamLayout& layout,
+    double rho_ar1, double* grad
+) {
+    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
+        grad[layout.logit_rho_ar1_idx] = ratiod_ar1::log_prior_rho_grad(
+            rho_ar1, data.temporal_rho_prior_a, data.temporal_rho_prior_b);
+}
+
 // =====================================================================
 // Temporal GMRF prior gradient helper (RW1/RW2/AR1)
 // Shared by all gradient functions that include temporal effects.
@@ -4843,7 +4886,7 @@ static inline void temporal_gmrf_prior_grad(
         grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
         if (layout.logit_rho_ar1_idx >= 0) {
             double gr = -n_groups * rho_ar1 / omr2 + total_gr;
-            grad[layout.logit_rho_ar1_idx] += gr * rho_ar1 * (1.0 - rho_ar1);
+            grad[layout.logit_rho_ar1_idx] += gr * ratiod_ar1::drho_dlogit(rho_ar1);
         }
     }
 }
@@ -5981,16 +6024,12 @@ void compute_gradient_icar_collapsed(
     if (collapsed_temporal_offset.num.size() == (size_t)N) {
         int T_temporal = layout.temporal_end - layout.temporal_start;
         double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
-        double rho_ar1 = 0.5;
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-            rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
-        }
+        double rho_ar1 = read_temporal_rho_ar1(params, data, layout);
         // tau_temporal_prior_grad assigns (=) rather than accumulates, so it
         // has to run before temporal_gmrf_prior_grad's += -- same order as
         // every other call site (e.g. compute_gradient_composite).
         tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
-            grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+        temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
 
         // Seed with the Laplace log-det's own temporal gradient (already added
         // into grad[] by the Part B loop above -- log det(H) depends on eta,
@@ -6101,8 +6140,7 @@ void compute_gradient_gp_temporal_handcoded(
     double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
     int T_len = layout.temporal_end - layout.temporal_start;
     const double* phi_temporal = &params[layout.temporal_start];
-    double rho_ar1 = (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
-        ? 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx])) : 0.5;
+    double rho_ar1 = read_temporal_rho_ar1(params, data, layout);
 
     // Prior gradients
     beta_gradient_prior(data, layout, beta_num, beta_denom, grad.data());
@@ -6113,8 +6151,7 @@ void compute_gradient_gp_temporal_handcoded(
         sigma2_gp, data.gp_sigma2_prior_U, data.gp_sigma2_prior_alpha);
     grad[layout.log_phi_gp_idx] = 1.0;
     tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
-    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
-        grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+    temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
 
     // NNGP prior gradients
     ratiod_gp::NNGPGradients nngp_grads;
@@ -6540,8 +6577,7 @@ void compute_gradient_msgp_temporal_handcoded(
     double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
     int T_len = layout.temporal_end - layout.temporal_start;
     const double* phi_temporal = &params[layout.temporal_start];
-    double rho_ar1 = (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
-        ? 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx])) : 0.5;
+    double rho_ar1 = read_temporal_rho_ar1(params, data, layout);
 
     // Bounds check for phi
     if (phi_local < data.multiscale_gp_data.range_local_lower ||
@@ -6568,8 +6604,7 @@ void compute_gradient_msgp_temporal_handcoded(
 
     // Temporal prior
     tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
-    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
-        grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+    temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
 
     // =========================================================================
     // NNGP prior gradients for multi-scale GP
@@ -7999,10 +8034,11 @@ void compute_gradient_gp_temporal_autodiff(
         // AR1: also estimate rho
         if (layout.is_ar1) {
             Var logit_rho = params_ad[layout.logit_rho_ar1_idx];
-            rho_ar1 = 1.0 / (1.0 + safe_exp(-logit_rho));
+            rho_ar1 = ratiod_ar1::rho_from_logit(logit_rho);
 
-            // rho ~ Uniform(0,1) prior with logit Jacobian
-            log_post = log_post + safe_log(rho_ar1) + safe_log(1.0 - rho_ar1);
+            // Beta(a, b) on u = (rho + 1) / 2, logit Jacobian folded in
+            log_post = log_post + ratiod_ar1::log_prior_rho(
+                rho_ar1, data.temporal_rho_prior_a, data.temporal_rho_prior_b);
         }
 
         // Extract temporal effects for each group
@@ -8199,14 +8235,12 @@ void compute_gradient_hsgp(
   double tau_temporal = 0.0;
   int T_len = 0;
   const double* phi_temporal = nullptr;
-  double rho_ar1 = 0.5;
+  double rho_ar1 = 0.0;
   if (layout.has_temporal) {
     tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
     T_len = layout.temporal_end - layout.temporal_start;
     phi_temporal = &params[layout.temporal_start];
-    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-      rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
-    }
+    rho_ar1 = read_temporal_rho_ar1(params, data, layout);
   }
 
   // Zero the grad_f buffer (workspace, no allocation)
@@ -8235,9 +8269,7 @@ void compute_gradient_hsgp(
   // Temporal prior on tau (Gamma) and rho (Beta)
   if (layout.has_temporal) {
     tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
-    if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-      grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
-    }
+    temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
   }
 
   // --- Vectorized observation loop (3-pass: Eigen matvec, scalar residuals, Eigen scatter) ---
@@ -8427,14 +8459,12 @@ void compute_gradient_msgp_hsgp(
     double tau_temporal = 0.0;
     int T_len = 0;
     const double* phi_temporal = nullptr;
-    double rho_ar1 = 0.5;
+    double rho_ar1 = 0.0;
     if (layout.has_temporal) {
         tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
         T_len = layout.temporal_end - layout.temporal_start;
         phi_temporal = &params[layout.temporal_start];
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-            rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
-        }
+        rho_ar1 = read_temporal_rho_ar1(params, data, layout);
     }
 
     // Zero grad_f buffers
@@ -8472,9 +8502,7 @@ void compute_gradient_msgp_hsgp(
     // Temporal prior on tau/rho
     if (layout.has_temporal) {
         tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-            grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
-        }
+        temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
     }
 
     // --- Vectorized observation loop ---
@@ -8934,23 +8962,29 @@ void compute_gradient_spatiotemporal_handcoded(
     double tau_temporal = 0.0;
     int T_temporal = 0;
     const double* phi_temporal = nullptr;
-    double rho_ar1 = 0.5;
+    double rho_ar1 = 0.0;
     if (layout.has_temporal) {
         tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
         T_temporal = layout.temporal_end - layout.temporal_start;
         phi_temporal = &params[layout.temporal_start];
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-            rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
-        }
+        rho_ar1 = read_temporal_rho_ar1(params, data, layout);
     }
 
     // Spatiotemporal interaction parameters
     const auto& st = data.spatiotemporal_data;
-    int S = st.n_spatial;
-    int T = st.n_times;
     int ST = st.n_params;
     double tau_st = std::exp(params[layout.log_tau_st_idx]);
-    double tau_st2 = 1.0;  // Always 1.0 — single tau for all ST types
+    // The interaction's own time-margin correlation. The layout carries one
+    // only where the margin is AR1; elsewhere 0 leaves R(rho) at the identity
+    // and every term reading it inert.
+    double rho_st = (layout.logit_rho_st_idx >= 0)
+        ? ratiod_ar1::rho_from_logit(params[layout.logit_rho_st_idx])
+        : 0.0;
+    double sigma2_st_hsgp = 1.0, lengthscale_st_hsgp = 1.0;
+    if (data.st_is_hsgp) {
+        sigma2_st_hsgp = std::exp(params[layout.log_sigma2_st_hsgp_idx]);
+        lengthscale_st_hsgp = std::exp(params[layout.log_lengthscale_st_hsgp_idx]);
+    }
 
     // NC reparameterization: params store z, reconstruct delta
     const bool st_use_nc = (data.st_parameterization == 1 &&
@@ -8990,9 +9024,7 @@ void compute_gradient_spatiotemporal_handcoded(
     // Temporal prior (Gamma on tau, Beta on rho)
     if (layout.has_temporal) {
         tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-            grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
-        }
+        temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
     }
 
     // ST interaction prior on tau_st (PC prior: exponential on sigma_st)
@@ -9016,6 +9048,21 @@ void compute_gradient_spatiotemporal_handcoded(
         grad[layout.log_tau_st_idx] = 0.5 * lambda * sigma_st + 0.5 + 1.0;
     }
     // tau_st2 removed — single tau for all ST types
+
+    // ST interaction prior on rho_st (Beta on u = (rho + 1) / 2)
+    if (layout.logit_rho_st_idx >= 0) {
+        grad[layout.logit_rho_st_idx] = ratiod_ar1::log_prior_rho_grad(
+            rho_st, st.rho_prior_a, st.rho_prior_b);
+    }
+
+    // HSGP-ST hyperparameter priors: PC on sigma, LogNormal(0, 1) on the
+    // lengthscale. The field's own contribution to both arrives below.
+    if (data.st_is_hsgp) {
+        grad[layout.log_sigma2_st_hsgp_idx] =
+            -0.5 * 4.6 * std::sqrt(sigma2_st_hsgp) + 0.5;
+        grad[layout.log_lengthscale_st_hsgp_idx] =
+            -params[layout.log_lengthscale_st_hsgp_idx];
+    }
 
     // =========================================================================
     // =========================================================================
@@ -9152,246 +9199,29 @@ void compute_gradient_spatiotemporal_handcoded(
     }
 
     // =========================================================================
-    // Spatiotemporal interaction prior gradients (Type I-IV)
+    // Spatiotemporal interaction prior gradients
     // =========================================================================
-    // delta is stored column-major: delta[s*T + t]
-    // Accumulate ST delta log-prior alongside gradient to avoid recomputing
-    // the expensive Kronecker quadratic form in compute_log_post.
-    double st_lp_accum = 0.0;
-    if (st.type == STType::TYPE_I) {
-        // IID: log p = 0.5*n*log(tau) - 0.5*tau*sum(delta^2)
-        double qf = 0.0;
-        for (int k = 0; k < ST; k++) {
-            grad[layout.st_delta_start + k] = grad_delta_lik[k] - tau_st * delta[k];
-            qf += delta[k] * delta[k];
-        }
-        grad[layout.log_tau_st_idx] += 0.5 * ST - 0.5 * tau_st * qf;
-        st_lp_accum = 0.5 * ST * std::log(tau_st) - 0.5 * tau_st * qf;
+    // One implementation, shared with compute_gradient_composite
+    // (st_prior_grad.h): the interaction's field prior, its sum-to-zero
+    // margins, and what both contribute to tau, rho and the HSGP-ST spectral
+    // hyperparameters. The log-prior comes back with the gradient so
+    // compute_log_post below does not evaluate the Kronecker quadratic form a
+    // second time.
+    const ratiod_spatiotemporal::StPriorGrad st_pg =
+        ratiod_spatiotemporal::st_interaction_prior_grad(
+            st, data.st_is_hsgp, data.st_hsgp_data,
+            z_or_delta, delta, grad_delta_lik.data(),
+            tau_st, rho_st, sigma2_st_hsgp, lengthscale_st_hsgp,
+            st_use_nc, &grad[layout.st_delta_start]);
 
-    } else if (st.type == STType::TYPE_II) {
-        // Structured time per spatial unit: temporal GMRF applied to delta[s,:]
-        double total_qf = 0.0;
-        for (int s = 0; s < S; s++) {
-            // Apply temporal stencil to delta[s*T .. s*T+T-1]
-            const double* delta_s = &delta[s * T];
-            if (st.temporal_type == TemporalType::RW1) {
-                double qf = 0.0;
-                for (int t = 0; t < T; t++) {
-                    double g = 0.0;
-                    if (t > 0) { g += tau_st * (delta_s[t-1] - delta_s[t]); qf += std::pow(delta_s[t] - delta_s[t-1], 2); }
-                    if (t < T - 1) g += tau_st * (delta_s[t+1] - delta_s[t]);
-                    grad[layout.st_delta_start + s * T + t] = grad_delta_lik[s * T + t] + g;
-                }
-                total_qf += qf;
-            } else if (st.temporal_type == TemporalType::RW2) {
-                double qf = 0.0;
-                for (int t = 0; t < T; t++) {
-                    double g = 0.0;
-                    if (t >= 2) g -= tau_st * (delta_s[t-2] - 2.0*delta_s[t-1] + delta_s[t]);
-                    if (t >= 1 && t < T - 1) g += 2.0 * tau_st * (delta_s[t-1] - 2.0*delta_s[t] + delta_s[t+1]);
-                    if (t < T - 2) g -= tau_st * (delta_s[t] - 2.0*delta_s[t+1] + delta_s[t+2]);
-                    grad[layout.st_delta_start + s * T + t] = grad_delta_lik[s * T + t] + g;
-                }
-                for (int t = 2; t < T; t++) qf += std::pow(delta_s[t-2] - 2.0*delta_s[t-1] + delta_s[t], 2);
-                total_qf += qf;
-            }
-        }
-        int rank_per_unit = (st.temporal_type == TemporalType::RW1) ? (T - 1) :
-                            (st.temporal_type == TemporalType::RW2) ? (T - 2) : T;
-        grad[layout.log_tau_st_idx] += 0.5 * S * rank_per_unit - 0.5 * tau_st * total_qf;
-        st_lp_accum = 0.5 * S * rank_per_unit * std::log(tau_st) - 0.5 * tau_st * total_qf;
-
-    } else if (st.type == STType::TYPE_III) {
-        // Structured space per time point: ICAR applied to delta[:,t]
-        double total_qf = 0.0;
-        for (int t = 0; t < T; t++) {
-            // Apply ICAR stencil to delta[0*T+t, 1*T+t, ..., (S-1)*T+t]
-            for (int s = 0; s < S; s++) {
-                double icar_grad = 0.0;
-                for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
-                    int j = st.adj_col_idx[idx] - 1;
-                    icar_grad += tau_st * (delta[j * T + t] - delta[s * T + t]);
-                }
-                grad[layout.st_delta_start + s * T + t] = grad_delta_lik[s * T + t] + icar_grad;
-            }
-            // Compute ICAR quadratic form for this time slice
-            for (int s = 0; s < S; s++) {
-                for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
-                    int j = st.adj_col_idx[idx] - 1;
-                    if (j > s) {
-                        double diff = delta[s * T + t] - delta[j * T + t];
-                        total_qf += diff * diff;
-                    }
-                }
-            }
-        }
-        int rank_spatial = S - 1;
-        grad[layout.log_tau_st_idx] += 0.5 * T * rank_spatial - 0.5 * tau_st * total_qf;
-        st_lp_accum = 0.5 * T * rank_spatial * std::log(tau_st) - 0.5 * tau_st * total_qf;
-
-    } else if (st.type == STType::TYPE_IV) {
-        // Kronecker: Q_delta = Q_s ⊗ Q_t
-        // For NC: apply stencil to z (not delta), without tau factor
-        const double* stencil_input = st_use_nc ? z_or_delta : delta;
-
-        // Step 1: Apply temporal stencil: v[s,t] = (Q_t * input[s,:])_t
-        RATIOD_TLS_WORKSPACE(std::vector<double>, v);
-        v.assign(S * T, 0.0);
-        if (st.temporal_type == TemporalType::RW1) {
-            for (int s = 0; s < S; s++) {
-                for (int t = 0; t < T; t++) {
-                    double qt_val = 0.0;
-                    int n_t_neigh = 0;
-                    if (t > 0) { qt_val -= stencil_input[s * T + t - 1]; n_t_neigh++; }
-                    if (t < T - 1) { qt_val -= stencil_input[s * T + t + 1]; n_t_neigh++; }
-                    qt_val += n_t_neigh * stencil_input[s * T + t];
-                    v[s * T + t] = qt_val;
-                }
-            }
-        } else if (st.temporal_type == TemporalType::RW2) {
-            // Unrolled RW2 stencil: Q_t is the second-difference precision matrix.
-            // For each t, Q_t[t,:] * x gives a linear combination of second differences.
-            // Instead of irregular max/min bounds, handle boundary cases explicitly.
-            for (int s = 0; s < S; s++) {
-                const double* d_s = &stencil_input[s * T];
-                double* v_s = &v[s * T];
-                if (T >= 3) {
-                    // Precompute second differences d2[k] = d_s[k] - 2*d_s[k+1] + d_s[k+2]
-                    // Reused by multiple t values, avoids redundant subtraction
-                    const int n_d2 = T - 2;
-                    // Use stack for small T (typical: T=20), heap only if huge
-                    double d2_stack[64];
-                    double* d2 = (n_d2 <= 64) ? d2_stack : new double[n_d2];
-                    for (int k = 0; k < n_d2; k++) {
-                        d2[k] = d_s[k] - 2.0 * d_s[k + 1] + d_s[k + 2];
-                    }
-
-                    // t=0: only k=0 contributes (pos=0, coef=1)
-                    v_s[0] = d2[0];
-                    // t=1: k=0 (pos=1, coef=-2) + k=1 (pos=0, coef=1) if T>=4
-                    v_s[1] = -2.0 * d2[0];
-                    if (n_d2 > 1) v_s[1] += d2[1];
-                    // Interior: t=2..T-3, all three contributions present
-                    for (int t = 2; t < T - 2; t++) {
-                        v_s[t] = d2[t - 2] - 2.0 * d2[t - 1] + d2[t];
-                    }
-                    // t=T-2: k=T-4 (pos=2, coef=1) + k=T-3 (pos=1, coef=-2)
-                    if (T >= 4) {
-                        v_s[T - 2] = d2[n_d2 - 2] - 2.0 * d2[n_d2 - 1];
-                    } else {
-                        // T==3: t=1 already handled, t=T-2=1 is same slot
-                        // Just set directly
-                        v_s[T - 2] = -2.0 * d2[0];
-                    }
-                    // t=T-1: k=T-3 (pos=2, coef=1)
-                    v_s[T - 1] = d2[n_d2 - 1];
-
-                    if (n_d2 > 64) delete[] d2;
-                } else {
-                    // T < 3: no second differences possible, v stays zero
-                }
-            }
-        }
-
-        // Step 2: Apply spatial ICAR stencil to v: (Q_s ⊗ Q_t) * input
-        double total_qf = 0.0;
-        for (int s = 0; s < S; s++) {
-            for (int t = 0; t < T; t++) {
-                double qs_v = 0.0;
-                for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
-                    int j = st.adj_col_idx[idx] - 1;
-                    qs_v -= v[j * T + t];
-                }
-                int n_neigh = st.adj_row_ptr[s + 1] - st.adj_row_ptr[s];
-                qs_v += n_neigh * v[s * T + t];
-
-                if (st_use_nc) {
-                    // NC: grad_z = -(Q z)_k + dL/d(delta_k) / sqrt(tau)
-                    grad[layout.st_delta_start + s * T + t] =
-                        grad_delta_lik[s * T + t] * inv_scale - qs_v;
-                } else {
-                    // Centered: grad_delta = dL/d(delta_k) - tau * (Q delta)_k
-                    grad[layout.st_delta_start + s * T + t] =
-                        grad_delta_lik[s * T + t] - tau_st * qs_v;
-                }
-                total_qf += stencil_input[s * T + t] * qs_v;
-            }
-        }
-
-        int rank_space = S - 1;
-        int rank_time = (st.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T, st.temporal_cyclic) :
-                        (st.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T, st.temporal_cyclic) : T;
-        int total_rank = rank_space * rank_time;
-
-        if (st_use_nc) {
-            // NC tau gradient: 0.5*(rank - ST) from combined normalization+Jacobian
-            // plus likelihood chain rule: -0.5 * dot(grad_delta_lik, delta)
-            double lik_tau_grad = 0.0;
-            for (int k = 0; k < ST; k++) {
-                lik_tau_grad += grad_delta_lik[k] * delta[k];
-            }
-            grad[layout.log_tau_st_idx] += 0.5 * (total_rank - ST) - 0.5 * lik_tau_grad;
-            // NC log-prior: -0.5*qf + 0.5*(rank-ST)*log(tau)
-            st_lp_accum = -0.5 * total_qf + 0.5 * (total_rank - ST) * std::log(tau_st);
-        } else {
-            // Centered tau gradient: 0.5*rank - 0.5*tau*qf
-            grad[layout.log_tau_st_idx] += 0.5 * total_rank - 0.5 * tau_st * total_qf;
-            st_lp_accum = 0.5 * total_rank * std::log(tau_st) - 0.5 * tau_st * total_qf;
-        }
+    double st_lp_accum = st_pg.log_prior;
+    grad[layout.log_tau_st_idx] += st_pg.log_tau;
+    if (layout.logit_rho_st_idx >= 0) {
+        grad[layout.logit_rho_st_idx] += st_pg.logit_rho;
     }
-
-    // Sum-to-zero penalty gradients (on reconstructed delta)
-    // For NC: chain rule d/dz = inv_scale * d/d(delta), and penalty also contributes to tau
-    {
-        // Each margin carries its own constant, matching st_sum_to_zero_penalty:
-        // a space margin (row_sums, over the S units at one time) is pinned at
-        // s2z_precision(S), a time margin (col_sums, over the T times at one
-        // unit) at s2z_precision(T). Sharing one constant leaves whichever
-        // margin is longer under-identified.
-        const double lambda_s = tulpa::s2z_precision(S);
-        const double lambda_t = tulpa::s2z_precision(T);
-        // For NC, the penalty -0.5*lambda*sum(delta)^2 where delta=z*inv_scale
-        // d/dz = -lambda * sum(delta) * inv_scale
-        // d/d(log_tau) = -lambda * sum(delta) * d(delta)/d(log_tau) summed
-        //              = -lambda * sum(delta) * (-0.5 * delta[k]) for each k in sum
-        //              = but simpler: penalty = -0.5*lambda*(inv_scale * sum(z))^2
-        //              = -0.5*lambda*inv_scale^2 * sum(z)^2
-        // d/dz_k = -lambda*inv_scale^2 * sum(z)
-        // This equals -lambda*inv_scale * sum(delta) = centered penalty * inv_scale
-        double stz_scale = st_use_nc ? inv_scale : 1.0;
-
-        // Pre-compute row sums (over space) and col sums (over time) in a single pass
-        // This replaces 4 separate double-loops with one pass + two apply loops
-        RATIOD_TLS_WORKSPACE(std::vector<double>, row_sums_buf);
-        RATIOD_TLS_WORKSPACE(std::vector<double>, col_sums_buf);
-        row_sums_buf.assign(T, 0.0);
-        col_sums_buf.assign(S, 0.0);
-        for (int s = 0; s < S; s++) {
-            for (int t = 0; t < T; t++) {
-                double d = delta[s * T + t];
-                row_sums_buf[t] += d;
-                col_sums_buf[s] += d;
-            }
-        }
-
-        // Apply delta gradients + accumulate NC tau gradient in one pass
-        double tau_stz_grad = 0.0;
-        for (int s = 0; s < S; s++) {
-            for (int t = 0; t < T; t++) {
-                grad[layout.st_delta_start + s * T + t] -=
-                    stz_scale * (lambda_s * row_sums_buf[t] + lambda_t * col_sums_buf[s]);
-            }
-        }
-        if (st_use_nc) {
-            for (int t = 0; t < T; t++) tau_stz_grad += lambda_s * row_sums_buf[t] * row_sums_buf[t];
-            for (int s = 0; s < S; s++) tau_stz_grad += lambda_t * col_sums_buf[s] * col_sums_buf[s];
-            tau_stz_grad *= 0.5;
-            grad[layout.log_tau_st_idx] += tau_stz_grad;
-        }
-
-        // Accumulate sum-to-zero penalty into ST log-prior
-        for (int t = 0; t < T; t++) st_lp_accum -= 0.5 * lambda_s * row_sums_buf[t] * row_sums_buf[t];
-        for (int s = 0; s < S; s++) st_lp_accum -= 0.5 * lambda_t * col_sums_buf[s] * col_sums_buf[s];
+    if (data.st_is_hsgp) {
+        grad[layout.log_sigma2_st_hsgp_idx] += st_pg.log_sigma2_hsgp;
+        grad[layout.log_lengthscale_st_hsgp_idx] += st_pg.log_lengthscale_hsgp;
     }
 
     // Non-centered RE chain rule transformation
@@ -9498,16 +9328,14 @@ void compute_gradient_composite(
     double tau_temporal = 0.0;
     int T_temporal = 0;
     const double* phi_temporal = nullptr;
-    double rho_ar1 = 0.5;
+    double rho_ar1 = 0.0;
     const bool has_gmrf_temporal = layout.has_temporal && !layout.is_temporal_gp &&
                                    !layout.has_multiscale_temporal && !layout.has_tvc;
     if (has_gmrf_temporal) {
         tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
         T_temporal = layout.temporal_end - layout.temporal_start;
         phi_temporal = &params[layout.temporal_start];
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
-            rho_ar1 = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_ar1_idx]));
-        }
+        rho_ar1 = read_temporal_rho_ar1(params, data, layout);
     }
 
     // --- Temporal GP ---
@@ -9652,18 +9480,26 @@ void compute_gradient_composite(
                         data.spatiotemporal_data.type != STType::NONE &&
                         layout.st_delta_start >= 0 && layout.log_tau_st_idx >= 0;
     double tau_st = 0.0;
+    double rho_st = 0.0;
+    double sigma2_st_hsgp = 1.0, lengthscale_st_hsgp = 1.0;
     const double* st_delta = nullptr;
     RATIOD_TLS_WORKSPACE(std::vector<double>, st_delta_buf);
     bool st_use_nc = false;
     double inv_scale_st = 1.0;
     const double* z_or_delta_st = nullptr;
-    int ST_n = 0, S_st = 0, T_st = 0;
+    int ST_n = 0;
     if (has_st) {
         const auto& st = data.spatiotemporal_data;
-        S_st = st.n_spatial;
-        T_st = st.n_times;
         ST_n = st.n_params;
         tau_st = std::exp(params[layout.log_tau_st_idx]);
+        // The layout carries a time-margin correlation only where the margin
+        // is AR1; elsewhere 0 leaves R(rho) at the identity.
+        if (layout.logit_rho_st_idx >= 0)
+            rho_st = ratiod_ar1::rho_from_logit(params[layout.logit_rho_st_idx]);
+        if (data.st_is_hsgp) {
+            sigma2_st_hsgp = std::exp(params[layout.log_sigma2_st_hsgp_idx]);
+            lengthscale_st_hsgp = std::exp(params[layout.log_lengthscale_st_hsgp_idx]);
+        }
         st_use_nc = (data.st_parameterization == 1 && st.type == STType::TYPE_IV);
         z_or_delta_st = &params[layout.st_delta_start];
         if (st_use_nc) {
@@ -9763,8 +9599,7 @@ void compute_gradient_composite(
     // Temporal GMRF priors
     if (has_gmrf_temporal) {
         tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
-        if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0)
-            grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+        temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
     }
 
     // Temporal GP priors
@@ -9852,11 +9687,24 @@ void compute_gradient_composite(
         }
     }
 
-    // ST interaction prior on tau_st
+    // ST interaction hyperparameter priors: PC on sigma_st, Beta on the time
+    // margin's correlation, and for HSGP-ST a PC on sigma and a LogNormal(0, 1)
+    // on the lengthscale. The field's own contribution to each arrives below.
     if (has_st) {
         double sigma_st = 1.0 / std::sqrt(tau_st);
         double lambda = -std::log(data.st_sigma2_prior_alpha) / data.st_sigma2_prior_U;
         grad[layout.log_tau_st_idx] = 0.5 * lambda * sigma_st + 0.5 + 1.0;
+        if (layout.logit_rho_st_idx >= 0) {
+            grad[layout.logit_rho_st_idx] = ratiod_ar1::log_prior_rho_grad(
+                rho_st, data.spatiotemporal_data.rho_prior_a,
+                data.spatiotemporal_data.rho_prior_b);
+        }
+        if (data.st_is_hsgp) {
+            grad[layout.log_sigma2_st_hsgp_idx] =
+                -0.5 * 4.6 * std::sqrt(sigma2_st_hsgp) + 0.5;
+            grad[layout.log_lengthscale_st_hsgp_idx] =
+                -params[layout.log_lengthscale_st_hsgp_idx];
+        }
     }
 
     // Slopes priors (delegate to existing pattern from compute_gradient_analytical)
@@ -10451,211 +10299,23 @@ void compute_gradient_composite(
         }
     }
 
-    // ST interaction prior gradients
-    if (has_st && data.st_is_hsgp) {
-        // HSGP-ST: per-basis-function temporal GMRF with spectral precision scaling
-        int M_st = data.st_hsgp_data.m_total;
-        int T_st_h = data.spatiotemporal_data.n_times;
-        double sigma2_st_h = std::exp(params[layout.log_sigma2_st_hsgp_idx]);
-        double ls_st_h = std::exp(params[layout.log_lengthscale_st_hsgp_idx]);
+    // ST interaction prior gradients: the same implementation
+    // compute_gradient_spatiotemporal_handcoded drives (st_prior_grad.h).
+    if (has_st) {
+        const ratiod_spatiotemporal::StPriorGrad st_pg =
+            ratiod_spatiotemporal::st_interaction_prior_grad(
+                data.spatiotemporal_data, data.st_is_hsgp, data.st_hsgp_data,
+                z_or_delta_st, st_delta, grad_delta_lik.data(),
+                tau_st, rho_st, sigma2_st_hsgp, lengthscale_st_hsgp,
+                st_use_nc, &grad[layout.st_delta_start]);
 
-        const bool st_cyc_g = data.spatiotemporal_data.temporal_cyclic;
-        int rank_t = (data.spatiotemporal_data.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T_st_h, st_cyc_g) :
-                     (data.spatiotemporal_data.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T_st_h, st_cyc_g) : T_st_h;
-
-        double grad_log_sigma2_st = 0.0;
-        double grad_log_ls_st = 0.0;
-
-        for (int j = 0; j < M_st; j++) {
-            double omega_sq = data.st_hsgp_data.eigenvalues[j];
-            double S_j = ratiod_hsgp::spectral_density_se(omega_sq, sigma2_st_h, ls_st_h);
-            double S_j_safe = std::max(S_j, 1e-10);
-            double prec_j = tau_st / S_j_safe;
-
-            // Temporal GMRF stencil for basis function j
-            const double* dj = &st_delta[j * T_st_h];
-            double qf = 0.0;
-            if (data.spatiotemporal_data.temporal_type == TemporalType::RW1) {
-                for (int t = 0; t < T_st_h; t++) {
-                    double g = 0.0;
-                    if (t > 0) { g += prec_j * (dj[t-1] - dj[t]); qf += (dj[t] - dj[t-1]) * (dj[t] - dj[t-1]); }
-                    if (t < T_st_h - 1) g += prec_j * (dj[t+1] - dj[t]);
-                    grad[layout.st_delta_start + j * T_st_h + t] = grad_delta_lik[j * T_st_h + t] + g;
-                }
-            } else {
-                // RW2 or other — use generic stencil
-                for (int t = 0; t < T_st_h; t++)
-                    grad[layout.st_delta_start + j * T_st_h + t] = grad_delta_lik[j * T_st_h + t];
-            }
-
-            // Sum-to-zero per basis function
-            double sum_j = 0.0;
-            for (int t = 0; t < T_st_h; t++) sum_j += dj[t];
-            const double lam_j = tulpa::s2z_precision(T_st_h) * sum_j;
-            for (int t = 0; t < T_st_h; t++)
-                grad[layout.st_delta_start + j * T_st_h + t] -= lam_j;
-
-            // Tau gradient contribution from this basis function
-            // d/d(log_tau) [0.5*rank*log(prec_j) - 0.5*prec_j*qf]
-            //   = 0.5*rank - 0.5*prec_j*qf  (since d(prec_j)/d(log_tau) = prec_j)
-            grad[layout.log_tau_st_idx] += 0.5 * rank_t - 0.5 * prec_j * qf;
-
-            // Sigma2/lengthscale gradient through S_j
-            // d/d(log_sigma2) S_j = S_j (SE kernel)
-            // d/d(log_sigma2) [0.5*rank*log(tau/S_j) - 0.5*tau/S_j*qf]
-            //   = -0.5*rank + 0.5*prec_j*qf  (times sigma2, cancels with chain rule)
-            double dS_dsigma2 = S_j_safe / sigma2_st_h;
-            double dLogPrior_dS = -0.5 * rank_t / S_j_safe + 0.5 * tau_st * qf / (S_j_safe * S_j_safe);
-            grad_log_sigma2_st += dLogPrior_dS * dS_dsigma2 * sigma2_st_h;
-
-            // d/d(log_ell) S_j = S_j * (1/ell - ell*omega_sq) * ell
-            double dS_dl = S_j_safe * (1.0 / ls_st_h - ls_st_h * omega_sq);
-            grad_log_ls_st += dLogPrior_dS * dS_dl * ls_st_h;
+        grad[layout.log_tau_st_idx] += st_pg.log_tau;
+        if (layout.logit_rho_st_idx >= 0) {
+            grad[layout.logit_rho_st_idx] += st_pg.logit_rho;
         }
-
-        // HSGP-ST hyperparameter priors + likelihood chain rule
-        // PC prior on sigma: d/d(log_sigma2) [-4.6*sigma + 0.5*log_sigma2] = -0.5*4.6*sigma + 0.5
-        grad[layout.log_sigma2_st_hsgp_idx] = -0.5 * 4.6 * std::sqrt(sigma2_st_h) + 0.5 + grad_log_sigma2_st;
-        // LogNormal(0,1) on lengthscale
-        grad[layout.log_lengthscale_st_hsgp_idx] = -params[layout.log_lengthscale_st_hsgp_idx] + grad_log_ls_st;
-
-    } else if (has_st) {
-        const auto& st = data.spatiotemporal_data;
-        if (st.type == STType::TYPE_I) {
-            double qf = 0.0;
-            for (int k = 0; k < ST_n; k++) {
-                grad[layout.st_delta_start + k] = grad_delta_lik[k] - tau_st * st_delta[k];
-                qf += st_delta[k] * st_delta[k];
-            }
-            grad[layout.log_tau_st_idx] += 0.5 * ST_n - 0.5 * tau_st * qf;
-        } else if (st.type == STType::TYPE_II) {
-            double total_qf = 0.0;
-            for (int s = 0; s < S_st; s++) {
-                const double* delta_s = &st_delta[s * T_st];
-                if (st.temporal_type == TemporalType::RW1) {
-                    double qf = 0.0;
-                    for (int t = 0; t < T_st; t++) {
-                        double g = 0.0;
-                        if (t > 0) { g += tau_st * (delta_s[t-1] - delta_s[t]); qf += std::pow(delta_s[t] - delta_s[t-1], 2); }
-                        if (t < T_st - 1) g += tau_st * (delta_s[t+1] - delta_s[t]);
-                        grad[layout.st_delta_start + s * T_st + t] = grad_delta_lik[s * T_st + t] + g;
-                    }
-                    total_qf += qf;
-                }
-            }
-            int rank_per_unit = (st.temporal_type == TemporalType::RW1) ? (T_st - 1) : T_st;
-            grad[layout.log_tau_st_idx] += 0.5 * S_st * rank_per_unit - 0.5 * tau_st * total_qf;
-        } else if (st.type == STType::TYPE_III) {
-            double total_qf = 0.0;
-            for (int t = 0; t < T_st; t++) {
-                for (int s = 0; s < S_st; s++) {
-                    double icar_grad = 0.0;
-                    for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
-                        int j = st.adj_col_idx[idx] - 1;
-                        icar_grad += tau_st * (st_delta[j * T_st + t] - st_delta[s * T_st + t]);
-                    }
-                    grad[layout.st_delta_start + s * T_st + t] = grad_delta_lik[s * T_st + t] + icar_grad;
-                }
-                for (int s = 0; s < S_st; s++) {
-                    for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
-                        int j = st.adj_col_idx[idx] - 1;
-                        if (j > s) total_qf += std::pow(st_delta[s * T_st + t] - st_delta[j * T_st + t], 2);
-                    }
-                }
-            }
-            grad[layout.log_tau_st_idx] += 0.5 * T_st * (S_st - 1) - 0.5 * tau_st * total_qf;
-        } else if (st.type == STType::TYPE_IV) {
-            // Kronecker: Q_delta = Q_s ⊗ Q_t (analytical gradient, same as specialized ST function)
-            const double* stencil_input = st_use_nc ? z_or_delta_st : st_delta;
-            double inv_scale_nc = st_use_nc ? (1.0 / std::sqrt(tau_st)) : 1.0;
-
-            // Step 1: Apply temporal stencil: v[s,t] = (Q_t * input[s,:])_t
-            RATIOD_TLS_WORKSPACE(std::vector<double>, v_kron);
-            v_kron.assign(S_st * T_st, 0.0);
-            if (st.temporal_type == TemporalType::RW1) {
-                for (int s = 0; s < S_st; s++) {
-                    for (int t = 0; t < T_st; t++) {
-                        double qt_val = 0.0;
-                        int n_t_neigh = 0;
-                        if (t > 0) { qt_val -= stencil_input[s * T_st + t - 1]; n_t_neigh++; }
-                        if (t < T_st - 1) { qt_val -= stencil_input[s * T_st + t + 1]; n_t_neigh++; }
-                        qt_val += n_t_neigh * stencil_input[s * T_st + t];
-                        v_kron[s * T_st + t] = qt_val;
-                    }
-                }
-            } else if (st.temporal_type == TemporalType::RW2) {
-                for (int s = 0; s < S_st; s++) {
-                    const double* d_s = &stencil_input[s * T_st];
-                    double* v_s = &v_kron[s * T_st];
-                    if (T_st >= 3) {
-                        const int n_d2 = T_st - 2;
-                        double d2_stack[64];
-                        double* d2 = (n_d2 <= 64) ? d2_stack : new double[n_d2];
-                        for (int k = 0; k < n_d2; k++) d2[k] = d_s[k] - 2.0 * d_s[k + 1] + d_s[k + 2];
-                        v_s[0] = d2[0];
-                        v_s[1] = -2.0 * d2[0];
-                        if (n_d2 > 1) v_s[1] += d2[1];
-                        for (int t = 2; t < T_st - 2; t++) v_s[t] = d2[t - 2] - 2.0 * d2[t - 1] + d2[t];
-                        if (T_st >= 4) v_s[T_st - 2] = d2[n_d2 - 2] - 2.0 * d2[n_d2 - 1];
-                        else v_s[T_st - 2] = -2.0 * d2[0];
-                        v_s[T_st - 1] = d2[n_d2 - 1];
-                        if (n_d2 > 64) delete[] d2;
-                    }
-                }
-            }
-
-            // Step 2: Apply spatial ICAR stencil to v: (Q_s ⊗ Q_t) * input
-            double total_qf = 0.0;
-            for (int s = 0; s < S_st; s++) {
-                for (int t = 0; t < T_st; t++) {
-                    double qs_v = 0.0;
-                    for (int idx = st.adj_row_ptr[s]; idx < st.adj_row_ptr[s + 1]; idx++) {
-                        int j = st.adj_col_idx[idx] - 1;
-                        qs_v -= v_kron[j * T_st + t];
-                    }
-                    int n_neigh = st.adj_row_ptr[s + 1] - st.adj_row_ptr[s];
-                    qs_v += n_neigh * v_kron[s * T_st + t];
-
-                    if (st_use_nc) {
-                        grad[layout.st_delta_start + s * T_st + t] =
-                            grad_delta_lik[s * T_st + t] * inv_scale_nc - qs_v;
-                    } else {
-                        grad[layout.st_delta_start + s * T_st + t] =
-                            grad_delta_lik[s * T_st + t] - tau_st * qs_v;
-                    }
-                    total_qf += stencil_input[s * T_st + t] * qs_v;
-                }
-            }
-
-            int rank_space = S_st - 1;
-            int rank_time = (st.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T_st, st.temporal_cyclic) :
-                            (st.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T_st, st.temporal_cyclic) : T_st;
-            int total_rank = rank_space * rank_time;
-
-            if (st_use_nc) {
-                double lik_tau_grad = 0.0;
-                for (int k = 0; k < ST_n; k++) lik_tau_grad += grad_delta_lik[k] * st_delta[k];
-                grad[layout.log_tau_st_idx] += 0.5 * (total_rank - ST_n) - 0.5 * lik_tau_grad;
-            } else {
-                grad[layout.log_tau_st_idx] += 0.5 * total_rank - 0.5 * tau_st * total_qf;
-            }
-        }
-
-        // Sum-to-zero penalty on ST delta, each margin at its own precision
-        // (see st_sum_to_zero_penalty).
-        const double lambda_s_g = tulpa::s2z_precision(S_st);
-        const double lambda_t_g = tulpa::s2z_precision(T_st);
-        for (int t = 0; t < T_st; t++) {
-            double row_sum = 0.0;
-            for (int s = 0; s < S_st; s++) row_sum += st_delta[s * T_st + t];
-            for (int s = 0; s < S_st; s++)
-                grad[layout.st_delta_start + s * T_st + t] -= lambda_s_g * row_sum;
-        }
-        for (int s = 0; s < S_st; s++) {
-            double col_sum = 0.0;
-            for (int t = 0; t < T_st; t++) col_sum += st_delta[s * T_st + t];
-            for (int t = 0; t < T_st; t++)
-                grad[layout.st_delta_start + s * T_st + t] -= lambda_t_g * col_sum;
+        if (data.st_is_hsgp) {
+            grad[layout.log_sigma2_st_hsgp_idx] += st_pg.log_sigma2_hsgp;
+            grad[layout.log_lengthscale_st_hsgp_idx] += st_pg.log_lengthscale_hsgp;
         }
     }
 
@@ -13870,6 +13530,10 @@ Rcpp::List cpp_hmc_fit(
   bool temporal_shared = Rcpp::as<bool>(temporal_params["shared"]);
   double tau_temporal_shape = Rcpp::as<double>(temporal_params["tau_shape"]);
   double tau_temporal_rate = Rcpp::as<double>(temporal_params["tau_rate"]);
+  double temporal_rho_prior_a = temporal_params.containsElementNamed("rho_prior_a")
+      ? Rcpp::as<double>(temporal_params["rho_prior_a"]) : ratiod_ar1::RHO_PRIOR_A;
+  double temporal_rho_prior_b = temporal_params.containsElementNamed("rho_prior_b")
+      ? Rcpp::as<double>(temporal_params["rho_prior_b"]) : ratiod_ar1::RHO_PRIOR_B;
 
   // Prior parameters
   double sigma_beta = Rcpp::as<double>(prior_params["sigma_beta"]);
@@ -14233,6 +13897,8 @@ Rcpp::List cpp_hmc_fit(
   data.phi_prior_rate = phi_prior_rate;
   data.tau_spatial_shape = tau_spatial_shape;
   data.tau_spatial_rate = tau_spatial_rate;
+  data.temporal_rho_prior_a = temporal_rho_prior_a;
+  data.temporal_rho_prior_b = temporal_rho_prior_b;
 
   // Parallelization
   data.n_threads = n_threads;
@@ -14276,6 +13942,10 @@ Rcpp::List cpp_hmc_fit(
     std::vector<int> st_adj_col_idx = Rcpp::as<std::vector<int>>(st_params["adj_col_idx"]);
     double st_sigma2_prior_U = Rcpp::as<double>(st_params["sigma2_prior_U"]);
     double st_sigma2_prior_alpha = Rcpp::as<double>(st_params["sigma2_prior_alpha"]);
+    double st_rho_prior_a = st_params.containsElementNamed("rho_prior_a")
+        ? Rcpp::as<double>(st_params["rho_prior_a"]) : ratiod_ar1::RHO_PRIOR_A;
+    double st_rho_prior_b = st_params.containsElementNamed("rho_prior_b")
+        ? Rcpp::as<double>(st_params["rho_prior_b"]) : ratiod_ar1::RHO_PRIOR_B;
 
     // Parse ST type (accept both R-side "I"/"IV" and legacy "type_i"/"type_iv")
     if (st_type_str == "I" || st_type_str == "type_i") {
@@ -14305,15 +13975,29 @@ Rcpp::List cpp_hmc_fit(
     data.spatiotemporal_data.t_idx = st_t_idx;
     data.spatiotemporal_data.st_flat = st_flat;
 
-    // Temporal type for Type II/IV
+    // Temporal type for Type II/IV and HSGP-ST, the interactions whose own
+    // time margin carries a precision.
+    const bool st_is_hsgp_flag =
+        st_params.containsElementNamed("st_is_hsgp") &&
+        Rcpp::as<bool>(st_params["st_is_hsgp"]);
+    const bool st_reads_time_margin =
+        ratiod_spatiotemporal::st_time_margin_is_structured(
+            data.spatiotemporal_data.type) || st_is_hsgp_flag;
     if (st_temporal_type_str == "rw1") {
       data.spatiotemporal_data.temporal_type = TemporalType::RW1;
     } else if (st_temporal_type_str == "rw2") {
       data.spatiotemporal_data.temporal_type = TemporalType::RW2;
     } else if (st_temporal_type_str == "ar1") {
       data.spatiotemporal_data.temporal_type = TemporalType::AR1;
+    } else if (st_reads_time_margin) {
+      // The interaction reads this margin, and there is no precision to read
+      // it with. Defaulting to RW1 would fit a structure the caller did not
+      // ask for; contributing nothing would leave the field with no prior.
+      Rcpp::stop("Spatiotemporal temporal margin '%s' is not supported for this "
+                 "interaction type. Use temporal_rw1(), temporal_rw2() or "
+                 "temporal_ar1().", st_temporal_type_str.c_str());
     } else {
-      data.spatiotemporal_data.temporal_type = TemporalType::RW1;  // Default
+      data.spatiotemporal_data.temporal_type = TemporalType::RW1;  // Unread
     }
     data.spatiotemporal_data.temporal_cyclic = st_temporal_cyclic;
 
@@ -14324,6 +14008,8 @@ Rcpp::List cpp_hmc_fit(
     // Prior parameters
     data.st_sigma2_prior_U = st_sigma2_prior_U;
     data.st_sigma2_prior_alpha = st_sigma2_prior_alpha;
+    data.spatiotemporal_data.rho_prior_a = st_rho_prior_a;
+    data.spatiotemporal_data.rho_prior_b = st_rho_prior_b;
 
     // Parameterization: centered by default. NC requires spectral decomposition
     // (Kronecker eigenvectors of Q_s ⊗ Q_t) which is not yet implemented.

@@ -267,9 +267,9 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #' autocorrelation parameter rho.
 #'
 #' @inheritParams temporal_rw1
-#' @param rho_prior Prior for the autocorrelation parameter. Default is
-#'   `NULL` which uses a Uniform(-1, 1) prior. Can specify a Beta prior
-#'   on (rho+1)/2 for more informative priors.
+#' @param rho_prior Prior on the autocorrelation, as a [prior_beta()] on
+#'   `(rho + 1) / 2`. `NULL` takes the model-wide
+#'   `ratiod_priors(rho_temporal = )`, which defaults to `Beta(2, 2)`.
 #'
 #' @return A `ratiod_temporal` object
 #'
@@ -279,6 +279,11 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'
 #' The precision matrix is tridiagonal and full rank, so no constraints
 #' are needed.
+#'
+#' `rho` is estimated on (-1, 1), the range every AR1 correlation in the
+#' package is sampled on, so an alternating series is reachable. The sampled
+#' coordinate is `logit((rho + 1) / 2)`, which is what `rho_prior` places its
+#' Beta on.
 #'
 #' @examples
 #' # Create temporal AR1 specification
@@ -359,7 +364,7 @@ temporal_ar1 <- function(time_var, group_var = NULL, shared = TRUE,
      group_var = group_var,
      cyclic = FALSE,  # AR1 is not cyclic
      shared = shared,
-     rho_prior = rho_prior,
+     rho_prior = validate_rho_prior(rho_prior),
      n_times = NULL,
      n_groups = NULL,
      time_index = NULL,

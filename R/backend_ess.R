@@ -114,6 +114,8 @@ fit_ess <- function(formula,
   tau_temporal_rate <- priors$tau_temporal_rate %||% 0.5
   tau_spatial_shape <- priors$tau_spatial_shape %||% 1.0
   tau_spatial_rate <- priors$tau_spatial_rate %||% 0.01
+  rho_temporal_ab <- rho_prior_anchors(temporal_info$rho_prior,
+                                       priors$rho_temporal)
 
   # Bundle parameters
   re_params <- list(
@@ -142,7 +144,9 @@ fit_ess <- function(formula,
     cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
     shared = temporal_info$shared %||% TRUE,
     tau_shape = tau_temporal_shape,
-    tau_rate = tau_temporal_rate
+    tau_rate = tau_temporal_rate,
+    rho_prior_a = rho_temporal_ab[["a"]],
+    rho_prior_b = rho_temporal_ab[["b"]]
   )
 
   prior_params <- list(

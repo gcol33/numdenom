@@ -374,11 +374,7 @@ layout_st_block <- function(cur, st_info) {
 
   out <- list(type = st_info$type, is_gp = is_gp, is_hsgp = is_hsgp,
               log_tau = cur$one())
-  out$logit_rho <- if (identical(st_info$temporal_type %||% "rw1", "ar1")) {
-    cur$one()
-  } else {
-    integer(0)
-  }
+  out$logit_rho <- if (st_has_rho(st_info)) cur$one() else integer(0)
   if (is_gp) {
     out$log_phi_space <- cur$one()
     out$log_phi_time <- cur$one()
@@ -626,7 +622,8 @@ unpack_temporal <- function(samples, lay, temporal_info) {
 
   out$tau <- exp(samples[, lay$log_tau])
   if (length(lay$logit_rho) > 0L) {
-    out$rho <- inv_logit(samples[, lay$logit_rho])
+    # rho on (-1, 1), the mapping every AR1 correlation in the package uses.
+    out$rho <- 2 * inv_logit(samples[, lay$logit_rho]) - 1
   }
   out$field <- block_draws(samples, lay$effects)
   out

@@ -1,3 +1,60 @@
+# tulpaRatio 1.6.0
+
+* **The spatiotemporal interaction's AR1 time margin exists (#66).**
+  `spatiotemporal(temporal = temporal_ar1(...))` allocated a correlation and
+  put a Beta prior on it, and nothing else read it:
+  `spatiotemporal_log_prior()` opened with `(void)rho`, `type_ii_log_prior()`
+  carried a `// AR1 would need rho parameter` comment and no branch, and
+  `type_iv_log_prior()` fell through both stencils, so its Kronecker quadratic
+  form was exactly zero and its `rank_time` read `rw2_rank`. The field had no
+  temporal prior curvature at all, and the density and its gradient disagreed
+  on the normalizer. The AR1 precision `R(rho)` is now the interaction's time
+  margin on Type II, Type IV and HSGP-ST -- the quadratic form and the
+  rho-dependent `log|R| = log(1 - rho^2)`, differentiated together -- and
+  `ratiod_ar1::ar1_precision_apply()` / `ar1_quadratic_form()` /
+  `ar1_log_prior()` (`src/ar1_shared.h`) are the one matrix the scalar AR1
+  density and the Kronecker margin both read. Measured at the gradient check's
+  own draw, `logit_rho_st` went from an analytic `0.000000` against a
+  finite-difference `-0.299363` -- the prior alone, since the density had no
+  other dependence -- to `-9.133676` against `-9.133675`.
+
+* **One spatiotemporal interaction gradient (#66).** The two hand-coded
+  gradients that reach an interaction each carried their own copy of every
+  type. They had drifted: `compute_gradient_composite()` had no Type II RW2
+  branch at all and normalized that arm at rank `T` instead of `T - 2`, no
+  AR1 branch anywhere, and neither wrote `logit_rho_st`.
+  `st_interaction_prior_grad()` (`src/st_prior_grad.h`) is the single
+  implementation both now call, so a term added to the density reaches both
+  gradients or neither. `st_time_rank()` is the matching single rank, read by
+  the density, the non-centered rank correction and both gradients.
+
+* **Type I and Type III no longer allocate a correlation.** Neither reads a
+  time margin -- Type I is iid over the whole grid, Type III's time margin is
+  unstructured -- so the parameter the layout used to allocate for them moved
+  under its own prior and nothing else. A time margin an interaction reads but
+  cannot express (a GP margin under Type IV) is now refused at the door rather
+  than silently run as RW1.
+
+* **`temporal_ar1()`'s correlation lives on (-1, 1) (#67).** It was mapped onto
+  `(0, 1)`, so a negative autocorrelation was not reachable from that block at
+  all, while the TVC arm, the multi-scale short-term arm and the spatiotemporal
+  interaction all used `rho = 2u - 1`. `?temporal_ar1` documented
+  Uniform(-1, 1) and `?priors_default` documented Beta(2, 2), and the code did
+  neither. The mapping is now `2u - 1` with the shared Beta(2, 2) on
+  `u = (rho + 1) / 2`, which **changes the posterior of every existing
+  `temporal_ar1()` fit**. `ratiod_ar1::rho_from_logit()` and `drho_dlogit()`
+  are the one map and the one chain rule; the eight hand-written copies of each
+  are gone.
+
+* **`temporal_ar1(rho_prior = )` is wired (#67).** It was stored on the spec
+  and never read again, as was `ratiod_priors(rho_temporal = )`. Both now reach
+  the density and every gradient as the Beta anchors on `u = (rho + 1) / 2`,
+  the block's own prior taking precedence; a `spatiotemporal()` interaction's
+  AR1 margin reads its own temporal spec's prior the same way. A `rho_prior`
+  that is not a `prior_beta()` is refused at the door -- which includes
+  `temporal_ar1(rho = 0.8)`, where `rho` used to partial-match `rho_prior` and
+  store a bare number nothing read.
+
 # tulpaRatio 1.5.3
 
 * **One AR1 correlation prior, read by every density and every gradient

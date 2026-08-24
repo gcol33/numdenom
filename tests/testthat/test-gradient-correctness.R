@@ -54,14 +54,17 @@ CAR_PROPER_FIELDS <- c("car_proper")
 # branch (both its centered and non-centered forms) had never been checked
 # against finite differences before #24.
 ST_IV_FIELDS <- c("st4", "st4_nc")
-# The same interaction with an AR1 time margin, which is the only
-# configuration the parameter layout allocates logit_rho_st_idx for and so
-# the only one that reaches the spatiotemporal rho on either density.
-# logit_rho_st_idx is read by the two densities and by nothing else: the
-# handcoded path carries neither a gradient for it nor its prior in the value
-# it fuses, so this field stays out of ALL_FIELDS and takes the assertions it
-# does answer one at a time below (gcol33/tulpaRatio#66).
-ST_IV_AR1_FIELDS <- c("st4_ar1")
+# The interaction's other two structured margins. Type II applies the temporal
+# precision within each spatial unit -- its RW2 and AR1 arms are the ones
+# compute_gradient_composite had no branch for at all -- and Type III applies
+# ICAR at each time point. Both reach the shared interaction gradient
+# (src/st_prior_grad.h) through a different margin than Type IV does.
+ST_OTHER_FIELDS <- c("st2", "st2_rw2", "st2_ar1", "st3")
+# The AR1 time margin, centered and non-centered. Its precision R(rho) enters
+# both the quadratic form and the log-determinant, and its correlation is the
+# only hyperparameter the layout allocates logit_rho_st_idx for
+# (gcol33/tulpaRatio#66).
+ST_IV_AR1_FIELDS <- c("st4_ar1", "st4_ar1_nc")
 # The kernels resolve_gradient_fn can select that make_model() could not build a
 # model for at all: the GP, the multi-scale GP, the SVC pair, the temporal GP,
 # multi-scale temporal and latent factors (gcol33/tulpaRatio#45). Under the
@@ -85,9 +88,9 @@ KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc")
 # reports. Each names the defect it is blocked on; the case is written out so
 # the fix has a test to turn green, and the deviation each measures today is
 # recorded in the issue.
-BLOCKED_FIELDS <- c(st4_ar1 = "gcol33/tulpaRatio#66")
+BLOCKED_FIELDS <- character(0)
 ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
-                KERNEL_FIELDS)
+                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, KERNEL_FIELDS)
 MODES <- c("handcoded", "arena")
 AUTODIFF_MODES <- c("arena", "forward", "tape")
 # The same three under the names the front door takes.
@@ -165,44 +168,8 @@ for (field in CAR_PROPER_FIELDS) {
   })
 }
 
-for (field in ST_IV_AR1_FIELDS) {
-  test_that(sprintf("analytic gradient matches finite differences (%s, arena)", field), {
-    r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
-    expect_gt(r$n_params, 0)
-    dev <- rel_dev(r$analytic, r$finite_diff)
-    worst <- which.max(dev)
-    expect_lt(
-      max(dev),
-      1e-4,
-      label = sprintf(
-        "%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
-        field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
-      )
-    )
-  })
-
-  # The assertions ALL_FIELDS carries, for the field that cannot join it.
-  test_that(sprintf("the two log posteriors are the same function (%s)", field), {
-    r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
-    expect_true(is.na(r$impl_gap))
-    expect_equal(r$log_post, r$log_post_impl, tolerance = 1e-8)
-  })
-
-  for (mode in AUTODIFF_MODES) {
-    test_that(sprintf("autodiff carries every block (%s, %s)", field, mode), {
-      r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
-      zero <- r$analytic == 0
-      expect_equal(
-        sum(zero), 0L,
-        label = sprintf("%s/%s: zero-gradient blocks %s", field, mode,
-                        paste(unique(r$block[zero]), collapse = ", "))
-      )
-      expect_equal(r$log_post, r$log_post_mode, tolerance = 1e-8)
-    })
-  }
-}
-
-for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS)) {
+for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
+                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS)) {
   for (mode in MODES) {
     test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
@@ -434,7 +401,8 @@ for (field in KERNEL_COLLAPSED_FIELDS) {
 # 3.14 apart on temporal_ar1, 27.2 on tvc_ar1, 30.0 on st4_ar1 and 1.9e-03 on
 # ms_temporal, and the handcoded gradient of the first two was not finite at
 # all one step further out (gcol33/tulpaRatio#59).
-for (field in c("temporal_ar1", "tvc_ar1", "ms_temporal", "st4_ar1")) {
+for (field in c("temporal_ar1", "tvc_ar1", "ms_temporal", "st4_ar1",
+                "st4_ar1_nc", "st2_ar1")) {
   test_that(sprintf("the densities agree where the 1 - rho^2 floor binds (%s)", field), {
     r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded",
                                          near_unit_rho = TRUE)

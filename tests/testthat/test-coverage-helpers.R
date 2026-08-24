@@ -109,9 +109,13 @@ test_that("temporal_ar1 creates valid structure", {
   expect_equal(temp$type, "ar1")
 })
 
-test_that("temporal_ar1 accepts rho parameter", {
-  temp <- temporal_ar1(time_var = "year", rho = 0.8)
-  expect_equal(temp$rho, 0.8)
+test_that("temporal_ar1 accepts a Beta prior on its correlation", {
+  temp <- temporal_ar1(time_var = "year", rho_prior = prior_beta(5, 2))
+  expect_equal(temp$rho_prior$alpha, 5)
+  expect_equal(temp$rho_prior$beta, 2)
+  # `rho` is not an argument; it used to partial-match rho_prior and store a
+  # bare number nothing read.
+  expect_error(temporal_ar1(time_var = "year", rho = 0.8), "Beta prior")
 })
 
 test_that("print.ratiod_temporal works", {

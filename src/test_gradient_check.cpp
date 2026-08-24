@@ -128,6 +128,7 @@ const char* const KNOWN_FIELDS[] = {
   "icar", "bym2", "car_proper",
   "rw1", "rw2", "temporal_ar1", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
+  "st4_ar1_nc", "st2", "st2_rw2", "st2_ar1", "st3",
   "icar_collapsed", "bym2_collapsed",
   "icar_collapsed_rw1", "bym2_collapsed_rw1",
   "hsgp",
@@ -191,7 +192,14 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // ever build a Type I interaction; this is the field that checks the
   // handcoded Type IV Kronecker block against finite differences.
   const bool want_st4 = (field == "st4" || field == "st4_nc" ||
-                         field == "st4_ar1");
+                         field == "st4_ar1" || field == "st4_ar1_nc");
+  // Type II (structured time within each spatial unit) and Type III
+  // (structured space at each time point). Both reach the shared interaction
+  // gradient through a different margin than Type IV does, and Type II is the
+  // one whose RW2 and AR1 arms the composite gradient used to be missing.
+  const bool want_st2 = (field == "st2" || field == "st2_rw2" ||
+                         field == "st2_ar1");
+  const bool want_st3 = (field == "st3");
   // icar_collapsed_rw1 / bym2_collapsed_rw1 pair a collapsed spatial field
   // with a companion temporal RW1 term -- the combination the specialized
   // collapsed gradient has to carry into its inner Laplace.
@@ -630,10 +638,12 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // with a separate additive ICAR/BYM2 field; want_st4 is Type IV (Kronecker)
   // on its own, with the interaction's own space margin carrying the CSR
   // adjacency and its own time margin carrying a real RW1 structure.
-  if (want_st || want_st4) {
+  if (want_st || want_st4 || want_st2 || want_st3) {
     auto& st = data.spatiotemporal_data;
     st.type = want_st4 ? ratiod_spatiotemporal::STType::TYPE_IV
-                        : ratiod_spatiotemporal::STType::TYPE_I;
+            : want_st2 ? ratiod_spatiotemporal::STType::TYPE_II
+            : want_st3 ? ratiod_spatiotemporal::STType::TYPE_III
+                       : ratiod_spatiotemporal::STType::TYPE_I;
     st.shared = true;
     st.n_spatial = n_units;
     st.n_times = n_times;
@@ -651,7 +661,7 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     st.spatial_is_gp = false;
     st.spatial_proper = false;
     st.bym2_scale = 1.0;
-    if (want_st4) {
+    if (want_st4 || want_st3) {
       // build_grid_adjacency emits 0-based col_idx (the convention data.adj_col_idx
       // uses); the interaction's own adjacency is read with adj_col_idx[idx]-1
       // throughout (hmc_spatiotemporal.h, hmc_sampler.cpp), i.e. it is 1-based,
@@ -660,11 +670,18 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       // helper as-is, which would read adj_col_idx[idx]-1 == -1 out of bounds.
       build_grid_adjacency(n_units, st.adj_row_ptr, st.adj_col_idx, st.n_neighbors);
       for (int& j : st.adj_col_idx) j += 1;
-      // st4_ar1 gives the interaction an AR1 time margin, which is the only
-      // configuration the layout allocates logit_rho_st_idx for.
-      st.temporal_type = (field == "st4_ar1")
+      // st4_ar1 gives the interaction an AR1 time margin, whose precision
+      // R(rho) is what the layout allocates logit_rho_st_idx for.
+      st.temporal_type = (field == "st4_ar1" || field == "st4_ar1_nc")
                             ? ratiod_temporal::TemporalType::AR1
                             : ratiod_temporal::TemporalType::RW1;
+      st.temporal_cyclic = false;
+    } else if (want_st2) {
+      // Type II reads only the time margin, so it carries no adjacency. Its
+      // three arms are the three temporal precisions.
+      st.temporal_type = (field == "st2_ar1") ? ratiod_temporal::TemporalType::AR1
+                       : (field == "st2_rw2") ? ratiod_temporal::TemporalType::RW2
+                                              : ratiod_temporal::TemporalType::RW1;
       st.temporal_cyclic = false;
     } else {
       st.temporal_type = ratiod_temporal::TemporalType::NONE;
@@ -677,7 +694,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     // st4_nc exercises the non-centered branch of compute_gradient_spatiotemporal_
     // handcoded's Type IV block (st_use_nc): params store z,
     // delta = z/sqrt(tau_st).
-    data.st_parameterization = (field == "st4_nc") ? 1 : 0;
+    data.st_parameterization =
+        (field == "st4_nc" || field == "st4_ar1_nc") ? 1 : 0;
   }
 
   data.zi_type = zi_type;

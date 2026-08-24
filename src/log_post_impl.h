@@ -155,7 +155,7 @@ T compute_log_post_impl(
     // Temporal effects
     std::vector<T> phi_temporal;
     T tau_temporal = T(1.0);
-    T rho_ar1 = T(0.5);
+    T rho_ar1 = T(0.0);
     T sigma2_temporal_gp = T(1.0);
     T phi_temporal_gp = T(1.0);  // lengthscale
 
@@ -184,8 +184,8 @@ T compute_log_post_impl(
             tau_temporal = safe_exp(log_tau);
 
             if (layout.is_ar1) {
-                T logit_rho = params[layout.logit_rho_ar1_idx];
-                rho_ar1 = inv_logit(logit_rho);
+                rho_ar1 = ratiod_ar1::rho_from_logit(
+                    params[layout.logit_rho_ar1_idx]);
             }
         }
     }
@@ -612,32 +612,17 @@ T compute_log_post_impl(
                 }
 
             } else if (data.temporal_type == TemporalType::AR1) {
-                // AR1: phi[t] | phi[t-1] ~ N(rho * phi[t-1], 1/tau)
-                // Uniform(0, 1) on rho, logit Jacobian folded in
-                log_post = log_post + ratiod_ar1::log_prior_logit_rho(
-                    rho_ar1, ratiod_ar1::RHO_UNIT_PRIOR_A, ratiod_ar1::RHO_UNIT_PRIOR_B);
+                // Beta(a, b) on u = (rho + 1) / 2, logit Jacobian folded in
+                log_post = log_post + ratiod_ar1::log_prior_rho(
+                    rho_ar1, data.temporal_rho_prior_a, data.temporal_rho_prior_b);
 
-                // Include the full normal log-density normalization on both the
-                // stationary first observation and the conditional residuals so
-                // the posterior on tau is correct (the gaussian normalizers carry
-                // a +0.5*T*log(tau) term that gradient-based samplers need).
-                T sigma2_ar1 = T(1.0) / tau_temporal;
-                T one_minus_rho2 = ratiod_ar1::one_minus_rho2(rho_ar1);
-                T var_stationary = sigma2_ar1 / one_minus_rho2;
-                T log_norm_stat = T(-0.5) * safe_log(T(2.0 * M_PI) * var_stationary);
-                T log_norm_cond = T(-0.5) * safe_log(T(2.0 * M_PI) * sigma2_ar1);
-
+                // The normalized density, both the stationary first observation
+                // and the conditional residuals, since the gaussian normalizers
+                // carry the +0.5*T*log(tau) a gradient-based sampler needs.
                 for (int g = 0; g < data.n_temporal_groups; g++) {
-                    // First time point: phi[0] ~ N(0, sigma^2 / (1 - rho^2))
-                    log_post = log_post - T(0.5) * phi_temporal[g * T_times] * phi_temporal[g * T_times] / var_stationary;
-                    log_post = log_post + log_norm_stat;
-
-                    // Subsequent: phi[t] | phi[t-1] ~ N(rho * phi[t-1], sigma^2)
-                    for (int t = 1; t < T_times; t++) {
-                        T resid = phi_temporal[g * T_times + t] - rho_ar1 * phi_temporal[g * T_times + t - 1];
-                        log_post = log_post - T(0.5) * tau_temporal * resid * resid;
-                        log_post = log_post + log_norm_cond;
-                    }
+                    log_post = log_post + ratiod_ar1::ar1_log_density(
+                        &phi_temporal[g * T_times], T_times, rho_ar1,
+                        tau_temporal);
                 }
             }
         }
@@ -973,13 +958,11 @@ T compute_log_post_impl(
 
         // AR1 rho parameter
         if (layout.logit_rho_st_idx >= 0) {
-            T logit_rho_st = params[layout.logit_rho_st_idx];
-            rho_st = T(2.0) / (T(1.0) + safe_exp(-logit_rho_st)) - T(1.0);
+            rho_st = ratiod_ar1::rho_from_logit(params[layout.logit_rho_st_idx]);
 
-            // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
-            T u = (rho_st + T(1.0)) / T(2.0);
-            log_post = log_post + ratiod_ar1::log_prior_logit_rho(
-                u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
+            // Beta(a, b) on u = (rho + 1) / 2, logit Jacobian folded in
+            log_post = log_post + ratiod_ar1::log_prior_rho(
+                rho_st, st_data.rho_prior_a, st_data.rho_prior_b);
         }
 
         // GP range parameters
@@ -1025,9 +1008,8 @@ T compute_log_post_impl(
             // Rank term with actual tau, combined with the NC Jacobian:
             // 0.5 * rank * log(tau) - ST/2 * log(tau)
             int rank_space = S - 1;
-            int rank_time = (st_data.temporal_type == TemporalType::RW1)
-                ? tulpa::rw1_rank(T_st, st_data.temporal_cyclic)
-                : tulpa::rw2_rank(T_st, st_data.temporal_cyclic);
+            int rank_time = ratiod_spatiotemporal::st_time_rank(
+                st_data.temporal_type, T_st, st_data.temporal_cyclic);
             int total_rank = rank_space * rank_time;
             log_post = log_post + T(0.5 * (total_rank - ST)) * safe_log(tau_st);
 
@@ -1054,8 +1036,15 @@ T compute_log_post_impl(
             // LogNormal(0,1) on lengthscale
             log_post = log_post - T(0.5) * log_ls_st * log_ls_st;
 
-            int rank_t = (st_data.temporal_type == TemporalType::RW1) ? tulpa::rw1_rank(T_st, st_data.temporal_cyclic) :
-                         (st_data.temporal_type == TemporalType::RW2) ? tulpa::rw2_rank(T_st, st_data.temporal_cyclic) : T_st;
+            int rank_t = ratiod_spatiotemporal::st_time_rank(
+                st_data.temporal_type, T_st, st_data.temporal_cyclic);
+            const bool st_hsgp_ar1 =
+                (st_data.temporal_type == TemporalType::AR1 && T_st >= 2);
+            if (st_hsgp_ar1) {
+                // One log|R(rho)| per basis function.
+                log_post = log_post + T(0.5 * M) *
+                           safe_log(ratiod_ar1::one_minus_rho2(rho_st));
+            }
 
             for (int j = 0; j < M; j++) {
                 T S_j = ratiod_hsgp::spectral_density_se(
@@ -1077,6 +1066,8 @@ T compute_log_post_impl(
                         T d2 = dj[t] - T(2.0) * dj[t - 1] + dj[t - 2];
                         qf = qf + d2 * d2;
                     }
+                } else if (st_hsgp_ar1) {
+                    qf = ratiod_ar1::ar1_quadratic_form(dj, T_st, rho_st);
                 }
                 log_post = log_post + T(0.5 * rank_t) * safe_log(prec_j)
                                     - T(0.5) * prec_j * qf;
