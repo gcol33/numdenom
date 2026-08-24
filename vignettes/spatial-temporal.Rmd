@@ -381,27 +381,39 @@ fit <- tratio(
 
 ## Non-Separable Spatiotemporal GP
 
-For continuous space-time data, use `spatiotemporal_gp()` with non-separable covariance:
+For continuous space-time data, `type = "nonsep_gp"` puts a covariance on the
+space-time grid rather than a GMRF stencil on it. The interaction carries its
+own `coords`, so an areal main effect pairs with a continuous interaction over
+the same units:
 
 ```{r}
 fit <- tratio(
   count | effort ~ x,
   data = df,
   family = ratiod_poisson_gamma(),
-  spatiotemporal = spatiotemporal_gp(
-    ~ lon + lat,
-    time_var = "date",
-    nonsep_type = "gneiting"
+  spatiotemporal = spatiotemporal(
+    spatial = spatial_car(adj, level = "group", group_var = "region"),
+    temporal = temporal_rw1("date"),
+    type = "nonsep_gp",
+    nonsep_type = "gneiting",
+    coords = ~ lon + lat
   )
 )
 ```
 
 Non-separability types:
 
-- `"product"`: Separable (reference)
-- `"sum"`: Additive covariance
+- `"product"`: the separable covariance, `C_s(h) C_t(u)`. `type = "separable"`
+  is this arm.
 - `"gneiting"`: Gneiting (2002) class
-- `"cressie_huang"`: Cressie-Huang (1999) class
+
+An additive covariance `C_s(h) + C_t(u)` is not among them. On a complete
+`S x T` grid its rank is `S + T - 1`, and the directions it drops are exactly
+the space-time interactions the block exists to carry.
+
+Both ranges are estimated on their own log scale, alongside the interaction's
+precision. The field is approximated by an NNGP over the grid, with `nn`
+neighbours per cell chosen on a joint space-time metric.
 
 ## Extracting Spatiotemporal Effects
 

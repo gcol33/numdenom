@@ -1099,3 +1099,76 @@ NumericVector cpp_test_parallel_independent(int n, int n_threads) {
 
   return results;
 }
+
+// ---------------------------------------------------------------------------
+// hmc_spatiotemporal.h: the GP interaction's field density
+//
+// The NNGP over a field's index set is EXACT when every location conditions on
+// all of its predecessors, so at nn = n - 1 this has to reproduce the dense
+// multivariate normal built from the same kernel. That identity is what pins
+// the covariance assembly, the ordering and the neighbour Cholesky against the
+// definition rather than against themselves; test-st-gp-density.R drives it.
+// ---------------------------------------------------------------------------
+
+#include "hmc_spatiotemporal.h"
+
+// [[Rcpp::export]]
+double cpp_test_st_gp_log_lik(
+    NumericVector w,
+    double sigma2,
+    double phi_space,
+    double phi_time,
+    NumericMatrix coords,        // n x 2, by field index
+    NumericVector time_values,   // n, by field index
+    int nn,
+    IntegerVector nn_idx,        // n x nn, row-major, 1-based within ordering
+    NumericVector nn_dist_space,
+    NumericVector nn_dist_time,
+    IntegerVector nn_order,      // 1-based from R, stored 0-based
+    std::string nonsep_type = "product",
+    std::string cov_space = "exponential",
+    std::string cov_time = "exponential"
+) {
+  ratiod_spatiotemporal::SpatiotemporalData st;
+  const int n = w.size();
+  st.type = ratiod_spatiotemporal::STType::NONSEP_GP;
+  st.n_params = n;
+  st.nn = nn;
+  st.coords.resize(2 * (size_t)n);
+  for (int i = 0; i < n; i++) {
+    st.coords[(size_t)i * 2 + 0] = coords(i, 0);
+    st.coords[(size_t)i * 2 + 1] = coords(i, 1);
+  }
+  st.time_values = Rcpp::as<std::vector<double>>(time_values);
+  st.nn_idx = Rcpp::as<std::vector<int>>(nn_idx);
+  st.nn_dist_space = Rcpp::as<std::vector<double>>(nn_dist_space);
+  st.nn_dist_time = Rcpp::as<std::vector<double>>(nn_dist_time);
+  std::vector<int> ord = Rcpp::as<std::vector<int>>(nn_order);
+  st.nn_order.resize(ord.size());
+  for (size_t i = 0; i < ord.size(); i++) st.nn_order[i] = ord[i] - 1;
+  st.nn_order_inv.assign(ord.size(), 0);
+  for (size_t i = 0; i < st.nn_order.size(); i++)
+    st.nn_order_inv[st.nn_order[i]] = (int)i;
+
+  if (nonsep_type == "product") {
+    st.nonsep_type = ratiod_spatiotemporal::NonsepType::PRODUCT;
+  } else if (nonsep_type == "gneiting") {
+    st.nonsep_type = ratiod_spatiotemporal::NonsepType::GNEITING;
+  } else {
+    Rcpp::stop("cpp_test_st_gp_log_lik: unknown nonsep_type '%s'",
+               nonsep_type.c_str());
+  }
+  auto parse_cov = [](const std::string& s) {
+    if (s == "exponential") return ratiod_cov::CovType::EXPONENTIAL;
+    if (s == "matern")      return ratiod_cov::CovType::MATERN;
+    if (s == "gaussian")    return ratiod_cov::CovType::GAUSSIAN;
+    if (s == "spherical")   return ratiod_cov::CovType::SPHERICAL;
+    Rcpp::stop("cpp_test_st_gp_log_lik: unknown covariance '%s'", s.c_str());
+    return ratiod_cov::CovType::EXPONENTIAL;
+  };
+  st.cov_space = parse_cov(cov_space);
+  st.cov_time = parse_cov(cov_time);
+
+  return ratiod_spatiotemporal::st_gp_nngp_log_lik(
+      w.begin(), sigma2, phi_space, phi_time, st);
+}

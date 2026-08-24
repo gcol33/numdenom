@@ -34,7 +34,7 @@
 #' @param temporal Optional temporal structure specification.
 #'   See [temporal_rw1()], [temporal_rw2()], [temporal_ar1()].
 #' @param spatiotemporal Optional spatiotemporal interaction specification.
-#'   See [spatiotemporal()], [spatiotemporal_gp()].
+#'   See [spatiotemporal()].
 #' @param zi Optional zero-inflation specification.
 #'   See [zi_poisson()], [zi_negbin()], [hurdle_poisson()], [hurdle_negbin()].
 #' @param latent Optional latent factor specification for unmeasured confounders.
@@ -268,16 +268,12 @@ tratio <- function(formula,
     if (!inherits(spatiotemporal, "ratiod_spatiotemporal")) {
       stop(
         "`spatiotemporal` must be a ratiod_spatiotemporal object.\n",
-        "Options: spatiotemporal(), spatiotemporal_gp()",
+        "Build one with spatiotemporal().",
         call. = FALSE
       )
     }
     # Validate and compute dimensions
-    if (inherits(spatiotemporal, "ratiod_st_gp")) {
-      spatiotemporal <- validate_st_gp(spatiotemporal, data)
-    } else {
-      spatiotemporal <- validate_spatiotemporal(spatiotemporal, data)
-    }
+    spatiotemporal <- validate_spatiotemporal(spatiotemporal, data)
 
     # Auto-extract main spatial/temporal effects from spatiotemporal if not
     # provided separately. The Knorr-Held decomposition requires main effects

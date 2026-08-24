@@ -65,6 +65,17 @@ ST_OTHER_FIELDS <- c("st2", "st2_rw2", "st2_ar1", "st3")
 # only hyperparameter the layout allocates logit_rho_st_idx for
 # (gcol33/tulpaRatio#66).
 ST_IV_AR1_FIELDS <- c("st4_ar1", "st4_ar1_nc")
+# The GP interaction types: a continuous covariance over the S x T grid instead
+# of a GMRF stencil on it (gcol33/tulpaRatio#68). Nothing built one before, and
+# what the gradient did with the block was leave it at zero and subtract the
+# sum-to-zero push -- the field felt neither its data nor its own prior. Its
+# precision, its two ranges and the field itself all reach st_prior_grad.h's GP
+# branch. stgp_latent pairs the interaction with a latent factor, which is what
+# routes it away from compute_gradient_spatiotemporal_handcoded and into the
+# composite, so both callers of that branch are checked; that pairing is also
+# what caught compute_gradient_latent_handcoded being selected for a model
+# carrying an interaction it never writes (gcol33/tulpaRatio#71).
+ST_GP_FIELDS <- c("stgp", "stgp_matern", "stgp_gneiting", "stgp_latent")
 # The kernels resolve_gradient_fn can select that make_model() could not build a
 # model for at all: the GP, the multi-scale GP, the SVC pair, the temporal GP,
 # multi-scale temporal and latent factors (gcol33/tulpaRatio#45). Under the
@@ -90,7 +101,7 @@ KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc")
 # recorded in the issue.
 BLOCKED_FIELDS <- character(0)
 ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
-                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, KERNEL_FIELDS)
+                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, ST_GP_FIELDS, KERNEL_FIELDS)
 MODES <- c("handcoded", "arena")
 AUTODIFF_MODES <- c("arena", "forward", "tape")
 # The same three under the names the front door takes.
@@ -169,7 +180,7 @@ for (field in CAR_PROPER_FIELDS) {
 }
 
 for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
-                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS)) {
+                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, ST_GP_FIELDS)) {
   for (mode in MODES) {
     test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)

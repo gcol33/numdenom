@@ -7,9 +7,14 @@
 spatiotemporal(
   spatial,
   temporal,
-  type = c("I", "II", "III", "IV", "iid", "separable"),
+  type = c("I", "II", "III", "IV", "iid", "separable", "nonsep_gp"),
   shared = TRUE,
-  parameterization = c("centered", "noncentered")
+  parameterization = c("centered", "noncentered"),
+  nonsep_type = c("product", "gneiting"),
+  coords = NULL,
+  cov_space = NULL,
+  cov_time = NULL,
+  nn = NULL
 )
 }
 \arguments{
@@ -25,7 +30,9 @@ or \code{\link[=spatial_gp]{spatial_gp()}}.}
 \item \code{"II"}: Structured time at each location
 \item \code{"III"}: Structured space at each time point
 \item \code{"IV"}: Fully structured (Kronecker product of spatial and temporal)
-\item \code{"separable"}: Separable covariance (Kronecker product)
+\item \code{"separable"}: Separable space-time GP, the product covariance
+\verb{C_s(h) C_t(u)} over the grid
+\item \code{"nonsep_gp"}: Non-separable space-time GP, see \code{nonsep_type}
 }}
 
 \item{shared}{Logical; if TRUE (default), spatiotemporal effect enters both
@@ -41,6 +48,25 @@ shrinks with it (a funnel), which NUTS cannot span with a single step
 size; \code{"noncentered"} decouples the two and should be tried first when
 \code{rhat} for the interaction (or an intercept sharing its geometry) will
 not drop with more warmup. Ignored outside the HMC backend.}
+
+\item{nonsep_type}{For \code{type = "nonsep_gp"}: \code{"product"} (the separable
+covariance) or \code{"gneiting"} (Gneiting 2002). An additive covariance is not
+among them: on a complete \verb{S x T} grid its rank is \code{S + T - 1}, and the
+directions it drops are the space-time interactions the block carries.}
+
+\item{coords}{Required for \code{"separable"} and \code{"nonsep_gp"}: a formula
+(\code{~ lon + lat}) or a character vector of two column names, giving the
+coordinates the interaction's covariance is built on. Where a spatial
+unit's rows carry different positions, the unit's coordinate is their
+centroid. The interaction's geometry is its own, so an areal spatial main
+effect pairs with a continuous interaction.}
+
+\item{cov_space, cov_time}{For the GP types: the spatial and temporal
+kernels, one of \code{"exponential"} (default), \code{"matern"}, \code{"gaussian"},
+\code{"spherical"}. \code{phi} is a lengthscale in all four.}
+
+\item{nn}{For the GP types: NNGP neighbours per grid cell (default 15,
+capped at \code{S * T - 1}), chosen on a joint space-time metric.}
 }
 \value{
 A \code{ratiod_spatiotemporal} object

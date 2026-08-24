@@ -53,7 +53,7 @@ See \code{\link[=spatial_car]{spatial_car()}}, \code{\link[=spatial_bym2]{spatia
 See \code{\link[=temporal_rw1]{temporal_rw1()}}, \code{\link[=temporal_rw2]{temporal_rw2()}}, \code{\link[=temporal_ar1]{temporal_ar1()}}.}
 
 \item{spatiotemporal}{Optional spatiotemporal interaction specification.
-See \code{\link[=spatiotemporal]{spatiotemporal()}}, \code{\link[=spatiotemporal_gp]{spatiotemporal_gp()}}.}
+See \code{\link[=spatiotemporal]{spatiotemporal()}}.}
 
 \item{zi}{Optional zero-inflation specification.
 See \code{\link[=zi_poisson]{zi_poisson()}}, \code{\link[=zi_negbin]{zi_negbin()}}, \code{\link[=hurdle_poisson]{hurdle_poisson()}}, \code{\link[=hurdle_negbin]{hurdle_negbin()}}.}

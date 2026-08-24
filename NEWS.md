@@ -1,3 +1,69 @@
+# tulpaRatio 1.7.0
+
+* **The GP spatiotemporal interaction exists (#68, #69).** `type = "separable"`
+  reached the sampler and segfaulted on the first log-posterior evaluation, in
+  every gradient mode. `SpatiotemporalData`'s NNGP members -- `nn`, `nn_idx`,
+  `nn_order`, `nn_dist_space`, `nn_dist_time`, `coords`, `time_values`,
+  `nonsep_type`, `cov_space`, `cov_time` -- were never assigned by anything:
+  `st_params` did not carry them and the sampler entry did not write them, so
+  `st_gp_nngp_log_lik()` read `nn_order[0]` on an empty vector, and the four
+  scalars among them were indeterminate rather than unset. Both types are now
+  built end to end. The interaction carries its own `coords`, so an areal main
+  effect pairs with a continuous interaction over the same units; `nonsep_type`,
+  `cov_space`, `cov_time` and `nn` are its own too, and `type = "nonsep_gp"` is
+  reachable from the front door for the first time.
+
+* **That interaction now has a gradient (#68).** `compute_gradient_composite`
+  and `compute_gradient_spatiotemporal_handcoded` both skipped the GP types
+  entirely, eta included, so a fit would have moved the block under nothing but
+  its sum-to-zero penalty and computed every other block's gradient at a linear
+  predictor missing the interaction. `st_gp_nngp_grad()` (`src/st_prior_grad.h`)
+  writes the field, its precision and both ranges, sharing the conditional
+  decomposition with the density through `st_gp_nngp_scan()` so the two cannot
+  disagree about what the prior is. `sigma2` factors out of the neighbour block,
+  which collapses its gradient to a closed form with no extra solve; the two
+  ranges take one further pair of triangular solves against the factor the scan
+  already built. Checked against central differences at `1e-7` to `1e-5` on four
+  new `cpp_gradient_check()` fields (`stgp`, `stgp_matern`, `stgp_gneiting`,
+  `stgp_latent`), on both the analytic and the templated density.
+
+* **The interaction's covariance is one definition (#68).** The GP branch
+  carried its own Cholesky, its own two triangular solves and its own
+  conditional-variance floor, a fifth copy of what `ratiod_cov` (`src/hmc_cov.h`)
+  holds for every other NNGP path; it now reads that one. Each arm is written as
+  a correlation with `r(0, 0) = 1` and scaled by `sigma2` once, so the marginal
+  variance is what the PC prior is a prior on and the neighbour block's diagonal
+  is the kernel's own value rather than a constant written beside it.
+  `cpp_test_st_gp_log_lik()` drives the shipped density against a dense
+  multivariate normal built from the kernel formulas, at `nn = n - 1` where the
+  NNGP is exact.
+
+* **Two non-separability names are gone, for different reasons (#68).**
+  Cressie-Huang (1999) had no branch of its own and was evaluated as the product
+  covariance. The additive kernel `C_s(h) + C_t(u)` cannot be an interaction
+  covariance on a complete grid: its rank there is `S + T - 1` of `S * T`, and
+  every direction it drops is an interaction -- measured on a 6 x 5 grid, rank
+  10 of 30 and smallest eigenvalue -1.6e-15, against condition numbers of 8.4
+  and 10.8 for the product and Gneiting arms.
+
+* **`spatiotemporal_gp()` is withdrawn (#68).** It emitted `type = "st_gp"`, a
+  string no other R file read and the sampler entry rejected, and its
+  observation-level index set had no relationship to the `S x T` sum-to-zero
+  penalty the density applies. `spatiotemporal(type = "nonsep_gp",
+  nonsep_type =, coords =)` is the spelling that works, and carries the same
+  knobs.
+
+* **A spatial GP indexed an interaction by row (#68).** `build_st_index()` set
+  `s_idx <- seq_len(N)` for a GP spatial component while `n_spatial` counted
+  unique locations, so `st_flat` ran past the `S x T` grid it indexes the moment
+  two observations shared a location. It reads `obs_to_loc`.
+
+* **`compute_gradient_latent_handcoded` was selected for models it cannot write
+  (#71).** Its guard checked for no spatial and no temporal main effect and not
+  for an interaction, so a latent factor alongside one returned the latent
+  factors at -2.34 against a finite difference of 0.114. The remaining
+  specialized guards omitting the same check are listed in #71.
+
 # tulpaRatio 1.6.0
 
 * **The spatiotemporal interaction's AR1 time margin exists (#66).**

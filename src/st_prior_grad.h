@@ -19,6 +19,7 @@
 #define RATIOD_ST_PRIOR_GRAD_H
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include <tulpa/soft_sum_to_zero.h>
@@ -38,8 +39,152 @@ struct StPriorGrad {
   double logit_rho = 0.0;
   double log_sigma2_hsgp = 0.0;
   double log_lengthscale_hsgp = 0.0;
+  // The GP types' two ranges, with respect to the log parameters the sampler
+  // moves. Zero for every Knorr-Held type, which carries no range.
+  double log_phi_space = 0.0;
+  double log_phi_time = 0.0;
   double log_prior = 0.0;
 };
+
+// What a GP interaction's prior contributes, before the sum-to-zero margins.
+struct StGpGrad {
+  double log_prior = 0.0;
+  double log_tau = 0.0;
+  double log_phi_space = 0.0;
+  double log_phi_time = 0.0;
+  bool ok = true;
+};
+
+// The GP interaction's prior gradient.
+//
+// The conditional decomposition is the same pass the density makes
+// (st_gp_nngp_scan), so the two cannot disagree about what the field's prior
+// is; what is written here is the derivative of each location's Gaussian term.
+// With e_i = w_i - m_i, m_i = alpha' w_nb and d_i = sigma2 - c' alpha,
+//
+//   log p = sum_i [ -0.5 log(2 pi d_i) - 0.5 e_i^2 / d_i ]
+//   d/dtheta = (-0.5/d_i + 0.5 e_i^2/d_i^2) dd_i + (e_i/d_i) dm_i.
+//
+// The FIELD enters only through w, so its gradient is the scatter of -e_i/d_i
+// onto location i and +alpha_j e_i/d_i onto each of its neighbours: one pass,
+// no second factorization, and exactly the (I - A)' D^-1 (I - A) w application
+// the Vecchia factorization already holds.
+//
+// SIGMA2 factors out of the neighbour block (C = sigma2 R), so alpha and m_i do
+// not move with it and d_i is proportional to it. That collapses to
+// d(log p)/d(log sigma2) = sum_i (-0.5 + 0.5 e_i^2/d_i) with no extra solve,
+// and log_tau = -log sigma2 flips the sign.
+//
+// The two RANGES need dC/dphi. With beta = C^-1 w_nb, one more pair of
+// triangular solves against the factor the scan already built,
+//
+//   dd_i = -2 (dc/dphi)' alpha + alpha' (dC/dphi) alpha
+//   dm_i =    (dc/dphi)' beta  - alpha' (dC/dphi) beta.
+//
+// A location whose conditional variance sat on its floor contributes no dd_i:
+// what is reported there is a constant, not a function of the parameters. Its
+// dm_i still counts, the conditional mean being untouched by the floor.
+//
+//   grad_w  ACCUMULATED, length st.n_params
+inline StGpGrad st_gp_nngp_grad(const SpatiotemporalData& st, const double* w,
+                                double sigma2, double phi_space,
+                                double phi_time, double* grad_w) {
+  StGpGrad out;
+  double d_dphi_space = 0.0;
+  double d_dphi_time = 0.0;
+
+  RATIOD_TLS_WORKSPACE(std::vector<double>, gp_wnb);
+  RATIOD_TLS_WORKSPACE(std::vector<double>, gp_tmp);
+  RATIOD_TLS_WORKSPACE(std::vector<double>, gp_beta);
+  RATIOD_TLS_WORKSPACE(std::vector<double>, gp_dc_s);
+  RATIOD_TLS_WORKSPACE(std::vector<double>, gp_dc_t);
+  RATIOD_TLS_WORKSPACE(std::vector<double>, gp_dC_s);
+  RATIOD_TLS_WORKSPACE(std::vector<double>, gp_dC_t);
+
+  const int nn = st.nn;
+
+  out.ok = st_gp_nngp_scan<double>(
+      w, sigma2, phi_space, phi_time, st,
+      [&](int i, int obs_idx, const int* nb, int n_nb, const double* L,
+          const double* /*c_vec*/, const double* alpha, const double& cond_mean,
+          const double& cond_var, bool floored) {
+        const double e = w[obs_idx] - cond_mean;
+        const double r = e / cond_var;
+        out.log_prior += -0.5 * std::log(2.0 * M_PI * cond_var) - 0.5 * e * r;
+        grad_w[obs_idx] -= r;
+        if (!floored) out.log_tau += 0.5 - 0.5 * e * r;
+
+        if (n_nb == 0) return;
+        for (int j = 0; j < n_nb; j++) grad_w[nb[j]] += alpha[j] * r;
+
+        const size_t nsq = static_cast<size_t>(n_nb) * n_nb;
+        gp_wnb.resize(n_nb);
+        gp_tmp.resize(n_nb);
+        gp_beta.resize(n_nb);
+        gp_dc_s.resize(n_nb);
+        gp_dc_t.resize(n_nb);
+        gp_dC_s.assign(nsq, 0.0);
+        gp_dC_t.assign(nsq, 0.0);
+
+        for (int j = 0; j < n_nb; j++) gp_wnb[j] = w[nb[j]];
+        ratiod_cov::nngp_forward_solve(L, n_nb, gp_wnb.data(), gp_tmp.data());
+        ratiod_cov::nngp_back_solve(L, n_nb, gp_tmp.data(), gp_beta.data());
+
+        for (int j = 0; j < n_nb; j++) {
+          const size_t f = static_cast<size_t>(i) * nn + j;
+          double ds, dt;
+          st_corr_dphi(st.nn_dist_space[f], st.nn_dist_time[f], phi_space,
+                       phi_time, st, &ds, &dt);
+          gp_dc_s[j] = sigma2 * ds;
+          gp_dc_t[j] = sigma2 * dt;
+        }
+        for (int j1 = 0; j1 < n_nb; j1++) {
+          for (int j2 = j1; j2 < n_nb; j2++) {
+            double h12, u12, ds, dt;
+            st_pair_separation(st, nb[j1], nb[j2], &h12, &u12);
+            st_corr_dphi(h12, u12, phi_space, phi_time, st, &ds, &dt);
+            gp_dC_s[static_cast<size_t>(j1) * n_nb + j2] = sigma2 * ds;
+            gp_dC_s[static_cast<size_t>(j2) * n_nb + j1] = sigma2 * ds;
+            gp_dC_t[static_cast<size_t>(j1) * n_nb + j2] = sigma2 * dt;
+            gp_dC_t[static_cast<size_t>(j2) * n_nb + j1] = sigma2 * dt;
+          }
+        }
+
+        const double w_d = floored ? 0.0 : (-0.5 / cond_var + 0.5 * r * r);
+        double dot_c_a_s = 0.0, dot_c_b_s = 0.0;
+        double dot_c_a_t = 0.0, dot_c_b_t = 0.0;
+        double quad_aa_s = 0.0, quad_ab_s = 0.0;
+        double quad_aa_t = 0.0, quad_ab_t = 0.0;
+        for (int j1 = 0; j1 < n_nb; j1++) {
+          dot_c_a_s += gp_dc_s[j1] * alpha[j1];
+          dot_c_b_s += gp_dc_s[j1] * gp_beta[j1];
+          dot_c_a_t += gp_dc_t[j1] * alpha[j1];
+          dot_c_b_t += gp_dc_t[j1] * gp_beta[j1];
+          double row_a_s = 0.0, row_b_s = 0.0, row_a_t = 0.0, row_b_t = 0.0;
+          for (int j2 = 0; j2 < n_nb; j2++) {
+            const double s = gp_dC_s[static_cast<size_t>(j1) * n_nb + j2];
+            const double t = gp_dC_t[static_cast<size_t>(j1) * n_nb + j2];
+            row_a_s += s * alpha[j2];
+            row_b_s += s * gp_beta[j2];
+            row_a_t += t * alpha[j2];
+            row_b_t += t * gp_beta[j2];
+          }
+          quad_aa_s += alpha[j1] * row_a_s;
+          quad_ab_s += alpha[j1] * row_b_s;
+          quad_aa_t += alpha[j1] * row_a_t;
+          quad_ab_t += alpha[j1] * row_b_t;
+        }
+        d_dphi_space += w_d * (-2.0 * dot_c_a_s + quad_aa_s)
+                      + r * (dot_c_b_s - quad_ab_s);
+        d_dphi_time += w_d * (-2.0 * dot_c_a_t + quad_aa_t)
+                     + r * (dot_c_b_t - quad_ab_t);
+      });
+
+  // The sampled parameters are the logs of the two ranges.
+  out.log_phi_space = d_dphi_space * phi_space;
+  out.log_phi_time = d_dphi_time * phi_time;
+  return out;
+}
 
 // The interaction's log-prior gradient.
 //
@@ -50,6 +195,7 @@ struct StPriorGrad {
 //   delta           the reconstructed field (== z_or_delta unless use_nc)
 //   grad_delta_lik  d(log-likelihood) / d(delta)
 //   tau, rho        the interaction's precision and time-margin correlation
+//   phi_space, phi_time  the GP types' two ranges; unread by Knorr-Held I-IV
 //   use_nc          the non-centered Type IV reparameterization, delta = z / sqrt(tau)
 //   grad_delta      OUT, length st.n_params, ASSIGNED (not accumulated)
 inline StPriorGrad st_interaction_prior_grad(
@@ -63,6 +209,8 @@ inline StPriorGrad st_interaction_prior_grad(
     double rho,
     double sigma2_hsgp,
     double lengthscale_hsgp,
+    double phi_space,
+    double phi_time,
     bool use_nc,
     double* grad_delta
 ) {
@@ -259,6 +407,28 @@ inline StPriorGrad st_interaction_prior_grad(
     const int rank_spatial = S - 1;
     out.log_tau += 0.5 * T * rank_spatial - 0.5 * tau * total_qf;
     out.log_prior = 0.5 * T * rank_spatial * std::log(tau) - 0.5 * tau * total_qf;
+
+  } else if (st.type == STType::SEPARABLE || st.type == STType::NONSEP_GP) {
+    // A GP over the field's own index set, so tau enters as the marginal
+    // variance sigma2 = 1/tau rather than through a GMRF stencil, and the two
+    // ranges are parameters of the same prior. The Knorr-Held branches read a
+    // Kronecker structure this one does not have; what they share is the
+    // sum-to-zero block below, which the density applies to every type.
+    for (int k = 0; k < ST; k++) grad_delta[k] = grad_delta_lik[k];
+    const StGpGrad g =
+        st_gp_nngp_grad(st, delta, 1.0 / tau, phi_space, phi_time, grad_delta);
+    if (!g.ok) {
+      // The structure was not filled, or a neighbour block would not factorize.
+      // The density returns -inf at the same state, so the step is rejected;
+      // what the field must not carry away from here is a partial prior.
+      for (int k = 0; k < ST; k++) grad_delta[k] = grad_delta_lik[k];
+      out.log_prior = -std::numeric_limits<double>::infinity();
+      return out;
+    }
+    out.log_prior = g.log_prior;
+    out.log_tau += g.log_tau;
+    out.log_phi_space = g.log_phi_space;
+    out.log_phi_time = g.log_phi_time;
 
   } else if (st.type == STType::TYPE_IV) {
     // Kronecker: Q_delta = tau * (Q_s (x) Q_t). Under the non-centered

@@ -469,6 +469,10 @@ cpp_test_parallel_independent <- function(n, n_threads) {
     .Call(`_tulpaRatio_cpp_test_parallel_independent`, n, n_threads)
 }
 
+cpp_test_st_gp_log_lik <- function(w, sigma2, phi_space, phi_time, coords, time_values, nn, nn_idx, nn_dist_space, nn_dist_time, nn_order, nonsep_type = "product", cov_space = "exponential", cov_time = "exponential") {
+    .Call(`_tulpaRatio_cpp_test_st_gp_log_lik`, w, sigma2, phi_space, phi_time, coords, time_values, nn, nn_idx, nn_dist_space, nn_dist_time, nn_order, nonsep_type, cov_space, cov_time)
+}
+
 cpp_tls_workspace_shrink <- function(cycles, work, n) {
     .Call(`_tulpaRatio_cpp_tls_workspace_shrink`, cycles, work, n)
 }

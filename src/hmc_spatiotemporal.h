@@ -7,6 +7,8 @@
 
 #include <vector>
 #include <cmath>
+#include <limits>
+#include "hmc_cov.h"
 #include "hmc_temporal.h"
 #include "hmc_svc.h"
 #include "autodiff_utils.h"
@@ -65,12 +67,24 @@ inline bool st_time_margin_is_structured(STType type) {
   return type == STType::TYPE_II || type == STType::TYPE_IV;
 }
 
-// Non-separability types for GP
+// Non-separability types for the GP interaction. Two of the four names this
+// carried are gone, for different reasons.
+//
+// Cressie-Huang (1999) had no branch of its own in the covariance and was
+// evaluated as PRODUCT. A class that silently means another one is worse than
+// an absent option.
+//
+// The ADDITIVE kernel C_s(h) + C_t(u) cannot be an interaction covariance on a
+// complete grid. Its rank there is S + T - 1 out of S * T -- for any four cells
+// (s1,t1), (s1,t2), (s2,t1), (s2,t2) the vector (1, -1, -1, 1) is in its null
+// space, and that vector IS an interaction. So it assigns the block it is a
+// prior for zero variance in every direction the block exists to carry, and
+// what a neighbour Cholesky then factorizes is the ridge. Measured on a 6 x 5
+// grid: rank 10 of 30, smallest eigenvalue -1.6e-15, against a product kernel
+// at condition number 8.4 and a Gneiting kernel at 10.8.
 enum class NonsepType {
-  PRODUCT,       // Separable (C_s * C_t)
-  SUM,           // C_s + C_t
-  GNEITING,      // Gneiting (2002) class
-  CRESSIE_HUANG  // Cressie-Huang (1999) class
+  PRODUCT,   // C_s(h) * C_t(u), the separable arm
+  GNEITING   // Gneiting (2002) class
 };
 
 // =====================================================================
@@ -104,18 +118,27 @@ struct SpatiotemporalData {
   TemporalType temporal_type;
   bool temporal_cyclic;
 
-  // GP parameters (for separable/non-separable GP)
-  NonsepType nonsep_type;
-  CovType cov_space;
-  CovType cov_time;
-  int nn;                          // NNGP neighbors
-  std::vector<double> coords;      // Coordinates (N x 2, flattened)
-  std::vector<double> time_values; // Time values (N)
-  std::vector<int> nn_idx;         // NNGP neighbor indices
-  std::vector<double> nn_dist_space; // Spatial distances to neighbors
-  std::vector<double> nn_dist_time;  // Temporal distances to neighbors
-  std::vector<int> nn_order;       // Observation ordering
-  std::vector<int> nn_order_inv;   // Inverse ordering
+  // GP parameters (SEPARABLE / NONSEP_GP). Everything here is indexed by the
+  // interaction's own field index k, which runs over n_params -- the S x T grid
+  // for spatiotemporal(), one entry per observation for spatiotemporal_gp() --
+  // and NOT by observation. st_gp_nngp_scan reads coords and time_values at the
+  // entries of nn_order, which are field indices.
+  //
+  // Every member carries a default, because the enum arms and nn are read
+  // before anything can check whether the structure was filled: ModelData is
+  // default-initialized, so a member without one is indeterminate rather than
+  // unset. st_gp_structure_filled() is the check itself.
+  NonsepType nonsep_type = NonsepType::PRODUCT;
+  CovType cov_space = CovType::EXPONENTIAL;
+  CovType cov_time = CovType::EXPONENTIAL;
+  int nn = 0;                      // NNGP neighbours per location
+  std::vector<double> coords;      // n_params x 2, row-major
+  std::vector<double> time_values; // n_params
+  std::vector<int> nn_idx;         // n_params x nn, 1-based within the ordering, 0 absent
+  std::vector<double> nn_dist_space; // n_params x nn
+  std::vector<double> nn_dist_time;  // n_params x nn
+  std::vector<int> nn_order;       // ordering position -> field index, 0-based
+  std::vector<int> nn_order_inv;   // field index -> ordering position, 0-based
 
   // Prior parameters
   double sigma2_prior_U;           // PC prior: P(sigma > U) = alpha
@@ -393,237 +416,229 @@ inline Scalar type_iv_log_prior(
 }
 
 // =====================================================================
-// Non-separable GP covariance functions
+// The spatiotemporal GP covariance
 // =====================================================================
 
-// Gneiting (2002) non-separable covariance
-// C(h, u) = sigma2 / (a*|u|^(2*alpha) + 1)^tau * exp(-c*||h||^(2*gamma) / (a*|u|^(2*alpha) + 1)^(beta*gamma))
-template<typename Scalar>
-inline Scalar gneiting_cov(
-    double h,           // Spatial distance
-    double u,           // Temporal distance (absolute)
-    const Scalar& sigma2,
-    const Scalar& phi_space,   // Spatial range
-    const Scalar& phi_time,    // Temporal range
-    double alpha = 1.0, // Temporal smoothness (0.5 to 1)
-    double gamma = 0.5, // Spatial smoothness (0.5 to 1)
-    double beta = 1.0   // Space-time interaction (0 to 1)
-) {
-  using std::pow;
+// Every arm is written as a CORRELATION r(h, u) with r(0, 0) == 1, and the one
+// place a covariance is formed multiplies it by sigma2. Three things follow.
+// The marginal variance is sigma2 whichever non-separability is chosen, which
+// is what the PC prior on sigma is a prior on. The neighbour block's diagonal
+// is the kernel's own value at zero separation instead of a constant written
+// beside it, so the matrix is the one the kernel defines. And sigma2 factors
+// out of the block entirely, which is what lets its gradient be written in
+// closed form with no extra solve (st_prior_grad.h).
+//
+// The kernels themselves are ratiod_cov's, at unit variance -- the same four
+// the spatial GP, the SVC and their templated twins read, so a range prior
+// means the same thing on this field as on those.
 
-  // Rescale distances by range parameters. The ranges are positive, so the
-  // absolute value can be taken on the distance instead of the ratio.
-  Scalar u_scaled = Scalar(std::abs(u)) / phi_time;
-  Scalar h_scaled = Scalar(h) / phi_space;
-
-  // Parameters for the class
-  double a = 1.0;  // Can be estimated
-  double c = 1.0;  // Can be estimated
-  double tau = 1.0;
-
-  Scalar base = Scalar(a) * pow(u_scaled, 2.0 * alpha) + Scalar(1.0);
-  Scalar denom = pow(base, tau);
-  Scalar exp_arg = Scalar(-c) * pow(h_scaled, 2.0 * gamma) / pow(base, beta * gamma);
-
-  return sigma2 / denom * safe_exp(exp_arg);
+// Gneiting (2002) eq. (14) at a = c = tau = 1, alpha = 1, gamma = 1/2, beta = 1:
+//
+//   r(h, u) = base^-1 exp(-hs / sqrt(base)),   base = ut^2 + 1
+//
+// with hs = h / phi_space and ut = |u| / phi_time. The four shape constants are
+// fixed rather than estimated, which is what the range derivatives below are
+// written for.
+template <typename Scalar>
+inline Scalar gneiting_corr(double h, double u, const Scalar& phi_space,
+                            const Scalar& phi_time) {
+  const Scalar ut = Scalar(std::abs(u)) / phi_time;
+  const Scalar base = ut * ut + Scalar(1.0);
+  const Scalar hs = Scalar(h) / phi_space;
+  return safe_exp(-hs / safe_sqrt(base)) / base;
 }
 
-// Separable covariance (product)
-template<typename Scalar>
-inline Scalar separable_cov(
-    double h,
-    double u,
-    const Scalar& sigma2_space,
-    const Scalar& sigma2_time,
-    const Scalar& phi_space,
-    const Scalar& phi_time,
-    CovType cov_space,
-    CovType cov_time
-) {
-  Scalar c_space = compute_cov(h, sigma2_space, phi_space, cov_space);
-  Scalar c_time = compute_cov(u, sigma2_time, phi_time, cov_time);
-  return c_space * c_time;
+template <typename Scalar>
+inline Scalar st_corr(double h, double u, const Scalar& phi_space,
+                      const Scalar& phi_time, const SpatiotemporalData& st) {
+  if (st.nonsep_type == NonsepType::GNEITING) {
+    return gneiting_corr(h, u, phi_space, phi_time);
+  }
+  const Scalar ks = ratiod_cov::compute_cov(h, Scalar(1.0), phi_space, st.cov_space);
+  const Scalar kt = ratiod_cov::compute_cov(u, Scalar(1.0), phi_time, st.cov_time);
+  return ks * kt;  // PRODUCT: the separable arm
 }
 
-// Sum covariance
-template<typename Scalar>
-inline Scalar sum_cov(
-    double h,
-    double u,
-    const Scalar& sigma2_space,
-    const Scalar& sigma2_time,
-    const Scalar& phi_space,
-    const Scalar& phi_time,
-    CovType cov_space,
-    CovType cov_time
-) {
-  Scalar c_space = compute_cov(h, sigma2_space, phi_space, cov_space);
-  Scalar c_time = compute_cov(u, sigma2_time, phi_time, cov_time);
-  return c_space + c_time;
+template <typename Scalar>
+inline Scalar st_cov(double h, double u, const Scalar& sigma2,
+                     const Scalar& phi_space, const Scalar& phi_time,
+                     const SpatiotemporalData& st) {
+  return sigma2 * st_corr(h, u, phi_space, phi_time, st);
+}
+
+// dr/d(phi_space) and dr/d(phi_time), for the analytic gradient path. Written
+// directly under the correlation they differentiate and in terms of the same
+// intermediate quantities; cpp_gradient_check("stgp*") is what holds the two
+// together.
+inline void st_corr_dphi(double h, double u, double phi_space, double phi_time,
+                         const SpatiotemporalData& st,
+                         double* dr_dphi_space, double* dr_dphi_time) {
+  if (st.nonsep_type == NonsepType::GNEITING) {
+    const double ut = std::abs(u) / phi_time;
+    const double base = ut * ut + 1.0;
+    const double sqrt_base = std::sqrt(base);
+    const double hs = h / phi_space;
+    const double r = std::exp(-hs / sqrt_base) / base;
+    // hs enters only through -hs/sqrt(base), and d(hs)/d(phi_space) is
+    // -hs/phi_space.
+    *dr_dphi_space = r * hs / (phi_space * sqrt_base);
+    // base enters twice, and d(base)/d(phi_time) is -2 ut^2 / phi_time.
+    const double dr_dbase = r * (-1.0 / base + 0.5 * hs / (base * sqrt_base));
+    *dr_dphi_time = dr_dbase * (-2.0 * ut * ut / phi_time);
+    return;
+  }
+  const double ks = ratiod_cov::compute_cov(h, 1.0, phi_space, st.cov_space);
+  const double kt = ratiod_cov::compute_cov(u, 1.0, phi_time, st.cov_time);
+  const double dks = ratiod_cov::dcov_dphi(h, 1.0, phi_space, ks, st.cov_space);
+  const double dkt = ratiod_cov::dcov_dphi(u, 1.0, phi_time, kt, st.cov_time);
+  *dr_dphi_space = dks * kt;
+  *dr_dphi_time = ks * dkt;
+}
+
+// The separation between two grid cells, by their field index. Both the
+// neighbour block and its derivative read it, so the geometry is written once.
+inline void st_pair_separation(const SpatiotemporalData& st, int a, int b,
+                               double* h, double* u) {
+  if (a == b) {
+    *h = 0.0;
+    *u = 0.0;
+    return;
+  }
+  const double dx = st.coords[a * 2] - st.coords[b * 2];
+  const double dy = st.coords[a * 2 + 1] - st.coords[b * 2 + 1];
+  *h = std::sqrt(dx * dx + dy * dy);
+  *u = std::abs(st.time_values[a] - st.time_values[b]);
+}
+
+// Whether the interaction carries the NNGP structure its GP types need. The
+// members are filled at the .Call boundary and the R front door refuses a
+// configuration that cannot fill them; this is what keeps a half-filled
+// structure from being read as geometry.
+inline bool st_gp_structure_filled(const SpatiotemporalData& st) {
+  const int N = st.n_params;
+  if (N <= 0 || st.nn <= 0) return false;
+  if (static_cast<int>(st.nn_order.size()) != N) return false;
+  if (static_cast<int>(st.coords.size()) != 2 * N) return false;
+  if (static_cast<int>(st.time_values.size()) != N) return false;
+  const size_t need = static_cast<size_t>(N) * st.nn;
+  return st.nn_idx.size() == need && st.nn_dist_space.size() == need &&
+         st.nn_dist_time.size() == need;
 }
 
 // =====================================================================
-// Non-separable GP NNGP likelihood
+// The NNGP conditional decomposition
 // =====================================================================
 
-// Compute NNGP log-likelihood for spatiotemporal GP
+// One pass over the field's Vecchia decomposition, shared by the density and by
+// the analytic gradient so the two cannot disagree about what the prior is.
+// `visit` is called once per location, in the NNGP ordering, with that
+// location's neighbour block already factorized:
+//
+//   visit(i, obs_idx, nb, n_nb, L, c_vec, alpha, cond_mean, cond_var, floored)
+//
+// where i is the position in the ordering, obs_idx and nb[j] are field indices,
+// alpha = C^-1 c, and n_nb == 0 marks the marginal arm -- the first location,
+// and any location whose neighbour list is empty -- for which L, c_vec and
+// alpha carry nothing and cond_var is sigma2.
+//
+// Returns false if the structure is not filled, or if a neighbour block could
+// not be factorized. Both are a rejected parameter state at the caller rather
+// than a substituted pivot or a read past the end of an empty vector.
+template <typename Scalar, typename Visit>
+inline bool st_gp_nngp_scan(const Scalar* w, const Scalar& sigma2,
+                            const Scalar& phi_space, const Scalar& phi_time,
+                            const SpatiotemporalData& st, Visit&& visit) {
+  if (!st_gp_structure_filled(st)) return false;
+
+  const int N = st.n_params;
+  const int nn = st.nn;
+  const Scalar zero(0.0);
+
+  visit(0, st.nn_order[0], static_cast<const int*>(nullptr), 0,
+        static_cast<const Scalar*>(nullptr), static_cast<const Scalar*>(nullptr),
+        static_cast<const Scalar*>(nullptr), zero, sigma2, false);
+
+  std::vector<int> nb;
+  std::vector<Scalar> c_vec, C_mat, L, y, alpha;
+
+  for (int i = 1; i < N; i++) {
+    const int obs_idx = st.nn_order[i];
+
+    int n_nb = 0;
+    for (int j = 0; j < nn; j++) {
+      if (st.nn_idx[static_cast<size_t>(i) * nn + j] > 0) n_nb++;
+    }
+    if (n_nb == 0) {
+      visit(i, obs_idx, static_cast<const int*>(nullptr), 0,
+            static_cast<const Scalar*>(nullptr), static_cast<const Scalar*>(nullptr),
+            static_cast<const Scalar*>(nullptr), zero, sigma2, false);
+      continue;
+    }
+
+    nb.resize(n_nb);
+    c_vec.resize(n_nb);
+    for (int j = 0; j < n_nb; j++) {
+      const size_t f = static_cast<size_t>(i) * nn + j;
+      nb[j] = st.nn_order[st.nn_idx[f] - 1];
+      c_vec[j] = st_cov(st.nn_dist_space[f], st.nn_dist_time[f], sigma2,
+                        phi_space, phi_time, st);
+    }
+
+    C_mat.assign(static_cast<size_t>(n_nb) * n_nb, zero);
+    for (int j1 = 0; j1 < n_nb; j1++) {
+      for (int j2 = j1; j2 < n_nb; j2++) {
+        double h12, u12;
+        st_pair_separation(st, nb[j1], nb[j2], &h12, &u12);
+        const Scalar cov_val = st_cov(h12, u12, sigma2, phi_space, phi_time, st);
+        C_mat[static_cast<size_t>(j1) * n_nb + j2] = cov_val;
+        C_mat[static_cast<size_t>(j2) * n_nb + j1] = cov_val;
+      }
+    }
+
+    if (!ratiod_cov::nngp_chol(C_mat, n_nb, L)) return false;
+    ratiod_cov::nngp_forward_solve(L, n_nb, c_vec, y);
+    ratiod_cov::nngp_back_solve(L, n_nb, y, alpha);
+
+    Scalar cond_mean = zero;
+    Scalar c_Cinv_c = zero;
+    for (int j = 0; j < n_nb; j++) {
+      cond_mean = cond_mean + alpha[j] * w[nb[j]];
+      c_Cinv_c = c_Cinv_c + c_vec[j] * alpha[j];
+    }
+    const Scalar cond_var_raw = sigma2 - c_Cinv_c;
+    const bool floored =
+        (get_value(cond_var_raw) < ratiod_cov::NNGP_MIN_COND_VAR);
+    const Scalar cond_var = ratiod_cov::nngp_floor_cond_var(cond_var_raw);
+
+    visit(i, obs_idx, static_cast<const int*>(nb.data()), n_nb,
+          static_cast<const Scalar*>(L.data()),
+          static_cast<const Scalar*>(c_vec.data()),
+          static_cast<const Scalar*>(alpha.data()), cond_mean, cond_var, floored);
+  }
+
+  return true;
+}
+
+// Log-density of the interaction field under the NNGP approximation.
 template<typename Scalar>
 inline Scalar st_gp_nngp_log_lik(
-    const std::vector<Scalar>& w,      // ST effect (length N)
+    const Scalar* w,           // ST effect, length st_data.n_params
     const Scalar& sigma2,
     const Scalar& phi_space,
     const Scalar& phi_time,
     const SpatiotemporalData& st_data
 ) {
-  int N = w.size();
-  int nn = st_data.nn;
-
   Scalar log_lik = Scalar(0.0);
-
-  // First observation: marginal N(0, sigma2)
-  int first_idx = st_data.nn_order[0];
-  log_lik = log_lik - Scalar(0.5) * safe_log(Scalar(2.0 * M_PI) * sigma2)
-                    - Scalar(0.5) * w[first_idx] * w[first_idx] / sigma2;
-
-  // Remaining observations: conditional on neighbors
-  for (int i = 1; i < N; i++) {
-    int obs_idx = st_data.nn_order[i];
-
-    // Count actual neighbors
-    int n_neighbors = 0;
-    for (int j = 0; j < nn; j++) {
-      int nn_flat_idx = i * nn + j;
-      if (st_data.nn_idx[nn_flat_idx] > 0) {
-        n_neighbors++;
-      }
-    }
-
-    if (n_neighbors == 0) {
-      log_lik = log_lik - Scalar(0.5) * safe_log(Scalar(2.0 * M_PI) * sigma2)
-                        - Scalar(0.5) * w[obs_idx] * w[obs_idx] / sigma2;
-      continue;
-    }
-
-    // Build covariance structures
-    std::vector<Scalar> c_vec(n_neighbors);
-    std::vector<Scalar> C_mat(n_neighbors * n_neighbors);
-
-    // c_vec: covariances between obs i and its neighbors
-    for (int j = 0; j < n_neighbors; j++) {
-      int nn_flat_idx = i * nn + j;
-      double h = st_data.nn_dist_space[nn_flat_idx];
-      double u = st_data.nn_dist_time[nn_flat_idx];
-
-      if (st_data.nonsep_type == NonsepType::GNEITING) {
-        c_vec[j] = gneiting_cov(h, u, sigma2, phi_space, phi_time);
-      } else if (st_data.nonsep_type == NonsepType::SUM) {
-        c_vec[j] = sum_cov(h, u, sigma2, sigma2, phi_space, phi_time,
-                          st_data.cov_space, st_data.cov_time);
-      } else {
-        // Separable (product)
-        Scalar sigma = safe_sqrt(sigma2);
-        c_vec[j] = separable_cov(h, u, sigma, sigma,
-                                 phi_space, phi_time,
-                                 st_data.cov_space, st_data.cov_time);
-      }
-    }
-
-    // C_mat: covariances among neighbors
-    for (int j1 = 0; j1 < n_neighbors; j1++) {
-      int idx1 = st_data.nn_order[st_data.nn_idx[i * nn + j1] - 1];
-      for (int j2 = j1; j2 < n_neighbors; j2++) {
-        int idx2 = st_data.nn_order[st_data.nn_idx[i * nn + j2] - 1];
-
-        double h12, u12;
-        if (j1 == j2) {
-          h12 = 0.0;
-          u12 = 0.0;
-        } else {
-          // Compute distance between neighbors j1 and j2
-          h12 = std::sqrt(
-            std::pow(st_data.coords[idx1 * 2] - st_data.coords[idx2 * 2], 2) +
-            std::pow(st_data.coords[idx1 * 2 + 1] - st_data.coords[idx2 * 2 + 1], 2)
-          );
-          u12 = std::abs(st_data.time_values[idx1] - st_data.time_values[idx2]);
-        }
-
-        Scalar cov_val;
-        if (j1 == j2) {
-          cov_val = sigma2;
-        } else if (st_data.nonsep_type == NonsepType::GNEITING) {
-          cov_val = gneiting_cov(h12, u12, sigma2, phi_space, phi_time);
-        } else if (st_data.nonsep_type == NonsepType::SUM) {
-          cov_val = sum_cov(h12, u12, sigma2, sigma2, phi_space, phi_time,
-                           st_data.cov_space, st_data.cov_time);
-        } else {
-          Scalar sigma = safe_sqrt(sigma2);
-          cov_val = separable_cov(h12, u12, sigma, sigma,
-                                  phi_space, phi_time,
-                                  st_data.cov_space, st_data.cov_time);
-        }
-
-        C_mat[j1 * n_neighbors + j2] = cov_val;
-        C_mat[j2 * n_neighbors + j1] = cov_val;
-      }
-    }
-
-    // Cholesky decomposition
-    std::vector<Scalar> L(n_neighbors * n_neighbors, Scalar(0.0));
-    for (int j = 0; j < n_neighbors; j++) {
-      for (int k = 0; k <= j; k++) {
-        Scalar sum = C_mat[j * n_neighbors + k];
-        for (int m = 0; m < k; m++) {
-          sum = sum - L[j * n_neighbors + m] * L[k * n_neighbors + m];
-        }
-        if (j == k) {
-          Scalar diag = (get_value(sum) < 1e-10) ? Scalar(1e-10) : sum;
-          L[j * n_neighbors + j] = safe_sqrt(diag);
-        } else {
-          L[j * n_neighbors + k] = sum / L[k * n_neighbors + k];
-        }
-      }
-    }
-
-    // Solve L * y = c_vec
-    std::vector<Scalar> y(n_neighbors);
-    for (int j = 0; j < n_neighbors; j++) {
-      Scalar sum = c_vec[j];
-      for (int k = 0; k < j; k++) {
-        sum = sum - L[j * n_neighbors + k] * y[k];
-      }
-      y[j] = sum / L[j * n_neighbors + j];
-    }
-
-    // Solve L^T * alpha = y
-    std::vector<Scalar> alpha(n_neighbors);
-    for (int j = n_neighbors - 1; j >= 0; j--) {
-      Scalar sum = y[j];
-      for (int k = j + 1; k < n_neighbors; k++) {
-        sum = sum - L[k * n_neighbors + j] * alpha[k];
-      }
-      alpha[j] = sum / L[j * n_neighbors + j];
-    }
-
-    // Conditional mean and variance
-    Scalar cond_mean = Scalar(0.0);
-    for (int j = 0; j < n_neighbors; j++) {
-      int nn_orig_idx = st_data.nn_order[st_data.nn_idx[i * nn + j] - 1];
-      cond_mean = cond_mean + alpha[j] * w[nn_orig_idx];
-    }
-
-    Scalar c_Cinv_c = Scalar(0.0);
-    for (int j = 0; j < n_neighbors; j++) {
-      c_Cinv_c = c_Cinv_c + c_vec[j] * alpha[j];
-    }
-    Scalar cond_var_raw = sigma2 - c_Cinv_c;
-    Scalar cond_var = (get_value(cond_var_raw) < 1e-10) ? Scalar(1e-10) : cond_var_raw;
-
-    // Log-likelihood contribution
-    Scalar resid = w[obs_idx] - cond_mean;
-    log_lik = log_lik - Scalar(0.5) * safe_log(Scalar(2.0 * M_PI) * cond_var)
-                      - Scalar(0.5) * resid * resid / cond_var;
-  }
-
+  const bool ok = st_gp_nngp_scan<Scalar>(
+      w, sigma2, phi_space, phi_time, st_data,
+      [&](int /*i*/, int obs_idx, const int* /*nb*/, int /*n_nb*/,
+          const Scalar* /*L*/, const Scalar* /*c_vec*/, const Scalar* /*alpha*/,
+          const Scalar& cond_mean, const Scalar& cond_var, bool /*floored*/) {
+        const Scalar resid = w[obs_idx] - cond_mean;
+        log_lik = log_lik - Scalar(0.5) * safe_log(Scalar(2.0 * M_PI) * cond_var)
+                          - Scalar(0.5) * resid * resid / cond_var;
+      });
+  if (!ok) return Scalar(-std::numeric_limits<double>::infinity());
   return log_lik;
 }
 
@@ -667,11 +682,10 @@ inline Scalar spatiotemporal_log_prior(
 
     case STType::SEPARABLE:
     case STType::NONSEP_GP: {
-      // Convert delta to vector for GP function
-      int N = st_data.n_params;
-      std::vector<Scalar> w(delta, delta + N);
-      Scalar sigma2 = Scalar(1.0) / tau;
-      return st_gp_nngp_log_lik(w, sigma2, phi_space, phi_time, st_data);
+      // tau is the field's precision, so 1/tau is the marginal variance the
+      // correlation is scaled by.
+      const Scalar sigma2 = Scalar(1.0) / tau;
+      return st_gp_nngp_log_lik(delta, sigma2, phi_space, phi_time, st_data);
     }
 
     default:

@@ -53,7 +53,9 @@ NULL
 #'   - `"II"`: Structured time at each location
 #'   - `"III"`: Structured space at each time point
 #'   - `"IV"`: Fully structured (Kronecker product of spatial and temporal)
-#'   - `"separable"`: Separable covariance (Kronecker product)
+#'   - `"separable"`: Separable space-time GP, the product covariance
+#'     `C_s(h) C_t(u)` over the grid
+#'   - `"nonsep_gp"`: Non-separable space-time GP, see `nonsep_type`
 #' @param shared Logical; if TRUE (default), spatiotemporal effect enters both
 #'   numerator and denominator. Set to FALSE for process-specific effects
 #'   (triggers warning about potential confounding).
@@ -66,6 +68,21 @@ NULL
 #'   size; `"noncentered"` decouples the two and should be tried first when
 #'   `rhat` for the interaction (or an intercept sharing its geometry) will
 #'   not drop with more warmup. Ignored outside the HMC backend.
+#' @param nonsep_type For `type = "nonsep_gp"`: `"product"` (the separable
+#'   covariance) or `"gneiting"` (Gneiting 2002). An additive covariance is not
+#'   among them: on a complete `S x T` grid its rank is `S + T - 1`, and the
+#'   directions it drops are the space-time interactions the block carries.
+#' @param coords Required for `"separable"` and `"nonsep_gp"`: a formula
+#'   (`~ lon + lat`) or a character vector of two column names, giving the
+#'   coordinates the interaction's covariance is built on. Where a spatial
+#'   unit's rows carry different positions, the unit's coordinate is their
+#'   centroid. The interaction's geometry is its own, so an areal spatial main
+#'   effect pairs with a continuous interaction.
+#' @param cov_space,cov_time For the GP types: the spatial and temporal
+#'   kernels, one of `"exponential"` (default), `"matern"`, `"gaussian"`,
+#'   `"spherical"`. `phi` is a lengthscale in all four.
+#' @param nn For the GP types: NNGP neighbours per grid cell (default 15,
+#'   capped at `S * T - 1`), chosen on a joint space-time metric.
 #'
 #' @return A `ratiod_spatiotemporal` object
 #'
@@ -161,9 +178,15 @@ NULL
 #' @export
 spatiotemporal <- function(spatial,
                            temporal,
-                           type = c("I", "II", "III", "IV", "iid", "separable"),
+                           type = c("I", "II", "III", "IV", "iid", "separable",
+                                    "nonsep_gp"),
                            shared = TRUE,
-                           parameterization = c("centered", "noncentered")) {
+                           parameterization = c("centered", "noncentered"),
+                           nonsep_type = c("product", "gneiting"),
+                           coords = NULL,
+                           cov_space = NULL,
+                           cov_time = NULL,
+                           nn = NULL) {
 
   # Validate spatial specification
 
@@ -183,19 +206,46 @@ spatiotemporal <- function(spatial,
   type <- match.arg(type)
   if (type == "iid") type <- "I"
   parameterization <- match.arg(parameterization)
+  nonsep_type <- match.arg(nonsep_type)
+  is_gp_type <- type %in% c("separable", "nonsep_gp")
 
-  # Check compatibility
-  if (type == "separable") {
-    # Separable requires GP for at least one of spatial/temporal
-    is_spatial_gp <- inherits(spatial, c("ratiod_gp", "ratiod_multiscale"))
-    is_temporal_gp <- inherits(temporal, "ratiod_temporal_gp")
+  # The GP types put a continuous covariance on the space-time grid, so the
+  # interaction carries its own coordinates. They are the interaction's, not
+  # the spatial main effect's: an areal main effect and a continuous
+  # interaction over the same units is the usual combination, and tying the
+  # two would make the interaction's geometry a property of how the main
+  # effect happens to be parameterized.
+  coord_vars <- NULL
+  if (is_gp_type) {
+    if (type == "separable" && nonsep_type != "product") {
+      stop("type = \"separable\" IS the product covariance. ",
+           "For nonsep_type = \"", nonsep_type, "\" use type = \"nonsep_gp\".",
+           call. = FALSE)
+    }
+    if (type == "separable") nonsep_type <- "product"
 
-    if (!is_spatial_gp && !is_temporal_gp) {
-      warning(
-        "Separable interaction works best with GP spatial or temporal effects.\n",
-        "Consider using type = 'IV' for CAR/RW combinations.",
-        call. = FALSE
-      )
+    coord_vars <- st_parse_coord_vars(coords, type)
+
+    # A GP spatial main effect routes the whole model to the GP sampler, which
+    # is handed no interaction at all (gcol33/tulpaRatio#70). Refuse the
+    # combination rather than fit a model that silently drops the block.
+    if (inherits(spatial, c("ratiod_gp", "ratiod_multiscale", "ratiod_hsgp"))) {
+      stop("type = \"", type, "\" cannot be paired with a GP spatial main ",
+           "effect: that combination routes to the GP sampler, which does not ",
+           "carry a spatiotemporal interaction (gcol33/tulpaRatio#70). Use an ",
+           "areal main effect -- spatial_car() or spatial_bym2() -- with the ",
+           "interaction's own `coords`.", call. = FALSE)
+    }
+
+    cov_space <- cov_space %||% "exponential"
+    cov_time <- cov_time %||% "exponential"
+    # Refuse an unknown name here rather than at the .Call boundary, where the
+    # argument it came from is no longer nameable.
+    cov_type_code(cov_space)
+    cov_type_code(cov_time)
+    nn <- as.integer(nn %||% 15L)
+    if (is.na(nn) || nn < 1L) {
+      stop("`nn` must be a positive integer", call. = FALSE)
     }
   }
 
@@ -227,6 +277,12 @@ spatiotemporal <- function(spatial,
       temporal = temporal,
       shared = shared,
       parameterization = parameterization,
+      # Read by the GP types only
+      nonsep_type = if (is_gp_type) nonsep_type else NULL,
+      coord_vars = coord_vars,
+      cov_space = cov_space,
+      cov_time = cov_time,
+      nn = nn,
       # Filled in during validation
       n_spatial = NULL,
       n_times = NULL,
@@ -254,7 +310,8 @@ print.ratiod_spatiotemporal <- function(x, ...) {
     "II" = "Type II: Structured time, unstructured space",
     "III" = "Type III: Structured space, unstructured time",
     "IV" = "Type IV: Fully structured (Kronecker)",
-    "separable" = "Separable covariance"
+    "separable" = "Separable space-time GP (product covariance)",
+    "nonsep_gp" = paste0("Non-separable space-time GP (", x$nonsep_type, ")")
   )
   cat("Interaction type:", type_desc, "\n\n")
 
@@ -336,13 +393,173 @@ validate_spatiotemporal <- function(st, data) {
     "II" = S * T,                   # Temporal structure per location
     "III" = S * T,                  # Spatial structure per time point
     "IV" = S * T,                   # Fully structured
-    "separable" = S * T             # Separable GP
+    "separable" = S * T,            # Separable space-time GP
+    "nonsep_gp" = S * T             # Non-separable space-time GP
   )
 
   # Build space-time indexing
   st$st_index <- build_st_index(st, data)
 
+  # The GP types carry a covariance over that grid, so they carry its geometry
+  # and the NNGP neighbour sets built on it.
+  if (st$type %in% c("separable", "nonsep_gp")) {
+    st$gp_grid <- build_st_gp_grid(st, data)
+  }
+
   st
+}
+
+
+#' The space-time grid a GP interaction is defined on
+#'
+#' One entry per grid cell, in the same flattening `st_flat` carries
+#' (`k = (s - 1) * T + t`): the spatial unit's coordinates repeated across its
+#' times, and the distinct time values repeated across units. Both axes are
+#' standardized, since the neighbour metric adds a spatial distance to a
+#' temporal one and the two ranges share a prior.
+#'
+#' @param st Validated `ratiod_spatiotemporal` object of a GP type.
+#' @param data Data frame the coordinate columns are read from.
+#'
+#' @return List with the grid geometry and its NNGP neighbour sets.
+#' @keywords internal
+build_st_gp_grid <- function(st, data) {
+  S <- st$n_spatial
+  T <- st$n_times
+
+  coords_unit <- st_unit_coords(st, data, S)
+  times <- st_grid_time_values(st$temporal, T)
+
+  # Standardize each axis. validate_gp() may already have scaled the
+  # coordinates, in which case this is a no-op up to rounding.
+  coords_unit <- st_scale_axis(coords_unit)
+  times <- as.numeric(st_scale_axis(matrix(times, ncol = 1L)))
+
+  coords_grid <- coords_unit[rep(seq_len(S), each = T), , drop = FALSE]
+  time_grid <- rep(times, times = S)
+
+  n_grid <- S * T
+  nn <- min(as.integer(st$nn %||% 15L), n_grid - 1L)
+  if (nn < 1L) {
+    stop("Spatiotemporal GP: the ", S, " x ", T, " grid has too few cells ",
+         "to build a neighbour set on.", call. = FALSE)
+  }
+  nb <- compute_st_nngp_neighbors(coords_grid, time_grid, nn)
+
+  list(
+    nn = nn,
+    coords = coords_grid,
+    time_values = time_grid,
+    nn_idx = nb$nn_idx,
+    nn_dist_space = nb$nn_dist_space,
+    nn_dist_time = nb$nn_dist_time,
+    nn_order = nb$nn_order,
+    nn_order_inv = nb$nn_order_inv
+  )
+}
+
+
+#' The coordinate columns a GP interaction is built on
+#'
+#' A formula (`~ lon + lat`) or a character vector of two column names.
+#' @keywords internal
+st_parse_coord_vars <- function(coords, type) {
+  if (is.null(coords)) {
+    stop("type = \"", type, "\" is a Gaussian process over the space-time ",
+         "grid, so it needs coordinates: pass coords = ~ lon + lat. ",
+         "For an adjacency-based interaction use type = \"IV\".",
+         call. = FALSE)
+  }
+  if (inherits(coords, "formula")) {
+    coord_vars <- all.vars(coords)
+  } else if (is.character(coords)) {
+    coord_vars <- coords
+  } else {
+    stop("`coords` must be a formula (~ lon + lat) or a character vector of ",
+         "two column names.", call. = FALSE)
+  }
+  if (length(coord_vars) != 2L) {
+    stop("`coords` must name exactly 2 coordinate variables, not ",
+         length(coord_vars), ".", call. = FALSE)
+  }
+  coord_vars
+}
+
+
+#' One coordinate pair per spatial unit
+#'
+#' The interaction is indexed by unit, so each unit needs one position. Where a
+#' unit's rows carry different positions -- point observations inside an areal
+#' unit -- that position is their centroid, and saying so is the point of the
+#' message.
+#' @keywords internal
+st_unit_coords <- function(st, data, S) {
+  cv <- st$coord_vars
+  missing_cols <- setdiff(cv, names(data))
+  if (length(missing_cols) > 0) {
+    stop("Coordinate variable(s) not found in data: ",
+         paste(missing_cols, collapse = ", "), call. = FALSE)
+  }
+  xy <- cbind(as.numeric(data[[cv[1]]]), as.numeric(data[[cv[2]]]))
+  if (anyNA(xy)) {
+    stop("Coordinate columns contain missing values", call. = FALSE)
+  }
+  s_idx <- st$st_index$s_idx
+  if (length(s_idx) != nrow(xy)) {
+    stop("Spatiotemporal GP: ", length(s_idx), " spatial indices for ",
+         nrow(xy), " rows of coordinates.", call. = FALSE)
+  }
+
+  out <- matrix(NA_real_, S, 2L)
+  spread <- 0
+  for (j in 1:2) {
+    out[, j] <- as.numeric(tapply(xy[, j], factor(s_idx, levels = seq_len(S)),
+                                  mean))
+    rng <- tapply(xy[, j], factor(s_idx, levels = seq_len(S)),
+                  function(z) if (length(z) > 1L) diff(range(z)) else 0)
+    spread <- max(spread, max(as.numeric(rng), na.rm = TRUE))
+  }
+  if (anyNA(out)) {
+    stop("Spatiotemporal GP: ", sum(!stats::complete.cases(out)),
+         " of ", S, " spatial units have no coordinates in the data.",
+         call. = FALSE)
+  }
+  if (spread > 0) {
+    message(sprintf(
+      "Spatiotemporal GP: coordinates vary within spatial unit (up to %.4g); using unit centroids.",
+      spread))
+  }
+  out
+}
+
+
+#' Centre and scale one axis, leaving a constant axis alone
+#' @keywords internal
+st_scale_axis <- function(x) {
+  x <- as.matrix(x)
+  for (j in seq_len(ncol(x))) {
+    s <- stats::sd(x[, j])
+    x[, j] <- x[, j] - mean(x[, j])
+    if (is.finite(s) && s > 0) x[, j] <- x[, j] / s
+  }
+  x
+}
+
+
+#' The distinct time values a temporal component indexes
+#'
+#' `validate_temporal()` keeps the factor levels it built the time index from,
+#' and `validate_temporal_gp()` keeps the values themselves. A time variable
+#' whose levels are not numeric has no spacing to read, so its positions stand
+#' in for it.
+#' @keywords internal
+st_grid_time_values <- function(temporal, T) {
+  tv <- temporal$unique_time_values
+  if (is.null(tv)) {
+    tv <- suppressWarnings(as.numeric(temporal$time_levels))
+  }
+  if (length(tv) != T || anyNA(tv)) tv <- seq_len(T)
+  as.numeric(tv)
 }
 
 
@@ -375,8 +592,14 @@ build_st_index <- function(st, data) {
       s_factor <- as.factor(s_vals)
       s_idx <- as.integer(s_factor)
     }
+  } else if (!is.null(st$spatial$obs_to_loc)) {
+    # Spatial GP: n_spatial counts UNIQUE locations, so the interaction's
+    # spatial index is the observation's location, not its row. seq_len(N)
+    # here runs past the S x T grid the moment two observations share a
+    # location, and st_flat indexes the interaction with it.
+    s_idx <- as.integer(st$spatial$obs_to_loc)
   } else {
-    # Observation-level spatial (GP)
+    # Observation-level spatial with one location per row
     s_idx <- seq_len(N)
   }
 
@@ -459,6 +682,26 @@ prepare_spatiotemporal_for_hmc <- function(st, data) {
     temporal_Q = temporal_Q_info,
     temporal_cyclic = isTRUE(st$temporal$cyclic)
   )
+
+  # GP interaction fields: the grid geometry, its neighbour sets, and the two
+  # kernels. Matrices are transposed on the way out because C++ reads them
+  # row-major over (grid cell, neighbour).
+  if (st$type %in% c("separable", "nonsep_gp")) {
+    g <- st$gp_grid
+    result$gp <- list(
+      nn = as.integer(g$nn),
+      coords = as.numeric(t(g$coords)),
+      time_values = as.numeric(g$time_values),
+      nn_idx = as.integer(t(g$nn_idx)),
+      nn_dist_space = as.numeric(t(g$nn_dist_space)),
+      nn_dist_time = as.numeric(t(g$nn_dist_time)),
+      nn_order = as.integer(g$nn_order),
+      nn_order_inv = as.integer(g$nn_order_inv),
+      cov_space = cov_type_code(st$cov_space),
+      cov_time = cov_type_code(st$cov_time),
+      nonsep_type = st$nonsep_type %||% "product"
+    )
+  }
 
   # HSGP-ST fields
   if (isTRUE(st$spatial_is_hsgp)) {
@@ -827,234 +1070,6 @@ plot.ratiod_st_summary <- function(x, type = "heatmap", ...) {
 }
 
 
-#' Non-separable spatiotemporal GP
-#'
-#' @description
-#' Specify a non-separable Gaussian Process for spatiotemporal effects.
-#' Unlike separable models where the covariance factors as \eqn{C_s \otimes C_t},
-#' non-separable models allow for direct space-time interaction in the covariance.
-#'
-#' @param coords A one-sided formula specifying coordinate columns (e.g.,
-#'   `~ lon + lat`), or a character vector of length 2.
-#' @param time_var Name of the time variable in data.
-#' @param cov_space Spatial covariance: `"exponential"` (default), `"matern"`,
-#'   `"gaussian"`, or `"spherical"`.
-#' @param cov_time Temporal covariance: `"exponential"` (default), `"matern"`,
-#'   or `"gaussian"`.
-#' @param nonsep_type Non-separability type:
-#'   - `"product"`: \eqn{C_{st} = C_s \cdot C_t} (separable, for reference)
-#'   - `"sum"`: \eqn{C_{st} = C_s + C_t}
-#'   - `"gneiting"`: Gneiting (2002) non-separable class
-#'   - `"cressie_huang"`: Cressie-Huang (1999) non-separable class
-#' @param nn Number of nearest neighbors for NNGP approximation. Default 15.
-#' @param shared Logical; if TRUE (default), effect enters both processes.
-#'
-#' @return A `ratiod_st_gp` object
-#'
-#' @details
-#' The non-separable covariance functions allow for more flexible space-time
-
-#' dependence:
-#'
-#' **Gneiting class:**
-#' \deqn{C(h, u) = \frac{\sigma^2}{(a|u|^{2\alpha} + 1)^{\tau}} \exp\left(-\frac{c\|h\|^{2\gamma}}{(a|u|^{2\alpha} + 1)^{\beta\gamma}}\right)}
-#'
-#' where h is spatial lag, u is temporal lag, and parameters control the
-#' space-time interaction.
-#'
-#' **Cressie-Huang class:**
-#' Constructed via Fourier transform methods to ensure positive definiteness.
-#'
-#' @references
-#' Gneiting, T. (2002). Nonseparable, stationary covariance functions for
-#' space-time data. Journal of the American Statistical Association, 97(458), 590-600.
-#'
-#' Cressie, N., & Huang, H. C. (1999). Classes of nonseparable, spatio-temporal
-#' stationary covariance functions. Journal of the American Statistical
-#' Association, 94(448), 1330-1340.
-#'
-#' @examples
-#' # Non-separable spatiotemporal GP
-#' st_gp <- spatiotemporal_gp(
-#'   ~ lon + lat,
-#'   time_var = "year",
-#'   nonsep_type = "gneiting"
-#' )
-#' print(st_gp)
-#'
-#' @export
-spatiotemporal_gp <- function(coords,
-                              time_var,
-                              cov_space = c("exponential", "matern", "gaussian", "spherical"),
-                              cov_time = c("exponential", "matern", "gaussian"),
-                              nonsep_type = c("product", "sum", "gneiting", "cressie_huang"),
-                              nn = 15,
-                              shared = TRUE) {
-
-  cov_space <- match.arg(cov_space)
-  cov_time <- match.arg(cov_time)
-  nonsep_type <- match.arg(nonsep_type)
-
-  # Parse coordinate specification
-  if (inherits(coords, "formula")) {
-    coord_vars <- all.vars(coords)
-    if (length(coord_vars) != 2) {
-      stop("`coords` formula must specify exactly 2 coordinate variables",
-           call. = FALSE)
-    }
-  } else if (is.character(coords) && length(coords) == 2) {
-    coord_vars <- coords
-  } else {
-    stop("`coords` must be a formula (~ lon + lat) or character vector of length 2",
-         call. = FALSE)
-  }
-
-  if (!is.character(time_var) || length(time_var) != 1) {
-    stop("`time_var` must be a single character string", call. = FALSE)
-  }
-
-  # Validate nn
-  if (!is.numeric(nn) || length(nn) != 1 || nn < 1) {
-    stop("`nn` must be a positive integer", call. = FALSE)
-  }
-  nn <- as.integer(nn)
-
-  # Warning for non-shared
-  if (!shared) {
-    warning(
-      "Non-shared spatiotemporal GP effects (shared = FALSE) may lead to confounded ratio estimates.",
-      call. = FALSE
-    )
-  }
-
-  structure(
-    list(
-      type = "st_gp",
-      coord_vars = coord_vars,
-      time_var = time_var,
-      cov_space = cov_space,
-      cov_time = cov_time,
-      nonsep_type = nonsep_type,
-      nn = nn,
-      shared = shared,
-      # Filled during validation
-      n_obs = NULL,
-      n_spatial = NULL,
-      n_times = NULL,
-      coords_matrix = NULL,
-      time_values = NULL,
-      neighbor_info = NULL
-    ),
-    class = c("ratiod_st_gp", "ratiod_spatiotemporal", "list")
-  )
-}
-
-
-#' Print method for ratiod_st_gp
-#'
-#' @param x A ratiod_st_gp object
-#' @param ... Ignored
-#'
-#' @export
-print.ratiod_st_gp <- function(x, ...) {
-  cat("tulpaRatio Non-Separable Spatiotemporal GP\n")
-  cat("======================================\n\n")
-
-  cat("Coordinates:", paste(x$coord_vars, collapse = ", "), "\n")
-  cat("Time variable:", x$time_var, "\n")
-  cat("Spatial covariance:", x$cov_space, "\n")
-  cat("Temporal covariance:", x$cov_time, "\n")
-
-  nonsep_desc <- switch(x$nonsep_type,
-    product = "Product (separable)",
-    sum = "Sum",
-    gneiting = "Gneiting non-separable",
-    cressie_huang = "Cressie-Huang non-separable"
-  )
-  cat("Non-separability:", nonsep_desc, "\n")
-  cat("Neighbors (NNGP):", x$nn, "\n")
-  cat("Shared:", if (x$shared) "Yes" else "No", "\n")
-
-  if (!is.null(x$n_obs)) {
-    cat("\nObservations:", x$n_obs, "\n")
-  }
-
-  invisible(x)
-}
-
-
-#' Validate non-separable spatiotemporal GP
-#'
-#' @param st_gp ratiod_st_gp object
-#' @param data Data frame
-#'
-#' @return Updated object with computed structure
-#' @keywords internal
-validate_st_gp <- function(st_gp, data) {
-  if (is.null(st_gp)) return(NULL)
-  if (!inherits(st_gp, "ratiod_st_gp")) return(st_gp)
-
-  N <- nrow(data)
-
-  # Check coordinate columns exist
-  for (cv in st_gp$coord_vars) {
-    if (!(cv %in% names(data))) {
-      stop(sprintf("Coordinate variable '%s' not found in data", cv),
-           call. = FALSE)
-    }
-  }
-
-  # Check time variable exists
-  if (!(st_gp$time_var %in% names(data))) {
-    stop(sprintf("Time variable '%s' not found in data", st_gp$time_var),
-         call. = FALSE)
-  }
-
-  # Extract coordinates
-  coords <- cbind(
-    data[[st_gp$coord_vars[1]]],
-    data[[st_gp$coord_vars[2]]]
-  )
-
-  # Check for missing coordinates
-  if (any(is.na(coords))) {
-    stop("Coordinate columns contain missing values", call. = FALSE)
-  }
-
-  # Extract and scale time values
-  time_vals <- data[[st_gp$time_var]]
-  if (!is.numeric(time_vals)) {
-    if (inherits(time_vals, c("Date", "POSIXt"))) {
-      time_vals <- as.numeric(time_vals)
-    } else {
-      stop("Time variable must be numeric or a date/time type", call. = FALSE)
-    }
-  }
-
-  if (any(is.na(time_vals))) {
-    stop("Time variable contains missing values", call. = FALSE)
-  }
-
-  # Scale coordinates and time
-  coords_scaled <- scale(coords)
-  time_scaled <- as.vector(scale(time_vals))
-
-  st_gp$n_obs <- N
-  st_gp$n_spatial <- length(unique(paste(coords[, 1], coords[, 2], sep = "_")))
-  st_gp$n_times <- length(unique(time_vals))
-  st_gp$coords_matrix <- coords_scaled
-  st_gp$time_values <- time_scaled
-
-  # Compute space-time neighbors for NNGP
-  # We order by time first, then space within time
-  nn <- min(st_gp$nn, N - 1)
-  st_gp$neighbor_info <- compute_st_nngp_neighbors(coords_scaled, time_scaled, nn)
-  st_gp$n_params <- N
-
-  st_gp
-}
-
-
 #' Compute nearest neighbors for spatiotemporal NNGP
 #'
 #' @param coords N x 2 matrix of coordinates
@@ -1073,11 +1088,14 @@ compute_st_nngp_neighbors <- function(coords, time, k) {
   time_ordered <- time[time_order]
 
   # Compute neighbors in space-time
+  # Zero where there is no neighbour, matching nn_idx's own 0. An Inf would
+  # be a distance the covariance could be evaluated at if anything ever read
+  # past the neighbour count.
   nn_idx <- matrix(0L, nrow = N, ncol = k)
-  nn_dist_space <- matrix(Inf, nrow = N, ncol = k)
-  nn_dist_time <- matrix(Inf, nrow = N, ncol = k)
+  nn_dist_space <- matrix(0, nrow = N, ncol = k)
+  nn_dist_time <- matrix(0, nrow = N, ncol = k)
 
-  for (i in 2:N) {
+  for (i in seq_len(N)[-1]) {
     n_candidates <- min(i - 1, k)
 
     if (n_candidates > 0) {

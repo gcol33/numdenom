@@ -206,158 +206,168 @@ test_that("prepare_spatiotemporal_for_hmc handles NULL", {
 })
 
 
-test_that("spatiotemporal_gp creates non-separable specification", {
-  st_gp <- spatiotemporal_gp(
-    ~ lon + lat,
-    time_var = "year",
-    nonsep_type = "gneiting"
-  )
+st_gp_adj <- function(S) {
+  adj <- matrix(0, S, S)
+  for (i in seq_len(S - 1L)) adj[i, i + 1L] <- adj[i + 1L, i] <- 1
+  adj
+}
 
-  expect_s3_class(st_gp, "ratiod_st_gp")
-  expect_s3_class(st_gp, "ratiod_spatiotemporal")
-  expect_equal(st_gp$type, "st_gp")
-  expect_equal(st_gp$nonsep_type, "gneiting")
-  expect_equal(st_gp$coord_vars, c("lon", "lat"))
-  expect_equal(st_gp$time_var, "year")
+st_gp_df <- function(S = 5L, T = 4L, seed = 123) {
+  set.seed(seed)
+  xy <- cbind(runif(S, 0, 10), runif(S, 0, 10))
+  data.frame(
+    s = factor(rep(seq_len(S), each = T)),
+    lon = rep(xy[, 1], each = T),
+    lat = rep(xy[, 2], each = T),
+    year = rep(seq_len(T), times = S)
+  )
+}
+
+st_gp_spec <- function(S = 5L, coords = ~ lon + lat, ...) {
+  spatiotemporal(
+    spatial = spatial_car(st_gp_adj(S), level = "group", group_var = "s"),
+    temporal = temporal_rw1("year"),
+    coords = coords,
+    ...
+  )
+}
+
+
+test_that("nonsep_gp carries its kernels and its non-separability", {
+  st <- st_gp_spec(type = "nonsep_gp", nonsep_type = "gneiting",
+                   cov_space = "matern", nn = 4)
+
+  expect_s3_class(st, "ratiod_spatiotemporal")
+  expect_equal(st$type, "nonsep_gp")
+  expect_equal(st$nonsep_type, "gneiting")
+  expect_equal(st$cov_space, "matern")
+  expect_equal(st$cov_time, "exponential")
+  expect_equal(st$nn, 4L)
+  expect_equal(st$coord_vars, c("lon", "lat"))
 })
 
 
-test_that("spatiotemporal_gp validates coordinates", {
+test_that("the GP types need coordinates of their own", {
+  for (type in c("separable", "nonsep_gp")) {
+    expect_error(
+      spatiotemporal(
+        spatial = spatial_car(st_gp_adj(3), level = "group", group_var = "s"),
+        temporal = temporal_rw1("t"),
+        type = type
+      ),
+      "coords"
+    )
+  }
+  expect_error(st_gp_spec(type = "separable", coords = ~ lon), "exactly 2")
+  expect_error(st_gp_spec(type = "separable", coords = 42), "formula")
+})
+
+
+test_that("a GP main effect is refused, not silently dropped", {
+  # gcol33/tulpaRatio#70: that combination routes to a sampler entry that is
+  # handed no interaction at all.
   expect_error(
-    spatiotemporal_gp(
-      ~ lon,  # Only one coordinate
-      time_var = "year"
+    spatiotemporal(
+      spatial = spatial_gp(~ lon + lat),
+      temporal = temporal_rw1("year"),
+      type = "separable",
+      coords = ~ lon + lat
     ),
-    "2 coordinate"
+    "GP sampler"
   )
+})
 
+
+test_that("separable is the product arm, and says so", {
   expect_error(
-    spatiotemporal_gp(
-      "not_a_formula",  # Invalid type
-      time_var = "year"
-    ),
-    "formula"
+    st_gp_spec(type = "separable", nonsep_type = "gneiting"),
+    "nonsep_gp"
+  )
+  expect_equal(st_gp_spec(type = "separable")$nonsep_type, "product")
+})
+
+
+test_that("an unknown kernel is refused where the argument is nameable", {
+  expect_error(st_gp_spec(type = "separable", cov_space = "cauchy"),
+               "Unknown covariance")
+})
+
+
+test_that("validation builds the grid the interaction is defined on", {
+  S <- 5L; T <- 4L
+  st <- st_gp_spec(S = S, type = "separable", nn = 3)
+  st <- tulpaRatio:::validate_spatiotemporal(st, st_gp_df(S, T))
+
+  expect_equal(st$n_spatial, S)
+  expect_equal(st$n_times, T)
+  expect_equal(st$n_params, S * T)
+
+  g <- st$gp_grid
+  expect_equal(nrow(g$coords), S * T)
+  expect_equal(length(g$time_values), S * T)
+  expect_equal(sort(g$nn_order), seq_len(S * T))
+  expect_equal(g$nn_order_inv[g$nn_order], seq_len(S * T))
+  # Cell k = (s - 1) * T + t: a unit's coordinates repeat across its times,
+  # and its times repeat across units.
+  expect_equal(g$coords[1, ], g$coords[T, ])
+  expect_false(isTRUE(all.equal(g$coords[1, ], g$coords[T + 1L, ])))
+  expect_equal(g$time_values[seq_len(T)], g$time_values[T + seq_len(T)])
+  # Zero, not Inf, where nn_idx says there is no neighbour.
+  expect_true(all(g$nn_dist_space[g$nn_idx == 0L] == 0))
+  expect_true(all(is.finite(g$nn_dist_time)))
+})
+
+
+test_that("a unit whose rows disagree gets its centroid, and is told so", {
+  df <- st_gp_df(4L, 3L)
+  df$lon <- df$lon + rep(c(-1, 0, 1), times = 4)  # spread within each unit
+  st <- st_gp_spec(S = 4L, type = "separable", nn = 3)
+  expect_message(
+    tulpaRatio:::validate_spatiotemporal(st, df),
+    "centroid"
   )
 })
 
 
-test_that("spatiotemporal_gp validates time_var", {
-  expect_error(
-    spatiotemporal_gp(
-      ~ lon + lat,
-      time_var = c("year", "month")  # Multiple time vars
-    ),
-    "single character"
-  )
+test_that("prepare_spatiotemporal_for_hmc emits the GP grid", {
+  S <- 4L; T <- 3L
+  df <- st_gp_df(S, T)
+  st <- st_gp_spec(S = S, type = "nonsep_gp", nonsep_type = "gneiting", nn = 3)
+  st <- tulpaRatio:::validate_spatiotemporal(st, df)
+  info <- tulpaRatio:::prepare_spatiotemporal_for_hmc(st, df)
+
+  expect_equal(info$type, "nonsep_gp")
+  expect_equal(info$n_params, S * T)
+  expect_equal(info$gp$nonsep_type, "gneiting")
+  # Flattened row-major over (grid cell, neighbour) for C++.
+  expect_equal(length(info$gp$coords), 2L * S * T)
+  expect_equal(length(info$gp$time_values), S * T)
+  expect_equal(length(info$gp$nn_idx), S * T * info$gp$nn)
+  expect_equal(length(info$gp$nn_dist_space), S * T * info$gp$nn)
+  expect_equal(info$gp$cov_space, 0L)  # exponential
+  expect_equal(info$gp$cov_time, 0L)
 })
 
 
-test_that("spatiotemporal_gp validates nn parameter", {
-  expect_error(
-    spatiotemporal_gp(
-      ~ lon + lat,
-      time_var = "year",
-      nn = 0
-    ),
-    "positive integer"
-  )
-})
-
-
-test_that("spatiotemporal_gp warns for non-shared effects", {
-  expect_warning(
-    spatiotemporal_gp(
-      ~ lon + lat,
-      time_var = "year",
-      shared = FALSE
-    ),
-    "Non-shared"
-  )
-})
-
-
-test_that("print.ratiod_st_gp works", {
-  st_gp <- spatiotemporal_gp(
-    ~ x + y,
-    time_var = "t",
-    cov_space = "matern",
-    nonsep_type = "sum"
-  )
-
-  output <- capture.output(print(st_gp))
-  expect_true(any(grepl("Non-Separable", output)))
-  expect_true(any(grepl("matern", output)))
-  expect_true(any(grepl("Sum", output)))
-})
-
-
-test_that("validate_st_gp computes dimensions correctly", {
-  st_gp <- spatiotemporal_gp(
-    ~ lon + lat,
-    time_var = "time",
-    nn = 5
-  )
-
-  set.seed(123)
+test_that("a spatial GP indexes an interaction by location, not by row", {
+  # Two observations per location: s_idx has to be the location, or st_flat
+  # runs past the S x T grid it indexes.
   df <- data.frame(
-    lon = runif(20, 0, 10),
-    lat = runif(20, 0, 10),
-    time = rep(1:4, each = 5)
+    lon = rep(c(0, 1, 2), each = 4),
+    lat = rep(c(0, 1, 2), each = 4),
+    year = rep(1:2, times = 6)
   )
-
-  st_valid <- tulpaRatio:::validate_st_gp(st_gp, df)
-
-  expect_equal(st_valid$n_obs, 20)
-  expect_equal(st_valid$n_times, 4)
-  expect_equal(st_valid$n_params, 20)
-  expect_equal(nrow(st_valid$coords_matrix), 20)
-  expect_equal(length(st_valid$time_values), 20)
-})
-
-
-test_that("validate_st_gp checks for missing coordinates", {
-  st_gp <- spatiotemporal_gp(~ lon + lat, time_var = "time")
-
-  df <- data.frame(
-    lon = c(1, NA, 3),
-    lat = c(1, 2, 3),
-    time = 1:3
+  st <- spatiotemporal(
+    spatial = spatial_gp(~ lon + lat, nn = 2),
+    temporal = temporal_rw1("year"),
+    type = "I"
   )
+  st <- tulpaRatio:::validate_spatiotemporal(st, df)
 
-  expect_error(
-    tulpaRatio:::validate_st_gp(st_gp, df),
-    "missing values"
-  )
-})
-
-
-test_that("validate_st_gp checks for missing time values", {
-  st_gp <- spatiotemporal_gp(~ lon + lat, time_var = "time")
-
-  df <- data.frame(
-    lon = 1:3,
-    lat = 1:3,
-    time = c(1, NA, 3)
-  )
-
-  expect_error(
-    tulpaRatio:::validate_st_gp(st_gp, df),
-    "missing values"
-  )
-})
-
-
-test_that("validate_st_gp handles Date time variable", {
-  st_gp <- spatiotemporal_gp(~ lon + lat, time_var = "date")
-
-  df <- data.frame(
-    lon = runif(10),
-    lat = runif(10),
-    date = as.Date("2020-01-01") + 0:9
-  )
-
-  st_valid <- tulpaRatio:::validate_st_gp(st_gp, df)
-  expect_true(is.numeric(st_valid$time_values))
+  expect_equal(st$n_spatial, 3L)
+  expect_equal(st$n_params, 6L)
+  expect_true(max(st$st_index$st_flat) <= st$n_params)
+  expect_equal(sort(unique(st$st_index$s_idx)), 1:3)
 })
 
 
@@ -397,30 +407,11 @@ test_that("all interaction types are supported", {
 })
 
 
-test_that("separable type works with GP spatial", {
-  st <- expect_warning(
-    spatiotemporal(
-      spatial = spatial_gp(~ lon + lat),
-      temporal = temporal_rw1("year"),
-      type = "separable"
-    ),
-    NA  # No warning expected
-  )
-
+test_that("separable builds cleanly on an areal main effect", {
+  st <- st_gp_spec(type = "separable")
   expect_equal(st$type, "separable")
+  expect_equal(st$nonsep_type, "product")
 })
 
 
-test_that("separable type warns without GP", {
-  adj <- matrix(0, 3, 3)
-  adj[1, 2] <- adj[2, 1] <- 1
 
-  expect_warning(
-    spatiotemporal(
-      spatial = spatial_car(adj, level = "group", group_var = "s"),
-      temporal = temporal_rw1("t"),
-      type = "separable"
-    ),
-    "GP spatial"
-  )
-})

@@ -1889,6 +1889,30 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_test_st_gp_log_lik
+double cpp_test_st_gp_log_lik(NumericVector w, double sigma2, double phi_space, double phi_time, NumericMatrix coords, NumericVector time_values, int nn, IntegerVector nn_idx, NumericVector nn_dist_space, NumericVector nn_dist_time, IntegerVector nn_order, std::string nonsep_type, std::string cov_space, std::string cov_time);
+RcppExport SEXP _tulpaRatio_cpp_test_st_gp_log_lik(SEXP wSEXP, SEXP sigma2SEXP, SEXP phi_spaceSEXP, SEXP phi_timeSEXP, SEXP coordsSEXP, SEXP time_valuesSEXP, SEXP nnSEXP, SEXP nn_idxSEXP, SEXP nn_dist_spaceSEXP, SEXP nn_dist_timeSEXP, SEXP nn_orderSEXP, SEXP nonsep_typeSEXP, SEXP cov_spaceSEXP, SEXP cov_timeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type w(wSEXP);
+    Rcpp::traits::input_parameter< double >::type sigma2(sigma2SEXP);
+    Rcpp::traits::input_parameter< double >::type phi_space(phi_spaceSEXP);
+    Rcpp::traits::input_parameter< double >::type phi_time(phi_timeSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type coords(coordsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type time_values(time_valuesSEXP);
+    Rcpp::traits::input_parameter< int >::type nn(nnSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type nn_idx(nn_idxSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type nn_dist_space(nn_dist_spaceSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type nn_dist_time(nn_dist_timeSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type nn_order(nn_orderSEXP);
+    Rcpp::traits::input_parameter< std::string >::type nonsep_type(nonsep_typeSEXP);
+    Rcpp::traits::input_parameter< std::string >::type cov_space(cov_spaceSEXP);
+    Rcpp::traits::input_parameter< std::string >::type cov_time(cov_timeSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_test_st_gp_log_lik(w, sigma2, phi_space, phi_time, coords, time_values, nn, nn_idx, nn_dist_space, nn_dist_time, nn_order, nonsep_type, cov_space, cov_time));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_tls_workspace_shrink
 double cpp_tls_workspace_shrink(int cycles, int work, int n);
 RcppExport SEXP _tulpaRatio_cpp_tls_workspace_shrink(SEXP cyclesSEXP, SEXP workSEXP, SEXP nSEXP) {
@@ -2148,6 +2172,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_test_parallel_dot_products", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_dot_products, 3},
     {"_tulpaRatio_cpp_test_parallel_likelihood", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_likelihood, 3},
     {"_tulpaRatio_cpp_test_parallel_independent", (DL_FUNC) &_tulpaRatio_cpp_test_parallel_independent, 2},
+    {"_tulpaRatio_cpp_test_st_gp_log_lik", (DL_FUNC) &_tulpaRatio_cpp_test_st_gp_log_lik, 14},
     {"_tulpaRatio_cpp_tls_workspace_shrink", (DL_FUNC) &_tulpaRatio_cpp_tls_workspace_shrink, 3},
     {"_tulpaRatio_cpp_tulpa_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_abi_version, 0},
     {"_tulpaRatio_cpp_tulpa_compiled_abi_version", (DL_FUNC) &_tulpaRatio_cpp_tulpa_compiled_abi_version, 0},

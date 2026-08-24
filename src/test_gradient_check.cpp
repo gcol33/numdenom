@@ -129,6 +129,7 @@ const char* const KNOWN_FIELDS[] = {
   "rw1", "rw2", "temporal_ar1", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
   "st4_ar1_nc", "st2", "st2_rw2", "st2_ar1", "st3",
+  "stgp", "stgp_matern", "stgp_gneiting", "stgp_latent",
   "icar_collapsed", "bym2_collapsed",
   "icar_collapsed_rw1", "bym2_collapsed_rw1",
   "hsgp",
@@ -146,6 +147,76 @@ bool is_known_field(const std::string& field) {
     if (field == known) return true;
   }
   return false;
+}
+
+// The spatiotemporal counterpart of build_nngp, mirroring
+// compute_st_nngp_neighbors() in R/spatiotemporal.R: order the field's entries
+// by time and then by coordinate, and give each one the k nearest among its
+// predecessors under the joint space-time distance. The two component
+// distances are kept apart, the covariance reading each on its own range.
+struct STNNGPNeighbors {
+  int k = 0;
+  std::vector<int> nn_idx;
+  std::vector<double> nn_dist_space;
+  std::vector<double> nn_dist_time;
+  std::vector<int> nn_order;
+  std::vector<int> nn_order_inv;
+};
+
+STNNGPNeighbors build_nngp_st(const std::vector<double>& coords,
+                              const std::vector<double>& times, int n, int k) {
+  STNNGPNeighbors out;
+  out.k = k;
+
+  std::vector<int> order(n);
+  for (int i = 0; i < n; i++) order[i] = i;
+  std::sort(order.begin(), order.end(), [&](int a, int b) {
+    if (times[a] != times[b]) return times[a] < times[b];
+    if (coords[static_cast<size_t>(a) * 2] != coords[static_cast<size_t>(b) * 2])
+      return coords[static_cast<size_t>(a) * 2] < coords[static_cast<size_t>(b) * 2];
+    return coords[static_cast<size_t>(a) * 2 + 1] < coords[static_cast<size_t>(b) * 2 + 1];
+  });
+
+  // Separation between two positions IN THE ORDERING, read off the original
+  // entries the way the density does.
+  auto sep = [&](int a, int b, double* h, double* u) {
+    const int ia = order[a], ib = order[b];
+    const double dx = coords[static_cast<size_t>(ia) * 2] - coords[static_cast<size_t>(ib) * 2];
+    const double dy = coords[static_cast<size_t>(ia) * 2 + 1] - coords[static_cast<size_t>(ib) * 2 + 1];
+    *h = std::sqrt(dx * dx + dy * dy);
+    *u = std::abs(times[ia] - times[ib]);
+  };
+
+  out.nn_idx.assign(static_cast<size_t>(n) * k, 0);
+  out.nn_dist_space.assign(static_cast<size_t>(n) * k, 0.0);
+  out.nn_dist_time.assign(static_cast<size_t>(n) * k, 0.0);
+
+  for (int i = 1; i < n; i++) {
+    std::vector<std::pair<double, int>> cand;
+    cand.reserve(i);
+    for (int j = 0; j < i; j++) {
+      double h, u;
+      sep(i, j, &h, &u);
+      cand.emplace_back(std::sqrt(h * h + u * u), j);
+    }
+    std::sort(cand.begin(), cand.end());
+    const int m = std::min(static_cast<int>(cand.size()), k);
+    for (int c = 0; c < m; c++) {
+      double h, u;
+      sep(i, cand[c].second, &h, &u);
+      out.nn_idx[static_cast<size_t>(i) * k + c] = cand[c].second + 1;  // 1-based
+      out.nn_dist_space[static_cast<size_t>(i) * k + c] = h;
+      out.nn_dist_time[static_cast<size_t>(i) * k + c] = u;
+    }
+  }
+
+  out.nn_order.resize(n);
+  out.nn_order_inv.resize(n);
+  for (int i = 0; i < n; i++) {
+    out.nn_order[i] = order[i];       // 0-based
+    out.nn_order_inv[order[i]] = i;
+  }
+  return out;
 }
 
 // Synthetic model with an intercept, one covariate, and whichever structured
@@ -200,6 +271,15 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   const bool want_st2 = (field == "st2" || field == "st2_rw2" ||
                          field == "st2_ar1");
   const bool want_st3 = (field == "st3");
+  // The GP interaction types, over the same S x T grid the Knorr-Held types
+  // use. Each is a continuous covariance over that grid rather than a GMRF
+  // stencil on it, so it reaches st_prior_grad.h's GP branch and the two
+  // ranges the layout allocates alongside tau. stgp_latent pairs it with a
+  // latent factor, which is what routes an interaction away from
+  // compute_gradient_spatiotemporal_handcoded and into the composite -- the
+  // two callers of that branch, both arbitrated.
+  const bool want_stgp = (field == "stgp" || field == "stgp_matern" ||
+                          field == "stgp_gneiting" || field == "stgp_latent");
   // icar_collapsed_rw1 / bym2_collapsed_rw1 pair a collapsed spatial field
   // with a companion temporal RW1 term -- the combination the specialized
   // collapsed gradient has to carry into its inner Laplace.
@@ -237,7 +317,7 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   const bool want_svc_hsgp = (field == "svc_hsgp");
   const bool want_svc = (field == "svc" || want_svc_hsgp);
   const bool want_temporal_gp = (field == "temporal_gp");
-  const bool want_latent = (field == "latent");
+  const bool want_latent = (field == "latent" || field == "stgp_latent");
   // Random slopes route through a parameter layout the single-term path does
   // not use: one sigma per coefficient, and for the correlated variant a
   // tanh-Cholesky factor with an LKJ prior and re = diag(sigma) L z.
@@ -698,6 +778,79 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
         (field == "st4_nc" || field == "st4_ar1_nc") ? 1 : 0;
   }
 
+  // GP interaction over the S x T grid: one spatial coordinate pair per unit,
+  // repeated across that unit's times, and the time axis on the same [0, 1]
+  // scale as the unit square so the joint neighbour metric weighs the two
+  // alike. Field index k = (s - 1) * T + (t - 1), the same flattening st_flat
+  // carries.
+  if (want_stgp) {
+    auto& st = data.spatiotemporal_data;
+    st.type = (field == "stgp_gneiting")
+                  ? ratiod_spatiotemporal::STType::NONSEP_GP
+                  : ratiod_spatiotemporal::STType::SEPARABLE;
+    st.shared = true;
+    st.n_spatial = n_units;
+    st.n_times = n_times;
+    st.n_params = n_units * n_times;
+    st.s_idx.resize(n_obs);
+    st.t_idx.resize(n_obs);
+    st.st_flat.resize(n_obs);
+    for (int i = 0; i < n_obs; i++) {
+      const int s = (i % n_units) + 1;
+      const int t = (i % n_times) + 1;
+      st.s_idx[i] = s;
+      st.t_idx[i] = t;
+      st.st_flat[i] = (s - 1) * n_times + t;
+    }
+    st.spatial_is_gp = true;
+    st.spatial_proper = false;
+    st.bym2_scale = 1.0;
+    // The GP types read no time margin, so the layout allocates no rho for
+    // them; NONE is what says so.
+    st.temporal_type = ratiod_temporal::TemporalType::NONE;
+    st.temporal_cyclic = false;
+    st.sigma2_prior_U = 1.0;
+    st.sigma2_prior_alpha = 0.01;
+
+    std::vector<double> unit_coords(static_cast<size_t>(n_units) * 2);
+    std::uniform_real_distribution<double> runif_st(0.0, 1.0);
+    for (int s = 0; s < n_units; s++) {
+      unit_coords[static_cast<size_t>(s) * 2 + 0] = runif_st(rng);
+      unit_coords[static_cast<size_t>(s) * 2 + 1] = runif_st(rng);
+    }
+    const int ST_n = st.n_params;
+    st.coords.assign(static_cast<size_t>(ST_n) * 2, 0.0);
+    st.time_values.assign(ST_n, 0.0);
+    const double t_scale = (n_times > 1) ? 1.0 / (n_times - 1) : 0.0;
+    for (int s = 0; s < n_units; s++) {
+      for (int t = 0; t < n_times; t++) {
+        const size_t k = static_cast<size_t>(s) * n_times + t;
+        st.coords[k * 2 + 0] = unit_coords[static_cast<size_t>(s) * 2 + 0];
+        st.coords[k * 2 + 1] = unit_coords[static_cast<size_t>(s) * 2 + 1];
+        st.time_values[k] = t * t_scale;
+      }
+    }
+
+    st.nn = std::min(5, ST_n - 1);
+    STNNGPNeighbors stnb = build_nngp_st(st.coords, st.time_values, ST_n, st.nn);
+    st.nn_idx = stnb.nn_idx;
+    st.nn_dist_space = stnb.nn_dist_space;
+    st.nn_dist_time = stnb.nn_dist_time;
+    st.nn_order = stnb.nn_order;
+    st.nn_order_inv = stnb.nn_order_inv;
+
+    st.cov_space = (field == "stgp_matern") ? ratiod_svc::CovType::MATERN
+                                            : ratiod_svc::CovType::EXPONENTIAL;
+    st.cov_time = st.cov_space;
+    st.nonsep_type = (field == "stgp_gneiting")
+                         ? ratiod_spatiotemporal::NonsepType::GNEITING
+                         : ratiod_spatiotemporal::NonsepType::PRODUCT;
+
+    data.has_spatiotemporal = true;
+    data.st_is_hsgp = false;
+    data.st_parameterization = 0;
+  }
+
   data.zi_type = zi_type;
   data.p_zi = has_zi ? 2 : 0;
   data.zi_prior_sd = 1.0;
@@ -758,7 +911,8 @@ Rcpp::List cpp_gradient_check(std::string field,
   // 7.0e-02 Gaussian, all flat in the difference step.
   const double log_phi_center = std::log(0.1);
   for (int idx : {layout.log_phi_gp_idx, layout.log_phi_gp_local_idx,
-                  layout.log_phi_gp_regional_idx}) {
+                  layout.log_phi_gp_regional_idx,
+                  layout.log_phi_st_space_idx, layout.log_phi_st_time_idx}) {
     if (idx >= 0 && idx < n_params) params[idx] += log_phi_center;
   }
   if (layout.log_phi_svc_start >= 0) {

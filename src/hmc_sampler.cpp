@@ -21,6 +21,7 @@
 #include "hmc_tvc_grad.h"
 #include "hmc_multiscale_temporal_grad.h"
 #include "st_prior_grad.h"
+#include "cov_type_code.h"
 #include <Rcpp.h>
 
 // Include log_post_impl.h AFTER hmc_sampler.h so types are defined
@@ -8986,6 +8987,15 @@ void compute_gradient_spatiotemporal_handcoded(
         lengthscale_st_hsgp = std::exp(params[layout.log_lengthscale_st_hsgp_idx]);
     }
 
+    // The GP types' two ranges. The prior is uniform inside its bounds, so it
+    // leaves only the log Jacobian on each; the field's own contribution to
+    // both arrives with the interaction's prior below.
+    double phi_st_space = 1.0, phi_st_time = 1.0;
+    if (layout.is_st_gp) {
+        phi_st_space = std::exp(params[layout.log_phi_st_space_idx]);
+        phi_st_time = std::exp(params[layout.log_phi_st_time_idx]);
+    }
+
     // NC reparameterization: params store z, reconstruct delta
     const bool st_use_nc = (data.st_parameterization == 1 &&
                             st.type == STType::TYPE_IV);
@@ -9048,6 +9058,14 @@ void compute_gradient_spatiotemporal_handcoded(
         grad[layout.log_tau_st_idx] = 0.5 * lambda * sigma_st + 0.5 + 1.0;
     }
     // tau_st2 removed — single tau for all ST types
+
+    // ST interaction ranges: uniform inside the bounds, so each carries only
+    // its log Jacobian. Outside them the density is -inf and the state is
+    // rejected on the value, not steered on the gradient.
+    if (layout.is_st_gp) {
+        grad[layout.log_phi_st_space_idx] = 1.0;
+        grad[layout.log_phi_st_time_idx] = 1.0;
+    }
 
     // ST interaction prior on rho_st (Beta on u = (rho + 1) / 2)
     if (layout.logit_rho_st_idx >= 0) {
@@ -9212,6 +9230,7 @@ void compute_gradient_spatiotemporal_handcoded(
             st, data.st_is_hsgp, data.st_hsgp_data,
             z_or_delta, delta, grad_delta_lik.data(),
             tau_st, rho_st, sigma2_st_hsgp, lengthscale_st_hsgp,
+            phi_st_space, phi_st_time,
             st_use_nc, &grad[layout.st_delta_start]);
 
     double st_lp_accum = st_pg.log_prior;
@@ -9222,6 +9241,10 @@ void compute_gradient_spatiotemporal_handcoded(
     if (data.st_is_hsgp) {
         grad[layout.log_sigma2_st_hsgp_idx] += st_pg.log_sigma2_hsgp;
         grad[layout.log_lengthscale_st_hsgp_idx] += st_pg.log_lengthscale_hsgp;
+    }
+    if (layout.is_st_gp) {
+        grad[layout.log_phi_st_space_idx] += st_pg.log_phi_space;
+        grad[layout.log_phi_st_time_idx] += st_pg.log_phi_time;
     }
 
     // Non-centered RE chain rule transformation
@@ -9476,12 +9499,13 @@ void compute_gradient_composite(
     }
 
     // --- Spatiotemporal ---
-    const bool has_st = layout.has_spatiotemporal && !layout.is_st_gp &&
+    const bool has_st = layout.has_spatiotemporal &&
                         data.spatiotemporal_data.type != STType::NONE &&
                         layout.st_delta_start >= 0 && layout.log_tau_st_idx >= 0;
     double tau_st = 0.0;
     double rho_st = 0.0;
     double sigma2_st_hsgp = 1.0, lengthscale_st_hsgp = 1.0;
+    double phi_st_space = 1.0, phi_st_time = 1.0;
     const double* st_delta = nullptr;
     RATIOD_TLS_WORKSPACE(std::vector<double>, st_delta_buf);
     bool st_use_nc = false;
@@ -9499,6 +9523,13 @@ void compute_gradient_composite(
         if (data.st_is_hsgp) {
             sigma2_st_hsgp = std::exp(params[layout.log_sigma2_st_hsgp_idx]);
             lengthscale_st_hsgp = std::exp(params[layout.log_lengthscale_st_hsgp_idx]);
+        }
+        // The GP types' two ranges. The prior is uniform inside its bounds, so it
+        // leaves only the log Jacobian on each; the field's own contribution to
+        // both arrives with the interaction's prior below.
+        if (layout.is_st_gp) {
+            phi_st_space = std::exp(params[layout.log_phi_st_space_idx]);
+            phi_st_time = std::exp(params[layout.log_phi_st_time_idx]);
         }
         st_use_nc = (data.st_parameterization == 1 && st.type == STType::TYPE_IV);
         z_or_delta_st = &params[layout.st_delta_start];
@@ -9694,6 +9725,12 @@ void compute_gradient_composite(
         double sigma_st = 1.0 / std::sqrt(tau_st);
         double lambda = -std::log(data.st_sigma2_prior_alpha) / data.st_sigma2_prior_U;
         grad[layout.log_tau_st_idx] = 0.5 * lambda * sigma_st + 0.5 + 1.0;
+        if (layout.is_st_gp) {
+            // Uniform inside the bounds: each range carries only its log
+            // Jacobian, the same term the density adds.
+            grad[layout.log_phi_st_space_idx] = 1.0;
+            grad[layout.log_phi_st_time_idx] = 1.0;
+        }
         if (layout.logit_rho_st_idx >= 0) {
             grad[layout.logit_rho_st_idx] = ratiod_ar1::log_prior_rho_grad(
                 rho_st, data.spatiotemporal_data.rho_prior_a,
@@ -10307,6 +10344,7 @@ void compute_gradient_composite(
                 data.spatiotemporal_data, data.st_is_hsgp, data.st_hsgp_data,
                 z_or_delta_st, st_delta, grad_delta_lik.data(),
                 tau_st, rho_st, sigma2_st_hsgp, lengthscale_st_hsgp,
+                phi_st_space, phi_st_time,
                 st_use_nc, &grad[layout.st_delta_start]);
 
         grad[layout.log_tau_st_idx] += st_pg.log_tau;
@@ -10316,6 +10354,10 @@ void compute_gradient_composite(
         if (data.st_is_hsgp) {
             grad[layout.log_sigma2_st_hsgp_idx] += st_pg.log_sigma2_hsgp;
             grad[layout.log_lengthscale_st_hsgp_idx] += st_pg.log_lengthscale_hsgp;
+        }
+        if (layout.is_st_gp) {
+            grad[layout.log_phi_st_space_idx] += st_pg.log_phi_space;
+            grad[layout.log_phi_st_time_idx] += st_pg.log_phi_time;
         }
     }
 
@@ -10436,7 +10478,7 @@ GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const P
     if (layout.has_tvc && data.has_tvc &&
         !layout.has_spatial && !layout.has_latent)
         return &compute_gradient_tvc_handcoded;
-    if (layout.has_spatiotemporal && !layout.is_st_gp &&
+    if (layout.has_spatiotemporal &&
         !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
         !layout.has_latent &&
         data.spatiotemporal_data.type != STType::NONE &&
@@ -10451,8 +10493,13 @@ GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const P
         !layout.is_hsgp && !layout.has_svc && !layout.has_tvc &&
         !layout.has_latent && !layout.has_spatiotemporal)
         return &compute_gradient_ms_temporal_handcoded;
+    // compute_gradient_latent_handcoded writes no interaction block, so a model
+    // carrying one has to fall through to the composite. Measured on the
+    // stgp_latent fixture before the guard was added: the latent factors came
+    // back at -2.34 against a finite difference of 0.114.
     if (layout.has_latent && data.latent_n_factors > 0 &&
-        !layout.has_spatial && !layout.has_temporal)
+        !layout.has_spatial && !layout.has_temporal &&
+        !layout.has_spatiotemporal)
         return &compute_gradient_latent_handcoded;
 
     // Composite H-mode: catch-all for exotic multi-feature combinations
@@ -14004,6 +14051,55 @@ Rcpp::List cpp_hmc_fit(
     // Spatial adjacency for Type III/IV (already deep copied above)
     data.spatiotemporal_data.adj_row_ptr = st_adj_row_ptr;
     data.spatiotemporal_data.adj_col_idx = st_adj_col_idx;
+
+    // The GP types' NNGP structure, indexed by the interaction's own field
+    // index -- the S x T grid for spatiotemporal(), one entry per observation
+    // for spatiotemporal_gp(). nn_order / nn_order_inv arrive 1-based from R
+    // and are stored 0-based, the convention every other NNGP path uses;
+    // nn_idx stays 1-based within the ordering, with 0 for an absent
+    // neighbour. Nothing downstream can tell a half-filled structure from a
+    // filled one once a density is reading it, so it is checked here.
+    if (data.spatiotemporal_data.type == STType::SEPARABLE ||
+        data.spatiotemporal_data.type == STType::NONSEP_GP) {
+      auto& stg = data.spatiotemporal_data;
+      stg.nn = Rcpp::as<int>(st_params["nn"]);
+      stg.coords = Rcpp::as<std::vector<double>>(st_params["gp_coords"]);
+      stg.time_values = Rcpp::as<std::vector<double>>(st_params["gp_time_values"]);
+      stg.nn_idx = Rcpp::as<std::vector<int>>(st_params["nn_idx"]);
+      stg.nn_dist_space = Rcpp::as<std::vector<double>>(st_params["nn_dist_space"]);
+      stg.nn_dist_time = Rcpp::as<std::vector<double>>(st_params["nn_dist_time"]);
+      std::vector<int> stg_order = Rcpp::as<std::vector<int>>(st_params["nn_order"]);
+      std::vector<int> stg_order_inv = Rcpp::as<std::vector<int>>(st_params["nn_order_inv"]);
+      stg.nn_order.resize(stg_order.size());
+      for (size_t i = 0; i < stg_order.size(); i++) stg.nn_order[i] = stg_order[i] - 1;
+      stg.nn_order_inv.resize(stg_order_inv.size());
+      for (size_t i = 0; i < stg_order_inv.size(); i++) stg.nn_order_inv[i] = stg_order_inv[i] - 1;
+      stg.cov_space = ratiod_cov::cov_type_from_int(
+          Rcpp::as<int>(st_params["cov_space"]));
+      stg.cov_time = ratiod_cov::cov_type_from_int(
+          Rcpp::as<int>(st_params["cov_time"]));
+      const std::string st_nonsep = Rcpp::as<std::string>(st_params["nonsep_type"]);
+      if (st_nonsep == "product") {
+        stg.nonsep_type = NonsepType::PRODUCT;
+      } else if (st_nonsep == "gneiting") {
+        stg.nonsep_type = NonsepType::GNEITING;
+      } else {
+        Rcpp::stop("Unknown spatiotemporal nonsep_type: '%s'. Expected one of: "
+                   "product, gneiting", st_nonsep.c_str());
+      }
+      data.st_phi_space_prior_lower = Rcpp::as<double>(st_params["phi_space_prior_lower"]);
+      data.st_phi_space_prior_upper = Rcpp::as<double>(st_params["phi_space_prior_upper"]);
+      data.st_phi_time_prior_lower = Rcpp::as<double>(st_params["phi_time_prior_lower"]);
+      data.st_phi_time_prior_upper = Rcpp::as<double>(st_params["phi_time_prior_upper"]);
+      if (!ratiod_spatiotemporal::st_gp_structure_filled(stg)) {
+        Rcpp::stop("Spatiotemporal GP interaction: the NNGP structure does not "
+                   "describe its %d field entries (nn = %d). Every one of "
+                   "gp_coords, gp_time_values, nn_idx, nn_dist_space, "
+                   "nn_dist_time and nn_order has to be filled over the "
+                   "interaction's own index.",
+                   stg.n_params, stg.nn);
+      }
+    }
 
     // Prior parameters
     data.st_sigma2_prior_U = st_sigma2_prior_U;

@@ -563,6 +563,7 @@ fit_hmc <- function(formula,
     )
 
     st_is_hsgp <- isTRUE(spatiotemporal_info$spatial_is_hsgp)
+    st_gp <- spatiotemporal_info$gp %||% list()
     st_rho_ab <- rho_prior_anchors(spatiotemporal_info$rho_prior,
                                    priors$rho_temporal)
     st_params <- list(
@@ -594,7 +595,26 @@ fit_hmc <- function(formula,
       hsgp_m = as.integer(spatiotemporal_info$hsgp_m %||% 0L),
       hsgp_c = spatiotemporal_info$hsgp_c %||% 1.5,
       hsgp_coords = if (st_is_hsgp) as.numeric(t(spatiotemporal_info$hsgp_coords)) else numeric(0),
-      hsgp_scale_coords = spatiotemporal_info$hsgp_scale_coords %||% TRUE
+      hsgp_scale_coords = spatiotemporal_info$hsgp_scale_coords %||% TRUE,
+      # GP interaction fields (type "separable" / "nonsep_gp"). Empty for every
+      # Knorr-Held type, which carries no geometry; the .Call boundary reads
+      # them only for the GP types and refuses a structure that does not
+      # describe the interaction's own index set.
+      nn = as.integer(st_gp$nn %||% 0L),
+      gp_coords = as.numeric(st_gp$coords %||% numeric(0)),
+      gp_time_values = as.numeric(st_gp$time_values %||% numeric(0)),
+      nn_idx = as.integer(st_gp$nn_idx %||% integer(0)),
+      nn_dist_space = as.numeric(st_gp$nn_dist_space %||% numeric(0)),
+      nn_dist_time = as.numeric(st_gp$nn_dist_time %||% numeric(0)),
+      nn_order = as.integer(st_gp$nn_order %||% integer(0)),
+      nn_order_inv = as.integer(st_gp$nn_order_inv %||% integer(0)),
+      cov_space = as.integer(st_gp$cov_space %||% 0L),
+      cov_time = as.integer(st_gp$cov_time %||% 0L),
+      nonsep_type = st_gp$nonsep_type %||% "product",
+      phi_space_prior_lower = priors$st_phi_space_prior_lower %||% 0.01,
+      phi_space_prior_upper = priors$st_phi_space_prior_upper %||% 10.0,
+      phi_time_prior_lower = priors$st_phi_time_prior_lower %||% 0.01,
+      phi_time_prior_upper = priors$st_phi_time_prior_upper %||% 10.0
     )
 
     # TVC (Temporally-Varying Coefficients) parameters
