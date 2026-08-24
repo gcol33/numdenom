@@ -225,23 +225,6 @@ inline double log_prior_tau_pc(double tau, double U, double alpha) {
   return std::log(rate) - rate * sigma - std::log(2.0 * sigma) - 2.0 * std::log(tau);
 }
 
-// Log prior for AR1 correlation
-// Uniform on (-1, 1)
-inline double log_prior_rho_uniform(double rho) {
-  if (rho <= -1.0 || rho >= 1.0) return -INFINITY;
-  return -std::log(2.0);  // Uniform(-1, 1)
-}
-
-// Beta prior on (rho + 1) / 2
-inline double log_prior_rho_beta(double rho, double a, double b) {
-  if (rho <= -1.0 || rho >= 1.0) return -INFINITY;
-  double u = (rho + 1.0) / 2.0;  // Transform to (0, 1)
-  // Beta(a, b) density: u^{a-1} * (1-u)^{b-1} / B(a, b)
-  return (a - 1.0) * std::log(u) + (b - 1.0) * std::log(1.0 - u) -
-         std::lgamma(a) - std::lgamma(b) + std::lgamma(a + b) -
-         std::log(2.0);  // Jacobian for rho -> u
-}
-
 // -----------------------------------------------------------------------------
 // Gradient helpers (for HMC)
 // -----------------------------------------------------------------------------

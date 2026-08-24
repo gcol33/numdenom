@@ -10,6 +10,7 @@
 #include "hmc_progress.h"
 #include "autodiff.h"
 #include "autodiff_utils.h"
+#include "ar1_shared.h"
 #include "hmc_gp_autodiff.h"
 #include "hmc_gp_collapsed.h"
 #include <tulpa/soft_sum_to_zero.h>
@@ -1227,8 +1228,7 @@ double compute_log_post(
             for (int t = 1; t < T; t++) {
               double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
               double rho = std::exp(-dt / phi_temporal_gp);
-              double one_minus_rho2 = 1.0 - rho * rho;
-              if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
+              double one_minus_rho2 = ratiod_ar1::one_minus_rho2(rho);
               log_post += 0.5 * std::log(one_minus_rho2);
             }
           }
@@ -1241,8 +1241,7 @@ double compute_log_post(
             for (int t = 1; t < T; t++) {
               double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
               double rho = std::exp(-dt / phi_temporal_gp);
-              double one_minus_rho2 = 1.0 - rho * rho;
-              if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
+              double one_minus_rho2 = ratiod_ar1::one_minus_rho2(rho);
               double a_t = sigma * std::sqrt(one_minus_rho2);
               temporal_f_nc[off + t] = rho * temporal_f_nc[off + t - 1] + a_t * phi_temporal[off + t];
             }
@@ -1274,8 +1273,9 @@ double compute_log_post(
         double logit_rho = params[layout.logit_rho_ar1_idx];
         rho_ar1 = 1.0 / (1.0 + std::exp(-logit_rho));
 
-        // rho ~ Uniform(0,1) prior with logit Jacobian
-        log_post += std::log(rho_ar1) + std::log(1.0 - rho_ar1);
+        // Uniform(0, 1) on rho, logit Jacobian folded in
+        log_post += ratiod_ar1::log_prior_logit_rho(
+            rho_ar1, ratiod_ar1::RHO_UNIT_PRIOR_A, ratiod_ar1::RHO_UNIT_PRIOR_B);
       }
 
       // Temporal effects prior (per group)
@@ -1600,11 +1600,10 @@ double compute_log_post(
         double logit_rho_short = params[layout.logit_rho_short_idx];
         rho_short = 2.0 / (1.0 + std::exp(-logit_rho_short)) - 1.0;  // Map to (-1, 1)
 
-        // Prior on rho (Beta(2,2) on transformed scale)
-        log_post += ratiod_temporal::log_prior_rho(rho_short, 2.0, 2.0);
-        // Jacobian for logit transform
-        double x = (rho_short + 1.0) / 2.0;
-        log_post += std::log(x) + std::log(1.0 - x);
+        // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
+        double u = (rho_short + 1.0) / 2.0;
+        log_post += ratiod_ar1::log_prior_logit_rho(
+            u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
       }
     }
 
@@ -1683,10 +1682,10 @@ double compute_log_post(
       double logit_rho_st = params[layout.logit_rho_st_idx];
       rho_st = 2.0 / (1.0 + std::exp(-logit_rho_st)) - 1.0;  // Map to (-1, 1)
 
-      // Uniform(-1, 1) prior on rho
-      // Jacobian for logit((rho+1)/2) transform
-      double x = (rho_st + 1.0) / 2.0;
-      log_post += std::log(x) + std::log(1.0 - x);
+      // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
+      double u = (rho_st + 1.0) / 2.0;
+      log_post += ratiod_ar1::log_prior_logit_rho(
+          u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
     }
 
     // GP range parameters
@@ -1853,10 +1852,10 @@ double compute_log_post(
         double logit_rho = params[layout.logit_rho_tvc_start + j];
         tvc_rho[j] = 2.0 / (1.0 + std::exp(-logit_rho)) - 1.0;  // Map to (-1, 1)
 
-        // Uniform(-1, 1) prior on rho
-        // Jacobian for logit((rho+1)/2) transform
-        double x = (tvc_rho[j] + 1.0) / 2.0;
-        log_post += std::log(x) + std::log(1.0 - x);
+        // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
+        double u = (tvc_rho[j] + 1.0) / 2.0;
+        log_post += ratiod_ar1::log_prior_logit_rho(
+            u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
       }
     }
 
@@ -2779,8 +2778,8 @@ void compute_gradient_analytical(
     if (data.temporal_type == TemporalType::AR1 && layout.logit_rho_ar1_idx >= 0) {
       logit_rho_ar1 = params[layout.logit_rho_ar1_idx];
       rho_ar1 = 1.0 / (1.0 + std::exp(-logit_rho_ar1));
-      // Uniform(0,1) prior on rho with logit Jacobian: grad = 1 - 2*rho
-      grad[layout.logit_rho_ar1_idx] = 1.0 - 2.0 * rho_ar1;
+      grad[layout.logit_rho_ar1_idx] = ratiod_ar1::log_prior_logit_rho_grad(
+          rho_ar1, ratiod_ar1::RHO_UNIT_PRIOR_A, ratiod_ar1::RHO_UNIT_PRIOR_B);
     }
   }
 
@@ -4820,7 +4819,7 @@ static inline void temporal_gmrf_prior_grad(
         grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
 
     } else if (data.temporal_type == TemporalType::AR1) {
-        double omr2 = 1.0 - rho_ar1 * rho_ar1;
+        double omr2 = ratiod_ar1::one_minus_rho2(rho_ar1);
         double total_qf = 0.0, total_gr = 0.0;
         for (int gg = 0; gg < n_groups; gg++) {
             const double* phi_g = phi_temporal + gg * T;
@@ -6300,8 +6299,7 @@ void compute_gradient_temporal_gp_handcoded(
             double rho2 = rho_t * rho_t;
             double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
             double dt_over_phi = dt / phi_tgp;
-            double one_minus_rho2 = 1.0 - rho2;
-            if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
+            double one_minus_rho2 = ratiod_ar1::one_minus_rho2(rho_t);
             jac_phi_log -= rho2 * dt_over_phi / one_minus_rho2;
         }
         grad[layout.logit_phi_temporal_gp_idx] += jac_phi_log * n_groups * chi_tgp;
@@ -6324,8 +6322,7 @@ void compute_gradient_temporal_gp_handcoded(
             // NC Jacobian: T*log(sigma) + 0.5*sum log(1-rho^2)  per group
             double nc_jac = T_times * std::log(sigma_tgp);
             for (int t = 1; t < T_times; t++) {
-                double one_m_rho2 = 1.0 - nc_ws.rho[t-1] * nc_ws.rho[t-1];
-                if (one_m_rho2 < 1e-10) one_m_rho2 = 1e-10;
+                double one_m_rho2 = ratiod_ar1::one_minus_rho2(nc_ws.rho[t-1]);
                 nc_jac += 0.5 * std::log(one_m_rho2);
             }
             tgp_lp_accum += nc_jac * n_groups;
@@ -6349,8 +6346,7 @@ void compute_gradient_temporal_gp_handcoded(
                 double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
                 double rho = std::exp(-dt / phi_tgp);
                 double rho2 = rho * rho;
-                double cv = sigma2_tgp * (1.0 - rho2);
-                if (cv < 1e-10) cv = 1e-10;
+                double cv = sigma2_tgp * ratiod_ar1::one_minus_rho2(rho);
 
                 double f_prev = phi_temporal[offset + t - 1];
                 double f_curr = phi_temporal[offset + t];
@@ -7102,13 +7098,12 @@ void compute_gradient_tvc_handcoded(
             tvc_tau[j], data.tvc_tau_shape, data.tvc_tau_rate);
     }
 
-    // AR1: Uniform(-1,1) prior on rho (must match compute_log_post)
-    // log_post Jacobian: log(u) + log(1-u) where u = (rho+1)/2
-    // d/d(logit_u) [log(u) + log(1-u)] = (1-u) + (-u) = 1 - 2u
+    // AR1: the rho prior in the coordinate the sampler moves
     if (data.tvc_data.structure == ratiod_temporal::TemporalType::AR1) {
         for (int j = 0; j < n_tvc; j++) {
             double u = (tvc_rho[j] + 1.0) / 2.0;  // u in (0,1)
-            grad[layout.logit_rho_tvc_start + j] = 1.0 - 2.0 * u;
+            grad[layout.logit_rho_tvc_start + j] = ratiod_ar1::log_prior_logit_rho_grad(
+                u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
         }
     }
 
@@ -8729,11 +8724,10 @@ void compute_gradient_ms_temporal_handcoded(
             sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha) + 1.0;
     }
     if (mst.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0) {
-        // Beta(2,2) prior on u=(rho+1)/2: log p(u) = log(u) + log(1-u)
-        // Jacobian for logit transform: log|drho/d(logit_rho)| = log(u) + log(1-u) + const
-        // Total: 2*log(u) + 2*log(1-u), gradient = 2*(1 - 2*u)
+        // The rho prior in the coordinate the sampler moves
         double u = (rho_short + 1.0) / 2.0;
-        grad[layout.logit_rho_short_idx] = 2.0 * (1.0 - 2.0 * u);
+        grad[layout.logit_rho_short_idx] = ratiod_ar1::log_prior_logit_rho_grad(
+            u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
     }
 
     // =========================================================================
@@ -9794,8 +9788,7 @@ void compute_gradient_composite(
                 double rho_t = nc_ws_composite.rho[t - 1];
                 double rho2 = rho_t * rho_t;
                 double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
-                double one_minus_rho2 = 1.0 - rho2;
-                if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
+                double one_minus_rho2 = ratiod_ar1::one_minus_rho2(rho_t);
                 jac_phi_log -= rho2 * (dt / phi_tgp_comp) / one_minus_rho2;
             }
             grad[layout.logit_phi_temporal_gp_idx] += jac_phi_log * n_groups_gp * chi_tgp_prior;
@@ -9809,7 +9802,8 @@ void compute_gradient_composite(
                 tvc_tau_buf[j], data.tvc_tau_shape, data.tvc_tau_rate);
             if (data.tvc_data.structure == ratiod_temporal::TemporalType::AR1) {
                 double u = (tvc_rho_buf[j] + 1.0) / 2.0;
-                grad[layout.logit_rho_tvc_start + j] = 1.0 - 2.0 * u;
+                grad[layout.logit_rho_tvc_start + j] = ratiod_ar1::log_prior_logit_rho_grad(
+                    u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
             }
         }
     }
@@ -9853,7 +9847,8 @@ void compute_gradient_composite(
                 sigma2_short, data.ms_sigma2_short_prior_U, data.ms_sigma2_short_prior_alpha) + 1.0;
         if (mst.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0) {
             double u = (rho_short + 1.0) / 2.0;
-            grad[layout.logit_rho_short_idx] = 2.0 * (1.0 - 2.0 * u);
+            grad[layout.logit_rho_short_idx] = ratiod_ar1::log_prior_logit_rho_grad(
+                u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
         }
     }
 

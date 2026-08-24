@@ -21,7 +21,7 @@ MULTI_FIELDS <- c("icar_ms", "bym2_ms", "icar_st", "bym2_st")
 # allocates for belongs here, so that a structure cannot be added to one density
 # and not the other without a red test.
 STRUCTURE_FIELDS <- c("re", "re_crossed", "re_slopes", "re_slopes_corr",
-                      "hsgp", "tvc",
+                      "hsgp", "tvc", "tvc_ar1",
                       # TemporalType::IID was implemented for TVC's log-prior
                       # and gradient in both H and autodiff modes, but blocked
                       # from R by temporal_tvc()'s match.arg and never checked
@@ -54,6 +54,14 @@ CAR_PROPER_FIELDS <- c("car_proper")
 # branch (both its centered and non-centered forms) had never been checked
 # against finite differences before #24.
 ST_IV_FIELDS <- c("st4", "st4_nc")
+# The same interaction with an AR1 time margin, which is the only
+# configuration the parameter layout allocates logit_rho_st_idx for and so
+# the only one that reaches the spatiotemporal rho on either density.
+# logit_rho_st_idx is read by the two densities and by nothing else: the
+# handcoded path carries neither a gradient for it nor its prior in the value
+# it fuses, so this field stays out of ALL_FIELDS and takes the assertions it
+# does answer one at a time below (gcol33/tulpaRatio#66).
+ST_IV_AR1_FIELDS <- c("st4_ar1")
 # The kernels resolve_gradient_fn can select that make_model() could not build a
 # model for at all: the GP, the multi-scale GP, the SVC pair, the temporal GP,
 # multi-scale temporal and latent factors (gcol33/tulpaRatio#45). Under the
@@ -73,19 +81,11 @@ KERNEL_FIELDS <- c("gp", "gp_matern", "gp_gaussian", "gp_spherical",
 #                   through the transform. compute_log_post_impl has no
 #                   non-centred branch and says so (gcol33/tulpaRatio#26).
 KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc")
-# Fields whose analytic gradient reproduces their own density exactly while that
-# density and the templated one are different, so they join the sweep in
-# handcoded mode only and stay out of ALL_FIELDS, whose density-equality
-# assertion they fail. tvc_ar1's rho carries a Uniform(-1, 1) prior in
-# compute_log_post and a Beta(2, 2) one in compute_log_post_impl, one extra
-# log(u) + log(1-u) apart (gcol33/tulpaRatio#58); its gradient matches the
-# Uniform density to 0.
-KERNEL_H_ONLY_FIELDS <- c("tvc_ar1")
 # Cases the harness can build whose gradient does not match the density it
 # reports. Each names the defect it is blocked on; the case is written out so
 # the fix has a test to turn green, and the deviation each measures today is
 # recorded in the issue.
-BLOCKED_FIELDS <- character(0)
+BLOCKED_FIELDS <- c(st4_ar1 = "gcol33/tulpaRatio#66")
 ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
                 KERNEL_FIELDS)
 MODES <- c("handcoded", "arena")
@@ -163,6 +163,43 @@ for (field in CAR_PROPER_FIELDS) {
       )
     )
   })
+}
+
+for (field in ST_IV_AR1_FIELDS) {
+  test_that(sprintf("analytic gradient matches finite differences (%s, arena)", field), {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
+    expect_gt(r$n_params, 0)
+    dev <- rel_dev(r$analytic, r$finite_diff)
+    worst <- which.max(dev)
+    expect_lt(
+      max(dev),
+      1e-4,
+      label = sprintf(
+        "%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+        field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+      )
+    )
+  })
+
+  # The assertions ALL_FIELDS carries, for the field that cannot join it.
+  test_that(sprintf("the two log posteriors are the same function (%s)", field), {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
+    expect_true(is.na(r$impl_gap))
+    expect_equal(r$log_post, r$log_post_impl, tolerance = 1e-8)
+  })
+
+  for (mode in AUTODIFF_MODES) {
+    test_that(sprintf("autodiff carries every block (%s, %s)", field, mode), {
+      r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
+      zero <- r$analytic == 0
+      expect_equal(
+        sum(zero), 0L,
+        label = sprintf("%s/%s: zero-gradient blocks %s", field, mode,
+                        paste(unique(r$block[zero]), collapse = ", "))
+      )
+      expect_equal(r$log_post, r$log_post_mode, tolerance = 1e-8)
+    })
+  }
 }
 
 for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS)) {
@@ -372,7 +409,7 @@ for (field in KERNEL_FIELDS) {
   }
 }
 
-for (field in c(KERNEL_COLLAPSED_FIELDS, KERNEL_H_ONLY_FIELDS)) {
+for (field in KERNEL_COLLAPSED_FIELDS) {
   test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
     r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
     expect_gt(r$n_params, 0)
@@ -386,6 +423,26 @@ for (field in c(KERNEL_COLLAPSED_FIELDS, KERNEL_H_ONLY_FIELDS)) {
         field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
       )
     )
+  })
+}
+
+# Every AR1 correlation in the sweep above is drawn centred on rho = 0, well
+# inside its range, so nothing reaches the regime the floor on 1 - rho^2
+# exists for. A path that floors a different quantity, at a different point,
+# or not at all agrees with its siblings everywhere except there, which is
+# where a long-memory fit ends up. At near_unit_rho the two densities were
+# 3.14 apart on temporal_ar1, 27.2 on tvc_ar1, 30.0 on st4_ar1 and 1.9e-03 on
+# ms_temporal, and the handcoded gradient of the first two was not finite at
+# all one step further out (gcol33/tulpaRatio#59).
+for (field in c("temporal_ar1", "tvc_ar1", "ms_temporal", "st4_ar1")) {
+  test_that(sprintf("the densities agree where the 1 - rho^2 floor binds (%s)", field), {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded",
+                                         near_unit_rho = TRUE)
+    expect_true(is.finite(r$log_post), label = sprintf("%s: log_post", field))
+    expect_true(all(is.finite(r$analytic)),
+                label = sprintf("%s: analytic gradient", field))
+    expect_equal(r$log_post, r$log_post_impl, tolerance = 1e-8,
+                 info = sprintf("field = %s", field))
   })
 }
 

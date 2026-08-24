@@ -12,6 +12,7 @@
 
 #include <tulpa/soft_sum_to_zero.h>  // s2z_precision
 #include <tulpa/sum_to_zero.h>       // rw1_rank / rw2_rank
+#include "ar1_shared.h"              // the floored 1 - rho^2
 
 // Fallback definition of M_PI if not provided by <cmath>
 #ifndef M_PI
@@ -122,7 +123,7 @@ inline double ar1_log_density(
   double log_dens = 0.0;
 
   // First observation: phi[0] ~ N(0, sigma^2 / (1 - rho^2))
-  double marginal_var = 1.0 / (tau * (1.0 - rho * rho));
+  double marginal_var = 1.0 / (tau * ratiod_ar1::one_minus_rho2(rho));
   log_dens -= 0.5 * phi[0] * phi[0] / marginal_var;
   log_dens -= 0.5 * std::log(2.0 * M_PI * marginal_var);
 
@@ -149,8 +150,7 @@ inline void ar1_nc_forward(
     double rho, double tau
 ) {
   if (T <= 0) return;
-  double omr2 = 1.0 - rho * rho;
-  if (omr2 < 1e-12) omr2 = 1e-12;  // Guard against rho ≈ ±1
+  double omr2 = ratiod_ar1::one_minus_rho2(rho);
   double inv_sqrt_tau = 1.0 / std::sqrt(tau);
   double inv_sqrt_tau_omr2 = inv_sqrt_tau / std::sqrt(omr2);
 
@@ -189,8 +189,7 @@ inline std::pair<double, double> ar1_nc_gradient(
   if (T <= 0) return {0.0, 0.0};
   if (T == 1) {
     // Single time point: phi[0] = z[0] / sqrt(tau*(1-rho^2))
-    double omr2 = 1.0 - rho * rho;
-    if (omr2 < 1e-12) omr2 = 1e-12;
+    double omr2 = ratiod_ar1::one_minus_rho2(rho);
     double inv_sqrt_tau_omr2 = 1.0 / std::sqrt(tau * omr2);
     grad_z[0] = grad_phi_lik[0] * inv_sqrt_tau_omr2 - z[0];
     // tau gradient: d(phi[0])/d(log_tau) = -0.5 * phi[0]
@@ -201,8 +200,7 @@ inline std::pair<double, double> ar1_nc_gradient(
     return {glt, glr};
   }
 
-  double omr2 = 1.0 - rho * rho;
-  if (omr2 < 1e-12) omr2 = 1e-12;
+  double omr2 = ratiod_ar1::one_minus_rho2(rho);
   double inv_sqrt_tau = 1.0 / std::sqrt(tau);
   double inv_sqrt_tau_omr2 = inv_sqrt_tau / std::sqrt(omr2);
 

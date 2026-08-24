@@ -1,3 +1,43 @@
+# tulpaRatio 1.5.3
+
+* **One AR1 correlation prior, read by every density and every gradient
+  (#58).** The TVC rho carried a Uniform(-1, 1) prior in `compute_log_post` and
+  a Beta(2, 2) one in `compute_log_post_impl`, exactly one `log u + log(1 - u)`
+  apart, so the autodiff modes sampled a different posterior from the handcoded
+  one -- 1.408954 in the density and the whole gap in the gradient at
+  `logit_rho_tvc`. The prior is Beta(2, 2) on `u = (rho + 1) / 2` everywhere it
+  applies now, which is what `priors_default()` documents for a temporal
+  correlation and what the multi-scale short-term arm already used; the
+  spatiotemporal interaction's rho moves onto it from Uniform(-1, 1) as well, so
+  a fit carrying one shifts by that term. `ratiod_ar1::log_prior_logit_rho()`
+  and its gradient (`src/ar1_shared.h`) are the single expression all four
+  correlations read -- the two densities, both handcoded gradient functions and
+  the multi-scale arm -- with each site naming its own `(a, b)`, so the
+  Uniform(0, 1) the plain `temporal_ar1()` block carries is the same helper at
+  `(1, 1)` rather than a second spelling. Four unreachable copies of the prior
+  in `hmc_tvc.h`, `hmc_tvc_autodiff.h` and `hmc_temporal_multiscale.h` are gone.
+  `tvc_ar1` joins the structures in `test-gradient-correctness.R`, whose
+  density-equality assertion it now answers.
+
+* **One floored `1 - rho^2` (#59).** It was clamped at `1e-10` in five places,
+  clamped at `1e-12` in three, added as `+ 1e-10` in five more, and left
+  unfloored in eight -- including the AR1 marginal variance, its templated twin,
+  the temporal GP's two conditional variances and the Laplace path. `+ 1e-10`
+  and `max(., 1e-10)` are different functions, so paths that must agree parted
+  company wherever either bound: at a correlation near the edge of its range the
+  two densities were 3.14 apart on `temporal_ar1`, 27.2 on `tvc_ar1` and 1.9e-03
+  on `ms_temporal`, and one step further out `compute_log_post` returned `-Inf`
+  with a non-finite handcoded gradient while the templated density stayed
+  finite. `ratiod_ar1::one_minus_rho2()` is the one clamp every site reads.
+  `cpp_gradient_check(near_unit_rho = TRUE)` places each sampled correlation
+  where the floor binds, which nothing in the sweep reached before.
+
+* Two defects found while testing the above are filed rather than folded in:
+  no gradient function writes `logit_rho_st`, so a Type IV interaction with an
+  AR1 time margin moves its rho under a flat gradient and fuses a log posterior
+  missing the prior (#66); and `temporal_ar1()`'s rho lives on (0, 1) while its
+  documentation describes (-1, 1), with `rho_prior` inert (#67).
+
 # tulpaRatio 1.5.2
 
 * **PG GP fits carry their spatial field, so they can predict one (#63).**

@@ -103,7 +103,7 @@ T ar1_log_density_t(
     T log_dens = T(0.0);
 
     // First observation: phi[0] ~ N(0, sigma^2 / (1 - rho^2))
-    T marginal_var = T(1.0) / (tau * (T(1.0) - rho * rho));
+    T marginal_var = T(1.0) / (tau * ratiod_ar1::one_minus_rho2(rho));
     log_dens = log_dens - T(0.5) * phi[0] * phi[0] / marginal_var;
     log_dens = log_dens - T(0.5) * safe_log(T(2.0 * M_PI) * marginal_var);
 

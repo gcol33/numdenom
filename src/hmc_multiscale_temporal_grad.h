@@ -156,7 +156,7 @@ inline double rw2_grad_log_sigma2(const double* phi, int n, double sigma2) {
 
 inline void ar1_grad_phi(const double* phi, int n, double sigma2, double rho, double* grad_phi) {
     double inv_sigma2 = 1.0 / (sigma2 + 1e-10);
-    double one_m_rho2 = 1.0 - rho * rho + 1e-10;
+    double one_m_rho2 = ratiod_ar1::one_minus_rho2(rho);
     double inv_var_stationary = one_m_rho2 * inv_sigma2;
 
     if (n == 1) {
@@ -181,7 +181,7 @@ inline void ar1_grad_phi(const double* phi, int n, double sigma2, double rho, do
 }
 
 inline double ar1_grad_log_sigma2(const double* phi, int n, double sigma2, double rho) {
-    double one_m_rho2 = 1.0 - rho * rho + 1e-10;
+    double one_m_rho2 = ratiod_ar1::one_minus_rho2(rho);
 
     // AR1 has n terms: 1 marginal + (n-1) conditional
     // d/d(sigma2) [log_AR1] = -0.5*n/sigma2 + 0.5*quad/sigma2^2
@@ -202,7 +202,7 @@ inline double ar1_grad_log_sigma2(const double* phi, int n, double sigma2, doubl
 
 inline double ar1_grad_logit_rho(const double* phi, int n, double sigma2, double rho) {
     double inv_sigma2 = 1.0 / (sigma2 + 1e-10);
-    double one_m_rho2 = 1.0 - rho * rho + 1e-10;
+    double one_m_rho2 = ratiod_ar1::one_minus_rho2(rho);
 
     // AR1 log-lik = -0.5*log(sigma2/(1-rho^2)) - 0.5*(1-rho^2)/sigma2 * phi[0]^2
     //             + sum[-0.5*log(sigma2) - 0.5/sigma2 * (phi[t] - rho*phi[t-1])^2]

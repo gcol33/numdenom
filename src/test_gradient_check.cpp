@@ -127,7 +127,7 @@ const char* const KNOWN_FIELDS[] = {
   "none",
   "icar", "bym2", "car_proper",
   "rw1", "rw2", "temporal_ar1", "icar_rw1",
-  "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc",
+  "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
   "icar_collapsed", "bym2_collapsed",
   "icar_collapsed_rw1", "bym2_collapsed_rw1",
   "hsgp",
@@ -190,7 +190,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // compute_gradient_spatiotemporal_handcoded's multi-feature path but only
   // ever build a Type I interaction; this is the field that checks the
   // handcoded Type IV Kronecker block against finite differences.
-  const bool want_st4 = (field == "st4" || field == "st4_nc");
+  const bool want_st4 = (field == "st4" || field == "st4_nc" ||
+                         field == "st4_ar1");
   // icar_collapsed_rw1 / bym2_collapsed_rw1 pair a collapsed spatial field
   // with a companion temporal RW1 term -- the combination the specialized
   // collapsed gradient has to carry into its inner Laplace.
@@ -659,7 +660,11 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       // helper as-is, which would read adj_col_idx[idx]-1 == -1 out of bounds.
       build_grid_adjacency(n_units, st.adj_row_ptr, st.adj_col_idx, st.n_neighbors);
       for (int& j : st.adj_col_idx) j += 1;
-      st.temporal_type = ratiod_temporal::TemporalType::RW1;
+      // st4_ar1 gives the interaction an AR1 time margin, which is the only
+      // configuration the layout allocates logit_rho_st_idx for.
+      st.temporal_type = (field == "st4_ar1")
+                            ? ratiod_temporal::TemporalType::AR1
+                            : ratiod_temporal::TemporalType::RW1;
       st.temporal_cyclic = false;
     } else {
       st.temporal_type = ratiod_temporal::TemporalType::NONE;
@@ -700,7 +705,8 @@ Rcpp::List cpp_gradient_check(std::string field,
                               std::string family = "binomial",
                               bool temporal_shared = true,
                               std::string reference = "analytic",
-                              std::string zi = "none") {
+                              std::string zi = "none",
+                              bool near_unit_rho = false) {
   ModelData data = make_model(field, n_obs, n_units, n_times, seed,
                               family, temporal_shared, zi);
   ParamLayout layout = compute_param_layout(data);
@@ -740,6 +746,29 @@ Rcpp::List cpp_gradient_check(std::string field,
   if (layout.log_phi_svc_start >= 0) {
     for (int j = layout.log_phi_svc_start; j < layout.log_phi_svc_end; j++) {
       if (j < n_params) params[j] += log_phi_center;
+    }
+  }
+
+  // Every AR1 correlation is drawn centred on rho = 0, so nothing in the
+  // sweep reaches the edge of its range. near_unit_rho places each sampled
+  // one where 1 - rho^2 underflows to exactly zero in double, which is the
+  // regime ratiod_ar1::one_minus_rho2's floor exists for and the regime a
+  // path that floors a different quantity, or none, parts company with the
+  // others in. The temporal GP's correlation is exp(-dt / phi) on a phi the
+  // layout bounds, so it cannot be taken there this way.
+  if (near_unit_rho) {
+    // rho = 2u - 1 gives 1 - rho^2 = 4u(1 - u) and rho = u gives
+    // (1 - u)(1 + u), so the floor binds in both mappings once the logit
+    // passes about 24. Past about 37, u rounds to exactly 1 and the prior's
+    // own log(1 - u) is -inf, which is the edge of its support rather than
+    // anything about 1 - rho^2.
+    const double logit_edge = 30.0;
+    for (int idx : {layout.logit_rho_ar1_idx, layout.logit_rho_short_idx,
+                    layout.logit_rho_st_idx}) {
+      if (idx >= 0 && idx < n_params) params[idx] = logit_edge;
+    }
+    for (int j = layout.logit_rho_tvc_start; j >= 0 && j < layout.logit_rho_tvc_end; j++) {
+      if (j < n_params) params[j] = logit_edge;
     }
   }
 

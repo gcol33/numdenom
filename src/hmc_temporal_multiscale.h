@@ -143,8 +143,7 @@ inline T ar1_log_lik(
   T log_lik = T(0.0);
 
   // Marginal distribution of first observation
-  T one_minus_rho2 = T(1.0) - rho * rho;
-  T marginal_var = sigma2 / (one_minus_rho2 + T(1e-10));
+  T marginal_var = sigma2 / ratiod_ar1::one_minus_rho2(rho);
   log_lik = log_lik - T(0.5) * safe_log(T(2.0 * M_PI) * marginal_var);
   log_lik = log_lik - T(0.5) * phi[0] * phi[0] / marginal_var;
 
@@ -278,16 +277,6 @@ inline T log_prior_sigma2_temporal_pc(const T& sigma2, double U, double alpha) {
   T rate = T(-std::log(alpha) / U);
   T sigma = safe_sqrt(sigma2);
   return safe_log(rate) - rate * sigma - safe_log(T(2.0) * sigma);
-}
-
-// Prior for AR1 rho: Beta(a, b) on (rho + 1) / 2
-template <typename T>
-inline T log_prior_rho(const T& rho, double a = 2.0, double b = 2.0) {
-  // Transform to [0, 1]
-  T x = (rho + T(1.0)) / T(2.0);
-
-  // Beta log density (unnormalized)
-  return T(a - 1.0) * safe_log(x) + T(b - 1.0) * safe_log(T(1.0) - x);
 }
 
 // Parse temporal type from string

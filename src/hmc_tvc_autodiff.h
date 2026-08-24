@@ -58,23 +58,6 @@ T log_prior_tau_gamma(const T& log_tau, double shape, double rate) {
     return T(shape - 1.0) * log_tau - rate * tau + log_tau;
 }
 
-// Beta prior on rho (AR1 correlation on (-1, 1))
-// Transform: u = (rho + 1) / 2, u ~ Beta(a, b)
-template<typename T>
-T log_prior_rho_beta(const T& logit_rho_scaled, double a, double b) {
-    // logit_rho_scaled = logit((rho + 1)/2) = log((rho+1)/(1-rho))
-    // rho = (2 * inv_logit(logit_rho_scaled)) - 1
-    T u = inv_logit(logit_rho_scaled);
-    T rho = T(2.0) * u - T(1.0);
-
-    // Beta density on u
-    T log_dens = T(a - 1.0) * safe_log(u) + T(b - 1.0) * safe_log(T(1.0) - u);
-    // Jacobian for logit transform: u * (1 - u)
-    log_dens = log_dens + safe_log(u) + safe_log(T(1.0) - u);
-
-    return log_dens;
-}
-
 } // namespace ratiod_tvc_ad
 
 #endif // RATIOD_HMC_TVC_AUTODIFF_H

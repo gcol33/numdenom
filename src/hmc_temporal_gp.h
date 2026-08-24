@@ -8,6 +8,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include "ar1_shared.h"  // the floored 1 - rho^2
 
 namespace ratiod_temporal_gp {
 
@@ -101,7 +102,7 @@ struct StateSpaceAR1 {
 inline void ar1_transition(double dt, const StateSpaceAR1& ss,
                            double& rho, double& cond_var) {
   rho = std::exp(-dt / ss.range);
-  cond_var = ss.marginal_var * (1.0 - rho * rho);
+  cond_var = ss.marginal_var * ratiod_ar1::one_minus_rho2(rho);
 }
 
 // Compute log-likelihood using state-space (O(n) algorithm)
@@ -134,10 +135,7 @@ inline double temporal_gp_log_lik_statespace(
 
     // AR(1) transition
     double rho = std::exp(-dt / phi);
-    double cond_var = sigma2 * (1.0 - rho * rho);
-
-    // Ensure positive variance
-    if (cond_var < 1e-10) cond_var = 1e-10;
+    double cond_var = sigma2 * ratiod_ar1::one_minus_rho2(rho);
 
     double cond_mean = rho * f[i-1];
     double resid = f[i] - cond_mean;
@@ -349,8 +347,7 @@ static inline void temporal_gp_nc_forward(
         double dt = time_values[t] - time_values[t - 1];
         double rho_t = std::exp(-dt / phi);
         ws.rho[t - 1] = rho_t;
-        double one_minus_rho2 = 1.0 - rho_t * rho_t;
-        if (one_minus_rho2 < 1e-10) one_minus_rho2 = 1e-10;
+        double one_minus_rho2 = ratiod_ar1::one_minus_rho2(rho_t);
         ws.a[t] = sigma * std::sqrt(one_minus_rho2);
     }
 

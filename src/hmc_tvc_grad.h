@@ -148,7 +148,7 @@ inline void ar1_grad_w(const double* w, int n_times, double tau, double rho, dou
     // An empty field has no w[0]; the AR1 density is flat there too.
     if (n_times < 1) return;
 
-    double one_m_rho2 = 1.0 - rho * rho;
+    double one_m_rho2 = ratiod_ar1::one_minus_rho2(rho);
 
     if (n_times == 1) {
         grad_w[0] = -tau * one_m_rho2 * w[0];
@@ -175,7 +175,7 @@ inline void ar1_grad_w(const double* w, int n_times, double tau, double rho, dou
 inline double ar1_grad_log_tau(const double* w, int n_times, double tau, double rho) {
     if (n_times < 1) return 0.0;
 
-    double one_m_rho2 = 1.0 - rho * rho;
+    double one_m_rho2 = ratiod_ar1::one_minus_rho2(rho);
 
     // Stationary part. var_stationary = 1/(tau*(1-rho^2)) is the precision
     // parameterization, so d/d(log tau)[-0.5*log(2*pi*var_stationary)] = +0.5.
@@ -199,7 +199,7 @@ inline double ar1_grad_log_tau(const double* w, int n_times, double tau, double 
 inline double ar1_grad_logit_rho(const double* w, int n_times, double tau, double rho) {
     if (n_times < 1) return 0.0;
 
-    double one_m_rho2 = 1.0 - rho * rho;
+    double one_m_rho2 = ratiod_ar1::one_minus_rho2(rho);
 
     // d log p / d rho from stationary distribution:
     // log p(w[0]) = 0.5*log(tau*(1-rho^2)) - 0.5*tau*(1-rho^2)*w[0]^2 + const

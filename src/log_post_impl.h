@@ -11,6 +11,7 @@
 #include <vector>
 #include <limits>
 #include "autodiff_utils.h"
+#include "ar1_shared.h"  // AR1 rho: the floored 1 - rho^2 and its prior
 #include <tulpa/soft_sum_to_zero.h>
 #include "spatial_field_constraint.h"
 #include "hmc_re.h"  // Templated random-effect prior and effects
@@ -483,8 +484,7 @@ T compute_log_post_impl(
                 for (int t = 1; t < T_times; t++) {
                     double dt = data.temporal_gp_data.time_values[t] - data.temporal_gp_data.time_values[t - 1];
                     rho_shared[t - 1] = safe_exp(T(-dt) / phi_temporal_gp);
-                    T one_minus_rho2 = T(1.0) - rho_shared[t - 1] * rho_shared[t - 1];
-                    T one_minus_rho2_safe = safe_max(one_minus_rho2, T(1e-10));
+                    T one_minus_rho2_safe = ratiod_ar1::one_minus_rho2(rho_shared[t - 1]);
                     log_one_minus_rho2_shared[t - 1] = safe_log(one_minus_rho2_safe);
                     a_shared[t - 1] = sigma_t * safe_sqrt(one_minus_rho2_safe);
                 }
@@ -613,15 +613,16 @@ T compute_log_post_impl(
 
             } else if (data.temporal_type == TemporalType::AR1) {
                 // AR1: phi[t] | phi[t-1] ~ N(rho * phi[t-1], 1/tau)
-                // Uniform(0,1) prior on rho with logit Jacobian: log(rho) + log(1-rho)
-                log_post = log_post + safe_log(rho_ar1) + safe_log(T(1.0) - rho_ar1);
+                // Uniform(0, 1) on rho, logit Jacobian folded in
+                log_post = log_post + ratiod_ar1::log_prior_logit_rho(
+                    rho_ar1, ratiod_ar1::RHO_UNIT_PRIOR_A, ratiod_ar1::RHO_UNIT_PRIOR_B);
 
                 // Include the full normal log-density normalization on both the
                 // stationary first observation and the conditional residuals so
                 // the posterior on tau is correct (the gaussian normalizers carry
                 // a +0.5*T*log(tau) term that gradient-based samplers need).
                 T sigma2_ar1 = T(1.0) / tau_temporal;
-                T one_minus_rho2 = T(1.0) - rho_ar1 * rho_ar1;
+                T one_minus_rho2 = ratiod_ar1::one_minus_rho2(rho_ar1);
                 T var_stationary = sigma2_ar1 / one_minus_rho2;
                 T log_norm_stat = T(-0.5) * safe_log(T(2.0 * M_PI) * var_stationary);
                 T log_norm_cond = T(-0.5) * safe_log(T(2.0 * M_PI) * sigma2_ar1);
@@ -712,9 +713,9 @@ T compute_log_post_impl(
                 T u = inv_logit(logit_rho_short);
                 ms_rho_short = T(2.0) * u - T(1.0);
 
-                // Beta(2,2) prior on u + Jacobian for logit transform
-                log_post = log_post + safe_log(u) + safe_log(T(1.0) - u);  // Beta(2,2)
-                log_post = log_post + safe_log(u) + safe_log(T(1.0) - u);  // Jacobian
+                // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
+                log_post = log_post + ratiod_ar1::log_prior_logit_rho(
+                    u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
             }
         }
 
@@ -865,10 +866,9 @@ T compute_log_post_impl(
                 T u = inv_logit(logit_rho);
                 tvc_rho[j] = T(2.0) * u - T(1.0);
 
-                // Beta(2, 2) prior on u (favors moderate autocorrelation)
-                // + Jacobian for logit transform
-                log_post = log_post + safe_log(u) + safe_log(T(1.0) - u);  // Beta(2,2)
-                log_post = log_post + safe_log(u) + safe_log(T(1.0) - u);  // Jacobian
+                // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
+                log_post = log_post + ratiod_ar1::log_prior_logit_rho(
+                    u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
             }
         }
 
@@ -976,9 +976,10 @@ T compute_log_post_impl(
             T logit_rho_st = params[layout.logit_rho_st_idx];
             rho_st = T(2.0) / (T(1.0) + safe_exp(-logit_rho_st)) - T(1.0);
 
-            // Uniform(-1, 1) prior on rho, Jacobian for the logit transform
-            T x = (rho_st + T(1.0)) / T(2.0);
-            log_post = log_post + safe_log(x) + safe_log(T(1.0) - x);
+            // Beta(2, 2) on u = (rho + 1) / 2, logit Jacobian folded in
+            T u = (rho_st + T(1.0)) / T(2.0);
+            log_post = log_post + ratiod_ar1::log_prior_logit_rho(
+                u, ratiod_ar1::RHO_PRIOR_A, ratiod_ar1::RHO_PRIOR_B);
         }
 
         // GP range parameters

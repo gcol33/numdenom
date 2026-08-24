@@ -4,6 +4,7 @@
 
 #include "laplace_core.h"
 #include "linalg_fast.h"
+#include "ar1_shared.h"
 #include "omp_thread_scope.h"
 #include <Rcpp.h>
 #include <cmath>
@@ -2126,7 +2127,7 @@ inline void add_ar1_precision_laplace(
 ) {
   if (n_times < 1) return;
 
-  double tau_marginal = tau * (1.0 - rho * rho);
+  double tau_marginal = tau * ratiod_ar1::one_minus_rho2(rho);
   int idx0 = start_idx;
   grad[idx0] -= tau_marginal * x[idx0];
   H(idx0, idx0) += tau_marginal;
