@@ -4,6 +4,7 @@
 
 #include "pg_binomial.h"
 #include "pg_rng.h"
+#include "hmc_cov.h"
 #include "linalg_fast.h"
 #include "omp_thread_scope.h"
 #include <Rcpp.h>
@@ -935,13 +936,27 @@ Rcpp::List cpp_pg_binomial_gibbs_bym2(
 // Uses sequential NNGP updates
 // ---------------------------------------------------------------------
 
+// The integer R sends for spatial_gp(cov = ), in the order backend_pg.R maps
+// the four documented choices. An unrecognised code is refused rather than
+// resolved to whichever kernel a fallthrough happens to reach.
+inline ratiod_cov::CovType pg_cov_type_from_int(int cov_type) {
+  switch (cov_type) {
+    case 0: return ratiod_cov::CovType::EXPONENTIAL;
+    case 1: return ratiod_cov::CovType::MATERN;
+    case 2: return ratiod_cov::CovType::GAUSSIAN;
+    case 3: return ratiod_cov::CovType::SPHERICAL;
+  }
+  Rcpp::stop("Unknown covariance code %d. Expected 0 (exponential), "
+             "1 (matern), 2 (gaussian) or 3 (spherical).", cov_type);
+}
+
 // Helper: compute NNGP conditional mean and variance
 inline void pg_nngp_conditional(
     int i,
     const std::vector<double>& w,
     double sigma2,
     double phi_gp,
-    int cov_type,
+    ratiod_cov::CovType cov_type,
     const Rcpp::NumericMatrix& coords,
     const Rcpp::IntegerMatrix& nn_idx,
     const Rcpp::NumericMatrix& nn_dist,
@@ -961,18 +976,11 @@ inline void pg_nngp_conditional(
     return;
   }
 
-  // Covariance function lambda
+  // The shared covariance family, so this path answers to the same four
+  // spatial_gp(cov = ) choices every other one does. Each kernel returns
+  // sigma2 at d = 0, so the zero-distance case needs no special arm.
   auto compute_cov = [sigma2, phi_gp, cov_type](double d) {
-    if (d < 1e-10) return sigma2;
-    if (cov_type == 0) {  // Exponential
-      return sigma2 * std::exp(-d / phi_gp);
-    } else if (cov_type == 1) {  // Matern 1.5
-      double x = std::sqrt(3.0) * d / phi_gp;
-      return sigma2 * (1.0 + x) * std::exp(-x);
-    } else {  // Matern 2.5
-      double x = std::sqrt(5.0) * d / phi_gp;
-      return sigma2 * (1.0 + x + x * x / 3.0) * std::exp(-x);
-    }
+    return ratiod_cov::compute_cov(d, sigma2, phi_gp, cov_type);
   };
 
   std::vector<double> c_vec(n_neighbors);
@@ -998,41 +1006,16 @@ inline void pg_nngp_conditional(
     }
   }
 
-  // Cholesky of C
-  std::vector<double> L(n_neighbors * n_neighbors, 0.0);
-  for (int j = 0; j < n_neighbors; j++) {
-    for (int k = 0; k <= j; k++) {
-      double sum = C_mat[j * n_neighbors + k];
-      for (int m = 0; m < k; m++) {
-        sum -= L[j * n_neighbors + m] * L[k * n_neighbors + m];
-      }
-      if (j == k) {
-        L[j * n_neighbors + j] = std::sqrt(std::max(1e-10, sum));
-      } else {
-        L[j * n_neighbors + k] = sum / L[k * n_neighbors + k];
-      }
-    }
+  // The shared neighbour-block factorization. A block it cannot factor falls
+  // back to the marginal, which is what the no-neighbour case above returns.
+  std::vector<double> L, y_sol, alpha;
+  if (!ratiod_cov::nngp_chol(C_mat, n_neighbors, L)) {
+    cond_mean = 0.0;
+    cond_var = sigma2;
+    return;
   }
-
-  // Solve L * y_sol = c_vec
-  std::vector<double> y_sol(n_neighbors);
-  for (int j = 0; j < n_neighbors; j++) {
-    double sum = c_vec[j];
-    for (int k = 0; k < j; k++) {
-      sum -= L[j * n_neighbors + k] * y_sol[k];
-    }
-    y_sol[j] = sum / L[j * n_neighbors + j];
-  }
-
-  // Solve L^T * alpha = y_sol
-  std::vector<double> alpha(n_neighbors);
-  for (int j = n_neighbors - 1; j >= 0; j--) {
-    double sum = y_sol[j];
-    for (int k = j + 1; k < n_neighbors; k++) {
-      sum -= L[k * n_neighbors + j] * alpha[k];
-    }
-    alpha[j] = sum / L[j * n_neighbors + j];
-  }
+  ratiod_cov::nngp_forward_solve(L, n_neighbors, c_vec, y_sol);
+  ratiod_cov::nngp_back_solve(L, n_neighbors, y_sol, alpha);
 
   cond_mean = 0.0;
   for (int j = 0; j < n_neighbors; j++) {
@@ -1044,7 +1027,33 @@ inline void pg_nngp_conditional(
   for (int j = 0; j < n_neighbors; j++) {
     c_Cinv_c += c_vec[j] * alpha[j];
   }
-  cond_var = std::max(1e-10, sigma2 - c_Cinv_c);
+  cond_var = ratiod_cov::nngp_floor_cond_var(sigma2 - c_Cinv_c);
+}
+
+// Drive pg_nngp_conditional at one location, deterministically. The PG GP
+// sampler cannot arbitrate which kernel it runs -- its sigma2_gp rails and its
+// draws do not reproduce at a fixed seed -- so the conditional is checked
+// directly instead, against an independent implementation in R.
+// [[Rcpp::export]]
+Rcpp::NumericVector cpp_pg_nngp_conditional_probe(
+    int i,
+    Rcpp::NumericVector w,
+    double sigma2,
+    double phi_gp,
+    int cov_type,
+    Rcpp::NumericMatrix coords,
+    Rcpp::IntegerMatrix nn_idx,
+    Rcpp::NumericMatrix nn_dist,
+    Rcpp::IntegerVector nn_order,
+    int nn
+) {
+  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  std::vector<double> w_vec(w.begin(), w.end());
+  double cond_mean = 0.0, cond_var = 0.0;
+  pg_nngp_conditional(i, w_vec, sigma2, phi_gp, cov, coords, nn_idx, nn_dist,
+                      nn_order, nn, cond_mean, cond_var);
+  return Rcpp::NumericVector::create(Rcpp::Named("cond_mean") = cond_mean,
+                                     Rcpp::Named("cond_var") = cond_var);
 }
 
 // [[Rcpp::export]]
@@ -1091,6 +1100,7 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
   Rcpp::NumericVector sigma_re_draws(n_save);
   Rcpp::NumericMatrix gp_draws(n_save, n_spatial);
   Rcpp::NumericVector sigma2_gp_draws(n_save);
+  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
   Rcpp::NumericVector phi_gp_draws(n_save);
   Rcpp::NumericMatrix eta_draws_gp;
   if (store_eta) eta_draws_gp = Rcpp::NumericMatrix(n_save, N);
@@ -1183,7 +1193,7 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
       int obs_i = nn_order[idx];
 
       double cond_mean, cond_var;
-      pg_nngp_conditional(idx, w, sigma2_gp, phi_gp, cov_type,
+      pg_nngp_conditional(idx, w, sigma2_gp, phi_gp, cov,
                           coords, nn_idx, nn_dist, nn_order, nn,
                           cond_mean, cond_var);
 

@@ -712,7 +712,10 @@ fit_pg_binomial_gp <- function(formula,
       coords = spatial$coords_matrix,
       nn_idx = nn_info$nn_idx,
       nn_dist = nn_info$nn_dist,
-      nn_order = nn_info$nn_order,
+      # 0-based: the C++ uses these values directly as indices into w, coords
+      # and the per-location likelihood accumulators, all sized n_spatial.
+      # backend_hmc.R converts the same vector the same way.
+      nn_order = as.integer(nn_info$nn_order - 1L),
       n_spatial = spatial$n_spatial,
       nn = spatial$nn,
       sigma2_gp_init = sigma2_gp_init,

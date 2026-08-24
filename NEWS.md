@@ -81,6 +81,39 @@
   Both call sites share one function, so a mismatch raises an R-level warning
   from the multi-chain path as well as the single-chain one.
 
+* **The PG binomial GP sampler indexed one past the end of every per-location
+  array, and could take R down with it.** `backend_pg.R` passed `nn_order`
+  1-based while the C++ uses its values directly as indices into `w`, `coords`
+  and the per-location likelihood accumulators, all sized `n_spatial`, so each
+  could reach `n_spatial` itself. `backend_hmc.R` converts the same vector with
+  `- 1L`; the PG path did not. The symptom was `STATUS_HEAP_CORRUPTION`
+  (`0xC0000374`) killing the R process, reached at some parameter states and not
+  others -- 20 locations crashed at `nn = 5` and `nn = 6` while 25 locations
+  survived -- and, where it did not crash, the GP effects were attached to the
+  wrong locations.
+
+* **`spatial_gp(cov = )` runs the kernel you asked for under `mode = "pg"`
+  (#35).** The selector tested `cov_type` 0 and 1 and sent everything else to an
+  unconditional `else` computing Matern 2.5, so `"gaussian"` and `"spherical"`
+  -- both documented and `match.arg`-validated -- ran a kernel the user did not
+  choose. It now routes through the shared `ratiod_cov` family introduced above,
+  and an unrecognised code is an error rather than whichever kernel a
+  fallthrough reaches. The neighbour block goes through the shared
+  factorization at the same time, replacing a seventh distinct regularization
+  (a `1e-10` value substituted into the pivot). Measured on a 12-location
+  fixture, against an NNGP conditional written out independently in R: all four
+  kernels now agree to machine precision, and at the probed location the
+  conditional mean moves by 0.11 for `"gaussian"` and 0.34 for `"spherical"`
+  against the Matern 2.5 both used to return.
+
+* **`tratio(mode = "pg")` honours `control$seed` and `control$chains`.**
+  `fit_pg_binomial()` accepts both and threads `seed` down to a per-chain
+  `set.seed(seed + chain - 1)`, but `tratio()` called it without either, so PG
+  fits ran off whatever RNG state they inherited -- two runs of the same call
+  differed by 1.23 on the intercept and 3.19 on `sigma_re` -- and always used
+  the backend default of 4 chains whatever `chains` said. Runs at a fixed seed
+  are now bit-identical.
+
 * **`spatial_gp(parameterization = "noncentered")` gets its handcoded gradient
   back (#57).** Two defects made it disagree with the density it reports, and
   `resolve_gradient_fn` sends every GP model at the default gradient mode to

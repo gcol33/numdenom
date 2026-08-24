@@ -105,6 +105,10 @@ cpp_pg_binomial_gibbs_bym2 <- function(y, n, X, re_group, n_re_groups, spatial_g
     .Call(`_tulpaRatio_cpp_pg_binomial_gibbs_bym2`, y, n, X, re_group, n_re_groups, spatial_group, n_spatial_units, adj_list, n_neighbors, scale_factor, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_spatial_scale, prior_rho_alpha, prior_rho_beta, store_eta, verbose, n_threads)
 }
 
+cpp_pg_nngp_conditional_probe <- function(i, w, sigma2, phi_gp, cov_type, coords, nn_idx, nn_dist, nn_order, nn) {
+    .Call(`_tulpaRatio_cpp_pg_nngp_conditional_probe`, i, w, sigma2, phi_gp, cov_type, coords, nn_idx, nn_dist, nn_order, nn)
+}
+
 cpp_pg_binomial_gibbs_gp <- function(y, n, X, re_group, n_re_groups, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp_init, phi_gp_init, cov_type, n_iter = 2000L, n_warmup = 1000L, thin = 1L, prior_beta_sd = 10.0, prior_sigma_re_scale = 2.5, prior_sigma_gp_U = 1.0, prior_sigma_gp_alpha = 0.01, prior_phi_lower = 0.01, prior_phi_upper = 10.0, store_eta = FALSE, verbose = TRUE, n_threads = 1L) {
     .Call(`_tulpaRatio_cpp_pg_binomial_gibbs_gp`, y, n, X, re_group, n_re_groups, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp_init, phi_gp_init, cov_type, n_iter, n_warmup, thin, prior_beta_sd, prior_sigma_re_scale, prior_sigma_gp_U, prior_sigma_gp_alpha, prior_phi_lower, prior_phi_upper, store_eta, verbose, n_threads)
 }
