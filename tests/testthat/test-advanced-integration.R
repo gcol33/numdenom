@@ -476,14 +476,6 @@ test_that("PG backend fits binomial model with spatial CAR", {
 # Validation Functions (validate.R coverage)
 # ============================================================================
 
-test_that("prior_predict names the argument a single-response formula needs", {
-  expect_error(
-    prior_predict(y ~ x, ratiod_poisson_gamma(), data.frame(x = 1:5)),
-    "formula_denom"
-  )
-})
-
-
 test_that("ratiod_compare handles model comparison setup", {
   skip_on_cran()
 

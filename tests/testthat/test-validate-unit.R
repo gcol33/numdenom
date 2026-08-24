@@ -6,11 +6,6 @@ test_that("pp_check generic exists", {
   expect_true(is.function(pp_check))
 })
 
-# Test prior_predict
-test_that("prior_predict throws not implemented error", {
-  expect_error(prior_predict(y ~ x, ratiod_poisson_gamma(), data.frame(x = 1)), "not yet implemented")
-})
-
 # Test loo.ratiod_fit (mocked - needs stanfit)
 test_that("loo.ratiod_fit requires loo package", {
   # Test that function exists

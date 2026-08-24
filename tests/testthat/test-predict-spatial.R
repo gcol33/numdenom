@@ -117,26 +117,20 @@ test_that("predict errors when coords.0 missing for GP", {
   set.seed(111)
   n <- 20
   df <- data.frame(
-    y = rpois(n, 10),
+    y = rbinom(n, 20L, 0.4),
     n_trials = rep(20L, n),
     x = rnorm(n),
     lon = runif(n),
     lat = runif(n)
   )
 
-  # Skip if GP fitting fails
-  fit <- tryCatch(
-    tratio(
-      y | n_trials ~ x,
-      data = df,
-      family = ratiod_binomial(),
-      spatial = spatial_gp(coords = c("lon", "lat"), nn = 5),
-      control = list(iter = 50, warmup = 25, chains = 1)
-    ),
-    error = function(e) NULL
+  fit <- tratio(
+    y | n_trials ~ x,
+    data = df,
+    family = ratiod_binomial(),
+    spatial = spatial_gp(coords = c("lon", "lat"), nn = 5),
+    control = list(iter = 50, warmup = 25, chains = 1)
   )
-
-  skip_if(is.null(fit), "GP model fitting failed")
 
   new_df <- data.frame(x = c(0, 1))
 
@@ -331,19 +325,14 @@ test_that("predict works for PG backend with spatial", {
     region = factor(rep(LETTERS[1:n_sites], length.out = n))
   )
 
-  fit <- tryCatch(
-    tratio(
-      y | n_trials ~ x,
-      data = df,
-      family = ratiod_binomial(),
-      spatial = spatial_car(adjacency = adj, group_var = "region"),
-      mode = "pg",
-      control = list(iter = 100, warmup = 50, chains = 1)
-    ),
-    error = function(e) NULL
+  fit <- tratio(
+    y | n_trials ~ x,
+    data = df,
+    family = ratiod_binomial(),
+    spatial = spatial_car(adjacency = adj, group_var = "region"),
+    mode = "pg",
+    control = list(iter = 100, warmup = 50, chains = 1)
   )
-
-  skip_if(is.null(fit), "PG backend not available")
 
   new_df <- data.frame(x = c(0, 0.5), region = factor(c("A", "C")))
   pred <- predict(fit, newdata = new_df)

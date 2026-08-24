@@ -143,6 +143,20 @@ test_that("prior_predict validates its arguments", {
                "ratiod_priors")
 })
 
+test_that("prior_predict names the arm a formula leaves unread", {
+  df <- pp_data()
+  # A single-response formula names the numerator and leaves the denominator
+  # to `formula_denom`; a one-sided formula names neither.
+  expect_error(
+    prior_predict(count ~ x, family = ratiod_negbin_negbin(), data = df, n = 5),
+    "formula_denom"
+  )
+  expect_error(
+    prior_predict(~ x, family = ratiod_negbin_negbin(), data = df, n = 5),
+    "response and predictors"
+  )
+})
+
 test_that("every prior_*() constructor can be drawn from", {
   priors <- list(
     prior_normal(1, 2), prior_half_normal(1), prior_half_cauchy(2),

@@ -6,17 +6,6 @@ test_that("pp_check generic dispatches correctly", {
   expect_true("pp_check.ratiod_fit" %in% methods("pp_check"))
 })
 
-test_that("prior_predict is not yet implemented", {
-  expect_error(
-    prior_predict(
-      formula = y ~ x,
-      family = ratiod_negbin_negbin(),
-      data = data.frame(y = 1:10, x = rnorm(10))
-    ),
-    "not yet implemented"
-  )
-})
-
 test_that("ratiod_compare requires at least two models", {
   skip_on_cran()
   skip_if_not_installed("loo")

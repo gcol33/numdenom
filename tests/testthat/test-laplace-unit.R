@@ -484,21 +484,6 @@ test_that("convert_laplace_spatial_to_ratiod_fit creates valid fit", {
 })
 
 # ---------------------------------------------------------------------------
-# prior_predict tests
-# ---------------------------------------------------------------------------
-
-test_that("prior_predict raises not implemented error", {
-  expect_error(
-    prior_predict(
-      formula = ~ 1,
-      family = ratiod_binomial(),
-      data = data.frame(x = 1:10)
-    ),
-    "not yet implemented"
-  )
-})
-
-# ---------------------------------------------------------------------------
 # ratiod_compare error handling tests
 # ---------------------------------------------------------------------------
 
