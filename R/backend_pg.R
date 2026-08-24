@@ -709,13 +709,19 @@ fit_pg_binomial_gp <- function(formula,
       X = X,
       re_group = re_info$group_idx,
       n_re_groups = re_info$n_groups,
-      coords = spatial$coords_matrix,
+      # The unique locations, which is what the neighbour structure was built
+      # on and what nn_order indexes. coords_matrix is the observation-order
+      # matrix, one row per row of data.
+      coords = spatial$unique_coords,
       nn_idx = nn_info$nn_idx,
       nn_dist = nn_info$nn_dist,
       # 0-based: the C++ uses these values directly as indices into w, coords
       # and the per-location likelihood accumulators, all sized n_spatial.
       # backend_hmc.R converts the same vector the same way.
       nn_order = as.integer(nn_info$nn_order - 1L),
+      # 0-based, one entry per observation: which location it was measured at.
+      # Without it the sampler can only pair the two by row position.
+      obs_to_loc = as.integer(spatial$obs_to_loc - 1L),
       n_spatial = spatial$n_spatial,
       nn = spatial$nn,
       sigma2_gp_init = sigma2_gp_init,

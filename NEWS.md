@@ -1,3 +1,57 @@
+# tulpaRatio 1.5.1
+
+* **The PG binomial GP sampler now pairs observations with locations by
+  coordinate rather than by row position (#60).** `spatial_gp()` reduces the
+  data to unique locations and builds the NNGP on those, but
+  `cpp_pg_binomial_gibbs_gp()` was never given the map back: it aggregated the
+  per-location Polya-Gamma likelihood over row position and discarded every row
+  past `n_spatial`, and it wrote the field into only the first `n_spatial`
+  linear predictors. On the four-observations-per-location design used to
+  measure it, 75 of 100 observations reached no location at all, the 25 that did
+  were credited to locations by row order, and the field never entered three
+  quarters of eta. `obs_to_loc` is now passed and read on both sides. The
+  coordinates handed to the sampler were also the observation-order matrix
+  rather than the unique locations the neighbour structure indexes, so the
+  neighbour blocks were assembled from the wrong points; `unique_coords` is what
+  goes in now. Recovery of the true field over three seeds: correlation 0.95,
+  0.98, 0.98.
+
+* **`sigma2_gp` and `phi_gp` are drawn from the NNGP density the field was
+  sampled under (#62).** The `sigma2` acceptance ratio was built from an
+  independent `N(0, sigma2)` quadratic form carrying no log-determinant, so
+  raising `sigma2` only ever reduced the penalty and the ratio pointed one way
+  at every value; `phi`'s ratio was the log-scale Jacobian alone, so `phi` was
+  drawn from its prior rather than its posterior. Both now difference
+  `sum_k log N(w_k; mu_k, d_k)` over the sampler's own conditioning order,
+  evaluated by the same conditional the field sweep draws from. The `sigma2`
+  prior's change of variables was also carrying a full `log(sigma2)` where the
+  PC prior on `sigma = sqrt(sigma2)` gives `+0.5 log(sigma2)` once the walk's
+  Jacobian is included. Against a true `sigma2` of 0.7, posterior medians over
+  three seeds are 0.36, 0.60 and 0.65, where the issue measured `[94, 1746]` and
+  `[24.9, 11568]`.
+
+* **`spatial_multiscale(cov = )` is read by the multiscale PG sampler (#61).**
+  `cov_type` was accepted by `cpp_pg_binomial_gibbs_multiscale_gp()` and never
+  mentioned again; an exponential kernel was written out inline at six sites, so
+  three of the four documented choices silently ran the fourth. Both scales now
+  go through the same `pg_nngp_conditional()` the single-scale entry uses. That
+  also replaces what stood beside the kernel: the conditional mean was a raw
+  covariance-weighted sum of the neighbours in place of the NNGP weights
+  `C^-1 c`, the conditional precision was `1 / sigma2` in place of the
+  conditional variance, `nn_idx` was indexed by location and its values read as
+  locations where both are positions in the conditioning order, and each
+  scale's `sigma2` was a conjugate draw under an independent `N(0, sigma2)`
+  form that read the PC prior's upper bound as an inverse-gamma rate and its
+  tail probability not at all.
+
+* **One convention, checked at the entry.** `PgNngpGraph` carries the neighbour
+  structure the two entries share, `pg_check_nngp_graph()` refuses a `nn_order`
+  that is not a 0-based permutation of the locations, a `nn_idx` entry that is
+  not an earlier position in the order, and a coordinate matrix that is not one
+  row per location, and `pg_check_obs_to_loc()` does the same for the
+  observation map. The 1-based `nn_order` fixed in 267f2cb was a silent
+  out-of-bounds read; it is now an error naming the argument.
+
 # tulpaRatio 1.5.0
 
 * **One walk of the sampler's parameter vector now feeds `fitted()`,

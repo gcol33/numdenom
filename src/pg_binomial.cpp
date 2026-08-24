@@ -950,6 +950,104 @@ inline ratiod_cov::CovType pg_cov_type_from_int(int cov_type) {
              "1 (matern), 2 (gaussian) or 3 (spherical).", cov_type);
 }
 
+// The neighbour structure of one NNGP field, in the convention
+// compute_nngp_neighbors() writes and backend_pg.R passes:
+//
+//   nn_order[k]   the 0-based LOCATION index sitting at position k of the
+//                 conditioning order, so w and the per-location likelihood
+//                 accumulators are indexed by nn_order[k] and never by k;
+//   nn_idx(k, j)  the 1-based POSITION in that order of neighbour j of the
+//                 location at position k, 0 where it has fewer than nn
+//                 predecessors. That neighbour's location is nn_order[nn_idx-1];
+//   nn_dist(k, j) the distance to that neighbour;
+//   coords        one row per LOCATION, so the unique coordinates rather than
+//                 the observation-order matrix.
+//
+// Every consumer reads the same struct. A second entry re-deriving the
+// convention is how the multiscale sweep came to index nn_idx by location and
+// read its values as locations, two mismatches in one expression.
+struct PgNngpGraph {
+  const Rcpp::NumericMatrix& coords;
+  const Rcpp::IntegerMatrix& nn_idx;
+  const Rcpp::NumericMatrix& nn_dist;
+  const Rcpp::IntegerVector& nn_order;
+  int nn;
+  int n_spatial;
+};
+
+// Refuse a graph whose shapes or index ranges do not match that convention, at
+// the entry point, rather than reading past an array inside a sweep. This path
+// once took nn_order 1-based and used it directly to index w, coords and the
+// accumulators, all sized n_spatial.
+inline void pg_check_nngp_graph(const PgNngpGraph& g, const char* what) {
+  if (g.n_spatial <= 0) {
+    Rcpp::stop("%s: n_spatial is %d; the NNGP needs at least one location.",
+               what, g.n_spatial);
+  }
+  if (g.coords.nrow() != g.n_spatial) {
+    Rcpp::stop("%s: coords has %d rows against n_spatial = %d. The neighbour "
+               "structure is built on the unique locations, so coords carries "
+               "one row per location.",
+               what, static_cast<int>(g.coords.nrow()), g.n_spatial);
+  }
+  if (g.coords.ncol() < 2) {
+    Rcpp::stop("%s: coords has %d columns; two are required.",
+               what, static_cast<int>(g.coords.ncol()));
+  }
+  if (g.nn_order.size() != g.n_spatial) {
+    Rcpp::stop("%s: nn_order has length %d against n_spatial = %d.",
+               what, static_cast<int>(g.nn_order.size()), g.n_spatial);
+  }
+  if (g.nn < 0 || g.nn_idx.nrow() != g.n_spatial || g.nn_idx.ncol() < g.nn ||
+      g.nn_dist.nrow() != g.n_spatial || g.nn_dist.ncol() < g.nn) {
+    Rcpp::stop("%s: nn_idx and nn_dist must each be %d x %d.",
+               what, g.n_spatial, g.nn);
+  }
+
+  std::vector<bool> seen(static_cast<size_t>(g.n_spatial), false);
+  for (int k = 0; k < g.n_spatial; k++) {
+    const int loc = g.nn_order[k];
+    if (loc < 0 || loc >= g.n_spatial) {
+      Rcpp::stop("%s: nn_order[%d] is %d, outside [0, %d). It is a 0-based "
+                 "location index.", what, k, loc, g.n_spatial);
+    }
+    if (seen[static_cast<size_t>(loc)]) {
+      Rcpp::stop("%s: nn_order visits location %d twice; it is a permutation "
+                 "of the locations.", what, loc);
+    }
+    seen[static_cast<size_t>(loc)] = true;
+
+    for (int j = 0; j < g.nn; j++) {
+      const int pos = g.nn_idx(k, j);
+      // 0 means "no neighbour here"; anything else is a position strictly
+      // earlier in the order, which is what makes the factorization sequential.
+      if (pos < 0 || pos > k) {
+        Rcpp::stop("%s: nn_idx(%d, %d) is %d; a neighbour is a 1-based "
+                   "position in [1, %d], or 0 for absent.", what, k, j, pos, k);
+      }
+    }
+  }
+}
+
+// obs_to_loc[i] is the location observation i was measured at. It is what maps
+// the two sides of the model to each other, and the only thing that can: a
+// location carries as many observations as the design gave it, in no particular
+// row order.
+inline void pg_check_obs_to_loc(const Rcpp::IntegerVector& obs_to_loc, int N,
+                                int n_spatial, const char* what) {
+  if (obs_to_loc.size() != N) {
+    Rcpp::stop("%s: obs_to_loc has length %d against N = %d.",
+               what, static_cast<int>(obs_to_loc.size()), N);
+  }
+  for (int i = 0; i < N; i++) {
+    const int loc = obs_to_loc[i];
+    if (loc < 0 || loc >= n_spatial) {
+      Rcpp::stop("%s: obs_to_loc[%d] is %d, outside [0, %d). It is a 0-based "
+                 "location index.", what, i, loc, n_spatial);
+    }
+  }
+}
+
 // Helper: compute NNGP conditional mean and variance
 inline void pg_nngp_conditional(
     int i,
@@ -957,14 +1055,16 @@ inline void pg_nngp_conditional(
     double sigma2,
     double phi_gp,
     ratiod_cov::CovType cov_type,
-    const Rcpp::NumericMatrix& coords,
-    const Rcpp::IntegerMatrix& nn_idx,
-    const Rcpp::NumericMatrix& nn_dist,
-    const Rcpp::IntegerVector& nn_order,
-    int nn,
+    const PgNngpGraph& g,
     double& cond_mean,
     double& cond_var
 ) {
+  const Rcpp::NumericMatrix& coords = g.coords;
+  const Rcpp::IntegerMatrix& nn_idx = g.nn_idx;
+  const Rcpp::NumericMatrix& nn_dist = g.nn_dist;
+  const Rcpp::IntegerVector& nn_order = g.nn_order;
+  const int nn = g.nn;
+
   int n_neighbors = 0;
   for (int j = 0; j < nn; j++) {
     if (nn_idx(i, j) > 0) n_neighbors++;
@@ -1030,6 +1130,157 @@ inline void pg_nngp_conditional(
   cond_var = ratiod_cov::nngp_floor_cond_var(sigma2 - c_Cinv_c);
 }
 
+// log p(w | sigma2, phi) under the NNGP, taken in the sampler's own
+// conditioning order and from the same conditionals its field sweep draws
+// from, so the hyperparameters are conditioned on the prior the field was
+// actually drawn under.
+//
+//   log p(w) = sum_k log N(w_{o(k)} ; mu_k, d_k)
+//
+// The log-determinant half of that, sum_k -0.5 log d_k, is what an independent
+// N(0, sigma2) form leaves out: without it raising sigma2 only ever shrinks the
+// quadratic penalty, so the acceptance ratio ratchets one way and sigma2 runs
+// away (gcol33/tulpaRatio#62).
+inline double pg_nngp_log_density(
+    const std::vector<double>& w,
+    double sigma2,
+    double phi_gp,
+    ratiod_cov::CovType cov_type,
+    const PgNngpGraph& g
+) {
+  const double log_2pi = std::log(2.0 * M_PI);
+  double ll = 0.0;
+  for (int k = 0; k < g.n_spatial; k++) {
+    double cond_mean = 0.0, cond_var = 0.0;
+    pg_nngp_conditional(k, w, sigma2, phi_gp, cov_type, g, cond_mean, cond_var);
+    const double resid = w[g.nn_order[k]] - cond_mean;
+    ll += -0.5 * (log_2pi + std::log(cond_var)) - 0.5 * resid * resid / cond_var;
+  }
+  return ll;
+}
+
+// The Polya-Gamma likelihood at one location is the sum over every observation
+// measured THERE, which obs_to_loc is what names. Before #60 both this and the
+// scatter below ran over observation ROW POSITION and dropped every row past
+// n_spatial, so on a design with several observations per location most of the
+// data reached no location and the rest reached the wrong one.
+inline void pg_accumulate_by_location(
+    int N,
+    const Rcpp::IntegerVector& obs_to_loc,
+    const Rcpp::NumericVector& omega,
+    const Rcpp::NumericVector& kappa,
+    const Rcpp::NumericVector& offset,
+    std::vector<double>& sum_omega,
+    std::vector<double>& sum_resid
+) {
+  std::fill(sum_omega.begin(), sum_omega.end(), 0.0);
+  std::fill(sum_resid.begin(), sum_resid.end(), 0.0);
+  for (int i = 0; i < N; i++) {
+    const int loc = obs_to_loc[i];
+    sum_omega[loc] += omega[i];
+    sum_resid[loc] += kappa[i] - omega[i] * offset[i];
+  }
+}
+
+// The field's contribution to every observation's linear predictor.
+inline void pg_scatter_by_location(
+    int N,
+    const Rcpp::IntegerVector& obs_to_loc,
+    const std::vector<double>& w,
+    Rcpp::NumericVector& contrib
+) {
+  for (int i = 0; i < N; i++) contrib[i] = w[obs_to_loc[i]];
+}
+
+// One sequential NNGP Gibbs sweep over a field, conjugate given the
+// Polya-Gamma weights: the conditional prior N(mu_k, d_k) meets the per-location
+// Gaussian likelihood the accumulators carry.
+inline void pg_nngp_field_sweep(
+    std::vector<double>& w,
+    double sigma2,
+    double phi_gp,
+    ratiod_cov::CovType cov_type,
+    const PgNngpGraph& g,
+    const std::vector<double>& sum_omega,
+    const std::vector<double>& sum_resid
+) {
+  for (int k = 0; k < g.n_spatial; k++) {
+    const int loc = g.nn_order[k];
+    double cond_mean = 0.0, cond_var = 0.0;
+    pg_nngp_conditional(k, w, sigma2, phi_gp, cov_type, g, cond_mean, cond_var);
+
+    const double tau_prior = 1.0 / cond_var;
+    const double tau_post = tau_prior + sum_omega[loc];
+    const double mean_post = (tau_prior * cond_mean + sum_resid[loc]) / tau_post;
+    w[loc] = R::rnorm(mean_post, 1.0 / std::sqrt(tau_post));
+  }
+}
+
+// One Metropolis-Hastings sweep over an NNGP field's (sigma2, phi). Both are
+// random walks on the log scale, so each acceptance ratio carries the
+// log-Jacobian of its own transform alongside the density difference.
+//
+// sigma2's prior is the PC prior on the standard deviation sigma = sqrt(sigma2),
+// P(sigma > U) = alpha, i.e. Exponential(lambda) with lambda = -log(alpha) / U.
+// In log(sigma2) its density is
+//
+//   -lambda sqrt(s2) - 0.5 log(s2)   (change of variable to s2)
+//   + log(s2)                        (the walk's own Jacobian)
+//
+// which is the +0.5 log(s2) below. The earlier form carried a full log(s2) --
+// the walk's Jacobian on a prior read as if it were already on sigma2 -- and so
+// pushed sigma2 up by half a log-density on top of the missing determinant.
+//
+// phi's prior is uniform on [lower, upper]; a proposal outside is rejected.
+// Until #62 phi's ratio was its Jacobian ALONE, which draws phi from its prior
+// rather than from its posterior.
+inline void pg_update_gp_hyper(
+    double& sigma2,
+    double& phi_gp,
+    const std::vector<double>& w,
+    ratiod_cov::CovType cov_type,
+    const PgNngpGraph& g,
+    double prior_sigma_U,
+    double prior_sigma_alpha,
+    double prior_phi_lower,
+    double prior_phi_upper,
+    double rw_sd
+) {
+  const double lambda = -std::log(prior_sigma_alpha) / prior_sigma_U;
+  auto log_prior_sigma2 = [lambda](double s2) {
+    return -lambda * std::sqrt(s2) + 0.5 * std::log(s2);
+  };
+
+  double ll_curr = pg_nngp_log_density(w, sigma2, phi_gp, cov_type, g);
+
+  const double sigma2_prop =
+    ratiod_linalg::safe_exp(std::log(sigma2) + R::rnorm(0, rw_sd));
+  if (std::isfinite(sigma2_prop) && sigma2_prop > 0) {
+    const double ll_prop =
+      pg_nngp_log_density(w, sigma2_prop, phi_gp, cov_type, g);
+    const double log_alpha = (ll_prop + log_prior_sigma2(sigma2_prop)) -
+                             (ll_curr + log_prior_sigma2(sigma2));
+    if (std::isfinite(log_alpha) && std::log(R::runif(0, 1)) < log_alpha) {
+      sigma2 = sigma2_prop;
+      // The phi step below conditions on whichever sigma2 survived.
+      ll_curr = ll_prop;
+    }
+  }
+
+  const double phi_prop =
+    ratiod_linalg::safe_exp(std::log(phi_gp) + R::rnorm(0, rw_sd));
+  if (std::isfinite(phi_prop) && phi_prop >= prior_phi_lower &&
+      phi_prop <= prior_phi_upper) {
+    const double ll_prop =
+      pg_nngp_log_density(w, sigma2, phi_prop, cov_type, g);
+    const double log_alpha = ll_prop - ll_curr +
+                             std::log(phi_prop) - std::log(phi_gp);
+    if (std::isfinite(log_alpha) && std::log(R::runif(0, 1)) < log_alpha) {
+      phi_gp = phi_prop;
+    }
+  }
+}
+
 // Drive pg_nngp_conditional at one location, deterministically. The PG GP
 // sampler cannot arbitrate which kernel it runs -- its sigma2_gp rails and its
 // draws do not reproduce at a fixed seed -- so the conditional is checked
@@ -1048,12 +1299,37 @@ Rcpp::NumericVector cpp_pg_nngp_conditional_probe(
     int nn
 ) {
   const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  const PgNngpGraph g{coords, nn_idx, nn_dist, nn_order, nn,
+                      static_cast<int>(nn_order.size())};
   std::vector<double> w_vec(w.begin(), w.end());
   double cond_mean = 0.0, cond_var = 0.0;
-  pg_nngp_conditional(i, w_vec, sigma2, phi_gp, cov, coords, nn_idx, nn_dist,
-                      nn_order, nn, cond_mean, cond_var);
+  pg_nngp_conditional(i, w_vec, sigma2, phi_gp, cov, g, cond_mean, cond_var);
   return Rcpp::NumericVector::create(Rcpp::Named("cond_mean") = cond_mean,
                                      Rcpp::Named("cond_var") = cond_var);
+}
+
+// Drive pg_nngp_log_density, the quantity the (sigma2, phi) acceptance ratios
+// are differences of. Same reason as the conditional probe: the sampler cannot
+// arbitrate its own hyperparameter step, so the density is scored directly
+// against an R reference.
+// [[Rcpp::export]]
+double cpp_pg_nngp_log_density_probe(
+    Rcpp::NumericVector w,
+    double sigma2,
+    double phi_gp,
+    int cov_type,
+    Rcpp::NumericMatrix coords,
+    Rcpp::IntegerMatrix nn_idx,
+    Rcpp::NumericMatrix nn_dist,
+    Rcpp::IntegerVector nn_order,
+    int nn
+) {
+  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  const PgNngpGraph g{coords, nn_idx, nn_dist, nn_order, nn,
+                      static_cast<int>(nn_order.size())};
+  pg_check_nngp_graph(g, "cpp_pg_nngp_log_density_probe");
+  std::vector<double> w_vec(w.begin(), w.end());
+  return pg_nngp_log_density(w_vec, sigma2, phi_gp, cov, g);
 }
 
 // [[Rcpp::export]]
@@ -1067,6 +1343,7 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
     Rcpp::IntegerMatrix nn_idx,
     Rcpp::NumericMatrix nn_dist,
     Rcpp::IntegerVector nn_order,
+    Rcpp::IntegerVector obs_to_loc,
     int n_spatial,
     int nn,
     double sigma2_gp_init,
@@ -1091,6 +1368,10 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
   int N = y.size();
   int p = X.ncol();
   int n_save = (n_iter - n_warmup) / thin;
+
+  const PgNngpGraph graph{coords, nn_idx, nn_dist, nn_order, nn, n_spatial};
+  pg_check_nngp_graph(graph, "cpp_pg_binomial_gibbs_gp");
+  pg_check_obs_to_loc(obs_to_loc, N, n_spatial, "cpp_pg_binomial_gibbs_gp");
 
   ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
@@ -1121,6 +1402,8 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
   Rcpp::NumericVector re_contrib(N);
   Rcpp::NumericVector gp_contrib(N);
   Rcpp::NumericVector offset(N);
+  std::vector<double> sum_omega_gp(n_spatial, 0.0);
+  std::vector<double> sum_resid_gp(n_spatial, 0.0);
 
   for (int i = 0; i < N; i++) {
     omega[i] = 0.5;
@@ -1179,64 +1462,20 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
     }
 
     // Aggregate likelihood info per spatial location
-    std::vector<double> sum_omega_gp(n_spatial, 0.0);
-    std::vector<double> sum_resid_gp(n_spatial, 0.0);
-    for (int i = 0; i < N; i++) {
-      if (i < n_spatial) {
-        sum_omega_gp[i] += omega[i];
-        sum_resid_gp[i] += kappa[i] - omega[i] * offset[i];
-      }
-    }
+    pg_accumulate_by_location(N, obs_to_loc, omega, kappa, offset,
+                              sum_omega_gp, sum_resid_gp);
 
     // Update each GP effect in NNGP order
-    for (int idx = 0; idx < n_spatial; idx++) {
-      int obs_i = nn_order[idx];
-
-      double cond_mean, cond_var;
-      pg_nngp_conditional(idx, w, sigma2_gp, phi_gp, cov,
-                          coords, nn_idx, nn_dist, nn_order, nn,
-                          cond_mean, cond_var);
-
-      double tau_prior = 1.0 / cond_var;
-      double tau_lik = sum_omega_gp[obs_i];
-      double tau_post = tau_prior + tau_lik;
-      double mean_post = (tau_prior * cond_mean + sum_resid_gp[obs_i]) / tau_post;
-
-      w[obs_i] = R::rnorm(mean_post, 1.0 / std::sqrt(tau_post));
-    }
+    pg_nngp_field_sweep(w, sigma2_gp, phi_gp, cov, graph,
+                        sum_omega_gp, sum_resid_gp);
 
     // Update GP contributions
-    for (int i = 0; i < N; i++) {
-      if (i < n_spatial) {
-        gp_contrib[i] = w[i];
-      }
-    }
+    pg_scatter_by_location(N, obs_to_loc, w, gp_contrib);
 
     // 6. Update GP hyperparameters via MH
-    double sigma2_prop = ratiod_linalg::safe_exp(std::log(sigma2_gp) + R::rnorm(0, 0.1));
-    if (!std::isfinite(sigma2_prop) || sigma2_prop <= 0) sigma2_prop = sigma2_gp;
-    double log_prior_curr = -(-std::log(prior_sigma_gp_alpha) / prior_sigma_gp_U) * std::sqrt(sigma2_gp);
-    double log_prior_prop = -(-std::log(prior_sigma_gp_alpha) / prior_sigma_gp_U) * std::sqrt(sigma2_prop);
-
-    double log_lik_diff = 0.0;
-    for (int i = 0; i < n_spatial; i++) {
-      log_lik_diff += -0.5 * w[nn_order[i]] * w[nn_order[i]] / sigma2_prop;
-      log_lik_diff -= -0.5 * w[nn_order[i]] * w[nn_order[i]] / sigma2_gp;
-    }
-
-    double log_alpha = log_lik_diff + log_prior_prop - log_prior_curr +
-                       std::log(sigma2_prop) - std::log(sigma2_gp);
-    if (std::log(R::runif(0, 1)) < log_alpha) {
-      sigma2_gp = sigma2_prop;
-    }
-
-    double phi_prop = ratiod_linalg::safe_exp(std::log(phi_gp) + R::rnorm(0, 0.1));
-    if (std::isfinite(phi_prop) && phi_prop >= prior_phi_lower && phi_prop <= prior_phi_upper) {
-      double log_alpha_phi = std::log(phi_prop) - std::log(phi_gp);
-      if (std::log(R::runif(0, 1)) < log_alpha_phi) {
-        phi_gp = phi_prop;
-      }
-    }
+    pg_update_gp_hyper(sigma2_gp, phi_gp, w, cov, graph,
+                       prior_sigma_gp_U, prior_sigma_gp_alpha,
+                       prior_phi_lower, prior_phi_upper, 0.1);
 
     // Save draws
     if (iter >= n_warmup && (iter - n_warmup) % thin == 0) {
@@ -1646,6 +1885,7 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
     Rcpp::NumericMatrix nn_dist_regional,
     Rcpp::IntegerVector nn_order_regional,
     int nn_regional,
+    Rcpp::IntegerVector obs_to_loc,
     int n_spatial,
     double sigma2_local_init,
     double phi_local_init,
@@ -1674,6 +1914,23 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
 
   int N = y.size();
   int p = X.ncol();
+
+  // Both scales are NNGP fields over the same locations, read through the same
+  // struct and the same conditional as the single-scale entry. They used to
+  // carry their own inline exponential kernel -- ignoring cov_type outright
+  // (gcol33/tulpaRatio#61) -- with the raw covariance in place of the
+  // conditional mean's C^-1 c weights and sigma2 in place of the conditional
+  // variance, which is not the density either scale's prior claims.
+  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  const PgNngpGraph graph_local{coords, nn_idx_local, nn_dist_local,
+                                nn_order_local, nn_local, n_spatial};
+  const PgNngpGraph graph_regional{coords, nn_idx_regional, nn_dist_regional,
+                                   nn_order_regional, nn_regional, n_spatial};
+  pg_check_nngp_graph(graph_local, "cpp_pg_binomial_gibbs_multiscale_gp (local)");
+  pg_check_nngp_graph(graph_regional,
+                      "cpp_pg_binomial_gibbs_multiscale_gp (regional)");
+  pg_check_obs_to_loc(obs_to_loc, N, n_spatial,
+                      "cpp_pg_binomial_gibbs_multiscale_gp");
 
   if (verbose) {
     Rcpp::Rcout << "PG Binomial Gibbs sampler with multiscale GP spatial\n";
@@ -1706,6 +1963,10 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
   Rcpp::NumericVector local_contrib(N, 0.0);
   Rcpp::NumericVector regional_contrib(N, 0.0);
   Rcpp::NumericVector offset(N, 0.0);
+  std::vector<double> sum_omega_local(n_spatial, 0.0);
+  std::vector<double> sum_resid_local(n_spatial, 0.0);
+  std::vector<double> sum_omega_regional(n_spatial, 0.0);
+  std::vector<double> sum_resid_regional(n_spatial, 0.0);
 
   // Compute kappa
   for (int i = 0; i < N; i++) {
@@ -1777,151 +2038,43 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
     }
 
     // Aggregate likelihood info per spatial location
-    std::vector<double> sum_omega_local(n_spatial, 0.0);
-    std::vector<double> sum_resid_local(n_spatial, 0.0);
-    for (int i = 0; i < N; i++) {
-      if (i < n_spatial) {
-        sum_omega_local[i] += omega[i];
-        sum_resid_local[i] += kappa[i] - omega[i] * offset[i];
-      }
-    }
+    pg_accumulate_by_location(N, obs_to_loc, omega, kappa, offset,
+                              sum_omega_local, sum_resid_local);
 
     // Sequential NNGP Gibbs update for local effects
-    double tau_local = 1.0 / sigma2_local;
-    for (int ii = 0; ii < n_spatial; ii++) {
-      int i = nn_order_local[ii];
-
-      double cond_mean = 0.0;
-      double cond_prec = tau_local;
-
-      for (int k = 0; k < nn_local; k++) {
-        int neighbor = nn_idx_local(i, k) - 1;
-        if (neighbor >= 0 && neighbor < n_spatial) {
-          double dist = nn_dist_local(i, k);
-          double cov_val = std::exp(-dist / phi_local);
-          cond_mean += cov_val * w_local[neighbor];
-        }
-      }
-      cond_mean *= tau_local;
-
-      double post_prec = cond_prec + sum_omega_local[i];
-      double post_mean = (cond_mean + sum_resid_local[i]) / post_prec;
-      w_local[i] = R::rnorm(post_mean, 1.0 / std::sqrt(post_prec));
-    }
+    pg_nngp_field_sweep(w_local, sigma2_local, phi_local, cov, graph_local,
+                        sum_omega_local, sum_resid_local);
 
     // Update local contributions
-    for (int i = 0; i < N; i++) {
-      if (i < n_spatial) {
-        local_contrib[i] = w_local[i];
-      }
-    }
+    pg_scatter_by_location(N, obs_to_loc, w_local, local_contrib);
 
     // 6. Update regional GP effects
     for (int i = 0; i < N; i++) {
       offset[i] = X_beta[i] + re_contrib[i] + local_contrib[i];
     }
 
-    std::vector<double> sum_omega_regional(n_spatial, 0.0);
-    std::vector<double> sum_resid_regional(n_spatial, 0.0);
-    for (int i = 0; i < N; i++) {
-      if (i < n_spatial) {
-        sum_omega_regional[i] += omega[i];
-        sum_resid_regional[i] += kappa[i] - omega[i] * offset[i];
-      }
-    }
+    pg_accumulate_by_location(N, obs_to_loc, omega, kappa, offset,
+                              sum_omega_regional, sum_resid_regional);
 
-    double tau_regional = 1.0 / sigma2_regional;
-    for (int ii = 0; ii < n_spatial; ii++) {
-      int i = nn_order_regional[ii];
+    pg_nngp_field_sweep(w_regional, sigma2_regional, phi_regional, cov,
+                        graph_regional, sum_omega_regional, sum_resid_regional);
 
-      double cond_mean = 0.0;
-      double cond_prec = tau_regional;
+    pg_scatter_by_location(N, obs_to_loc, w_regional, regional_contrib);
 
-      for (int k = 0; k < nn_regional; k++) {
-        int neighbor = nn_idx_regional(i, k) - 1;
-        if (neighbor >= 0 && neighbor < n_spatial) {
-          double dist = nn_dist_regional(i, k);
-          double cov_val = std::exp(-dist / phi_regional);
-          cond_mean += cov_val * w_regional[neighbor];
-        }
-      }
-      cond_mean *= tau_regional;
+    // 7. Update hyperparameters via MH, each scale against its own NNGP
+    // density. sigma2 used to be a conjugate draw from an independent
+    // N(0, sigma2) form -- ignoring the spatial correlation and reading the PC
+    // prior's upper bound U as an inverse-gamma rate, with alpha unread -- and
+    // phi's ratio was built from the same unnormalized quadratic form the field
+    // sweep used.
+    pg_update_gp_hyper(sigma2_local, phi_local, w_local, cov, graph_local,
+                       prior_sigma_local_U, prior_sigma_local_alpha,
+                       prior_phi_local_lower, prior_phi_local_upper, 0.1);
 
-      double post_prec = cond_prec + sum_omega_regional[i];
-      double post_mean = (cond_mean + sum_resid_regional[i]) / post_prec;
-      w_regional[i] = R::rnorm(post_mean, 1.0 / std::sqrt(post_prec));
-    }
-
-    for (int i = 0; i < N; i++) {
-      if (i < n_spatial) {
-        regional_contrib[i] = w_regional[i];
-      }
-    }
-
-    // 7. Update hyperparameters via MH
-    // Update sigma2_local (Gibbs from inverse-gamma)
-    double ss_local = 0.0;
-    for (int i = 0; i < n_spatial; i++) {
-      ss_local += w_local[i] * w_local[i];
-    }
-    double shape_local = 0.5 * n_spatial + 1.0;
-    double rate_local = 0.5 * ss_local + prior_sigma_local_U;
-    sigma2_local = 1.0 / R::rgamma(shape_local, 1.0 / rate_local);
-
-    // Update sigma2_regional
-    double ss_regional = 0.0;
-    for (int i = 0; i < n_spatial; i++) {
-      ss_regional += w_regional[i] * w_regional[i];
-    }
-    double shape_regional = 0.5 * n_spatial + 1.0;
-    double rate_regional = 0.5 * ss_regional + prior_sigma_regional_U;
-    sigma2_regional = 1.0 / R::rgamma(shape_regional, 1.0 / rate_regional);
-
-    // Update phi_local via random walk MH
-    double phi_local_prop = phi_local * ratiod_linalg::safe_exp(R::rnorm(0, 0.1));
-    if (std::isfinite(phi_local_prop) && phi_local_prop >= prior_phi_local_lower && phi_local_prop <= prior_phi_local_upper) {
-      double ll_curr = 0.0, ll_prop = 0.0;
-      for (int i = 0; i < n_spatial; i++) {
-        double cond_mean_curr = 0.0, cond_mean_prop = 0.0;
-        for (int k = 0; k < nn_local; k++) {
-          int neighbor = nn_idx_local(i, k) - 1;
-          if (neighbor >= 0 && neighbor < n_spatial) {
-            double dist = nn_dist_local(i, k);
-            cond_mean_curr += std::exp(-dist / phi_local) * w_local[neighbor];
-            cond_mean_prop += std::exp(-dist / phi_local_prop) * w_local[neighbor];
-          }
-        }
-        ll_curr += -0.5 * tau_local * (w_local[i] - cond_mean_curr) * (w_local[i] - cond_mean_curr);
-        ll_prop += -0.5 * tau_local * (w_local[i] - cond_mean_prop) * (w_local[i] - cond_mean_prop);
-      }
-      double log_ratio = ll_prop - ll_curr + std::log(phi_local_prop / phi_local);
-      if (std::log(R::runif(0, 1)) < log_ratio) {
-        phi_local = phi_local_prop;
-      }
-    }
-
-    // Update phi_regional via MH
-    double phi_regional_prop = phi_regional * ratiod_linalg::safe_exp(R::rnorm(0, 0.1));
-    if (std::isfinite(phi_regional_prop) && phi_regional_prop >= prior_phi_regional_lower && phi_regional_prop <= prior_phi_regional_upper) {
-      double ll_curr = 0.0, ll_prop = 0.0;
-      for (int i = 0; i < n_spatial; i++) {
-        double cond_mean_curr = 0.0, cond_mean_prop = 0.0;
-        for (int k = 0; k < nn_regional; k++) {
-          int neighbor = nn_idx_regional(i, k) - 1;
-          if (neighbor >= 0 && neighbor < n_spatial) {
-            double dist = nn_dist_regional(i, k);
-            cond_mean_curr += std::exp(-dist / phi_regional) * w_regional[neighbor];
-            cond_mean_prop += std::exp(-dist / phi_regional_prop) * w_regional[neighbor];
-          }
-        }
-        ll_curr += -0.5 * tau_regional * (w_regional[i] - cond_mean_curr) * (w_regional[i] - cond_mean_curr);
-        ll_prop += -0.5 * tau_regional * (w_regional[i] - cond_mean_prop) * (w_regional[i] - cond_mean_prop);
-      }
-      double log_ratio = ll_prop - ll_curr + std::log(phi_regional_prop / phi_regional);
-      if (std::log(R::runif(0, 1)) < log_ratio) {
-        phi_regional = phi_regional_prop;
-      }
-    }
+    pg_update_gp_hyper(sigma2_regional, phi_regional, w_regional, cov,
+                       graph_regional,
+                       prior_sigma_regional_U, prior_sigma_regional_alpha,
+                       prior_phi_regional_lower, prior_phi_regional_upper, 0.1);
 
     // Store draws after warmup
     if (iter >= n_warmup && (iter - n_warmup + 1) % thin == 0) {
