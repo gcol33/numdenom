@@ -53,6 +53,10 @@ cpp_hmc_fit_gp_v2 <- function(args) {
     .Call(`_tulpaRatio_cpp_hmc_fit_gp_v2`, args)
 }
 
+cpp_kriging_predict <- function(coords_train, coords_new, w_train, sigma2, phi, cov_type, nn) {
+    .Call(`_tulpaRatio_cpp_kriging_predict`, coords_train, coords_new, w_train, sigma2, phi, cov_type, nn)
+}
+
 cpp_laplace_fit <- function(y, n, X, re_idx, n_re_groups, sigma_re, family, phi = 1.0, max_iter = 100L, tol = 1e-6, n_threads = 1L) {
     .Call(`_tulpaRatio_cpp_laplace_fit`, y, n, X, re_idx, n_re_groups, sigma_re, family, phi, max_iter, tol, n_threads)
 }

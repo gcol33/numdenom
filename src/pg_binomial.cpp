@@ -5,6 +5,7 @@
 #include "pg_binomial.h"
 #include "pg_rng.h"
 #include "hmc_cov.h"
+#include "cov_type_code.h"
 #include "linalg_fast.h"
 #include "omp_thread_scope.h"
 #include <Rcpp.h>
@@ -936,20 +937,6 @@ Rcpp::List cpp_pg_binomial_gibbs_bym2(
 // Uses sequential NNGP updates
 // ---------------------------------------------------------------------
 
-// The integer R sends for spatial_gp(cov = ), in the order backend_pg.R maps
-// the four documented choices. An unrecognised code is refused rather than
-// resolved to whichever kernel a fallthrough happens to reach.
-inline ratiod_cov::CovType pg_cov_type_from_int(int cov_type) {
-  switch (cov_type) {
-    case 0: return ratiod_cov::CovType::EXPONENTIAL;
-    case 1: return ratiod_cov::CovType::MATERN;
-    case 2: return ratiod_cov::CovType::GAUSSIAN;
-    case 3: return ratiod_cov::CovType::SPHERICAL;
-  }
-  Rcpp::stop("Unknown covariance code %d. Expected 0 (exponential), "
-             "1 (matern), 2 (gaussian) or 3 (spherical).", cov_type);
-}
-
 // The neighbour structure of one NNGP field, in the convention
 // compute_nngp_neighbors() writes and backend_pg.R passes:
 //
@@ -1140,7 +1127,7 @@ inline void pg_nngp_conditional(
 // The log-determinant half of that, sum_k -0.5 log d_k, is what an independent
 // N(0, sigma2) form leaves out: without it raising sigma2 only ever shrinks the
 // quadratic penalty, so the acceptance ratio ratchets one way and sigma2 runs
-// away (gcol33/tulpaRatio#62).
+// away.
 inline double pg_nngp_log_density(
     const std::vector<double>& w,
     double sigma2,
@@ -1160,8 +1147,8 @@ inline double pg_nngp_log_density(
 }
 
 // The Polya-Gamma likelihood at one location is the sum over every observation
-// measured THERE, which obs_to_loc is what names. Before #60 both this and the
-// scatter below ran over observation ROW POSITION and dropped every row past
+// measured THERE, which obs_to_loc is what names. Both this and the scatter
+// below used to run over observation ROW POSITION and drop every row past
 // n_spatial, so on a design with several observations per location most of the
 // data reached no location and the rest reached the wrong one.
 inline void pg_accumulate_by_location(
@@ -1232,7 +1219,7 @@ inline void pg_nngp_field_sweep(
 // pushed sigma2 up by half a log-density on top of the missing determinant.
 //
 // phi's prior is uniform on [lower, upper]; a proposal outside is rejected.
-// Until #62 phi's ratio was its Jacobian ALONE, which draws phi from its prior
+// The phi ratio used to be its Jacobian ALONE, which draws phi from its prior
 // rather than from its posterior.
 inline void pg_update_gp_hyper(
     double& sigma2,
@@ -1298,7 +1285,7 @@ Rcpp::NumericVector cpp_pg_nngp_conditional_probe(
     Rcpp::IntegerVector nn_order,
     int nn
 ) {
-  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  const ratiod_cov::CovType cov = ratiod_cov::cov_type_from_int(cov_type);
   const PgNngpGraph g{coords, nn_idx, nn_dist, nn_order, nn,
                       static_cast<int>(nn_order.size())};
   std::vector<double> w_vec(w.begin(), w.end());
@@ -1324,7 +1311,7 @@ double cpp_pg_nngp_log_density_probe(
     Rcpp::IntegerVector nn_order,
     int nn
 ) {
-  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  const ratiod_cov::CovType cov = ratiod_cov::cov_type_from_int(cov_type);
   const PgNngpGraph g{coords, nn_idx, nn_dist, nn_order, nn,
                       static_cast<int>(nn_order.size())};
   pg_check_nngp_graph(g, "cpp_pg_nngp_log_density_probe");
@@ -1381,7 +1368,7 @@ Rcpp::List cpp_pg_binomial_gibbs_gp(
   Rcpp::NumericVector sigma_re_draws(n_save);
   Rcpp::NumericMatrix gp_draws(n_save, n_spatial);
   Rcpp::NumericVector sigma2_gp_draws(n_save);
-  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  const ratiod_cov::CovType cov = ratiod_cov::cov_type_from_int(cov_type);
   Rcpp::NumericVector phi_gp_draws(n_save);
   Rcpp::NumericMatrix eta_draws_gp;
   if (store_eta) eta_draws_gp = Rcpp::NumericMatrix(n_save, N);
@@ -1917,11 +1904,11 @@ Rcpp::List cpp_pg_binomial_gibbs_multiscale_gp(
 
   // Both scales are NNGP fields over the same locations, read through the same
   // struct and the same conditional as the single-scale entry. They used to
-  // carry their own inline exponential kernel -- ignoring cov_type outright
-  // (gcol33/tulpaRatio#61) -- with the raw covariance in place of the
+  // carry their own inline exponential kernel, ignoring cov_type outright,
+  // with the raw covariance in place of the
   // conditional mean's C^-1 c weights and sigma2 in place of the conditional
   // variance, which is not the density either scale's prior claims.
-  const ratiod_cov::CovType cov = pg_cov_type_from_int(cov_type);
+  const ratiod_cov::CovType cov = ratiod_cov::cov_type_from_int(cov_type);
   const PgNngpGraph graph_local{coords, nn_idx_local, nn_dist_local,
                                 nn_order_local, nn_local, n_spatial};
   const PgNngpGraph graph_regional{coords, nn_idx_regional, nn_dist_regional,

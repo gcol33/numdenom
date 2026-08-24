@@ -240,6 +240,23 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_kriging_predict
+Rcpp::NumericMatrix cpp_kriging_predict(Rcpp::NumericMatrix coords_train, Rcpp::NumericMatrix coords_new, Rcpp::NumericMatrix w_train, Rcpp::NumericVector sigma2, Rcpp::NumericVector phi, int cov_type, int nn);
+RcppExport SEXP _tulpaRatio_cpp_kriging_predict(SEXP coords_trainSEXP, SEXP coords_newSEXP, SEXP w_trainSEXP, SEXP sigma2SEXP, SEXP phiSEXP, SEXP cov_typeSEXP, SEXP nnSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type coords_train(coords_trainSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type coords_new(coords_newSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type w_train(w_trainSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type sigma2(sigma2SEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< int >::type cov_type(cov_typeSEXP);
+    Rcpp::traits::input_parameter< int >::type nn(nnSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_kriging_predict(coords_train, coords_new, w_train, sigma2, phi, cov_type, nn));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_laplace_fit
 Rcpp::List cpp_laplace_fit(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, std::string family, double phi, int max_iter, double tol, int n_threads);
 RcppExport SEXP _tulpaRatio_cpp_laplace_fit(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
@@ -2026,6 +2043,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_get_max_threads", (DL_FUNC) &_tulpaRatio_cpp_get_max_threads, 0},
     {"_tulpaRatio_cpp_hmc_fit_gp", (DL_FUNC) &_tulpaRatio_cpp_hmc_fit_gp, 32},
     {"_tulpaRatio_cpp_hmc_fit_gp_v2", (DL_FUNC) &_tulpaRatio_cpp_hmc_fit_gp_v2, 1},
+    {"_tulpaRatio_cpp_kriging_predict", (DL_FUNC) &_tulpaRatio_cpp_kriging_predict, 7},
     {"_tulpaRatio_cpp_laplace_fit", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit, 11},
     {"_tulpaRatio_cpp_laplace_get_max_threads", (DL_FUNC) &_tulpaRatio_cpp_laplace_get_max_threads, 0},
     {"_tulpaRatio_cpp_laplace_fit_spatial", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_spatial, 17},

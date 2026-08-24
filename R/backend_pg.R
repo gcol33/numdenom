@@ -671,14 +671,7 @@ fit_pg_binomial_gp <- function(formula,
     message(sprintf("  Covariance: %s", spatial$cov))
   }
 
-  # Covariance type mapping
-  cov_type <- switch(spatial$cov,
-    "exponential" = 0L,
-    "matern" = 1L,
-    "gaussian" = 2L,
-    "spherical" = 3L,
-    0L
-  )
+  cov_type <- cov_type_code(spatial$cov)
 
   # Get neighbor info
   nn_info <- spatial$neighbor_info
@@ -819,7 +812,15 @@ convert_pg_gp_to_ratiod_fit <- function(fit_raw, formula, data, family,
   combined_beta <- do.call(rbind, lapply(fit_raw, `[[`, "beta"))
   combined_re <- do.call(rbind, lapply(fit_raw, `[[`, "re"))
   combined_eta <- do.call(rbind, lapply(fit_raw, `[[`, "eta"))
-  combined_w_gp <- do.call(rbind, lapply(fit_raw, `[[`, "w_gp"))
+  # The field draws, one column per unique LOCATION, stacked in the same chain
+  # order as the fixed effects beside them. The per-chain hyperparameters are
+  # stacked the same way, so a draw of the field and the (sigma2, phi) it was
+  # drawn under share a row -- what kriging it onto new coordinates needs.
+  combined_w_gp <- do.call(rbind, lapply(fit_raw, `[[`, "gp"))
+  combined_gp_hyper <- data.frame(
+    sigma2 = unlist(lapply(fit_raw, `[[`, "sigma2_gp"), use.names = FALSE),
+    phi = unlist(lapply(fit_raw, `[[`, "phi_gp"), use.names = FALSE)
+  )
 
   fit <- list(
     draws = draws_array,
@@ -840,6 +841,9 @@ convert_pg_gp_to_ratiod_fit <- function(fit_raw, formula, data, family,
       beta = combined_beta,
       re = combined_re,
       w_gp = combined_w_gp,
+      gp_hyper = combined_gp_hyper,
+      gp_coords = spatial$unique_coords,
+      gp_obs_to_loc = spatial$obs_to_loc,
       X = X,
       re_info = re_info,
       chain_results = fit_raw

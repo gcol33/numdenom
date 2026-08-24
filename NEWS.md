@@ -1,3 +1,41 @@
+# tulpaRatio 1.5.2
+
+* **PG GP fits carry their spatial field, so they can predict one (#63).**
+  `convert_pg_gp_to_ratiod_fit()` read the field draws off `"w_gp"` while the
+  sampler returns them under `"gp"`, and `[[` on a missing name is `NULL`, so
+  `.internal$w_gp` was `NULL` on every such fit and `predict_spatial_gp_pg()`
+  returned nothing without saying so. `fitted()` was unaffected -- it reads the
+  linear predictor the sampler stores directly. The `(sigma2, phi)` draws that
+  go with the field were also read from the first chain alone while the field
+  spanned every chain, so a multi-chain fit paired half its draws with nothing;
+  both are stacked in the same chain order now and the kriging entry refuses a
+  pair that is not row-aligned.
+
+* **A GP prediction is made in the units its fit was made in.**
+  `spatial_gp(scale_coords = TRUE)`, the default, centres and scales the
+  coordinates before the neighbour structure is built, and `scale()` puts the
+  centre and scale on an attribute that subsetting the matrix drops. Nothing
+  recorded them, so `coords.0` was read raw against a scaled training set on
+  every backend: kriging the training locations of a fit back onto themselves
+  recovered its own field at correlation -0.01. `gp_scale_new_coords()` is the
+  conversion, and the same fixture now reads 0.95.
+
+* **One kriging implementation, and one covariance family behind it.**
+  `kriging_predict()` and `cov_function()` were an R triple loop over
+  (draw, location, neighbour pair) and an R copy of the covariance family that
+  knew three of the four kernels, resolving `"spherical"` to an exponential one
+  -- the same defect fixed in the compiled family at 267f2cb, in the other copy.
+  `cpp_kriging_predict()` replaces both: it reads `hmc_cov.h`, the family every
+  fitting path reads, and takes the whole draw matrix at once, so the neighbour
+  sets are found once rather than per draw. The HMC and PG prediction paths both
+  go through it.
+
+* **`cov_type_code()` is the one name-to-code mapping.** Three copies of it in R
+  each ended in a bare `0L`, so a covariance name none of them knew ran
+  exponential; one of the three was missing `"spherical"` outright. The C++ side
+  meets it at `ratiod_cov::cov_type_from_int()` in `cov_type_code.h`, which the
+  PG entries now share, and both ends refuse a value they do not know.
+
 # tulpaRatio 1.5.1
 
 * **The PG binomial GP sampler now pairs observations with locations by

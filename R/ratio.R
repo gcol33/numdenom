@@ -1048,96 +1048,20 @@ predict_spatial_gp <- function(object, coords.0, return_spatial) {
   # Covariance type
   cov_type <- hmc_data$cov_type %||% 0L  # 0 = exponential
 
-  # Perform kriging for each posterior sample
-  w_pred <- matrix(NA_real_, nrow = n_samples, ncol = n_new)
-
-  for (s in seq_len(n_samples)) {
-    w_pred[s, ] <- kriging_predict(
-      coords_train = coords_train,
-      coords_new = coords.0,
-      w_train = w_train[s, ],
-      sigma2 = sigma2_gp[s],
-      phi = phi_gp[s],
-      cov_type = cov_type,
-      nn = min(hmc_data$nn %||% 15L, n_train)
-    )
-  }
+  w_pred <- cpp_kriging_predict(
+    coords_train = coords_train,
+    coords_new = gp_scale_new_coords(object$spatial, coords.0),
+    w_train = w_train,
+    sigma2 = sigma2_gp,
+    phi = phi_gp,
+    cov_type = cov_type,
+    nn = min(hmc_data$nn %||% 15L, n_train)
+  )
 
   list(
     w_pred = w_pred,
     w_samples = if (return_spatial) w_pred else NULL
   )
-}
-
-
-#' Kriging prediction at new locations
-#' @keywords internal
-kriging_predict <- function(coords_train, coords_new, w_train, sigma2, phi,
-                            cov_type, nn = 15) {
-  n_train <- nrow(coords_train)
-  n_new <- nrow(coords_new)
-  w_new <- numeric(n_new)
-
-  # Use NNGP-style prediction: for each new point, use nearest neighbors
-  for (i in seq_len(n_new)) {
-    s0 <- coords_new[i, ]
-
-    # Find nearest neighbors
-    dists_to_train <- sqrt(rowSums((coords_train - matrix(s0, n_train, 2, byrow = TRUE))^2))
-    nn_idx <- order(dists_to_train)[seq_len(min(nn, n_train))]
-    nn_dists <- dists_to_train[nn_idx]
-
-    # Compute covariances
-    C_s0_S <- cov_function(nn_dists, sigma2, phi, cov_type)
-
-    # Covariance among neighbors
-    coords_nn <- coords_train[nn_idx, , drop = FALSE]
-    nn_count <- length(nn_idx)
-    C_SS <- matrix(0, nn_count, nn_count)
-    for (j in seq_len(nn_count)) {
-      for (k in seq_len(nn_count)) {
-        if (j == k) {
-          C_SS[j, k] <- sigma2
-        } else {
-          d_jk <- sqrt(sum((coords_nn[j, ] - coords_nn[k, ])^2))
-          C_SS[j, k] <- cov_function(d_jk, sigma2, phi, cov_type)
-        }
-      }
-    }
-
-    # Add jitter for numerical stability
-    C_SS <- C_SS + diag(1e-6, nn_count)
-
-    # Kriging weights: C_s0_S * C_SS^{-1}
-    w_nn <- w_train[nn_idx]
-    weights <- solve(C_SS, C_s0_S)
-
-    # Kriging mean (we ignore kriging variance for point prediction)
-    w_new[i] <- sum(weights * w_nn)
-  }
-
-  w_new
-}
-
-
-#' Covariance function for GP
-#' @keywords internal
-cov_function <- function(d, sigma2, phi, cov_type) {
-  # cov_type: 0 = exponential, 1 = matern32, 2 = squared_exp
-  if (cov_type == 0L) {
-    # Exponential
-    sigma2 * exp(-d / phi)
-  } else if (cov_type == 1L) {
-    # Matern 3/2
-    r <- sqrt(3) * d / phi
-    sigma2 * (1 + r) * exp(-r)
-  } else if (cov_type == 2L) {
-    # Squared exponential (Gaussian)
-    sigma2 * exp(-0.5 * (d / phi)^2)
-  } else {
-    # Default to exponential
-    sigma2 * exp(-d / phi)
-  }
 }
 
 
@@ -1465,47 +1389,36 @@ compute_predictions_pg <- function(object, pred_data, type) {
 #' Predict spatial effects for PG GP models
 #' @keywords internal
 predict_spatial_gp_pg <- function(object, coords.0, return_spatial) {
-  # Similar to HMC GP prediction but using PG stored samples
-  w_gp <- object$.internal$w_gp
+  internal <- object$.internal
+  w_gp <- internal$w_gp
   if (is.null(w_gp)) return(list(w_pred = NULL, w_samples = NULL))
 
-  n_samples <- nrow(w_gp)
-  n_new <- nrow(coords.0)
-
-  # Get training coordinates from spatial object
-  spatial <- object$spatial
-  coords_train <- spatial$coords_matrix
+  # The unique locations the field is indexed by, not the observation-order
+  # matrix: a design with several observations per location has more rows of
+  # data than it has field entries.
+  coords_train <- internal$gp_coords %||% object$spatial$unique_coords
   if (is.null(coords_train)) {
     warning("Training coordinates not found. Cannot predict spatial effects.",
             call. = FALSE)
     return(list(w_pred = NULL, w_samples = NULL))
   }
 
-  # Get GP hyperparameters
-  sigma2_gp <- object$.internal$chain_results[[1]]$sigma2_gp
-  phi_gp <- object$.internal$chain_results[[1]]$phi_gp
-
-  # Covariance type
-  cov_type <- switch(spatial$cov %||% "exponential",
-    "exponential" = 0L,
-    "matern" = 1L,
-    "gaussian" = 2L,
-    0L
-  )
-
-  # Kriging prediction
-  w_pred <- matrix(NA_real_, n_samples, n_new)
-  for (s in seq_len(n_samples)) {
-    w_pred[s, ] <- kriging_predict(
-      coords_train = coords_train,
-      coords_new = coords.0,
-      w_train = w_gp[s, ],
-      sigma2 = sigma2_gp[s],
-      phi = phi_gp[s],
-      cov_type = cov_type,
-      nn = spatial$nn %||% 15L
-    )
+  hyper <- internal$gp_hyper
+  if (is.null(hyper) || nrow(hyper) != nrow(w_gp)) {
+    warning("The GP hyperparameter draws are not aligned with the field ",
+            "draws. Cannot predict spatial effects.", call. = FALSE)
+    return(list(w_pred = NULL, w_samples = NULL))
   }
+
+  w_pred <- cpp_kriging_predict(
+    coords_train = as.matrix(coords_train),
+    coords_new = gp_scale_new_coords(object$spatial, coords.0),
+    w_train = w_gp,
+    sigma2 = hyper$sigma2,
+    phi = hyper$phi,
+    cov_type = cov_type_code(object$spatial$cov),
+    nn = object$spatial$nn %||% 15L
+  )
 
   list(w_pred = w_pred, w_samples = if (return_spatial) w_pred else NULL)
 }

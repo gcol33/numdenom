@@ -1266,14 +1266,7 @@ fit_laplace_gp <- function(formula,
   sigma2_gp <- spatial$sigma2 %||% 1.0
   phi_gp <- spatial$phi %||% 1.0
 
-  # Covariance type mapping
-  cov_type <- switch(spatial$cov,
-    "exponential" = 0L,
-    "matern" = 1L,
-    "gaussian" = 2L,
-    "spherical" = 3L,
-    0L
-  )
+  cov_type <- cov_type_code(spatial$cov)
 
   # Get neighbor info
   nn_info <- spatial$neighbor_info

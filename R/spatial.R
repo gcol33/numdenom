@@ -1217,9 +1217,16 @@ validate_gp <- function(gp, data) {
     stop("Coordinate columns contain missing values", call. = FALSE)
   }
 
-  # Scale coordinates if requested
+  # Scale coordinates if requested. The centre and scale are kept: a fit made
+  # on scaled coordinates has to read prediction coordinates in the same units,
+  # and scale() puts them on an attribute that subsetting the matrix drops.
+  gp$coord_center <- NULL
+  gp$coord_scale <- NULL
   if (gp$scale_coords) {
     coords <- scale(coords)
+    gp$coord_center <- as.numeric(attr(coords, "scaled:center"))
+    gp$coord_scale <- as.numeric(attr(coords, "scaled:scale"))
+    coords <- matrix(as.numeric(coords), nrow(coords), ncol(coords))
   }
 
   # Detect unique coordinates (NNGP requires unique locations)
@@ -1612,6 +1619,61 @@ validate_svc <- function(svc, data, X) {
   }
 
   svc
+}
+
+
+#' Covariance code for the compiled kernel family
+#'
+#' @description
+#' The integer the C++ covariance family is selected by, from the name a
+#' `cov = ` argument carries. One mapping, read by every path that hands a
+#' covariance choice to compiled code, so a fit and a prediction cannot be made
+#' under different kernels. A name the family does not know is an error rather
+#' than a silent exponential.
+#'
+#' @param cov One of "exponential", "matern", "gaussian", "spherical"
+#'
+#' @return Integer code in 0:3
+#'
+#' @keywords internal
+cov_type_code <- function(cov) {
+  known <- c("exponential", "matern", "gaussian", "spherical")
+  cov <- cov %||% "exponential"
+  code <- match(cov, known)
+  if (length(code) != 1L || is.na(code)) {
+    stop(sprintf("Unknown covariance '%s'. One of %s.",
+                 paste(cov, collapse = ", "),
+                 paste(sQuote(known), collapse = ", ")), call. = FALSE)
+  }
+  as.integer(code - 1L)
+}
+
+
+#' Put new coordinates in the units a GP fit was made in
+#'
+#' @description
+#' `spatial_gp(scale_coords = TRUE)` centres and scales the coordinates before
+#' the neighbour structure is built, so the fitted field lives in those units.
+#' Prediction coordinates arrive raw and are put in the same units here. A fit
+#' made without scaling returns them unchanged.
+#'
+#' @param gp A validated spatial object
+#' @param coords Matrix of new coordinates
+#'
+#' @return `coords` in the fit's own units
+#'
+#' @keywords internal
+gp_scale_new_coords <- function(gp, coords) {
+  coords <- as.matrix(coords)
+  center <- gp$coord_center
+  scale <- gp$coord_scale
+  if (is.null(center) || is.null(scale)) return(coords)
+  if (length(center) != ncol(coords) || length(scale) != ncol(coords)) {
+    stop(sprintf(paste("The fit was made on %d scaled coordinate columns and",
+                       "these have %d."),
+                 length(center), ncol(coords)), call. = FALSE)
+  }
+  sweep(sweep(coords, 2L, center, "-"), 2L, scale, "/")
 }
 
 
