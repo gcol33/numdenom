@@ -45,8 +45,8 @@ cpp_get_max_threads <- function() {
     .Call(`_tulpaRatio_cpp_get_max_threads`)
 }
 
-cpp_hmc_fit_gp <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth = 10L, adapt_delta = -1.0, metric_str = "auto", gradient_mode_str = "auto") {
-    .Call(`_tulpaRatio_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta, metric_str, gradient_mode_str)
+cpp_hmc_fit_gp <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, latent_params, st_params, tvc_params, svc_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth = 10L, adapt_delta = -1.0, metric_str = "auto", gradient_mode_str = "auto") {
+    .Call(`_tulpaRatio_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, latent_params, st_params, tvc_params, svc_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta, metric_str, gradient_mode_str)
 }
 
 cpp_hmc_fit_gp_v2 <- function(args) {
@@ -179,6 +179,10 @@ cpp_within_chain_team <- function(n_chains, max_concurrent, want) {
 
 cpp_num_procs <- function() {
     .Call(`_tulpaRatio_cpp_num_procs`)
+}
+
+cpp_gradient_dispatch <- function(field, n_obs = 40L, n_units = 8L, n_times = 5L, seed = 42L, family = "binomial") {
+    .Call(`_tulpaRatio_cpp_gradient_dispatch`, field, n_obs, n_units, n_times, seed, family)
 }
 
 cpp_gradient_check <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, eps = 1e-5, seed = 42L, mode = "handcoded", precenter = FALSE, family = "binomial", temporal_shared = TRUE, reference = "analytic", zi = "none", near_unit_rho = FALSE) {

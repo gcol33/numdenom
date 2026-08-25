@@ -263,18 +263,18 @@ test_that("the GP types need coordinates of their own", {
 })
 
 
-test_that("a GP main effect is refused, not silently dropped", {
-  # gcol33/tulpaRatio#70: that combination routes to a sampler entry that is
-  # handed no interaction at all.
-  expect_error(
-    spatiotemporal(
-      spatial = spatial_gp(~ lon + lat),
-      temporal = temporal_rw1("year"),
-      type = "separable",
-      coords = ~ lon + lat
-    ),
-    "GP sampler"
+test_that("a GP main effect pairs with a GP interaction", {
+  # gcol33/tulpaRatio#70: the GP sampler entry is handed the interaction now,
+  # so the pairing builds instead of being refused.
+  st <- spatiotemporal(
+    spatial = spatial_gp(~ lon + lat),
+    temporal = temporal_rw1("year"),
+    type = "separable",
+    coords = ~ lon + lat
   )
+  expect_s3_class(st, "ratiod_spatiotemporal")
+  expect_equal(st$type, "separable")
+  expect_equal(st$coord_vars, c("lon", "lat"))
 })
 
 

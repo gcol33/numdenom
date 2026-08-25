@@ -139,7 +139,13 @@ const char* const KNOWN_FIELDS[] = {
   "gp_nc", "gp_collapsed", "gp_temporal",
   "msgp", "msgp_temporal",
   "svc", "svc_hsgp",
-  "temporal_gp", "ms_temporal", "latent"
+  "temporal_gp", "ms_temporal", "latent",
+  // Combinations a specialized gradient used to be selected for while writing
+  // none of the second block. Each is routed by its feature mask now, and each
+  // of these is what says the function it lands on writes both blocks.
+  "gp_st4", "gp_stgp", "gp_temporal_st4", "msgp_st4", "gp_collapsed_st4",
+  "icar_collapsed_st4", "bym2_collapsed_st4", "tvc_st4", "temporal_gp_st4",
+  "gp_tgp", "svc_ms", "gp_slopes"
 };
 
 bool is_known_field(const std::string& field) {
@@ -254,7 +260,7 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // therefore the ones that must agree with the log posterior about how that
   // field is identified.
   const bool want_ms = (field == "icar_ms" || field == "bym2_ms" ||
-                        field == "ms_temporal");
+                        field == "ms_temporal" || field == "svc_ms");
   const bool want_st = (field == "icar_st" || field == "bym2_st");
   // st4: a spatiotemporal Type IV (Kronecker) interaction with NO accompanying
   // additive spatial or temporal field -- the only structured term is the
@@ -263,7 +269,12 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // ever build a Type I interaction; this is the field that checks the
   // handcoded Type IV Kronecker block against finite differences.
   const bool want_st4 = (field == "st4" || field == "st4_nc" ||
-                         field == "st4_ar1" || field == "st4_ar1_nc");
+                         field == "st4_ar1" || field == "st4_ar1_nc" ||
+                         field == "gp_st4" || field == "gp_temporal_st4" ||
+                         field == "msgp_st4" || field == "gp_collapsed_st4" ||
+                         field == "icar_collapsed_st4" ||
+                         field == "bym2_collapsed_st4" ||
+                         field == "tvc_st4" || field == "temporal_gp_st4");
   // Type II (structured time within each spatial unit) and Type III
   // (structured space at each time point). Both reach the shared interaction
   // gradient through a different margin than Type IV does, and Type II is the
@@ -279,32 +290,38 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // compute_gradient_spatiotemporal_handcoded and into the composite -- the
   // two callers of that branch, both arbitrated.
   const bool want_stgp = (field == "stgp" || field == "stgp_matern" ||
-                          field == "stgp_gneiting" || field == "stgp_latent");
+                          field == "stgp_gneiting" || field == "stgp_latent" ||
+                          field == "gp_stgp");
   // icar_collapsed_rw1 / bym2_collapsed_rw1 pair a collapsed spatial field
   // with a companion temporal RW1 term -- the combination the specialized
   // collapsed gradient has to carry into its inner Laplace.
   const bool want_icar = (field == "icar" || field == "icar_rw1" ||
                           field == "icar_ms" || field == "icar_st" ||
-                          field == "icar_collapsed" || field == "icar_collapsed_rw1");
+                          field == "icar_collapsed" || field == "icar_collapsed_rw1" ||
+                          field == "icar_collapsed_st4");
   const bool want_bym2 = (field == "bym2" || field == "bym2_ms" ||
                           field == "bym2_st" || field == "bym2_collapsed" ||
-                          field == "bym2_collapsed_rw1");
+                          field == "bym2_collapsed_rw1" ||
+                          field == "bym2_collapsed_st4");
   // Proper CAR (rho estimated): exercises
   // compute_gradient_composite's is_car_proper branch, the only gradient
   // path it reaches under H/AUTO (can_use_analytical_gradient excludes it).
   const bool want_car_proper = (field == "car_proper");
   const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st ||
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1" ||
-                          field == "gp_temporal" || field == "msgp_temporal");
+                          field == "gp_temporal" || field == "msgp_temporal" ||
+                          field == "gp_temporal_st4");
   const bool want_rw2  = (field == "rw2");
   // The temporal block's own AR1 arm, which carries a rho of its own. rw1 and
   // rw2 reach the same kernels without it.
   const bool want_temporal_ar1 = (field == "temporal_ar1");
   const bool want_hsgp = (field == "hsgp");
-  const bool want_tvc  = (field == "tvc" || field == "tvc_iid" || field == "tvc_ar1");
+  const bool want_tvc  = (field == "tvc" || field == "tvc_iid" ||
+                          field == "tvc_ar1" || field == "tvc_st4");
   // The NNGP / spectral fields. Each reaches a gradient kernel of its own that
   // no areal field visits: see resolve_gradient_fn in hmc_sampler.cpp.
-  const bool want_gp_collapsed = (field == "gp_collapsed");
+  const bool want_gp_collapsed = (field == "gp_collapsed" ||
+                                  field == "gp_collapsed_st4");
   // spatial_gp(parameterization = "noncentered"): the sampled parameters are
   // z ~ N(0, I) and the field is w = L(sigma2, phi) z, so both hyperparameters
   // reach eta through the transform as well as through the prior.
@@ -312,16 +329,23 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   const bool want_gp = (field == "gp" || field == "gp_matern" ||
                         field == "gp_gaussian" || field == "gp_spherical" ||
                         field == "gp_temporal" || want_gp_nc ||
-                        want_gp_collapsed);
-  const bool want_msgp = (field == "msgp" || field == "msgp_temporal");
+                        want_gp_collapsed ||
+                        field == "gp_st4" || field == "gp_stgp" ||
+                        field == "gp_temporal_st4" || field == "gp_tgp" ||
+                        field == "gp_slopes");
+  const bool want_msgp = (field == "msgp" || field == "msgp_temporal" ||
+                          field == "msgp_st4");
   const bool want_svc_hsgp = (field == "svc_hsgp");
-  const bool want_svc = (field == "svc" || want_svc_hsgp);
-  const bool want_temporal_gp = (field == "temporal_gp");
+  const bool want_svc = (field == "svc" || want_svc_hsgp || field == "svc_ms");
+  const bool want_temporal_gp = (field == "temporal_gp" ||
+                                 field == "temporal_gp_st4" ||
+                                 field == "gp_tgp");
   const bool want_latent = (field == "latent" || field == "stgp_latent");
   // Random slopes route through a parameter layout the single-term path does
   // not use: one sigma per coefficient, and for the correlated variant a
   // tanh-Cholesky factor with an LKJ prior and re = diag(sigma) L z.
-  const bool want_re_slopes = (field == "re_slopes" || field == "re_slopes_corr");
+  const bool want_re_slopes = (field == "re_slopes" || field == "re_slopes_corr" ||
+                               field == "gp_slopes");
   const bool want_re = (field == "re" || field == "re_crossed" || want_re_slopes);
 
   data.N = n_obs;
@@ -449,8 +473,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.bym2_scale_factor = 1.0;
     // Collapsed: the field is marginalized out, so the layout allocates no
     // phi/theta and the density carries a Laplace correction at the mode.
-    data.icar_collapsed = (field == "icar_collapsed" || field == "icar_collapsed_rw1");
-    data.bym2_collapsed = (field == "bym2_collapsed" || field == "bym2_collapsed_rw1");
+    data.icar_collapsed = (field == "icar_collapsed" || field == "icar_collapsed_rw1" ||
+                           field == "icar_collapsed_st4");
+    data.bym2_collapsed = (field == "bym2_collapsed" || field == "bym2_collapsed_rw1" ||
+                           field == "bym2_collapsed_st4");
     // rho in the interior of (0, 1), away from both boundaries the
     // finite-difference step could clip against.
     data.car_rho_lower = 0.0;
@@ -864,6 +890,23 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
 
 // Returns the analytic gradient alongside a central-difference gradient of the
 // log posterior, both evaluated at the same random point.
+// [[Rcpp::export]]
+std::string cpp_gradient_dispatch(std::string field,
+                                  int n_obs = 40,
+                                  int n_units = 8,
+                                  int n_times = 5,
+                                  unsigned int seed = 42,
+                                  std::string family = "binomial") {
+  if (!is_known_field(field)) {
+    Rcpp::stop("Unknown field '%s'.", field.c_str());
+  }
+  ModelData data = make_model(field, n_obs, n_units, n_times, seed,
+                              family, /*temporal_shared=*/true, "none");
+  ParamLayout layout = compute_param_layout(data);
+  return std::string(
+      gradient_fn_name(resolve_gradient_fn(GradientMode::HANDCODED, data, layout)));
+}
+
 // [[Rcpp::export]]
 Rcpp::List cpp_gradient_check(std::string field,
                               int n_obs = 400,

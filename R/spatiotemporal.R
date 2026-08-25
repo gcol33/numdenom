@@ -226,17 +226,6 @@ spatiotemporal <- function(spatial,
 
     coord_vars <- st_parse_coord_vars(coords, type)
 
-    # A GP spatial main effect routes the whole model to the GP sampler, which
-    # is handed no interaction at all (gcol33/tulpaRatio#70). Refuse the
-    # combination rather than fit a model that silently drops the block.
-    if (inherits(spatial, c("ratiod_gp", "ratiod_multiscale", "ratiod_hsgp"))) {
-      stop("type = \"", type, "\" cannot be paired with a GP spatial main ",
-           "effect: that combination routes to the GP sampler, which does not ",
-           "carry a spatiotemporal interaction (gcol33/tulpaRatio#70). Use an ",
-           "areal main effect -- spatial_car() or spatial_bym2() -- with the ",
-           "interaction's own `coords`.", call. = FALSE)
-    }
-
     cov_space <- cov_space %||% "exponential"
     cov_time <- cov_time %||% "exponential"
     # Refuse an unknown name here rather than at the .Call boundary, where the

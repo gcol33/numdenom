@@ -1,3 +1,51 @@
+# tulpaRatio 1.7.1
+
+* **A GP spatial main effect carries the blocks beside it (#70).**
+  `is_gp_spatial()` routes the whole model to `cpp_hmc_fit_gp_v2`, which was
+  handed `gp_params`, `ms_gp_params`, `ms_temporal_params`, `rsr_params`,
+  `temporal_params` and the ZI arguments and nothing else. A spatiotemporal
+  interaction, a latent factor, a TVC or an SVC paired with `spatial_gp()`,
+  `spatial_multiscale()` or `spatial_hsgp()` was dropped from the `ModelData`
+  the sampler ran on, while `initialize_hmc_params_full()` and
+  `hmc_param_layout()` above it still allocated and named that block's
+  parameters: every column from the dropped block onward was read at the wrong
+  offset and reported under the wrong name. Measured on 6 units x 5 times with
+  `spatial_gp(~ lon + lat)` and `spatiotemporal(type = "separable")`,
+  `phi_st_space` came back on `(22.7, 43380.7)` against a uniform prior on
+  `(0.01, 10)` whose density is `-Inf` outside those bounds. The four bundles
+  are built once, above the sampler branch, and both entry points assemble
+  their blocks through one set of builders (`src/hmc_model_data_blocks.h`)
+  rather than each writing its own extraction. `spatiotemporal()` no longer
+  refuses a GP main effect.
+
+* **A specialized gradient declares the blocks it writes (#71).**
+  `resolve_gradient_fn()` selected a hand-coded gradient by a chain of
+  negations, one per feature per function, and several of them omitted
+  `has_spatiotemporal`, so a model carrying an interaction reached a function
+  that never writes it. Each entry now names the blocks it handles and the
+  model's own blocks are one mask, so a model carrying anything outside that
+  set falls through to the composite; adding a block to `GradFeature` is a
+  block every entry that does not name it falls through on. Three combinations
+  the negations could not express fall out of it: a GP margin and a GMRF margin
+  are different temporal blocks, a multiscale temporal term is not an SVC term,
+  and no specialized function writes the random-slope block.
+
+* **The composite gradient is a catch-all for every sampled field.** It had no
+  NNGP arm at all -- neither the GP main effect, the multi-scale GP, nor the
+  NNGP approximation of an SVC -- so a model routed to it left those blocks at
+  zero while `compute_log_post()` carried them into eta. All three are written
+  from the same `ratiod_gp` / `ratiod_svc` entry points the dedicated kernels
+  use. A collapsed field alongside a second block routes to the numerical
+  gradient of the density, its marginal being an inner Laplace at a mode that
+  moves with every other block in eta.
+
+* Twelve `cpp_gradient_check()` fields cover the combinations, each held to
+  central differences at 1e-8 to 1e-7, and `cpp_gradient_dispatch()` reports the
+  function a model resolves to so the mask is asserted directly rather than
+  inferred from whether a gradient happens to come out right.
+  `test-gp-sampler-blocks.R` fits three GP-plus-block models end to end and
+  reads the draws against the prior support the densities refuse outside of.
+
 # tulpaRatio 1.7.0
 
 * **The GP spatiotemporal interaction exists (#68, #69).** `type = "separable"`

@@ -7,9 +7,9 @@
 // copy of every interaction type. The copies had already drifted: the composite
 // had no Type II RW2 branch and no HSGP-ST-with-AR1 branch, the two disagreed
 // with each other and with the density on the rank a non-RW time margin
-// contributes, and neither wrote logit_rho_st at all
-// (gcol33/tulpaRatio#66). One implementation is what keeps a term added to the
-// density from reaching one gradient and not the other.
+// contributes, and neither wrote logit_rho_st at all. One implementation is
+// what keeps a term added to the density from reaching one gradient and not
+// the other.
 //
 // Everything here is with respect to the RAW parameter block -- z under the
 // non-centered Type IV reparameterization, delta otherwise -- which is what the

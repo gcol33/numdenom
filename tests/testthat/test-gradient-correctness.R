@@ -100,8 +100,28 @@ KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc")
 # the fix has a test to turn green, and the deviation each measures today is
 # recorded in the issue.
 BLOCKED_FIELDS <- character(0)
+# Combinations resolve_gradient_fn used to hand to a specialized function that
+# writes only one of the two blocks (gcol33/tulpaRatio#71). Each is now routed
+# by its feature mask, and each of these says the function it lands on writes
+# both. gp_tgp, svc_ms and gp_slopes are not on #71's list: they are what the
+# mask separates once a block is named rather than negated one guard at a time
+# -- a GP margin and a GMRF margin are different temporal blocks, a multiscale
+# temporal term is not an SVC term, and no specialized function writes the
+# random-slope block at all.
+DISPATCH_MASK_FIELDS <- c("gp_st4", "gp_stgp", "gp_temporal_st4", "msgp_st4",
+                          "tvc_st4", "temporal_gp_st4", "gp_tgp", "svc_ms",
+                          "gp_slopes")
+# The same, for a collapsed field. Its marginal is an inner Laplace at a mode
+# that moves with every other block in eta, which nothing but the collapsed
+# kernels' own companion-temporal path carries, so the dispatch returns the
+# numerical gradient of the density rather than a specialized function that
+# would leave the interaction at zero. Like the other collapsed fields these
+# have no autodiff case: the templated density cannot express the marginal.
+DISPATCH_MASK_COLLAPSED_FIELDS <- c("gp_collapsed_st4", "icar_collapsed_st4",
+                                    "bym2_collapsed_st4")
 ALL_FIELDS <- c(FIELDS, MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
-                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, ST_GP_FIELDS, KERNEL_FIELDS)
+                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, ST_GP_FIELDS, KERNEL_FIELDS,
+                DISPATCH_MASK_FIELDS)
 MODES <- c("handcoded", "arena")
 AUTODIFF_MODES <- c("arena", "forward", "tape")
 # The same three under the names the front door takes.
@@ -162,6 +182,53 @@ for (field in COLLAPSED_TEMPORAL_FIELDS) {
   })
 }
 
+for (field in DISPATCH_MASK_COLLAPSED_FIELDS) {
+  test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
+    r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
+    expect_gt(r$n_params, 0)
+    dev <- rel_dev(r$analytic, r$finite_diff)
+    worst <- which.max(dev)
+    expect_lt(
+      max(dev),
+      1e-4,
+      label = sprintf(
+        "%s: worst parameter %d (block %s), analytic %.6f vs finite-diff %.6f",
+        field, worst, r$block[worst], r$analytic[worst], r$finite_diff[worst]
+      )
+    )
+  })
+}
+
+# What each model dispatches TO, rather than whether its gradient happens to
+# come out right. A guard written as a chain of negations passes the deviation
+# check the moment the function it wrongly selects is fixed to write the second
+# block; this is what says the model reaches the function that was meant for it
+# (gcol33/tulpaRatio#71).
+test_that("resolve_gradient_fn sends each model to the function written for it", {
+  expected <- c(
+    # One structure: the specialized function keeps it.
+    gp = "gp", gp_temporal = "gp_temporal", msgp = "msgp",
+    msgp_temporal = "msgp_temporal", hsgp = "hsgp",
+    svc = "svc", svc_hsgp = "svc_hsgp", tvc = "tvc",
+    temporal_gp = "temporal_gp", ms_temporal = "ms_temporal",
+    latent = "latent", st4 = "spatiotemporal", icar_st = "spatiotemporal",
+    icar_collapsed = "icar_collapsed", bym2_collapsed = "icar_collapsed",
+    gp_collapsed = "gp_collapsed",
+    icar_collapsed_rw1 = "icar_collapsed", bym2_collapsed_rw1 = "icar_collapsed",
+    # Two blocks no specialized function writes together.
+    gp_st4 = "composite", gp_stgp = "composite",
+    gp_temporal_st4 = "composite", msgp_st4 = "composite",
+    tvc_st4 = "composite", temporal_gp_st4 = "composite",
+    gp_tgp = "composite", svc_ms = "composite", gp_slopes = "composite",
+    stgp_latent = "composite",
+    # A collapsed marginal alongside a second block.
+    gp_collapsed_st4 = "numerical", icar_collapsed_st4 = "numerical",
+    bym2_collapsed_st4 = "numerical"
+  )
+  got <- vapply(names(expected), tulpaRatio:::cpp_gradient_dispatch, character(1))
+  expect_equal(got, expected)
+})
+
 for (field in CAR_PROPER_FIELDS) {
   test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {
     r <- tulpaRatio:::cpp_gradient_check(field, mode = "handcoded")
@@ -180,7 +247,8 @@ for (field in CAR_PROPER_FIELDS) {
 }
 
 for (field in c(MULTI_FIELDS, STRUCTURE_FIELDS, ST_IV_FIELDS,
-                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, ST_GP_FIELDS)) {
+                ST_OTHER_FIELDS, ST_IV_AR1_FIELDS, ST_GP_FIELDS,
+                DISPATCH_MASK_FIELDS)) {
   for (mode in MODES) {
     test_that(sprintf("analytic gradient matches finite differences (%s, %s)", field, mode), {
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)

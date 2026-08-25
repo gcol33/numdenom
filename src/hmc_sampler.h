@@ -104,6 +104,7 @@ using GradientFn = void(*)(
 
 // Resolve the gradient function pointer once based on mode + model config
 GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const ParamLayout& layout);
+const char* gradient_fn_name(GradientFn fn);
 
 // Errors when the active gradient mode differentiates the templated log
 // posterior and the model carries a structure that density cannot express.

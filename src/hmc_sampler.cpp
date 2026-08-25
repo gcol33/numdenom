@@ -22,6 +22,7 @@
 #include "hmc_multiscale_temporal_grad.h"
 #include "st_prior_grad.h"
 #include "cov_type_code.h"
+#include "hmc_model_data_blocks.h"
 #include <Rcpp.h>
 
 // Include log_post_impl.h AFTER hmc_sampler.h so types are defined
@@ -9315,8 +9316,13 @@ void compute_gradient_composite(
     const double* spatial_phi = nullptr;
     double sigma_s_bym2 = 0.0, sigma_u_bym2 = 0.0, rho_bym2 = 0.5, rho_car = 0.0;
     const double* theta_bym2 = nullptr;
+    // A collapsed field has no latent block for the layout to allocate, so
+    // spatial_start is -1 and this arm would index in front of the parameter
+    // vector. resolve_gradient_fn does not send a collapsed model here; the
+    // condition says so rather than relying on it.
     const bool has_icar_bym2 = layout.has_spatial && !layout.is_hsgp && !layout.is_gp &&
-                                !layout.is_multiscale_gp && !layout.has_svc;
+                                !layout.is_multiscale_gp && !layout.has_svc &&
+                                !data.icar_collapsed && !data.bym2_collapsed;
     if (has_icar_bym2) {
         if (!layout.is_bym2) tau_spatial = std::exp(params[layout.log_tau_spatial_idx]);
         spatial_phi = &params[layout.spatial_start];
@@ -9331,6 +9337,71 @@ void compute_gradient_composite(
             sigma_s_bym2 = sigma_total * std::sqrt(rho_bym2);
             sigma_u_bym2 = sigma_total * std::sqrt(1.0 - rho_bym2);
             theta_bym2 = &params[layout.theta_bym2_start];
+        }
+    }
+
+    // --- GP spatial (NNGP) ---
+    // The field, its two hyperparameters and the non-centred forward transform,
+    // read off the same ratiod_gp entry points compute_gradient_gp_handcoded
+    // uses. Without this arm the composite is not a catch-all for a GP main
+    // effect: the block reaches eta in compute_log_post and comes back at zero
+    // in the gradient, which is what a GP paired with an interaction, a latent
+    // factor or a TVC falls through to.
+    RATIOD_TLS_WORKSPACE(ratiod_gp::NNGPNCWorkspace, gp_nc_ws);
+    const bool has_nngp_gp = layout.is_gp && data.has_gp && !data.gp_collapsed;
+    const int N_gp_comp = has_nngp_gp ? data.gp_data.n_obs : 0;
+    double gp_sigma2_comp = 0.0, gp_phi_comp = 0.0;
+    bool gp_use_nc = false;
+    std::vector<double> gp_w_comp;
+    if (has_nngp_gp) {
+        gp_sigma2_comp = std::exp(params[layout.log_sigma2_gp_idx]);
+        gp_phi_comp = std::exp(params[layout.log_phi_gp_idx]);
+        // Outside its uniform bounds the density is -Inf, so the point is
+        // rejected whatever the gradient says; return the zero gradient the
+        // dedicated GP path returns there rather than a number read off a
+        // covariance built at a range the prior excludes.
+        if (gp_phi_comp < data.gp_phi_prior_lower || gp_phi_comp > data.gp_phi_prior_upper) {
+            if (log_post_out && !layout.has_zi)
+                *log_post_out = compute_log_post(params_in, data, layout);
+            return;
+        }
+        gp_use_nc = (data.gp_parameterization == 1);
+        gp_w_comp.resize(N_gp_comp);
+        if (gp_use_nc) {
+            ratiod_gp::nngp_nc_forward(&params[layout.gp_w_start], gp_sigma2_comp,
+                                       gp_phi_comp, data.gp_data, gp_nc_ws);
+            std::memcpy(gp_w_comp.data(), gp_nc_ws.w.data(), N_gp_comp * sizeof(double));
+        } else {
+            for (int i = 0; i < N_gp_comp; i++)
+                gp_w_comp[i] = params[layout.gp_w_start + i];
+        }
+    }
+
+    // --- Multi-scale GP spatial (two NNGP scales) ---
+    const bool has_msgp_nngp = layout.is_multiscale_gp && data.has_multiscale_gp &&
+                               !data.msgp_is_hsgp;
+    const int N_msgp = has_msgp_nngp ? data.multiscale_gp_data.n_obs : 0;
+    double ms_sigma2_local = 0.0, ms_phi_local = 0.0;
+    double ms_sigma2_regional = 0.0, ms_phi_regional = 0.0;
+    std::vector<double> ms_w_local, ms_w_regional;
+    if (has_msgp_nngp) {
+        ms_sigma2_local = std::exp(params[layout.log_sigma2_gp_local_idx]);
+        ms_phi_local = std::exp(params[layout.log_phi_gp_local_idx]);
+        ms_sigma2_regional = std::exp(params[layout.log_sigma2_gp_regional_idx]);
+        ms_phi_regional = std::exp(params[layout.log_phi_gp_regional_idx]);
+        const auto& msd = data.multiscale_gp_data;
+        if (ms_phi_local < msd.range_local_lower || ms_phi_local > msd.range_local_upper ||
+            ms_phi_regional < msd.range_regional_lower ||
+            ms_phi_regional > msd.range_regional_upper) {
+            if (log_post_out && !layout.has_zi)
+                *log_post_out = compute_log_post(params_in, data, layout);
+            return;
+        }
+        ms_w_local.resize(N_msgp);
+        ms_w_regional.resize(N_msgp);
+        for (int i = 0; i < N_msgp; i++) {
+            ms_w_local[i] = params[layout.gp_local_start + i];
+            ms_w_regional[i] = params[layout.gp_regional_start + i];
         }
     }
 
@@ -9437,12 +9508,40 @@ void compute_gradient_composite(
         }
     }
 
-    // --- SVC (HSGP) ---
+    // --- SVC, on either approximation ---
+    // The NNGP arm carries the field itself; the HSGP arm carries its basis
+    // coefficients. Both reach eta through svc_eta_precomp, so the observation
+    // loop reads one quantity either way.
     RATIOD_TLS_WORKSPACE(ratiod_hsgp::HSGPWorkspace, svc_hsgp_ws);
     int n_svc = 0, svc_m_total = 0;
     RATIOD_TLS_WORKSPACE(std::vector<double>, svc_eta_precomp);
     RATIOD_TLS_WORKSPACE(std::vector<double>, svc_f_all);
-    if (layout.has_svc && data.has_svc && data.svc_is_hsgp) {
+    const bool has_svc_hsgp = layout.has_svc && data.has_svc && data.svc_is_hsgp;
+    const bool has_svc_nngp = layout.has_svc && data.has_svc && !data.svc_is_hsgp;
+    const int N_svc = has_svc_nngp ? data.svc_data.n_obs : 0;
+    std::vector<double> svc_w_nngp;
+    if (has_svc_nngp) {
+        n_svc = data.svc_data.n_svc;
+        svc_w_nngp.resize(static_cast<size_t>(N_svc) * n_svc);
+        for (int j = 0; j < n_svc; j++) {
+            const double phi_j = std::exp(params[layout.log_phi_svc_start + j]);
+            if (phi_j < data.svc_phi_prior_lower || phi_j > data.svc_phi_prior_upper) {
+                if (log_post_out && !layout.has_zi)
+                    *log_post_out = compute_log_post(params_in, data, layout);
+                return;
+            }
+        }
+        for (int k = 0; k < N_svc * n_svc; k++)
+            svc_w_nngp[k] = params[layout.svc_w_start + k];
+        svc_eta_precomp.assign(N, 0.0);
+        for (int i = 0; i < N; i++) {
+            double eff = 0.0;
+            for (int j = 0; j < n_svc; j++)
+                eff += data.svc_data.X_svc[i * n_svc + j] * svc_w_nngp[j * N_svc + i];
+            svc_eta_precomp[i] = eff;
+        }
+    }
+    if (has_svc_hsgp) {
         n_svc = data.svc_data.n_svc;
         svc_m_total = data.svc_hsgp_data.m_total;
         svc_hsgp_ws.init(data.svc_hsgp_data.n_obs, svc_m_total);
@@ -9612,6 +9711,77 @@ void compute_gradient_composite(
         // the matching derivation in compute_log_post.
         const double u = (rho_car - data.car_rho_lower) / (data.car_rho_upper - data.car_rho_lower);
         grad[layout.logit_rho_car_idx] = data.car_rho_prior_a * (1.0 - u) - data.car_rho_prior_b * u;
+    }
+
+    // GP (NNGP) priors: PC on sigma2, uniform on phi (log-transform Jacobian
+    // only). Under the non-centred parameterization the field's own prior is
+    // N(0, I) on z and is seeded by nngp_nc_backward, so it is not added twice.
+    if (has_nngp_gp) {
+        grad[layout.log_sigma2_gp_idx] += gp_pc_prior_grad_log_sigma2(
+            gp_sigma2_comp, data.gp_sigma2_prior_U, data.gp_sigma2_prior_alpha);
+        grad[layout.log_phi_gp_idx] += 1.0;
+        if (!gp_use_nc) {
+            ratiod_gp::NNGPGradients nngp_grads;
+            ratiod_gp::gp_nngp_gradients(gp_w_comp, gp_sigma2_comp, gp_phi_comp,
+                                         data.gp_data, nngp_grads);
+            for (int i = 0; i < N_gp_comp; i++)
+                grad[layout.gp_w_start + i] += nngp_grads.grad_w[i];
+            grad[layout.log_sigma2_gp_idx] += nngp_grads.grad_log_sigma2;
+            grad[layout.log_phi_gp_idx] += nngp_grads.grad_log_phi;
+        }
+    }
+
+    // Multi-scale GP priors: PC on each scale's variance, uniform on each
+    // range (log-transform Jacobian only), plus both NNGP field priors.
+    if (has_msgp_nngp) {
+        auto [ms_gp_local, ms_gp_regional] = make_msgp_gp_views(data.multiscale_gp_data);
+        grad[layout.log_sigma2_gp_local_idx] += gp_pc_prior_grad_log_sigma2(
+            ms_sigma2_local, data.ms_sigma2_local_prior_U, data.ms_sigma2_local_prior_alpha);
+        grad[layout.log_sigma2_gp_regional_idx] += gp_pc_prior_grad_log_sigma2(
+            ms_sigma2_regional, data.ms_sigma2_regional_prior_U,
+            data.ms_sigma2_regional_prior_alpha);
+        grad[layout.log_phi_gp_local_idx] += 1.0;
+        grad[layout.log_phi_gp_regional_idx] += 1.0;
+
+        ratiod_gp::NNGPGradients ms_grads_local, ms_grads_regional;
+        ratiod_gp::gp_nngp_gradients(ms_w_local, ms_sigma2_local, ms_phi_local,
+                                     ms_gp_local, ms_grads_local);
+        ratiod_gp::gp_nngp_gradients(ms_w_regional, ms_sigma2_regional, ms_phi_regional,
+                                     ms_gp_regional, ms_grads_regional);
+        for (int i = 0; i < N_msgp; i++) {
+            grad[layout.gp_local_start + i] += ms_grads_local.grad_w[i];
+            grad[layout.gp_regional_start + i] += ms_grads_regional.grad_w[i];
+        }
+        grad[layout.log_sigma2_gp_local_idx] += ms_grads_local.grad_log_sigma2;
+        grad[layout.log_phi_gp_local_idx] += ms_grads_local.grad_log_phi;
+        grad[layout.log_sigma2_gp_regional_idx] += ms_grads_regional.grad_log_sigma2;
+        grad[layout.log_phi_gp_regional_idx] += ms_grads_regional.grad_log_phi;
+    }
+
+    // SVC (NNGP) priors: half-Cauchy on each sigma, uniform on each range, the
+    // NNGP field prior, and the sum-to-zero penalty from the same helper the
+    // log posterior writes it in.
+    if (has_svc_nngp) {
+        for (int j = 0; j < n_svc; j++) {
+            const double sigma_j = std::exp(0.5 * params[layout.log_sigma2_svc_start + j]);
+            const double ratio = sigma_j / data.svc_sigma2_prior_scale;
+            const double ratio_sq = ratio * ratio;
+            grad[layout.log_sigma2_svc_start + j] += -ratio_sq / (1.0 + ratio_sq) + 1.0;
+            grad[layout.log_phi_svc_start + j] += 1.0;
+
+            std::vector<double> w_j(svc_w_nngp.begin() + static_cast<size_t>(j) * N_svc,
+                                    svc_w_nngp.begin() + static_cast<size_t>(j + 1) * N_svc);
+            ratiod_svc::SVCGradients svc_grads;
+            ratiod_svc::svc_nngp_gradients(
+                w_j, std::exp(params[layout.log_sigma2_svc_start + j]),
+                std::exp(params[layout.log_phi_svc_start + j]), data.svc_data, svc_grads);
+            for (int i = 0; i < N_svc; i++)
+                grad[layout.svc_w_start + j * N_svc + i] += svc_grads.grad_w[i];
+            grad[layout.log_sigma2_svc_start + j] += svc_grads.grad_log_sigma2;
+            grad[layout.log_phi_svc_start + j] += svc_grads.grad_log_phi;
+        }
+        ratiod_svc::svc_sum_to_zero_penalty_grad(svc_w_nngp.data(), data.svc_data,
+                                                 layout.svc_w_start, grad.data());
     }
 
     // HSGP priors (must match hardcoded rate=4.6 in compute_log_post)
@@ -9791,12 +9961,14 @@ void compute_gradient_composite(
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_tvc_w);
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_factors_c);
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_svc_f);
+    RATIOD_TLS_WORKSPACE(std::vector<double>, grad_gp_w_lik);
 
     if (has_icar_bym2) grad_spatial_lik.assign(data.n_spatial_units, 0.0);
     if (has_icar_bym2 && layout.is_bym2) grad_theta_lik.assign(data.n_spatial_units, 0.0);
     if (has_gmrf_temporal) grad_temporal_lik.assign(T_temporal, 0.0);
     if (has_temporal_gp) grad_temporal_lik.assign(data.temporal_gp_data.n_groups * T_gp, 0.0);
     if (layout.is_hsgp && data.has_hsgp) grad_hsgp_f.assign(N, 0.0);
+    if (has_nngp_gp) grad_gp_w_lik.assign(N_gp_comp, 0.0);
     if (has_st) grad_delta_lik.assign(ST_n, 0.0);
     if (layout.has_tvc && data.has_tvc) grad_tvc_w.assign(n_w, 0.0);
     if (K_latent > 0) grad_factors_c.assign(N * K_latent, 0.0);
@@ -9874,6 +10046,21 @@ void compute_gradient_composite(
             if (!is_binomial && data.hsgp_data.shared) eta_denom_i += hsgp_eff;
         }
 
+        // Multi-scale GP spatial
+        if (has_msgp_nngp) {
+            const int loc_i = data.multiscale_gp_data.obs_to_loc[i];
+            const double ms_eff = ms_w_local[loc_i] + ms_w_regional[loc_i];
+            eta_num_i += ms_eff;
+            if (!is_binomial && data.multiscale_gp_data.shared) eta_denom_i += ms_eff;
+        }
+
+        // GP spatial (NNGP)
+        if (has_nngp_gp) {
+            double gp_eff = gp_w_comp[data.gp_data.obs_to_loc[i]];
+            eta_num_i += gp_eff;
+            if (!is_binomial && data.gp_data.shared) eta_denom_i += gp_eff;
+        }
+
         // Temporal GMRF
         if (has_gmrf_temporal && !data.temporal_time_idx.empty() &&
             i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
@@ -9904,8 +10091,8 @@ void compute_gradient_composite(
             if (!is_binomial) eta_denom_i += tvc_eta_precomp[i];
         }
 
-        // SVC
-        if (layout.has_svc && data.has_svc && data.svc_is_hsgp) {
+        // SVC, on either approximation
+        if (has_svc_hsgp || has_svc_nngp) {
             eta_num_i += svc_eta_precomp[i];
             if (!is_binomial) eta_denom_i += svc_eta_precomp[i];
         }
@@ -10087,6 +10274,20 @@ void compute_gradient_composite(
             grad_hsgp_f[i] = dLL_num + (data.hsgp_data.shared ? dLL_denom : 0.0);
         }
 
+        // Scatter to the multi-scale GP field, by location rather than by row
+        if (has_msgp_nngp) {
+            const int loc_i = data.multiscale_gp_data.obs_to_loc[i];
+            const double dLL_ms = data.multiscale_gp_data.shared ? dLL_shared : dLL_num;
+            grad[layout.gp_local_start + loc_i] += dLL_ms;
+            grad[layout.gp_regional_start + loc_i] += dLL_ms;
+        }
+
+        // Scatter to the GP field, by location rather than by row
+        if (has_nngp_gp) {
+            grad_gp_w_lik[data.gp_data.obs_to_loc[i]] +=
+                data.gp_data.shared ? dLL_shared : dLL_num;
+        }
+
         // Scatter to temporal GMRF
         if (has_gmrf_temporal && !data.temporal_time_idx.empty() &&
             i < (int)data.temporal_time_idx.size() && data.temporal_time_idx[i] > 0) {
@@ -10118,11 +10319,17 @@ void compute_gradient_composite(
         }
 
         // Scatter to SVC
-        if (layout.has_svc && data.has_svc && data.svc_is_hsgp) {
+        if (has_svc_hsgp) {
             for (int j = 0; j < n_svc; j++) {
                 double x_ij = data.svc_data.X_svc[i * n_svc + j];
                 grad_svc_f[j * N + i] = dLL_shared * x_ij;
             }
+        }
+        if (has_svc_nngp) {
+            const double dLL_svc = data.svc_data.shared ? dLL_shared : dLL_num;
+            for (int j = 0; j < n_svc; j++)
+                grad[layout.svc_w_start + j * N_svc + i] +=
+                    dLL_svc * data.svc_data.X_svc[i * n_svc + j];
         }
 
         // Scatter to latent factors
@@ -10184,6 +10391,26 @@ void compute_gradient_composite(
                                 centering.active(), tau_spatial,
                                 sigma_s_bym2, sigma_u_bym2, rho_bym2, rho_car, theta_bym2,
                                 grad_spatial_lik.data(), grad.data());
+    }
+
+    // GP (NNGP) field: the likelihood scatter reaches the sampled parameters
+    // through the non-centred backward pass, or lands on them directly.
+    if (has_nngp_gp) {
+        if (gp_use_nc) {
+            std::vector<double> grad_z(N_gp_comp, 0.0);
+            double grad_log_sigma2_lik = 0.0, grad_log_phi_lik = 0.0, grad_log_phi_jac = 0.0;
+            ratiod_gp::nngp_nc_backward(
+                &params[layout.gp_w_start], gp_sigma2_comp, gp_phi_comp,
+                data.gp_data, gp_nc_ws, grad_gp_w_lik.data(), grad_z.data(),
+                grad_log_sigma2_lik, grad_log_phi_lik, grad_log_phi_jac);
+            for (int i = 0; i < N_gp_comp; i++)
+                grad[layout.gp_w_start + i] += grad_z[i];
+            grad[layout.log_sigma2_gp_idx] += grad_log_sigma2_lik;
+            grad[layout.log_phi_gp_idx] += grad_log_phi_lik;
+        } else {
+            for (int i = 0; i < N_gp_comp; i++)
+                grad[layout.gp_w_start + i] += grad_gp_w_lik[i];
+        }
     }
 
     // HSGP spectral density gradients
@@ -10424,6 +10651,57 @@ void compute_gradient(
 }
 
 // =====================================================================
+// The latent blocks a model carries, as one mask. A specialized gradient
+// declares the blocks it writes; a block the model carries outside that set is
+// one the function leaves at zero while every other block is differentiated at
+// a linear predictor missing it.
+//
+// The temporal margin contributes exactly one bit: a GP margin is
+// GF_TEMPORAL_GP and not GF_TEMPORAL, the two being different blocks with
+// different gradients, so a function writing one does not write the other.
+// =====================================================================
+
+enum GradFeature : unsigned {
+  GF_AREAL          = 1u << 0,   // ICAR / BYM2 / proper CAR field
+  GF_GP             = 1u << 1,
+  GF_MULTISCALE_GP  = 1u << 2,
+  GF_HSGP           = 1u << 3,
+  GF_SVC            = 1u << 4,
+  GF_TEMPORAL       = 1u << 5,   // RW1 / RW2 / AR1 margin
+  GF_TEMPORAL_GP    = 1u << 6,
+  GF_MS_TEMPORAL    = 1u << 7,
+  GF_TVC            = 1u << 8,
+  GF_SPATIOTEMPORAL = 1u << 9,
+  GF_LATENT         = 1u << 10,
+  GF_RE_SLOPES      = 1u << 11,  // no specialized function writes the slope block
+  // A collapsed field is a marginal, not a latent block: it is its own bit
+  // rather than GF_AREAL / GF_GP so that a function written for the sampled
+  // field cannot be selected for it.
+  GF_AREAL_COLLAPSED = 1u << 12,
+  GF_GP_COLLAPSED    = 1u << 13
+};
+
+inline unsigned model_grad_features(const ModelData& data, const ParamLayout& layout) {
+  unsigned f = 0u;
+  const bool areal_collapsed = layout.is_icar_collapsed || layout.is_bym2_collapsed;
+  if (layout.has_spatial)
+    f |= areal_collapsed ? GF_AREAL_COLLAPSED : GF_AREAL;
+  if (layout.is_gp && data.has_gp)
+    f |= (layout.is_gp_collapsed && data.gp_collapsed) ? GF_GP_COLLAPSED : GF_GP;
+  if (layout.is_multiscale_gp && data.has_multiscale_gp) f |= GF_MULTISCALE_GP;
+  if (layout.is_hsgp && data.has_hsgp)                   f |= GF_HSGP;
+  if (layout.has_svc && data.has_svc)                    f |= GF_SVC;
+  if (layout.is_temporal_gp)                             f |= GF_TEMPORAL_GP;
+  else if (layout.has_temporal)                          f |= GF_TEMPORAL;
+  if (layout.has_multiscale_temporal)                    f |= GF_MS_TEMPORAL;
+  if (layout.has_tvc && data.has_tvc)                    f |= GF_TVC;
+  if (layout.has_spatiotemporal)                         f |= GF_SPATIOTEMPORAL;
+  if (layout.has_latent && data.latent_n_factors > 0)    f |= GF_LATENT;
+  if (layout.has_re_slopes)                              f |= GF_RE_SLOPES;
+  return f;
+}
+
+// =====================================================================
 // Resolve gradient function pointer — SINGLE SOURCE OF TRUTH for dispatch.
 // Called once at sampling start, returns a function pointer to eliminate
 // per-call branching during leapfrog steps. compute_gradient() delegates here.
@@ -10444,68 +10722,106 @@ GradientFn resolve_gradient_fn(GradientMode mode, const ModelData& data, const P
     if (can_use_analytical_gradient(data, layout)) {
         return &compute_gradient_analytical;
     }
-    // Specialized H-mode functions: only dispatch if model has NO features
-    // beyond what the function can handle. Otherwise fall through to composite.
+    // Specialized H-mode functions. Each writes the blocks its own body writes
+    // and no others, so a model carrying anything outside that set falls
+    // through to the composite. The mask passed to covers() is what the
+    // function handles; covers() is the whole of the exclusion, in place of
+    // one negation per feature per function. A bit added to GradFeature is a
+    // block every entry that does not name it falls through on, rather than
+    // one every guard has to remember to exclude.
+    const unsigned mf = model_grad_features(data, layout);
+    auto covers = [mf](unsigned writes) { return (mf & ~writes) == 0u; };
+
     if (layout.is_hsgp && data.has_hsgp &&
-        !layout.is_temporal_gp && !layout.has_multiscale_temporal &&
-        !layout.has_tvc && !layout.has_spatiotemporal &&
-        !layout.has_latent && !layout.has_svc && !layout.has_re_slopes)
+        covers(GF_HSGP | GF_TEMPORAL))
         return &compute_gradient_hsgp;
     // Collapsed GP: analytical gradient + numerical Laplace correction
-    if (layout.is_gp_collapsed && data.has_gp && data.gp_collapsed)
+    if (layout.is_gp_collapsed && data.has_gp && data.gp_collapsed &&
+        covers(GF_GP_COLLAPSED))
         return &compute_gradient_gp_collapsed;
     // Collapsed ICAR/BYM2: analytical gradient + numerical Laplace correction
-    if (layout.is_icar_collapsed || layout.is_bym2_collapsed)
+    if ((layout.is_icar_collapsed || layout.is_bym2_collapsed) &&
+        covers(GF_AREAL_COLLAPSED | GF_TEMPORAL))
         return &compute_gradient_icar_collapsed;
-    if (layout.is_gp && data.has_gp && !layout.has_temporal)
+    // A collapsed field alongside anything else. Its marginal is an inner
+    // Laplace at a mode that moves with every other block in eta, which the
+    // two functions above carry for a companion temporal margin and for
+    // nothing else, and which the composite has no branch for at all. The
+    // numerical gradient of the density is the correct one for the
+    // combination, so it is what the dispatch returns, rather than a
+    // specialized function that would leave the second block at zero.
+    if (mf & (GF_AREAL_COLLAPSED | GF_GP_COLLAPSED))
+        return &compute_gradient_numerical;
+    if (layout.is_gp && data.has_gp && covers(GF_GP))
         return &compute_gradient_gp_handcoded;
-    if (layout.is_multiscale_gp && data.has_multiscale_gp && data.msgp_is_hsgp)
+    if (layout.is_multiscale_gp && data.has_multiscale_gp && data.msgp_is_hsgp &&
+        covers(GF_MULTISCALE_GP | GF_TEMPORAL))
         return &compute_gradient_msgp_hsgp;
-    if (layout.is_multiscale_gp && data.has_multiscale_gp && layout.has_temporal)
+    if (layout.is_multiscale_gp && data.has_multiscale_gp && layout.has_temporal &&
+        covers(GF_MULTISCALE_GP | GF_TEMPORAL))
         return &compute_gradient_msgp_temporal_handcoded;
-    if (layout.is_multiscale_gp && data.has_multiscale_gp)
+    if (layout.is_multiscale_gp && data.has_multiscale_gp &&
+        covers(GF_MULTISCALE_GP))
         return &compute_gradient_msgp_handcoded;
-    if (layout.is_gp && layout.has_temporal)
+    if (layout.is_gp && covers(GF_GP | GF_TEMPORAL))
         return &compute_gradient_gp_temporal_handcoded;
-    if (layout.has_svc && data.has_svc && data.svc_is_hsgp &&
-        !layout.has_temporal && !layout.has_spatiotemporal &&
-        !layout.has_latent && !layout.has_tvc)
+    if (layout.has_svc && data.has_svc && data.svc_is_hsgp && covers(GF_SVC))
         return &compute_gradient_svc_hsgp_handcoded;
-    if (layout.has_svc && data.has_svc &&
-        !layout.has_temporal && !layout.has_spatiotemporal &&
-        !layout.has_latent && !layout.has_tvc)
+    if (layout.has_svc && data.has_svc && covers(GF_SVC))
         return &compute_gradient_svc_handcoded;
-    if (layout.has_tvc && data.has_tvc &&
-        !layout.has_spatial && !layout.has_latent)
+    if (layout.has_tvc && data.has_tvc && covers(GF_TVC))
         return &compute_gradient_tvc_handcoded;
     if (layout.has_spatiotemporal &&
-        !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
-        !layout.has_latent &&
         data.spatiotemporal_data.type != STType::NONE &&
-        layout.st_delta_start >= 0 && layout.log_tau_st_idx >= 0)
+        layout.st_delta_start >= 0 && layout.log_tau_st_idx >= 0 &&
+        covers(GF_AREAL | GF_TEMPORAL | GF_SPATIOTEMPORAL))
         return &compute_gradient_spatiotemporal_handcoded;
     if (layout.is_temporal_gp && layout.has_temporal &&
-        !layout.is_gp && !layout.is_multiscale_gp && !layout.is_hsgp &&
-        !layout.has_spatial && !layout.has_latent &&
-        data.temporal_gp_data.cov_type == ratiod_temporal_gp::TemporalCovType::EXPONENTIAL)
+        data.temporal_gp_data.cov_type == ratiod_temporal_gp::TemporalCovType::EXPONENTIAL &&
+        covers(GF_TEMPORAL_GP))
         return &compute_gradient_temporal_gp_handcoded;
-    if (layout.has_multiscale_temporal && !layout.is_gp && !layout.is_multiscale_gp &&
-        !layout.is_hsgp && !layout.has_svc && !layout.has_tvc &&
-        !layout.has_latent && !layout.has_spatiotemporal)
+    if (layout.has_multiscale_temporal &&
+        covers(GF_AREAL | GF_MS_TEMPORAL))
         return &compute_gradient_ms_temporal_handcoded;
     // compute_gradient_latent_handcoded writes no interaction block, so a model
-    // carrying one has to fall through to the composite. Measured on the
-    // stgp_latent fixture before the guard was added: the latent factors came
-    // back at -2.34 against a finite difference of 0.114.
-    if (layout.has_latent && data.latent_n_factors > 0 &&
-        !layout.has_spatial && !layout.has_temporal &&
-        !layout.has_spatiotemporal)
+    // carrying one falls through to the composite. Measured on the stgp_latent
+    // fixture before the mask was derived: the latent factors came back at
+    // -2.34 against a finite difference of 0.114.
+    if (layout.has_latent && data.latent_n_factors > 0 && covers(GF_LATENT))
         return &compute_gradient_latent_handcoded;
 
     // Composite H-mode: catch-all for exotic multi-feature combinations
     // that no specialized function above handles (e.g., HSGP+TVC, SVC+RW1,
     // latent+spatial, crossed+slopes). Slower than specialized but faster than A_r.
     return &compute_gradient_composite;
+}
+
+// The name resolve_gradient_fn() settled on, so that which function a model
+// selects is assertable from R rather than inferred from whether its gradient
+// happens to come out right.
+const char* gradient_fn_name(GradientFn fn) {
+  if (fn == &compute_gradient_numerical) return "numerical";
+  if (fn == &compute_gradient_autodiff) return "autodiff_tape";
+  if (fn == &compute_gradient_arena) return "autodiff_arena";
+  if (fn == &compute_gradient_forward) return "autodiff_forward";
+  if (fn == &compute_gradient_analytical) return "analytical";
+  if (fn == &compute_gradient_hsgp) return "hsgp";
+  if (fn == &compute_gradient_gp_collapsed) return "gp_collapsed";
+  if (fn == &compute_gradient_icar_collapsed) return "icar_collapsed";
+  if (fn == &compute_gradient_gp_handcoded) return "gp";
+  if (fn == &compute_gradient_msgp_hsgp) return "msgp_hsgp";
+  if (fn == &compute_gradient_msgp_temporal_handcoded) return "msgp_temporal";
+  if (fn == &compute_gradient_msgp_handcoded) return "msgp";
+  if (fn == &compute_gradient_gp_temporal_handcoded) return "gp_temporal";
+  if (fn == &compute_gradient_svc_hsgp_handcoded) return "svc_hsgp";
+  if (fn == &compute_gradient_svc_handcoded) return "svc";
+  if (fn == &compute_gradient_tvc_handcoded) return "tvc";
+  if (fn == &compute_gradient_spatiotemporal_handcoded) return "spatiotemporal";
+  if (fn == &compute_gradient_temporal_gp_handcoded) return "temporal_gp";
+  if (fn == &compute_gradient_ms_temporal_handcoded) return "ms_temporal";
+  if (fn == &compute_gradient_latent_handcoded) return "latent";
+  if (fn == &compute_gradient_composite) return "composite";
+  return "unknown";
 }
 
 // Refuse an autodiff gradient mode on a model the templated log posterior
@@ -13626,13 +13942,6 @@ Rcpp::List cpp_hmc_fit(
     oi_prior_sd = Rcpp::as<double>(oi_prior_sd_sexp);
   }
 
-  // Latent factor parameters
-  bool has_latent = Rcpp::as<bool>(latent_params["has_latent"]);
-  int latent_n_factors = Rcpp::as<int>(latent_params["n_factors"]);
-  bool latent_shared = Rcpp::as<bool>(latent_params["shared"]);
-  bool latent_scale = Rcpp::as<bool>(latent_params["scale"]);
-  int latent_constraint = Rcpp::as<int>(latent_params["constraint"]);
-  double latent_sigma_prior_rate = Rcpp::as<double>(latent_params["sigma_prior_rate"]);
 
   // =========================================================================
   // Set up model data
@@ -13959,333 +14268,12 @@ Rcpp::List cpp_hmc_fit(
   data.has_multiscale_gp = false;
   data.has_multiscale_temporal = false;
   data.has_rsr = false;
-  data.has_svc = false;
   data.has_hsgp = false;
 
-  // Latent factors
-  data.has_latent = has_latent;
-  data.latent_n_factors = latent_n_factors;
-  data.latent_shared = latent_shared;
-  data.latent_scale = latent_scale;
-  data.latent_constraint = latent_constraint;
-  data.latent_sigma_prior_rate = latent_sigma_prior_rate;
-
-  // Spatiotemporal interaction - extract from list
-  bool has_spatiotemporal = st_params.size() > 0 && Rcpp::as<bool>(st_params["has_spatiotemporal"]);
-  data.has_spatiotemporal = has_spatiotemporal;
-  if (has_spatiotemporal) {
-    // Extract parameters from list (eager deep copies to prevent R GC issues)
-    std::string st_type_str = Rcpp::as<std::string>(st_params["type"]);
-    bool st_shared = Rcpp::as<bool>(st_params["shared"]);
-    int st_n_spatial = Rcpp::as<int>(st_params["n_spatial"]);
-    int st_n_times = Rcpp::as<int>(st_params["n_times"]);
-    int st_n_params = Rcpp::as<int>(st_params["n_params"]);
-    std::vector<int> st_s_idx = Rcpp::as<std::vector<int>>(st_params["s_idx"]);
-    std::vector<int> st_t_idx = Rcpp::as<std::vector<int>>(st_params["t_idx"]);
-    std::vector<int> st_flat = Rcpp::as<std::vector<int>>(st_params["st_flat"]);
-    std::string st_temporal_type_str = Rcpp::as<std::string>(st_params["temporal_type"]);
-    bool st_temporal_cyclic = Rcpp::as<bool>(st_params["temporal_cyclic"]);
-    std::vector<int> st_adj_row_ptr = Rcpp::as<std::vector<int>>(st_params["adj_row_ptr"]);
-    std::vector<int> st_adj_col_idx = Rcpp::as<std::vector<int>>(st_params["adj_col_idx"]);
-    double st_sigma2_prior_U = Rcpp::as<double>(st_params["sigma2_prior_U"]);
-    double st_sigma2_prior_alpha = Rcpp::as<double>(st_params["sigma2_prior_alpha"]);
-    double st_rho_prior_a = st_params.containsElementNamed("rho_prior_a")
-        ? Rcpp::as<double>(st_params["rho_prior_a"]) : ratiod_ar1::RHO_PRIOR_A;
-    double st_rho_prior_b = st_params.containsElementNamed("rho_prior_b")
-        ? Rcpp::as<double>(st_params["rho_prior_b"]) : ratiod_ar1::RHO_PRIOR_B;
-
-    // Parse ST type (accept both R-side "I"/"IV" and legacy "type_i"/"type_iv")
-    if (st_type_str == "I" || st_type_str == "type_i") {
-      data.spatiotemporal_data.type = STType::TYPE_I;
-    } else if (st_type_str == "II" || st_type_str == "type_ii") {
-      data.spatiotemporal_data.type = STType::TYPE_II;
-    } else if (st_type_str == "III" || st_type_str == "type_iii") {
-      data.spatiotemporal_data.type = STType::TYPE_III;
-    } else if (st_type_str == "IV" || st_type_str == "type_iv") {
-      data.spatiotemporal_data.type = STType::TYPE_IV;
-    } else if (st_type_str == "separable") {
-      data.spatiotemporal_data.type = STType::SEPARABLE;
-    } else if (st_type_str == "nonsep_gp") {
-      data.spatiotemporal_data.type = STType::NONSEP_GP;
-    } else {
-      Rcpp::stop("Unknown spatiotemporal type: '%s'. Expected one of: I, II, III, IV, separable, nonsep_gp",
-                 st_type_str.c_str());
-    }
-
-    data.spatiotemporal_data.shared = st_shared;
-    data.spatiotemporal_data.n_spatial = st_n_spatial;
-    data.spatiotemporal_data.n_times = st_n_times;
-    data.spatiotemporal_data.n_params = st_n_params;
-
-    // Observation indexing (already deep copied above)
-    data.spatiotemporal_data.s_idx = st_s_idx;
-    data.spatiotemporal_data.t_idx = st_t_idx;
-    data.spatiotemporal_data.st_flat = st_flat;
-
-    // Temporal type for Type II/IV and HSGP-ST, the interactions whose own
-    // time margin carries a precision.
-    const bool st_is_hsgp_flag =
-        st_params.containsElementNamed("st_is_hsgp") &&
-        Rcpp::as<bool>(st_params["st_is_hsgp"]);
-    const bool st_reads_time_margin =
-        ratiod_spatiotemporal::st_time_margin_is_structured(
-            data.spatiotemporal_data.type) || st_is_hsgp_flag;
-    if (st_temporal_type_str == "rw1") {
-      data.spatiotemporal_data.temporal_type = TemporalType::RW1;
-    } else if (st_temporal_type_str == "rw2") {
-      data.spatiotemporal_data.temporal_type = TemporalType::RW2;
-    } else if (st_temporal_type_str == "ar1") {
-      data.spatiotemporal_data.temporal_type = TemporalType::AR1;
-    } else if (st_reads_time_margin) {
-      // The interaction reads this margin, and there is no precision to read
-      // it with. Defaulting to RW1 would fit a structure the caller did not
-      // ask for; contributing nothing would leave the field with no prior.
-      Rcpp::stop("Spatiotemporal temporal margin '%s' is not supported for this "
-                 "interaction type. Use temporal_rw1(), temporal_rw2() or "
-                 "temporal_ar1().", st_temporal_type_str.c_str());
-    } else {
-      data.spatiotemporal_data.temporal_type = TemporalType::RW1;  // Unread
-    }
-    data.spatiotemporal_data.temporal_cyclic = st_temporal_cyclic;
-
-    // Spatial adjacency for Type III/IV (already deep copied above)
-    data.spatiotemporal_data.adj_row_ptr = st_adj_row_ptr;
-    data.spatiotemporal_data.adj_col_idx = st_adj_col_idx;
-
-    // The GP types' NNGP structure, indexed by the interaction's own field
-    // index -- the S x T grid for spatiotemporal(), one entry per observation
-    // for spatiotemporal_gp(). nn_order / nn_order_inv arrive 1-based from R
-    // and are stored 0-based, the convention every other NNGP path uses;
-    // nn_idx stays 1-based within the ordering, with 0 for an absent
-    // neighbour. Nothing downstream can tell a half-filled structure from a
-    // filled one once a density is reading it, so it is checked here.
-    if (data.spatiotemporal_data.type == STType::SEPARABLE ||
-        data.spatiotemporal_data.type == STType::NONSEP_GP) {
-      auto& stg = data.spatiotemporal_data;
-      stg.nn = Rcpp::as<int>(st_params["nn"]);
-      stg.coords = Rcpp::as<std::vector<double>>(st_params["gp_coords"]);
-      stg.time_values = Rcpp::as<std::vector<double>>(st_params["gp_time_values"]);
-      stg.nn_idx = Rcpp::as<std::vector<int>>(st_params["nn_idx"]);
-      stg.nn_dist_space = Rcpp::as<std::vector<double>>(st_params["nn_dist_space"]);
-      stg.nn_dist_time = Rcpp::as<std::vector<double>>(st_params["nn_dist_time"]);
-      std::vector<int> stg_order = Rcpp::as<std::vector<int>>(st_params["nn_order"]);
-      std::vector<int> stg_order_inv = Rcpp::as<std::vector<int>>(st_params["nn_order_inv"]);
-      stg.nn_order.resize(stg_order.size());
-      for (size_t i = 0; i < stg_order.size(); i++) stg.nn_order[i] = stg_order[i] - 1;
-      stg.nn_order_inv.resize(stg_order_inv.size());
-      for (size_t i = 0; i < stg_order_inv.size(); i++) stg.nn_order_inv[i] = stg_order_inv[i] - 1;
-      stg.cov_space = ratiod_cov::cov_type_from_int(
-          Rcpp::as<int>(st_params["cov_space"]));
-      stg.cov_time = ratiod_cov::cov_type_from_int(
-          Rcpp::as<int>(st_params["cov_time"]));
-      const std::string st_nonsep = Rcpp::as<std::string>(st_params["nonsep_type"]);
-      if (st_nonsep == "product") {
-        stg.nonsep_type = NonsepType::PRODUCT;
-      } else if (st_nonsep == "gneiting") {
-        stg.nonsep_type = NonsepType::GNEITING;
-      } else {
-        Rcpp::stop("Unknown spatiotemporal nonsep_type: '%s'. Expected one of: "
-                   "product, gneiting", st_nonsep.c_str());
-      }
-      data.st_phi_space_prior_lower = Rcpp::as<double>(st_params["phi_space_prior_lower"]);
-      data.st_phi_space_prior_upper = Rcpp::as<double>(st_params["phi_space_prior_upper"]);
-      data.st_phi_time_prior_lower = Rcpp::as<double>(st_params["phi_time_prior_lower"]);
-      data.st_phi_time_prior_upper = Rcpp::as<double>(st_params["phi_time_prior_upper"]);
-      if (!ratiod_spatiotemporal::st_gp_structure_filled(stg)) {
-        Rcpp::stop("Spatiotemporal GP interaction: the NNGP structure does not "
-                   "describe its %d field entries (nn = %d). Every one of "
-                   "gp_coords, gp_time_values, nn_idx, nn_dist_space, "
-                   "nn_dist_time and nn_order has to be filled over the "
-                   "interaction's own index.",
-                   stg.n_params, stg.nn);
-      }
-    }
-
-    // Prior parameters
-    data.st_sigma2_prior_U = st_sigma2_prior_U;
-    data.st_sigma2_prior_alpha = st_sigma2_prior_alpha;
-    data.spatiotemporal_data.rho_prior_a = st_rho_prior_a;
-    data.spatiotemporal_data.rho_prior_b = st_rho_prior_b;
-
-    // Parameterization: centered by default. NC requires spectral decomposition
-    // (Kronecker eigenvectors of Q_s ⊗ Q_t) which is not yet implemented.
-    // Simple scaling NC (z = delta * sqrt(tau)) preserves GMRF anisotropy
-    // and makes performance worse (eps=0.003, td=11.5 vs eps=0.006, td=10).
-    data.st_parameterization = 0;  // Always centered for now
-    if (st_params.containsElementNamed("parameterization")) {
-      std::string st_param_str = Rcpp::as<std::string>(st_params["parameterization"]);
-      data.st_parameterization = (st_param_str == "centered") ? 0 : 1;
-    }
-
-    // Kronecker precision data for ST_IV (precomputed in R)
-    if (st_params.containsElementNamed("Qs_inv") &&
-        st_params.containsElementNamed("Qt_inv")) {
-      SEXP qs_sexp = st_params["Qs_inv"];
-      SEXP ls_sexp = st_params["Ls"];
-      SEXP qt_sexp = st_params["Qt_inv"];
-      SEXP lt_sexp = st_params["Lt"];
-      if (!Rf_isNull(qs_sexp) && !Rf_isNull(qt_sexp) &&
-          !Rf_isNull(ls_sexp) && !Rf_isNull(lt_sexp)) {
-        data.st_Qs_inv = Rcpp::as<std::vector<double>>(qs_sexp);
-        data.st_Ls = Rcpp::as<std::vector<double>>(ls_sexp);
-        data.st_Qt_inv = Rcpp::as<std::vector<double>>(qt_sexp);
-        data.st_Lt = Rcpp::as<std::vector<double>>(lt_sexp);
-      }
-    }
-
-    // HSGP-ST: spectral basis spatiotemporal interaction
-    data.st_is_hsgp = false;
-    if (st_params.containsElementNamed("st_is_hsgp") &&
-        Rcpp::as<bool>(st_params["st_is_hsgp"])) {
-      data.st_is_hsgp = true;
-      data.spatiotemporal_data.is_hsgp = true;
-      int st_hsgp_m = Rcpp::as<int>(st_params["hsgp_m"]);
-      double st_hsgp_c = Rcpp::as<double>(st_params["hsgp_c"]);
-      std::vector<double> st_hsgp_coords = Rcpp::as<std::vector<double>>(st_params["hsgp_coords"]);
-      bool st_hsgp_scale = true;
-      if (st_params.containsElementNamed("hsgp_scale_coords"))
-        st_hsgp_scale = Rcpp::as<bool>(st_params["hsgp_scale_coords"]);
-
-      // Setup HSGP basis (Phi matrix + eigenvalues)
-      ratiod_hsgp::setup_hsgp_2d(
-        st_hsgp_coords, data.N,
-        st_hsgp_m, st_hsgp_c, st_hsgp_scale,
-        data.st_hsgp_data);
-      data.spatiotemporal_data.hsgp_m_total = data.st_hsgp_data.m_total;
-      // Override n_spatial and n_params for HSGP-ST
-      data.spatiotemporal_data.n_spatial = data.st_hsgp_data.m_total;
-      data.spatiotemporal_data.n_params = data.st_hsgp_data.m_total * st_n_times;
-    }
-  } else {
-    data.spatiotemporal_data.type = STType::NONE;
-  }
-
-  // TVC (Temporally-Varying Coefficients) parameters
-  bool has_tvc = tvc_params.size() > 0 && Rcpp::as<bool>(tvc_params["has_tvc"]);
-  data.has_tvc = has_tvc;
-  if (has_tvc) {
-    // Extract TVC parameters (eager deep copies to prevent R GC issues)
-    int tvc_n_tvc = Rcpp::as<int>(tvc_params["n_tvc"]);
-    int tvc_n_times = Rcpp::as<int>(tvc_params["n_times"]);
-    int tvc_n_groups = Rcpp::as<int>(tvc_params["n_groups"]);
-    std::string tvc_structure_str = Rcpp::as<std::string>(tvc_params["structure"]);
-    bool tvc_shared = Rcpp::as<bool>(tvc_params["shared"]);
-    bool tvc_cyclic = Rcpp::as<bool>(tvc_params["cyclic"]);
-    std::vector<int> tvc_indices = Rcpp::as<std::vector<int>>(tvc_params["tvc_indices"]);
-    std::vector<int> tvc_time_index = Rcpp::as<std::vector<int>>(tvc_params["time_index"]);
-    std::vector<int> tvc_group_index = Rcpp::as<std::vector<int>>(tvc_params["group_index"]);
-    std::vector<double> tvc_X_tvc = Rcpp::as<std::vector<double>>(tvc_params["X_tvc"]);
-    double tvc_tau_shape = Rcpp::as<double>(tvc_params["tau_shape"]);
-    double tvc_tau_rate = Rcpp::as<double>(tvc_params["tau_rate"]);
-
-    // Populate TVC data structure
-    data.tvc_data.n_obs = data.N;
-    data.tvc_data.n_tvc = tvc_n_tvc;
-    data.tvc_data.n_times = tvc_n_times;
-    data.tvc_data.n_groups = tvc_n_groups;
-    data.tvc_data.shared = tvc_shared;
-    data.tvc_data.cyclic = tvc_cyclic;
-    data.tvc_data.tvc_indices = tvc_indices;
-    data.tvc_data.time_index = tvc_time_index;
-    data.tvc_data.group_index = tvc_group_index;
-    data.tvc_data.X_tvc = tvc_X_tvc;
-
-    // Parse TVC temporal structure. R validates "gp" out at temporal_tvc()
-    // and rejects anything but "rw1" for the Gibbs backend, so every string
-    // reaching here is rw1/rw2/ar1/iid; the RW1 fallback below is for a
-    // literally unrecognized string, not a real, unimplemented choice.
-    data.tvc_data.structure = ratiod_tvc::parse_tvc_structure(tvc_structure_str);
-
-    // Prior parameters
-    data.tvc_tau_shape = tvc_tau_shape;
-    data.tvc_tau_rate = tvc_tau_rate;
-  } else {
-    data.tvc_data.n_tvc = 0;
-    data.tvc_data.n_times = 0;
-    data.tvc_data.n_groups = 1;
-  }
-
-  // SVC (Spatially-Varying Coefficients) parameters
-  bool has_svc = svc_params.size() > 0 && Rcpp::as<bool>(svc_params["has_svc"]);
-  data.has_svc = has_svc;
-  if (has_svc) {
-    // Extract SVC parameters (eager deep copies to prevent R GC issues)
-    int svc_n_svc = Rcpp::as<int>(svc_params["n_svc"]);
-    int svc_nn = Rcpp::as<int>(svc_params["nn"]);
-    bool svc_shared = Rcpp::as<bool>(svc_params["shared"]);
-    std::string svc_cov_type_str = Rcpp::as<std::string>(svc_params["cov_type"]);
-    std::vector<double> svc_coords = Rcpp::as<std::vector<double>>(svc_params["coords"]);
-    std::vector<int> svc_indices = Rcpp::as<std::vector<int>>(svc_params["svc_indices"]);
-    std::vector<double> svc_X_svc = Rcpp::as<std::vector<double>>(svc_params["X_svc"]);
-    double svc_sigma2_scale = Rcpp::as<double>(svc_params["sigma2_prior_scale"]);
-    double svc_phi_lower = Rcpp::as<double>(svc_params["phi_prior_lower"]);
-    double svc_phi_upper = Rcpp::as<double>(svc_params["phi_prior_upper"]);
-
-    // Check if this is HSGP-based SVC
-    std::string svc_approx = "nngp";
-    if (svc_params.containsElementNamed("svc_approx")) {
-      svc_approx = Rcpp::as<std::string>(svc_params["svc_approx"]);
-    }
-    data.svc_is_hsgp = (svc_approx == "hsgp");
-
-    // Populate SVC data structure (shared fields)
-    data.svc_data.n_obs = data.N;
-    data.svc_data.n_svc = svc_n_svc;
-    data.svc_data.shared = svc_shared;
-    data.svc_data.coords = svc_coords;
-    data.svc_data.svc_indices = svc_indices;
-    data.svc_data.X_svc = svc_X_svc;
-
-    if (data.svc_is_hsgp) {
-      // HSGP-based SVC: set up basis functions
-      int hsgp_m = Rcpp::as<int>(svc_params["hsgp_m"]);
-      double hsgp_c = Rcpp::as<double>(svc_params["hsgp_c"]);
-      data.svc_hsgp_m_per_dim = hsgp_m;
-      data.svc_hsgp_boundary_factor = hsgp_c;
-
-      // Set up HSGP basis (shared across all SVC terms)
-      ratiod_hsgp::setup_hsgp_2d(svc_coords, data.N, hsgp_m, hsgp_c,
-                                  svc_shared, data.svc_hsgp_data);
-
-      // No NNGP data needed
-      data.svc_data.nn = 0;
-    } else {
-      // NNGP-based SVC: set up neighbor structure
-      data.svc_data.nn = svc_nn;
-      data.svc_data.nn_idx = Rcpp::as<std::vector<int>>(svc_params["nn_idx"]);
-      data.svc_data.nn_dist = Rcpp::as<std::vector<double>>(svc_params["nn_dist"]);
-      data.svc_data.nn_order = Rcpp::as<std::vector<int>>(svc_params["nn_order"]);
-      data.svc_data.nn_order_inv = Rcpp::as<std::vector<int>>(svc_params["nn_order_inv"]);
-
-      // Parse SVC covariance type
-      if (svc_cov_type_str == "exponential") {
-        data.svc_data.cov_type = ratiod_svc::CovType::EXPONENTIAL;
-      } else if (svc_cov_type_str == "matern") {
-        data.svc_data.cov_type = ratiod_svc::CovType::MATERN;
-      } else if (svc_cov_type_str == "gaussian") {
-        data.svc_data.cov_type = ratiod_svc::CovType::GAUSSIAN;
-      } else if (svc_cov_type_str == "spherical") {
-        data.svc_data.cov_type = ratiod_svc::CovType::SPHERICAL;
-      } else {
-        Rcpp::stop("Unknown SVC covariance type '%s'. Expected one of "
-                   "exponential, matern, gaussian, spherical.",
-                   svc_cov_type_str);
-      }
-    }
-
-    // Prior parameters
-    data.svc_sigma2_prior_scale = svc_sigma2_scale;
-    data.svc_phi_prior_lower = svc_phi_lower;
-    data.svc_phi_prior_upper = svc_phi_upper;
-
-    // Pre-allocate SVC workspace buffers
-    data.svc_data.init_workspace();
-  } else {
-    data.svc_data.n_svc = 0;
-    data.svc_data.n_obs = data.N;
-    data.svc_data.nn = 0;
-    data.svc_is_hsgp = false;
-  }
+  apply_latent_params(data, latent_params);
+  apply_st_params(data, st_params);
+  apply_tvc_params(data, tvc_params);
+  apply_svc_params(data, svc_params);
 
   // Initialize parameters
   std::vector<double> q0(q_init.begin(), q_init.end());
@@ -14407,7 +14395,11 @@ Rcpp::List cpp_hmc_fit_gp(
     Rcpp::List ms_gp_params,
     Rcpp::List ms_temporal_params,
     Rcpp::List rsr_params,
-    Rcpp::List temporal_params,  // Regular temporal (RW1/RW2/AR1) — was missing, caused silent drop
+    Rcpp::List temporal_params,  // Regular temporal (RW1/RW2/AR1)
+    Rcpp::List latent_params,
+    Rcpp::List st_params,
+    Rcpp::List tvc_params,
+    Rcpp::List svc_params,
     double sigma_beta,
     double sigma_re_scale,
     double phi_prior_shape,
@@ -14856,20 +14848,14 @@ Rcpp::List cpp_hmc_fit_gp(
   data.tau_spatial_shape = 1.0;
   data.tau_spatial_rate = 0.01;
 
-  // SVC not used in GP interface
-  data.has_svc = false;
-
-  // Latent factors not used in GP interface
-  data.has_latent = false;
-  data.latent_n_factors = 0;
-  data.latent_shared = false;
-  data.latent_scale = false;
-  data.latent_constraint = 0;
-  data.latent_sigma_prior_rate = 1.0;
-
-  // Spatiotemporal not used in GP interface
-  data.has_spatiotemporal = false;
-  data.spatiotemporal_data.type = STType::NONE;
+  // The blocks a GP spatial main effect pairs with. compute_param_layout()
+  // allocates each of them off these flags and the R backend lays the same
+  // blocks over the returned draws, so a block declared inert here is one the
+  // sampler never writes and R still names.
+  apply_latent_params(data, latent_params);
+  apply_st_params(data, st_params);
+  apply_tvc_params(data, tvc_params);
+  apply_svc_params(data, svc_params);
 
   // Parallelization
   data.n_threads = n_threads;
@@ -14975,6 +14961,10 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
   Rcpp::List ms_temporal_params = Rcpp::as<Rcpp::List>(args["ms_temporal_params"]);
   Rcpp::List rsr_params = Rcpp::as<Rcpp::List>(args["rsr_params"]);
   Rcpp::List temporal_params = Rcpp::as<Rcpp::List>(args["temporal_params"]);
+  Rcpp::List latent_params = Rcpp::as<Rcpp::List>(args["latent_params"]);
+  Rcpp::List st_params = Rcpp::as<Rcpp::List>(args["st_params"]);
+  Rcpp::List tvc_params = Rcpp::as<Rcpp::List>(args["tvc_params"]);
+  Rcpp::List svc_params = Rcpp::as<Rcpp::List>(args["svc_params"]);
   double sigma_beta = Rcpp::as<double>(args["sigma_beta"]);
   double sigma_re_scale = Rcpp::as<double>(args["sigma_re_scale"]);
   double phi_prior_shape = Rcpp::as<double>(args["phi_prior_shape"]);
@@ -15011,7 +15001,7 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
     q_init, y_num, y_denom, y_denom_cont,
     X_num, X_denom, re_group, n_re_groups,
     model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params,
-    temporal_params,
+    temporal_params, latent_params, st_params, tvc_params, svc_params,
     sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate,
     zi_type_str, X_zi, zi_prior_sd,
     n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta,
