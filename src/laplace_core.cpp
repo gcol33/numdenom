@@ -6,6 +6,7 @@
 #include "linalg_fast.h"
 #include "ar1_shared.h"
 #include "omp_thread_scope.h"
+#include <tulpa/soft_sum_to_zero.h>
 #include <Rcpp.h>
 #include <cmath>
 #include <algorithm>
@@ -2049,6 +2050,35 @@ ratiod::LaplaceResult laplace_mode_gp(
 // Multiscale Temporal Laplace
 // ---------------------------------------------------------------------
 
+// Soft sum-to-zero pin for an intrinsic field block. The constant direction of
+// an RW1 or RW2 precision carries no prior mass and is jointly unidentified
+// with the intercept, which leaves the Newton system singular along it. The
+// penalty -0.5 * lambda * (sum phi)^2 has Hessian lambda * 11', supported
+// entirely on that direction; lambda is the package-wide constant from
+// tulpa/soft_sum_to_zero.h, the same one the HMC temporal blocks read.
+inline void add_sum_to_zero_pin_laplace(
+    Rcpp::NumericVector& grad,
+    Rcpp::NumericMatrix& H,
+    const Rcpp::NumericVector& x,
+    int start_idx,
+    int n
+) {
+  if (n < 1) return;
+
+  const double lambda = tulpa::s2z_precision(n);
+
+  double sum = 0.0;
+  for (int t = 0; t < n; t++) sum += x[start_idx + t];
+  const double push = lambda * sum;
+
+  for (int t = 0; t < n; t++) {
+    grad[start_idx + t] -= push;
+    for (int k = 0; k < n; k++) {
+      H(start_idx + t, start_idx + k) += lambda;
+    }
+  }
+}
+
 inline void add_rw1_precision_laplace(
     Rcpp::NumericVector& grad,
     Rcpp::NumericMatrix& H,
@@ -2083,6 +2113,8 @@ inline void add_rw1_precision_laplace(
     H(idx_first, idx_last) -= tau;
     H(idx_last, idx_first) -= tau;
   }
+
+  add_sum_to_zero_pin_laplace(grad, H, x, start_idx, n_times);
 }
 
 inline void add_rw2_precision_laplace(
@@ -2114,6 +2146,10 @@ inline void add_rw2_precision_laplace(
     H(idx - 1, idx + 1) += tau;
     H(idx + 1, idx - 1) += tau;
   }
+
+  // Only the constant direction is pinned. A non-cyclic RW2 also annihilates a
+  // linear ramp, which a temporal covariate carries rather than this pin.
+  add_sum_to_zero_pin_laplace(grad, H, x, start_idx, n_times);
 }
 
 inline void add_ar1_precision_laplace(
@@ -2198,33 +2234,38 @@ ratiod::LaplaceResult laplace_mode_multiscale_temporal(
 
   ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
-  for (int iter = 0; iter < max_iter; iter++) {
+  // Gradient and negative Hessian of the log posterior at x_cur. Runs once per
+  // Newton step, and once more at the final mode so the precision returned to
+  // the sampler belongs to that mode.
+  auto assemble = [&](const Rcpp::NumericVector& x_cur,
+                      Rcpp::NumericVector& grad,
+                      Rcpp::NumericMatrix& H) {
     Rcpp::NumericVector eta(N);
     for (int i = 0; i < N; i++) {
       eta[i] = 0.0;
       for (int j = 0; j < p; j++) {
-        eta[i] += X(i, j) * x[j];
+        eta[i] += X(i, j) * x_cur[j];
       }
       if (n_re_groups > 0) {
         int g = (int)re_idx[i] - 1;
         if (g >= 0 && g < n_re_groups) {
-          eta[i] += x[p + g];
+          eta[i] += x_cur[p + g];
         }
       }
 
       int t = time_idx[i] - 1;
       if (t >= 0 && t < n_times) {
         if (n_trend > 0 && t < n_trend) {
-          eta[i] += x[trend_start + t];
+          eta[i] += x_cur[trend_start + t];
         }
         if (n_seasonal > 0) {
           int s = t % seasonal_period;
           if (s < n_seasonal) {
-            eta[i] += x[seasonal_start + s];
+            eta[i] += x_cur[seasonal_start + s];
           }
         }
         if (n_short > 0 && t < n_short) {
-          eta[i] += x[short_start + t];
+          eta[i] += x_cur[short_start + t];
         }
       }
     }
@@ -2289,35 +2330,39 @@ ratiod::LaplaceResult laplace_mode_multiscale_temporal(
     }
 
     for (int g = 0; g < n_re_groups; g++) {
-      grad[p + g] -= tau_re * x[p + g];
+      grad[p + g] -= tau_re * x_cur[p + g];
       H(p + g, p + g) += tau_re;
     }
 
     if (trend_type == 1) {
-      add_rw1_precision_laplace(grad, H, x, trend_start, n_trend, tau_trend, false);
+      add_rw1_precision_laplace(grad, H, x_cur, trend_start, n_trend, tau_trend, false);
     } else if (trend_type == 2) {
-      add_rw2_precision_laplace(grad, H, x, trend_start, n_trend, tau_trend, false);
+      add_rw2_precision_laplace(grad, H, x_cur, trend_start, n_trend, tau_trend, false);
     }
 
     if (n_seasonal > 0) {
-      add_rw1_precision_laplace(grad, H, x, seasonal_start, n_seasonal, tau_seasonal, true);
+      add_rw1_precision_laplace(grad, H, x_cur, seasonal_start, n_seasonal, tau_seasonal, true);
     }
 
     if (short_type == 1) {
-      add_ar1_precision_laplace(grad, H, x, short_start, n_short, tau_short, rho_short);
+      add_ar1_precision_laplace(grad, H, x_cur, short_start, n_short, tau_short, rho_short);
     } else if (short_type == 2) {
       for (int t = 0; t < n_short; t++) {
         int idx = short_start + t;
-        grad[idx] -= tau_short * x[idx];
+        grad[idx] -= tau_short * x_cur[idx];
         H(idx, idx) += tau_short;
       }
     }
 
     double tau_beta = 1e-4;
     for (int j = 0; j < p; j++) {
-      grad[j] -= tau_beta * x[j];
+      grad[j] -= tau_beta * x_cur[j];
       H(j, j) += tau_beta;
     }
+  };
+
+  for (int iter = 0; iter < max_iter; iter++) {
+    assemble(x, grad, H);
 
     Rcpp::NumericMatrix L(n_x, n_x);
     for (int j = 0; j < n_x; j++) {
@@ -2381,6 +2426,11 @@ ratiod::LaplaceResult laplace_mode_multiscale_temporal(
   }
 
   result.mode = x;
+
+  // Centring the trend and seasonal blocks moves eta, so the precision the
+  // samples are drawn from is formed after it.
+  assemble(x, grad, H);
+  result.hessian = H;
 
   double log_det = 0.0;
   Rcpp::NumericMatrix L_final(n_x, n_x);
@@ -3238,6 +3288,7 @@ Rcpp::List cpp_laplace_fit_multiscale_temporal(
 
   return Rcpp::List::create(
     Rcpp::Named("mode") = result.mode,
+    Rcpp::Named("hessian") = result.hessian,
     Rcpp::Named("log_det_Q") = result.log_det_Q,
     Rcpp::Named("log_marginal") = result.log_marginal,
     Rcpp::Named("n_iter") = result.n_iter,

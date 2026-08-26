@@ -89,6 +89,19 @@ Point estimates usually good, uncertainty often underestimated.
 \item \code{"vi"} (Tier 3): Variational Inference
 }
 
+\strong{Structures each backend fits.} \code{"hmc"} fits every structure. The rest
+carry a subset, and a model naming a structure its backend cannot fit is
+refused with that structure named:
+\itemize{
+\item \code{"ess"}, \code{"sghmc"}, \code{"sgld"}, \code{"vi"}: \code{spatial}, \code{temporal}, \code{zi}
+\item \code{"gibbs"}: \code{spatial}, and \code{temporal} as \code{\link[=temporal_tvc]{temporal_tvc()}}
+\item \code{"pg"}, \code{"laplace"}: \code{spatial}, or \code{temporal} as
+\code{\link[=temporal_multiscale]{temporal_multiscale()}}, one of the two per model
+}
+
+\code{"auto"} selects a backend that fits the whole model, so it reaches
+\code{"laplace"} or \code{"gibbs"} only for models those carry.
+
 See \code{\link[=inference_mode_info]{inference_mode_info()}} for details on the tier system.}
 
 \item{control}{Named list of perf / numerical / tuning knobs. Statistical

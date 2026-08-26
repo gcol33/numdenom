@@ -4,20 +4,23 @@
 \alias{auto_select_mode}
 \title{Auto-select mode (Tier 1 or Tier 2 only)}
 \usage{
-auto_select_mode(
-  family,
-  n_obs,
-  has_spatial,
-  has_temporal,
-  has_latent,
-  temporal = NULL,
-  spatial_type = NULL
-)
+auto_select_mode(family, n_obs, structures = list())
+}
+\arguments{
+\item{family}{Model family object}
+
+\item{n_obs}{Number of observations}
+
+\item{structures}{Named list of structure specifications, \code{NULL} where the
+structure is absent. See \code{MODEL_STRUCTURES}.}
 }
 \description{
 Implements the "auto" mode selection. Chooses the most reliable method
 that is expected to finish for the given model.
 
 \strong{Critical rule}: Auto never selects Tier 3 (Optimized).
+
+A backend is a candidate only when it fits every structure in the model.
+Structure a backend cannot carry would otherwise be dropped from the fit.
 }
 \keyword{internal}

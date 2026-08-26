@@ -68,20 +68,11 @@ fit_ess <- function(formula,
     seed <- sample.int(.Machine$integer.max, 1)
   }
 
-  # Check for unsupported features
-  if (!is.null(spatiotemporal)) {
-    warning("ESS backend does not yet support spatiotemporal interactions. Using HMC instead.")
-    return(fit_hmc(formula, data, family, spatial, temporal, spatiotemporal,
-                   zi, latent, priors, iter = iter, warmup = warmup,
-                   chains = 1, seed = seed, verbose = verbose))
-  }
-
-  if (!is.null(latent)) {
-    warning("ESS backend does not yet support latent factors. Using HMC instead.")
-    return(fit_hmc(formula, data, family, spatial, temporal, spatiotemporal,
-                   zi, latent, priors, iter = iter, warmup = warmup,
-                   chains = 1, seed = seed, verbose = verbose))
-  }
+  assert_backend_fits_structures(
+    "ess",
+    list(spatial = spatial, temporal = temporal,
+         spatiotemporal = spatiotemporal, zi = zi, latent = latent)
+  )
 
   # Get model type
   model_type <- get_hmc_model_type(family)

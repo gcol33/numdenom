@@ -4,29 +4,18 @@
 \alias{suggest_mode}
 \title{Suggest alternative modes based on data characteristics}
 \usage{
-suggest_mode(
-  n_obs,
-  family,
-  spatial,
-  temporal = NULL,
-  current_mode,
-  current_backend
-)
+suggest_mode(n_obs, structures, current_mode)
 }
 \arguments{
 \item{n_obs}{Number of observations}
 
-\item{family}{tulpaRatio family object}
-
-\item{spatial}{Spatial specification (or NULL)}
-
-\item{temporal}{Temporal specification (or NULL)}
+\item{structures}{Named list of structure specifications, \code{NULL} where the
+structure is absent}
 
 \item{current_mode}{Currently selected mode}
-
-\item{current_backend}{Currently selected backend}
 }
 \description{
-Suggest alternative modes based on data characteristics
+Only backends that fit every structure in the model are suggested, so a
+suggestion taken up gives the same model under a faster backend.
 }
 \keyword{internal}

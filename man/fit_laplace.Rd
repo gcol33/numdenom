@@ -9,6 +9,7 @@ fit_laplace(
   data,
   family,
   spatial = NULL,
+  temporal = NULL,
   priors = NULL,
   n_samples = 1000,
   cores = NULL,
@@ -23,6 +24,9 @@ fit_laplace(
 \item{family}{Model family}
 
 \item{spatial}{Optional spatial structure}
+
+\item{temporal}{Optional multi-scale temporal structure. See
+\code{BACKEND_STRUCTURE_SUPPORT} for what this backend carries.}
 
 \item{priors}{Prior specification}
 

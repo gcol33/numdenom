@@ -78,6 +78,12 @@ fit_vi <- function(formula,
     seed <- sample.int(.Machine$integer.max, 1)
   }
 
+  assert_backend_fits_structures(
+    "vi",
+    list(spatial = spatial, temporal = temporal,
+         spatiotemporal = spatiotemporal, zi = zi, latent = latent)
+  )
+
   # Check for unsupported features
   if (!is.null(spatial) && !spatial$type %in% c("none", "icar", "bym2")) {
     warning("VI backend has limited spatial support. GP-based spatial effects not yet implemented.")

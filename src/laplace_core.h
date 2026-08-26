@@ -52,6 +52,8 @@ struct LaplaceResult {
   double log_marginal;          // Log p(y | theta) approximation
   int n_iter;                   // Newton iterations used
   bool converged;               // Convergence flag
+  Rcpp::NumericMatrix hessian;  // Posterior precision at the mode, 0x0 when
+                                // the caller builds it separately
 };
 
 // Find the mode of p(x | y, theta) using Newton-Raphson

@@ -30,6 +30,8 @@ NULL
 #' @param data Data frame
 #' @param family Model family
 #' @param spatial Optional spatial structure
+#' @param temporal Optional multi-scale temporal structure. See
+#'   `BACKEND_STRUCTURE_SUPPORT` for what this backend carries.
 #' @param priors Prior specification
 #' @param n_samples Number of posterior samples to draw
 #' @param cores Number of cores for parallel computation
@@ -41,10 +43,16 @@ fit_laplace <- function(formula,
                         data,
                         family,
                         spatial = NULL,
+                        temporal = NULL,
                         priors = NULL,
                         n_samples = 1000,
                         cores = NULL,
                         verbose = TRUE) {
+
+  assert_backend_fits_structures(
+    "laplace",
+    list(spatial = spatial, temporal = temporal)
+  )
 
   # Set cores
   if (is.null(cores)) {
@@ -98,6 +106,26 @@ fit_laplace <- function(formula,
       phi = phi,
       sigma_re = sigma_re,
       tau_spatial = tau_spatial,
+      n_samples = n_samples,
+      cores = cores,
+      verbose = verbose
+    ))
+  }
+
+  if (!is.null(temporal)) {
+    # Dispatch to multi-scale temporal Laplace
+    return(fit_laplace_temporal(
+      formula = formula,
+      data = data,
+      family = family,
+      family_type = family_type,
+      temporal = temporal,
+      y = y,
+      n_trials = n_trials,
+      X = X,
+      re_info = re_info,
+      phi = phi,
+      sigma_re = sigma_re,
       n_samples = n_samples,
       cores = cores,
       verbose = verbose
@@ -1552,7 +1580,7 @@ convert_laplace_temporal_to_ratiod_fit <- function(samples, result, formula, dat
   if (temporal$trend != "none") {
     trend_samples <- samples[, (pos + 1):(pos + n_times), drop = FALSE]
     temporal_draws$trend <- trend_samples
-    for (t in seq_len(min(5, n_times))) {
+    for (t in seq_len(n_times)) {
       draws_list[[paste0("trend[", t, "]")]] <- trend_samples[, t]
     }
     pos <- pos + n_times
@@ -1561,7 +1589,7 @@ convert_laplace_temporal_to_ratiod_fit <- function(samples, result, formula, dat
   if (seasonal_period > 0) {
     seasonal_samples <- samples[, (pos + 1):(pos + seasonal_period), drop = FALSE]
     temporal_draws$seasonal <- seasonal_samples
-    for (s in seq_len(min(5, seasonal_period))) {
+    for (s in seq_len(seasonal_period)) {
       draws_list[[paste0("seasonal[", s, "]")]] <- seasonal_samples[, s]
     }
     pos <- pos + seasonal_period
@@ -1570,7 +1598,7 @@ convert_laplace_temporal_to_ratiod_fit <- function(samples, result, formula, dat
   if (temporal$short_term != "none") {
     short_samples <- samples[, (pos + 1):(pos + n_times), drop = FALSE]
     temporal_draws$short_term <- short_samples
-    for (t in seq_len(min(5, n_times))) {
+    for (t in seq_len(n_times)) {
       draws_list[[paste0("short_term[", t, "]")]] <- short_samples[, t]
     }
     pos <- pos + n_times

@@ -62,6 +62,17 @@
 #'   - `"laplace"` (Tier 2): Laplace approximation
 #'   - `"vi"` (Tier 3): Variational Inference
 #'
+#'   **Structures each backend fits.** `"hmc"` fits every structure. The rest
+#'   carry a subset, and a model naming a structure its backend cannot fit is
+#'   refused with that structure named:
+#'   - `"ess"`, `"sghmc"`, `"sgld"`, `"vi"`: `spatial`, `temporal`, `zi`
+#'   - `"gibbs"`: `spatial`, and `temporal` as [temporal_tvc()]
+#'   - `"pg"`, `"laplace"`: `spatial`, or `temporal` as
+#'     [temporal_multiscale()], one of the two per model
+#'
+#'   `"auto"` selects a backend that fits the whole model, so it reaches
+#'   `"laplace"` or `"gibbs"` only for models those carry.
+#'
 #'   See [inference_mode_info()] for details on the tier system.
 #' @param control Named list of perf / numerical / tuning knobs. Statistical
 #'   arguments stay in the signature above; everything that tunes *how* the
@@ -298,16 +309,22 @@ tratio <- function(formula,
   # Mode and Backend Selection
   # ===========================================================================
 
+  # Everything the model asks a backend to carry, read by mode selection and
+  # by the capability check below.
+  structures <- list(
+    spatial = spatial,
+    temporal = temporal,
+    spatiotemporal = spatiotemporal,
+    zi = zi,
+    latent = latent
+  )
+
   # Select inference mode and backend
   mode_selection <- select_inference_mode(
     mode = mode,
     family = family,
     n_obs = nrow(data),
-    has_spatial = !is.null(spatial),
-    has_temporal = !is.null(temporal),
-    has_latent = !is.null(latent),
-    spatial_type = if (!is.null(spatial)) spatial$type else NULL,
-    temporal = temporal
+    structures = structures
   )
 
   # Extract selected backend
@@ -324,6 +341,10 @@ tratio <- function(formula,
       message(sprintf("  Reason: %s", mode_selection$reason))
     }
   }
+
+  # Refuse a model the selected backend would fit without part of its
+  # structure. `auto` never reaches this, having filtered on the same table.
+  assert_backend_fits_structures(selected_backend, structures)
 
   # PG backend only works for binomial family (currently experimental)
   if (selected_backend == "pg") {
@@ -358,11 +379,8 @@ tratio <- function(formula,
   if (mode == "auto") {
     suggest_mode(
       n_obs = nrow(data),
-      family = family,
-      spatial = spatial,
-      temporal = temporal,
-      current_mode = selected_mode,
-      current_backend = selected_backend
+      structures = structures,
+      current_mode = selected_mode
     )
   }
 
@@ -451,6 +469,7 @@ tratio <- function(formula,
       data = data,
       family = family,
       spatial = spatial,
+      temporal = temporal,
       iter = iter,
       warmup = warmup,
       chains = chains,
@@ -487,6 +506,7 @@ tratio <- function(formula,
       data = data,
       family = family,
       spatial = spatial,
+      temporal = temporal,
       priors = priors,
       n_samples = iter - warmup,
       cores = cores,
@@ -633,14 +653,6 @@ tratio <- function(formula,
       message("  Note: SGHMC uses minibatch gradients for scalability")
     }
 
-    # Note: SGHMC doesn't support spatiotemporal/latent yet
-    if (!is.null(spatiotemporal)) {
-      warning("SGHMC does not currently support spatiotemporal models. Ignoring.", call. = FALSE)
-    }
-    if (!is.null(latent)) {
-      warning("SGHMC does not currently support latent factors. Ignoring.", call. = FALSE)
-    }
-
     result <- do.call(fit_sghmc, c(list(
       formula = formula_spec,
       data = data,
@@ -680,14 +692,6 @@ tratio <- function(formula,
       message("  Note: SGLD uses Langevin dynamics with minibatch gradients")
     }
 
-    # Note: SGLD doesn't support spatiotemporal/latent yet
-    if (!is.null(spatiotemporal)) {
-      warning("SGLD does not currently support spatiotemporal models. Ignoring.", call. = FALSE)
-    }
-    if (!is.null(latent)) {
-      warning("SGLD does not currently support latent factors. Ignoring.", call. = FALSE)
-    }
-
     result <- do.call(fit_sgld, c(list(
       formula = formula_spec,
       data = data,
@@ -724,57 +728,57 @@ tratio <- function(formula,
 
 #' Suggest alternative modes based on data characteristics
 #'
+#' @description
+#' Only backends that fit every structure in the model are suggested, so a
+#' suggestion taken up gives the same model under a faster backend.
+#'
 #' @param n_obs Number of observations
-#' @param family tulpaRatio family object
-#' @param spatial Spatial specification (or NULL)
-#' @param temporal Temporal specification (or NULL)
+#' @param structures Named list of structure specifications, `NULL` where the
+#'   structure is absent
 #' @param current_mode Currently selected mode
-#' @param current_backend Currently selected backend
 #' @keywords internal
-suggest_mode <- function(n_obs, family, spatial, temporal = NULL,
-                         current_mode, current_backend) {
+suggest_mode <- function(n_obs, structures, current_mode) {
 
   # Thresholds for suggestions
   LARGE_DATA_THRESHOLD <- 10000
   VERY_LARGE_DATA_THRESHOLD <- 50000
 
-  suggestions <- character(0)
-
-  # Large dataset warnings for Exact mode
-  if (n_obs >= VERY_LARGE_DATA_THRESHOLD && current_mode == "exact") {
-    if (!is.null(spatial)) {
-      suggestions <- c(suggestions,
-        sprintf("Large spatial dataset (%s observations).", format(n_obs, big.mark = ",")),
-        "Consider mode = 'structured' for faster inference (Tier 2).",
-        "Or mode = 'sghmc' for stochastic gradient MCMC (Tier 1, exact)."
-      )
-    } else {
-      suggestions <- c(suggestions,
-        sprintf("Large dataset (%s observations).", format(n_obs, big.mark = ",")),
-        "Exact inference (Tier 1) may be slow. Consider:",
-        "  - mode = 'sghmc' or 'sgld' for stochastic gradient MCMC (Tier 1)",
-        "  - mode = 'structured' for Tier 2 (Laplace approximation)",
-        "  - Reducing data via stratified sampling"
-      )
-    }
-  } else if (n_obs >= LARGE_DATA_THRESHOLD && current_mode == "exact") {
-    suggestions <- c(suggestions,
-      sprintf("Moderately large dataset (%s observations).", format(n_obs, big.mark = ",")),
-      "If fitting is slow, consider:",
-      "  - mode = 'sghmc' for minibatch MCMC (Tier 1, scales better)",
-      "  - Fewer iterations (iter = 1000 for initial exploration)",
-      "  - mode = 'structured' for faster Tier 2 inference"
-    )
+  if (current_mode != "exact" || n_obs < LARGE_DATA_THRESHOLD) {
+    return(invisible(NULL))
   }
+
+  alternatives <- c(
+    sghmc = "  - mode = 'sghmc' for minibatch MCMC (Tier 1, scales better)",
+    sgld = "  - mode = 'sgld' for stochastic gradient Langevin dynamics (Tier 1)",
+    laplace = "  - mode = 'structured' for Tier 2 (Laplace approximation)"
+  )
+  alternatives <- alternatives[vapply(
+    names(alternatives), backend_fits_structures, logical(1),
+    structures = structures
+  )]
+
+  if (n_obs >= VERY_LARGE_DATA_THRESHOLD) {
+    header <- c(
+      sprintf("Large dataset (%s observations).", format(n_obs, big.mark = ",")),
+      "Exact inference (Tier 1) may be slow. Consider:"
+    )
+    tail_lines <- "  - Reducing data via stratified sampling"
+  } else {
+    header <- c(
+      sprintf("Moderately large dataset (%s observations).", format(n_obs, big.mark = ",")),
+      "If fitting is slow, consider:"
+    )
+    tail_lines <- "  - Fewer iterations (iter = 1000 for initial exploration)"
+  }
+
+  suggestions <- c(header, unname(alternatives), tail_lines)
 
   # Print suggestions as a message (not warning - it's informational)
-  if (length(suggestions) > 0) {
-    message("\n", cli_rule("Mode suggestion"))
-    for (s in suggestions) {
-      message("  ", s)
-    }
-    message(cli_rule(), "\n")
+  message("\n", cli_rule("Mode suggestion"))
+  for (s in suggestions) {
+    message("  ", s)
   }
+  message(cli_rule(), "\n")
 
   invisible(NULL)
 }

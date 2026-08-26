@@ -69,6 +69,11 @@ fit_pg_binomial <- function(formula,
                             prior_tau_rate = 0.01,
                             verbose = TRUE) {
 
+  assert_backend_fits_structures(
+    "pg",
+    list(spatial = spatial, temporal = temporal)
+  )
+
   # Set cores for within-chain parallelism
   if (is.null(cores)) {
     cores <- cpp_pg_get_max_threads()

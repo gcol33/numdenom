@@ -4,16 +4,7 @@
 \alias{select_inference_mode}
 \title{Select inference mode and backend}
 \usage{
-select_inference_mode(
-  mode,
-  family,
-  n_obs,
-  has_spatial = FALSE,
-  has_temporal = FALSE,
-  has_latent = FALSE,
-  spatial_type = NULL,
-  temporal = NULL
-)
+select_inference_mode(mode, family, n_obs, structures = list())
 }
 \arguments{
 \item{mode}{User-specified mode or backend name}
@@ -22,11 +13,8 @@ select_inference_mode(
 
 \item{n_obs}{Number of observations}
 
-\item{has_spatial}{Whether model has spatial effects}
-
-\item{has_temporal}{Whether model has temporal effects}
-
-\item{has_latent}{Whether model has latent factors}
+\item{structures}{Named list of structure specifications, \code{NULL} where the
+structure is absent. See \code{MODEL_STRUCTURES}.}
 }
 \value{
 List with:

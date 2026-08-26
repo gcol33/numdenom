@@ -78,6 +78,11 @@ fit_gibbs <- function(formula,
                  spatial$type), call. = FALSE)
   }
 
+  assert_backend_fits_structures(
+    "gibbs",
+    list(spatial = spatial, temporal = temporal)
+  )
+
   if (is.null(seed)) {
     seed <- sample.int(.Machine$integer.max, 1)
   }

@@ -134,6 +134,165 @@ get_mode_backends <- function(mode) {
 
 
 # ==============================================================================
+# Backend Capabilities
+# ==============================================================================
+
+#' Model structures a fit can carry
+#'
+#' @description
+#' The `tratio()` arguments that put structure into a model, in the order
+#' `unsupported_structures()` reports them.
+#'
+#' @keywords internal
+MODEL_STRUCTURES <- c("spatial", "temporal", "spatiotemporal", "zi", "latent")
+
+
+#' Temporal support rule for the Gibbs sampler
+#'
+#' @param temporal The temporal specification
+#' @param structures Named list of all structure specifications, for rules that
+#'   depend on what else is in the model
+#' @return `TRUE`, or a phrase naming the restriction
+#' @keywords internal
+tvc_temporal_support <- function(temporal, structures) {
+  if (inherits(temporal, "ratiod_tvc")) return(TRUE)
+  paste0("only time-varying coefficients are implemented; ",
+         "build the term with temporal_tvc()")
+}
+
+
+#' Temporal support rule for the Laplace and Polya-Gamma samplers
+#'
+#' @description
+#' Both hold one multi-scale temporal fit, and both dispatch on spatial
+#' structure ahead of temporal, so the temporal fit is out of reach once a
+#' spatial field is in the model.
+#'
+#' @inheritParams tvc_temporal_support
+#' @return `TRUE`, or a phrase naming the restriction
+#' @keywords internal
+multiscale_temporal_support <- function(temporal, structures) {
+  if (!inherits(temporal, "ratiod_temporal_multiscale")) {
+    return(paste0("only multi-scale temporal is implemented; ",
+                  "build the term with temporal_multiscale()"))
+  }
+  if (!is.null(structures$spatial)) {
+    return("a temporal field and a spatial field cannot share one fit")
+  }
+  TRUE
+}
+
+
+#' Which structures each backend can fit
+#'
+#' @description
+#' One entry per backend, one field per name in `MODEL_STRUCTURES`. A field is
+#' `TRUE` (any specification of that structure), `FALSE` (none), or a rule
+#' function of `(structure, structures)` returning `TRUE` or a phrase naming
+#' the restriction.
+#'
+#' `auto_select_mode()` and the check `tratio()` runs before dispatch both read
+#' this table, so a backend gains or loses a structure in one place.
+#'
+#' @keywords internal
+BACKEND_STRUCTURE_SUPPORT <- list(
+  hmc = list(
+    spatial = TRUE, temporal = TRUE, spatiotemporal = TRUE,
+    zi = TRUE, latent = TRUE
+  ),
+  ess = list(
+    spatial = TRUE, temporal = TRUE, spatiotemporal = FALSE,
+    zi = TRUE, latent = FALSE
+  ),
+  gibbs = list(
+    spatial = TRUE, temporal = tvc_temporal_support, spatiotemporal = FALSE,
+    zi = FALSE, latent = FALSE
+  ),
+  pg = list(
+    spatial = TRUE, temporal = multiscale_temporal_support,
+    spatiotemporal = FALSE, zi = FALSE, latent = FALSE
+  ),
+  sghmc = list(
+    spatial = TRUE, temporal = TRUE, spatiotemporal = FALSE,
+    zi = TRUE, latent = FALSE
+  ),
+  sgld = list(
+    spatial = TRUE, temporal = TRUE, spatiotemporal = FALSE,
+    zi = TRUE, latent = FALSE
+  ),
+  laplace = list(
+    spatial = TRUE, temporal = multiscale_temporal_support,
+    spatiotemporal = FALSE, zi = FALSE, latent = FALSE
+  ),
+  vi = list(
+    spatial = TRUE, temporal = TRUE, spatiotemporal = FALSE,
+    zi = TRUE, latent = FALSE
+  )
+)
+
+
+#' Structures a backend cannot fit
+#'
+#' @param backend Character string naming the backend
+#' @param structures Named list of structure specifications, `NULL` where the
+#'   structure is absent
+#' @return A named character vector holding one reason per structure the
+#'   backend cannot carry, empty when the backend fits the whole model
+#' @keywords internal
+unsupported_structures <- function(backend, structures) {
+  support <- BACKEND_STRUCTURE_SUPPORT[[backend]]
+  if (is.null(support)) {
+    stop(sprintf("Unknown backend: '%s'", backend), call. = FALSE)
+  }
+
+  reasons <- character(0)
+  for (nm in MODEL_STRUCTURES) {
+    if (is.null(structures[[nm]])) next
+    rule <- support[[nm]]
+    verdict <- if (is.function(rule)) rule(structures[[nm]], structures) else rule
+    if (isTRUE(verdict)) next
+    reasons[[nm]] <- if (is.character(verdict)) verdict else "not implemented"
+  }
+
+  reasons
+}
+
+
+#' Whether a backend can fit every structure in a model
+#'
+#' @inheritParams unsupported_structures
+#' @return `TRUE` or `FALSE`
+#' @keywords internal
+backend_fits_structures <- function(backend, structures) {
+  length(unsupported_structures(backend, structures)) == 0L
+}
+
+
+#' Stop unless the backend can fit every structure in the model
+#'
+#' @description
+#' A backend that cannot carry a structure fits the model without it and
+#' reports success, so the model is refused here and the structure named.
+#'
+#' @inheritParams unsupported_structures
+#' @return `invisible(TRUE)`, or an error naming each structure
+#' @keywords internal
+assert_backend_fits_structures <- function(backend, structures) {
+  reasons <- unsupported_structures(backend, structures)
+  if (length(reasons) == 0L) return(invisible(TRUE))
+
+  named <- sprintf("`%s`", names(reasons))
+
+  stop(sprintf(
+    "The %s backend cannot fit this model:\n%s\nUse `mode = \"hmc\"`, which fits every structure, or drop %s.",
+    backend,
+    paste(sprintf("  - %s: %s", named, reasons), collapse = "\n"),
+    paste(named, collapse = " and ")
+  ), call. = FALSE)
+}
+
+
+# ==============================================================================
 # Mode Selection Logic
 # ==============================================================================
 
@@ -149,9 +308,8 @@ get_mode_backends <- function(mode) {
 #' @param mode User-specified mode or backend name
 #' @param family Model family object
 #' @param n_obs Number of observations
-#' @param has_spatial Whether model has spatial effects
-#' @param has_temporal Whether model has temporal effects
-#' @param has_latent Whether model has latent factors
+#' @param structures Named list of structure specifications, `NULL` where the
+#'   structure is absent. See `MODEL_STRUCTURES`.
 #'
 #' @return List with:
 #'   - mode: The selected mode name
@@ -164,11 +322,7 @@ get_mode_backends <- function(mode) {
 select_inference_mode <- function(mode,
                                   family,
                                   n_obs,
-                                  has_spatial = FALSE,
-                                  has_temporal = FALSE,
-                                  has_latent = FALSE,
-                                  spatial_type = NULL,
-                                  temporal = NULL) {
+                                  structures = list()) {
 
   mode <- tolower(mode)
 
@@ -202,12 +356,11 @@ select_inference_mode <- function(mode,
 
   # Auto-selection logic
   if (mode == "auto") {
-    return(auto_select_mode(family, n_obs, has_spatial, has_temporal, has_latent, temporal,
-                             spatial_type))
+    return(auto_select_mode(family, n_obs, structures))
   }
 
   # Explicit tier mode: select best backend within that tier
-  backend <- select_backend_for_mode(mode, family, n_obs, has_spatial, has_temporal)
+  backend <- select_backend_for_mode(mode)
   tier_info <- get_backend_tier(backend)
 
   return(list(
@@ -228,13 +381,20 @@ select_inference_mode <- function(mode,
 #'
 #' **Critical rule**: Auto never selects Tier 3 (Optimized).
 #'
+#' A backend is a candidate only when it fits every structure in the model.
+#' Structure a backend cannot carry would otherwise be dropped from the fit.
+#'
+#' @inheritParams select_inference_mode
 #' @keywords internal
-auto_select_mode <- function(family, n_obs, has_spatial, has_temporal, has_latent, temporal = NULL,
-                             spatial_type = NULL) {
+auto_select_mode <- function(family, n_obs, structures = list()) {
 
   # Thresholds
   VERY_LARGE <- 50000
   LARGE <- 10000
+
+  has_spatial <- !is.null(structures$spatial)
+  has_latent <- !is.null(structures$latent)
+  spatial_type <- if (has_spatial) structures$spatial$type else NULL
 
   # Decision logic
   reason_parts <- character(0)
@@ -253,7 +413,7 @@ auto_select_mode <- function(family, n_obs, has_spatial, has_temporal, has_laten
     reason_parts <- c(reason_parts, "spatial model with large n")
   }
 
-  if (use_structured) {
+  if (use_structured && backend_fits_structures("laplace", structures)) {
     return(list(
       mode = "structured",
       backend = "laplace",
@@ -263,15 +423,12 @@ auto_select_mode <- function(family, n_obs, has_spatial, has_temporal, has_laten
     ))
   }
 
-  # Gibbs for ICAR spatial-only models (no temporal, no latent)
+  # Gibbs for ICAR spatial models
   # Gibbs is ~18x faster than HMC for ICAR because it updates phi
   # component-wise, avoiding HMC's curse of dimensionality
   is_gibbs_spatial <- has_spatial && !is.null(spatial_type) &&
                       spatial_type %in% c("icar", "car", "bym2")
-  # Gibbs supports: no temporal, or TVC temporal only
-  has_tvc_only <- !is.null(temporal) && inherits(temporal, "ratiod_tvc")
-  gibbs_temporal_ok <- !has_temporal || has_tvc_only
-  if (is_gibbs_spatial && gibbs_temporal_ok && !has_latent) {
+  if (is_gibbs_spatial && backend_fits_structures("gibbs", structures)) {
     # Check family is supported by Gibbs
     gibbs_families <- c("poisson_gamma", "negbin_negbin", "binomial",
                         "negbin_gamma", "poisson", "neg_binomial_2",
@@ -306,8 +463,9 @@ auto_select_mode <- function(family, n_obs, has_spatial, has_temporal, has_laten
 
 
 #' Select best backend within a mode
+#' @inheritParams select_inference_mode
 #' @keywords internal
-select_backend_for_mode <- function(mode, family, n_obs, has_spatial, has_temporal) {
+select_backend_for_mode <- function(mode) {
 
   if (mode == "exact") {
     # HMC is the default for Exact - most general
