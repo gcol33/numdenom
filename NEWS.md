@@ -1,5 +1,34 @@
 # tulpaRatio 1.7.2
 
+* **The templated log posterior expresses the HSGP multi-scale GP and the
+  non-centred GP (#26).** These were the two structures `log_post_impl_gap()`
+  named as expressible but unwritten, and both were reachable from R:
+  `spatial_multiscale(approx = "hsgp")` and
+  `spatial_gp(parameterization = "noncentered")`, the latter the default
+  coordinate for a GP fit. Declared rather than written, they cost the
+  `A_r` / `A` / `A_t` gradient modes those two models, since the front door
+  refuses a mode whose density is missing a block. The multi-scale case was a
+  missing block of the kind #18 fixed for the plain HSGP field -- the
+  parameters would carry no prior and contribute nothing to the linear
+  predictor -- and the non-centred case was worse than missing: the templated
+  density read the parameter slot as `w` when it holds `z`, so it evaluated a
+  different model rather than an incomplete one.
+
+  Both are now written against the same primitives the analytic density uses,
+  rather than transcribed beside them. `hsgp_evaluate_t()` is one spectral
+  expansion for every scalar type, with the Eigen matvec as its `double` arm,
+  and the plain HSGP field, the SVC terms and both multi-scale scales now read
+  it instead of carrying three inline copies of `f = Phi (sqrt(S) . beta)`.
+  `NNGPNCWorkspace` and `nngp_nc_forward()` are templated, so the `z -> w`
+  recursion has one definition rather than one per scalar type, and the
+  conditional-variance floor is `ratiod_cov::nngp_floor_cond_var` on both.
+  Measured against central differences of `compute_log_post`, all three
+  autodiff modes now agree to 5.7e-09 relative on `gp_nc` and 2.0e-09 on
+  `msgp_hsgp`, with no identically-zero gradient entry, and the two densities
+  agree to 5e-13. Both fields move from the gap list into the harness's kernel
+  sweep, where they are checked under `handcoded` and `arena` and included in
+  the density-equality and fused-value assertions.
+
 * **`temporal_iid()` reaches the standalone temporal field, and
   `temporal_ar1(parameterization = "noncentered")` reaches the AR1 one (#40).**
   `TemporalType::IID` had a branch in `temporal_log_prior()` and in its

@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <cmath>
+#include <type_traits>
 #include <RcppEigen.h>
 #include "autodiff_utils.h"
 
@@ -157,8 +158,36 @@ inline void setup_hsgp_2d(
     }
 }
 
+// f = Phi * (sqrt(S) ⊙ beta), as one Eigen matvec. Every double caller of the
+// HSGP expansion goes through here; sqrt_S_out, when non-null, receives
+// sqrt(S[j]) so the gradient path reuses it rather than repeating the
+// exponential.
+inline void hsgp_matvec(
+    const double* beta,
+    double sigma2,
+    double lengthscale,
+    const HSGPData& data,
+    double* f,
+    double* sqrt_S_out = nullptr
+) {
+    const int N = data.n_obs;
+    const int M = data.m_total;
+
+    Eigen::VectorXd scaled_beta(M);
+    for (int j = 0; j < M; j++) {
+        double S = spectral_density_se(data.eigenvalues[j], sigma2, lengthscale);
+        double sqrt_S = std::sqrt(S);
+        if (sqrt_S_out) sqrt_S_out[j] = sqrt_S;
+        scaled_beta(j) = sqrt_S * beta[j];
+    }
+
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        Phi(data.phi_flat.data(), N, M);
+    Eigen::Map<Eigen::VectorXd> f_vec(f, N);
+    f_vec.noalias() = Phi * scaled_beta;
+}
+
 // Evaluate HSGP spatial effects: f = Phi * (sqrt(S) ⊙ beta)
-// Vectorized with Eigen matrix-vector product (BLAS/SIMD)
 inline void hsgp_evaluate(
     const std::vector<double>& beta,
     double sigma2,
@@ -166,22 +195,38 @@ inline void hsgp_evaluate(
     const HSGPData& data,
     std::vector<double>& f
 ) {
+    f.resize(data.n_obs);
+    hsgp_matvec(beta.data(), sigma2, lengthscale, data, f.data());
+}
+
+// The same expansion for any scalar type. The double instantiation is the
+// matvec above, so the templated density and the analytic one cannot disagree
+// about what f is; the other scalars take the loop, which is what the tape
+// records.
+template<typename T>
+inline void hsgp_evaluate_t(
+    const T* beta,
+    const T& sigma2,
+    const T& lengthscale,
+    const HSGPData& data,
+    std::vector<T>& f
+) {
     const int N = data.n_obs;
     const int M = data.m_total;
-    f.resize(N);
 
-    // scaled_beta[j] = sqrt(S[j]) * beta[j]
-    Eigen::VectorXd scaled_beta(M);
-    for (int j = 0; j < M; j++) {
-        double S = spectral_density_se(data.eigenvalues[j], sigma2, lengthscale);
-        scaled_beta(j) = std::sqrt(S) * beta[j];
+    if constexpr (std::is_same<T, double>::value) {
+        f.resize(N);
+        hsgp_matvec(beta, sigma2, lengthscale, data, f.data());
+    } else {
+        f.assign(N, T(0.0));
+        for (int j = 0; j < M; j++) {
+            T scaled_j = ratiod::math::safe_sqrt(
+                spectral_density_se(data.eigenvalues[j], sigma2, lengthscale)) * beta[j];
+            for (int i = 0; i < N; i++) {
+                f[i] = f[i] + T(data.phi_flat[i * M + j]) * scaled_j;
+            }
+        }
     }
-
-    // f = Phi * scaled_beta  (single BLAS matvec)
-    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        Phi(data.phi_flat.data(), N, M);
-    Eigen::Map<Eigen::VectorXd> f_vec(f.data(), N);
-    f_vec.noalias() = Phi * scaled_beta;
 }
 
 // Log prior on beta: N(0, I)
@@ -209,7 +254,6 @@ struct HSGPWorkspace {
 
     // For hsgp_evaluate:
     std::vector<double> hsgp_beta;     // M
-    Eigen::VectorXd scaled_beta;       // M
 
     // For gradient computation:
     std::vector<double> hsgp_f;        // N
@@ -227,7 +271,6 @@ struct HSGPWorkspace {
         N = n_obs;
         M = m_total;
         hsgp_beta.resize(M);
-        scaled_beta.resize(M);
         hsgp_f.resize(N);
         grad_f.resize(N);
         PhiT_gf.resize(M);
@@ -246,21 +289,8 @@ inline void hsgp_evaluate_ws(
     const HSGPData& data,
     HSGPWorkspace& ws
 ) {
-    const int N = data.n_obs;
-    const int M = data.m_total;
-
-    // Compute sqrt(S[j]) once and cache for reuse in gradient step
-    for (int j = 0; j < M; j++) {
-        double S = spectral_density_se(data.eigenvalues[j], sigma2, lengthscale);
-        ws.sqrt_S(j) = std::sqrt(S);
-        ws.scaled_beta(j) = ws.sqrt_S(j) * beta[j];
-    }
-
-    // f = Phi * scaled_beta  (single BLAS matvec)
-    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        Phi(data.phi_flat.data(), N, M);
-    Eigen::Map<Eigen::VectorXd> f_vec(ws.hsgp_f.data(), N);
-    f_vec.noalias() = Phi * ws.scaled_beta;
+    // sqrt(S[j]) is cached for reuse in the gradient step.
+    hsgp_matvec(beta, sigma2, lengthscale, data, ws.hsgp_f.data(), ws.sqrt_S.data());
 }
 
 // Compute HSGP gradients using workspace buffers (zero allocation)

@@ -8,6 +8,7 @@
 #include <vector>
 #include <cmath>
 #include <random>
+#include <type_traits>
 #include <RcppEigen.h>
 #include "hmc_cov.h"  // Shared kernels and neighbour-block factorization
 #include "hmc_svc.h"  // Reuse covariance functions and NNGP infrastructure
@@ -941,57 +942,68 @@ inline void gp_gradient_w(
 // This improves posterior geometry for large N, reducing NUTS treedepth.
 // The prior on z is N(0,I), and no Jacobian is needed since we sample in z-space.
 
-struct NNGPNCWorkspace {
+// The reverse pass is written for double alone -- an autodiff scalar records
+// its own -- so the adjoint accumulator and the cached Cholesky factors it
+// reads are allocated only in the double instantiation.
+template <typename T>
+struct NNGPNCWorkspaceT {
+    static constexpr bool caches_for_backward = std::is_same<T, double>::value;
+
     int N = 0, nn = 0;
-    std::vector<double> w;          // Transformed spatial effects (N)
-    std::vector<double> sqrt_d;     // sqrt(conditional variance) per obs (N)
-    std::vector<double> B_flat;     // Regression coefficients (N * nn)
+    std::vector<T> w;               // Transformed spatial effects (N)
+    std::vector<T> sqrt_d;          // sqrt(conditional variance) per obs (N)
+    std::vector<T> B_flat;          // Regression coefficients (N * nn)
     std::vector<int> B_n_nb;        // Number of actual neighbors per obs (N)
     std::vector<int> nb_idx_flat;   // Neighbor indices per obs (N * nn), 0-based in w
     std::vector<double> adj;        // Adjoint accumulator (N)
-    std::vector<double> L_flat;     // Cached Cholesky factors (N * nn * nn) for backward phi grad
+    std::vector<T> L_flat;          // Cached Cholesky factors (N * nn * nn) for backward phi grad
 
     void init(int N_, int nn_) {
         if (N == N_ && nn == nn_) return;
         N = N_; nn = nn_;
         w.resize(N);
         sqrt_d.resize(N);
-        B_flat.assign(N * nn, 0.0);
-        B_n_nb.resize(N, 0);
-        nb_idx_flat.assign(N * nn, -1);
-        adj.resize(N, 0.0);
-        L_flat.assign(N * nn * nn, 0.0);
+        B_flat.assign(static_cast<size_t>(N) * nn, T(0.0));
+        B_n_nb.assign(N, 0);
+        nb_idx_flat.assign(static_cast<size_t>(N) * nn, -1);
+        if (caches_for_backward) {
+            adj.assign(N, 0.0);
+            L_flat.assign(static_cast<size_t>(N) * nn * nn, T(0.0));
+        }
     }
 };
+
+using NNGPNCWorkspace = NNGPNCWorkspaceT<double>;
 
 // Forward pass: z -> w via NNGP autoregressive structure
 // z and w are both indexed by LOCATION (0-based), matching the parameter layout.
 // Caches B, sqrt_d, nb_idx for backward pass.
 // O(N * nn^3) due to per-observation Cholesky.
+template <typename T>
 inline void nngp_nc_forward(
-    const double* z,          // z[loc_idx], indexed by location, length N
-    double sigma2, double phi,
+    const T* z,               // z[loc_idx], indexed by location, length N
+    const T& sigma2, const T& phi,
     const GPData& gp_data,
-    NNGPNCWorkspace& ws
+    NNGPNCWorkspaceT<T>& ws
 ) {
     int N = gp_data.n_obs;
     int nn = gp_data.nn;
     ws.init(N, nn);
 
     // Work arrays for Cholesky
-    std::vector<double> c_vec(nn), C_mat(nn * nn), L(nn * nn);
-    std::vector<double> y_vec(nn), alpha(nn);
+    std::vector<T> c_vec(nn), C_mat(nn * nn), L(nn * nn);
+    std::vector<T> y_vec(nn), alpha(nn);
 
     // First observation: marginal N(0, sigma2)
     int first_loc = gp_data.nn_order[0];  // Location index
-    ws.sqrt_d[0] = std::sqrt(sigma2);
+    ws.sqrt_d[0] = ratiod::math::safe_sqrt(sigma2);
     ws.w[first_loc] = ws.sqrt_d[0] * z[first_loc];
     ws.B_n_nb[0] = 0;
 
     for (int i = 1; i < N; i++) {
         int obs_loc = gp_data.nn_order[i];  // Location index for NNGP order i
         if (obs_loc < 0 || obs_loc >= N) {
-            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.sqrt_d[i] = ratiod::math::safe_sqrt(sigma2);
             ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
             ws.B_n_nb[i] = 0;
             continue;
@@ -1002,7 +1014,7 @@ inline void nngp_nc_forward(
         for (int j = 0; j < nn && gp_data.nn_idx[i * nn + j] > 0; j++) n_nb++;
 
         if (n_nb == 0) {
-            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.sqrt_d[i] = ratiod::math::safe_sqrt(sigma2);
             ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
             ws.B_n_nb[i] = 0;
             continue;
@@ -1011,7 +1023,7 @@ inline void nngp_nc_forward(
         // Build c_vec (covariance between obs and its neighbors)
         for (int j = 0; j < n_nb; j++) {
             double d = gp_data.nn_dist[i * nn + j];
-            c_vec[j] = compute_cov(d, sigma2, phi, gp_data.cov_type);
+            c_vec[j] = ratiod_cov::compute_cov(d, sigma2, phi, gp_data.cov_type);
         }
 
         // Build C_mat (covariance among neighbors) and get neighbor location indices
@@ -1028,13 +1040,14 @@ inline void nngp_nc_forward(
                     C_mat[j1 * n_nb + j2] = sigma2;
                 } else {
                     double d12 = gp_data.nn_neighbor_dist[i * nn * nn + j1 * nn + j2];
-                    C_mat[j1 * n_nb + j2] = compute_cov(d12, sigma2, phi, gp_data.cov_type);
+                    C_mat[j1 * n_nb + j2] = ratiod_cov::compute_cov(d12, sigma2, phi,
+                                                                    gp_data.cov_type);
                 }
             }
         }
 
         if (!ok) {
-            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.sqrt_d[i] = ratiod::math::safe_sqrt(sigma2);
             ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
             ws.B_n_nb[i] = 0;
             continue;
@@ -1043,7 +1056,7 @@ inline void nngp_nc_forward(
         // Cholesky: C = LL', and alpha = C^{-1} c (the regression coefficients
         // B[i,:]), through the same factorization the density uses.
         if (!ratiod_cov::nngp_chol(C_mat.data(), n_nb, L.data())) {
-            ws.sqrt_d[i] = std::sqrt(sigma2);
+            ws.sqrt_d[i] = ratiod::math::safe_sqrt(sigma2);
             ws.w[obs_loc] = ws.sqrt_d[i] * z[obs_loc];
             ws.B_n_nb[i] = 0;
             continue;
@@ -1052,27 +1065,29 @@ inline void nngp_nc_forward(
         ratiod_cov::nngp_back_solve(L.data(), n_nb, y_vec.data(), alpha.data());
 
         // Cache Cholesky factor L for backward phi gradient
-        for (int j1 = 0; j1 < n_nb; j1++) {
-            for (int j2 = 0; j2 <= j1; j2++) {
-                ws.L_flat[i * nn * nn + j1 * nn + j2] = L[j1 * n_nb + j2];
+        if (ws.caches_for_backward) {
+            for (int j1 = 0; j1 < n_nb; j1++) {
+                for (int j2 = 0; j2 <= j1; j2++) {
+                    ws.L_flat[i * nn * nn + j1 * nn + j2] = L[j1 * n_nb + j2];
+                }
             }
         }
 
         // Store B and compute conditional variance d_i
-        double c_alpha = 0.0;
+        T c_alpha = T(0.0);
         for (int j = 0; j < n_nb; j++) {
             ws.B_flat[i * nn + j] = alpha[j];
-            c_alpha += c_vec[j] * alpha[j];
+            c_alpha = c_alpha + c_vec[j] * alpha[j];
         }
         ws.B_n_nb[i] = n_nb;
 
-        double d_i = std::max(sigma2 - c_alpha, 1e-10);
-        ws.sqrt_d[i] = std::sqrt(d_i);
+        T d_i = ratiod_cov::nngp_floor_cond_var(sigma2 - c_alpha);
+        ws.sqrt_d[i] = ratiod::math::safe_sqrt(d_i);
 
         // Forward transform: w[loc] = B @ w_neighbors + sqrt(d_i) * z[loc]
-        double mu = 0.0;
+        T mu = T(0.0);
         for (int j = 0; j < n_nb; j++) {
-            mu += alpha[j] * ws.w[ws.nb_idx_flat[i * nn + j]];
+            mu = mu + alpha[j] * ws.w[ws.nb_idx_flat[i * nn + j]];
         }
         ws.w[obs_loc] = mu + ws.sqrt_d[i] * z[obs_loc];
     }

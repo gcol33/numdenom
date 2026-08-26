@@ -89,23 +89,25 @@ ST_GP_FIELDS <- c("stgp", "stgp_matern", "stgp_gneiting", "stgp_latent")
 # default gradient mode NUTS runs on these with no offline check, which is how
 # the GP covariance derivative (gcol33/tulpaRatio#42) and the AR1 precision
 # gradient (gcol33/tulpaRatio#43) both reached a release.
+#   gp_nc     -- spatial_gp(parameterization = "noncentered"): the sampled
+#                parameters are z ~ N(0, I) and the field is
+#                w = L(sigma2, phi) z, so both hyperparameters reach eta
+#                through the transform as well as through the prior.
+#   msgp_hsgp -- spatial_multiscale(approx = "hsgp"): both scales read one
+#                Hilbert-space basis rather than two neighbour sets, and each
+#                carries a PC prior on sigma with a LogNormal on its
+#                lengthscale rather than an NNGP density.
+# Both were declared gaps in the templated density until gcol33/tulpaRatio#26;
+# the autodiff modes now differentiate a density that expresses them, so they
+# belong here rather than with the collapsed fields.
 KERNEL_FIELDS <- c("gp", "gp_matern", "gp_gaussian", "gp_spherical",
-                   "gp_temporal", "msgp", "msgp_temporal", "svc", "svc_hsgp",
+                   "gp_temporal", "gp_nc", "msgp", "msgp_temporal",
+                   "msgp_hsgp", "svc", "svc_hsgp",
                    "temporal_gp", "ms_temporal", "latent")
-# Fields the templated density declares a gap for, so like the collapsed areal
-# fields they have no autodiff case and are checked against compute_log_post
-# alone.
-#   gp_collapsed -- marginalizes its field out, as the collapsed areal fields do.
-#   gp_nc        -- spatial_gp(parameterization = "noncentered"): the sampled
-#                   parameters are z ~ N(0, I) and the field is
-#                   w = L(sigma2, phi) z, so both hyperparameters reach eta
-#                   through the transform. compute_log_post_impl has no
-#                   non-centred branch and says so (gcol33/tulpaRatio#26).
-#   msgp_hsgp    -- spatial_multiscale(approx = "hsgp"): both scales read one
-#                   Hilbert-space basis rather than two neighbour sets.
-#                   compute_log_post_impl has no branch for it and says so
-#                   (gcol33/tulpaRatio#26, #38).
-KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc", "msgp_hsgp")
+# The kernel field the templated density declares a gap for: gp_collapsed
+# marginalizes its field out, as the collapsed areal fields do, so it has no
+# autodiff case and is checked against compute_log_post alone.
+KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed")
 # Cases the harness can build whose gradient does not match the density it
 # reports. Each names the defect it is blocked on; the case is written out so
 # the fix has a test to turn green, and the deviation each measures today is

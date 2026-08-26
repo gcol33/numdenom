@@ -58,11 +58,6 @@ inline const char* log_post_impl_gap(const ModelData& data,
     // Proper CAR's log-determinant needs a dense Cholesky; not written here,
     // and not verified differentiable through autodiff either.
     if (layout.is_car_proper) return "proper CAR";
-    // Expressible, but not written here yet, and the finite-difference harness
-    // cannot build either one to check a transcription against. Named rather
-    // than guessed at.
-    if (data.msgp_is_hsgp) return "HSGP multi-scale GP";
-    if (data.has_gp && data.gp_parameterization == 1) return "non-centred GP";
     return nullptr;
 }
 
@@ -324,28 +319,54 @@ T compute_log_post_impl(
             phi_gp, data.gp_phi_prior_lower, data.gp_phi_prior_upper);
         log_post = log_post + log_phi_gp;  // Jacobian
 
-        // Extract GP spatial effects w[0..n_gp-1]
+        if (layout.gp_w_start < 0 ||
+            layout.gp_w_start + data.gp_data.n_obs > (int)params.size()) {
+            return T(-INFINITY);  // Invalid parameter layout
+        }
         int n_gp = layout.gp_w_end - layout.gp_w_start;
-        gp_w.resize(n_gp);
-        for (int k = 0; k < n_gp; k++) {
-            gp_w[k] = params[layout.gp_w_start + k];
-        }
 
-        // Apply RSR projection if enabled
-        if (data.has_rsr && !data.rsr_projection.empty()) {
-            std::vector<T> w_projected(data.rsr_n, T(0.0));
-            for (int ii = 0; ii < data.rsr_n; ii++) {
-                for (int jj = 0; jj < data.rsr_n; jj++) {
-                    w_projected[ii] = w_projected[ii]
-                        + T(data.rsr_projection[ii * data.rsr_n + jj]) * gp_w[jj];
-                }
+        if (data.gp_parameterization == 1) {
+            // Non-centred: the slot holds z, and the field is w = L(sigma2, phi) z
+            // built by the NNGP autoregression. The NNGP prior on w and the
+            // Jacobian |dw/dz| cancel exactly, so what remains of the field's
+            // own density is N(0, I) on z; both hyperparameters reach eta
+            // through the transform instead. RSR does not apply: the projection
+            // is defined on the centred coordinate.
+            std::vector<T> z_gp(n_gp);
+            T z_sq_sum = T(0.0);
+            for (int k = 0; k < n_gp; k++) {
+                z_gp[k] = params[layout.gp_w_start + k];
+                z_sq_sum = z_sq_sum + z_gp[k] * z_gp[k];
             }
-            gp_w = w_projected;
-        }
+            log_post = log_post - T(0.5) * z_sq_sum;
 
-        // NNGP log-likelihood on spatial effects
-        log_post = log_post + ratiod_gp::gp_nngp_log_lik_t(
-            gp_w, sigma2_gp, phi_gp, data.gp_data);
+            ratiod_gp::NNGPNCWorkspaceT<T> nc_ws;
+            ratiod_gp::nngp_nc_forward(z_gp.data(), sigma2_gp, phi_gp,
+                                       data.gp_data, nc_ws);
+            gp_w.swap(nc_ws.w);
+        } else {
+            // Centred: the slot holds w, which carries the NNGP prior directly.
+            gp_w.resize(n_gp);
+            for (int k = 0; k < n_gp; k++) {
+                gp_w[k] = params[layout.gp_w_start + k];
+            }
+
+            // Apply RSR projection if enabled
+            if (data.has_rsr && !data.rsr_projection.empty()) {
+                std::vector<T> w_projected(data.rsr_n, T(0.0));
+                for (int ii = 0; ii < data.rsr_n; ii++) {
+                    for (int jj = 0; jj < data.rsr_n; jj++) {
+                        w_projected[ii] = w_projected[ii]
+                            + T(data.rsr_projection[ii * data.rsr_n + jj]) * gp_w[jj];
+                    }
+                }
+                gp_w = w_projected;
+            }
+
+            // NNGP log-likelihood on spatial effects
+            log_post = log_post + ratiod_gp::gp_nngp_log_lik_t(
+                gp_w, sigma2_gp, phi_gp, data.gp_data);
+        }
     }
 
     // HSGP spatial parameters and priors
@@ -372,19 +393,13 @@ T compute_log_post_impl(
 
         // N(0, I) on the basis coefficients, and f = Phi * (sqrt(S) .* beta).
         const int M_hsgp = data.hsgp_data.m_total;
-        const int N_hsgp = data.hsgp_data.n_obs;
-        hsgp_f.assign(N_hsgp, T(0.0));
+        std::vector<T> beta_hsgp(M_hsgp);
         for (int j = 0; j < M_hsgp; j++) {
-            T beta_j = params[layout.hsgp_beta_start + j];
-            log_post = log_post - T(0.5) * beta_j * beta_j;
-
-            T scaled_j = safe_sqrt(ratiod_hsgp::spectral_density_se(
-                data.hsgp_data.eigenvalues[j], sigma2_hsgp, ls_hsgp)) * beta_j;
-            for (int i = 0; i < N_hsgp; i++) {
-                hsgp_f[i] = hsgp_f[i]
-                    + T(data.hsgp_data.phi_flat[i * M_hsgp + j]) * scaled_j;
-            }
+            beta_hsgp[j] = params[layout.hsgp_beta_start + j];
+            log_post = log_post - T(0.5) * beta_hsgp[j] * beta_hsgp[j];
         }
+        ratiod_hsgp::hsgp_evaluate_t(beta_hsgp.data(), sigma2_hsgp, ls_hsgp,
+                                     data.hsgp_data, hsgp_f);
     }
 
     // Multi-scale GP spatial parameters and priors
@@ -392,11 +407,66 @@ T compute_log_post_impl(
     std::vector<T> ms_gp_w_regional;
     std::vector<T> ms_gp_effect;
 
-    // A structure log_post_impl_gap names is one this density does not write.
-    // Falling into the NNGP block on an HSGP field would read neighbour sets
-    // sized for the locations against a block sized for the basis, so the gap
-    // is skipped here as well as reported there.
-    if (layout.is_multiscale_gp && data.has_multiscale_gp && !data.msgp_is_hsgp) {
+    if (layout.is_multiscale_gp && data.has_multiscale_gp && data.msgp_is_hsgp) {
+        // Both scales read one Hilbert-space basis rather than two neighbour
+        // sets, so each contributes a spectral expansion instead of an NNGP
+        // density: sigma carries a PC prior on its own scale, the lengthscale a
+        // LogNormal on the log scale it is parameterized on, and the basis
+        // coefficients N(0, I).
+        T log_sigma2_local = params[layout.log_sigma2_gp_local_idx];
+        T log_ls_local = params[layout.log_phi_gp_local_idx];
+        T sigma2_local = safe_exp(log_sigma2_local);
+        T ls_local = safe_exp(log_ls_local);
+
+        T log_sigma2_regional = params[layout.log_sigma2_gp_regional_idx];
+        T log_ls_regional = params[layout.log_phi_gp_regional_idx];
+        T sigma2_regional = safe_exp(log_sigma2_regional);
+        T ls_regional = safe_exp(log_ls_regional);
+
+        // PC prior on sigma, with the d(sigma)/d(log sigma2) = 0.5 Jacobian.
+        log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+            sigma2_local, data.ms_sigma2_local_prior_U,
+            data.ms_sigma2_local_prior_alpha);
+        log_post = log_post + T(0.5) * log_sigma2_local;
+
+        log_post = log_post + ratiod_gp::log_prior_sigma2_pc_t(
+            sigma2_regional, data.ms_sigma2_regional_prior_U,
+            data.ms_sigma2_regional_prior_alpha);
+        log_post = log_post + T(0.5) * log_sigma2_regional;
+
+        // LogNormal on each lengthscale. No Jacobian: the prior is written on
+        // the log scale the parameter already lives on.
+        T z_ls_local = (log_ls_local - T(data.ms_log_ls_local_mean))
+                       / T(data.ms_log_ls_local_sd);
+        log_post = log_post - T(0.5) * z_ls_local * z_ls_local
+                            - T(std::log(data.ms_log_ls_local_sd));
+
+        T z_ls_regional = (log_ls_regional - T(data.ms_log_ls_regional_mean))
+                          / T(data.ms_log_ls_regional_sd);
+        log_post = log_post - T(0.5) * z_ls_regional * z_ls_regional
+                            - T(std::log(data.ms_log_ls_regional_sd));
+
+        const int m_total = data.msgp_hsgp_data.m_total;
+        std::vector<T> beta_local(m_total), beta_regional(m_total);
+        for (int j = 0; j < m_total; j++) {
+            beta_local[j] = params[layout.gp_local_start + j];
+            beta_regional[j] = params[layout.gp_regional_start + j];
+            log_post = log_post - T(0.5) * beta_local[j] * beta_local[j];
+            log_post = log_post - T(0.5) * beta_regional[j] * beta_regional[j];
+        }
+
+        // The basis is shared, so both expansions are observation-level.
+        std::vector<T> f_local, f_regional;
+        ratiod_hsgp::hsgp_evaluate_t(beta_local.data(), sigma2_local, ls_local,
+                                     data.msgp_hsgp_data, f_local);
+        ratiod_hsgp::hsgp_evaluate_t(beta_regional.data(), sigma2_regional,
+                                     ls_regional, data.msgp_hsgp_data, f_regional);
+
+        ms_gp_effect.resize(data.N);
+        for (int ii = 0; ii < data.N; ii++) {
+            ms_gp_effect[ii] = f_local[ii] + f_regional[ii];
+        }
+    } else if (layout.is_multiscale_gp && data.has_multiscale_gp) {
         // Extract 4 hyperparameters from log-scale
         T log_sigma2_local = params[layout.log_sigma2_gp_local_idx];
         T log_phi_local = params[layout.log_phi_gp_local_idx];
@@ -806,9 +876,8 @@ T compute_log_post_impl(
 
                     // Compute scaled beta: sqrt(S(eigenvalue_k, sigma2_j, ls_j)) * beta_jk
                     double omega_sq = data.svc_hsgp_data.eigenvalues[k];
-                    T S_k = sigma2_j * T(std::sqrt(2.0 * M_PI)) * ls_j *
-                            safe_exp(T(-0.5) * ls_j * ls_j * T(omega_sq));
-                    T sqrt_S_k = safe_sqrt(S_k);
+                    T sqrt_S_k = safe_sqrt(ratiod_hsgp::spectral_density_se(
+                        omega_sq, sigma2_j, ls_j));
 
                     // Accumulate f_j[i] = sum_k phi[i,k] * sqrt_S_k * beta_jk
                     for (int i = 0; i < n_obs; i++) {
