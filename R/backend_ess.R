@@ -349,6 +349,3 @@ print.summary.ratiod_ess <- function(x, digits = 3, ...) {
   invisible(x)
 }
 
-
-# Null-coalescing operator (if not already defined)
-`%||%` <- function(x, y) if (is.null(x)) y else x

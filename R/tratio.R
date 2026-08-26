@@ -723,8 +723,6 @@ tratio <- function(formula,
   )
 }
 
-# Null coalescing operator
-`%||%` <- function(a, b) if (is.null(a)) b else a
 
 #' Suggest alternative modes based on data characteristics
 #'

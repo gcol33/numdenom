@@ -549,6 +549,3 @@ print.ratiod_sgld <- function(x, digits = 3, ...) {
   invisible(x)
 }
 
-
-# Null-coalescing operator
-`%||%` <- function(x, y) if (is.null(x)) y else x
