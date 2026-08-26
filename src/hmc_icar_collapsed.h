@@ -2064,7 +2064,9 @@ inline CollapsedTemporalOffset collapsed_temporal_obs_offset(
                                     !layout.has_multiscale_temporal && !layout.has_tvc;
     if (!has_gmrf_temporal) return out;
 
-    const double* phi_temporal = &params[layout.temporal_start];
+    ratiod_hmc::TemporalView tview;
+    tview.read(params, data, layout);
+    const double* phi_temporal = tview.phi;
     const int T_temporal = layout.temporal_end - layout.temporal_start;
     out.num.assign(data.N, 0.0);
     if (data.temporal_shared) out.denom.assign(data.N, 0.0);

@@ -45,13 +45,26 @@ generate_msgp_data <- function(n = 50, seed = 123) {
   )
 }
 
-# Test that each sampler option runs without error
+# `sampler` selects warmup mass-matrix adaptation for the two GP blocks. It
+# used to offer five parameterization names beside those two, all of which
+# produced byte-identical sampling because the field is centred wherever the
+# density or the gradient reads it (gcol33/tulpaRatio#36); a name that changes
+# nothing has to be rejected rather than accepted.
 test_that("all MSGP sampler options run without error", {
   skip_on_cran()
 
   df <- generate_msgp_data(n = 30, seed = 42)
 
-  samplers <- c("auto", "noncentered", "centered", "interweaved", "adaptive", "riemannian")
+  samplers <- c("auto", "lbfgs")
+
+  for (gone in c("noncentered", "centered", "interweaved", "adaptive",
+                 "riemannian")) {
+    expect_error(
+      spatial_multiscale(~ x + y, sampler = gone),
+      "should be one of",
+      label = sprintf("sampler = %s", gone)
+    )
+  }
 
   for (sampler in samplers) {
     # Create spatial specification with sampler option
@@ -92,7 +105,7 @@ test_that("MSGP samplers have acceptable divergence rates", {
   df <- generate_msgp_data(n = 40, seed = 123)
 
   # Test non-centered (current default, known to work well)
-  ms_nc <- spatial_multiscale(~ x + y, nn_local = 5, nn_regional = 10, sampler = "noncentered")
+  ms_nc <- spatial_multiscale(~ x + y, nn_local = 5, nn_regional = 10, sampler = "auto")
 
   fit_nc <- suppressWarnings(
     tratio(
@@ -123,7 +136,7 @@ test_that("MSGP sampler speed comparison", {
 
   df <- generate_msgp_data(n = 50, seed = 456)
 
-  samplers_to_test <- c("noncentered", "centered", "interweaved")
+  samplers_to_test <- c("auto", "lbfgs")
   results <- list()
 
   for (sampler in samplers_to_test) {
@@ -166,12 +179,11 @@ test_that("MSGP sampler speed comparison", {
   }
   cat("=====================================\n\n")
 
-  # Non-centered should be competitive
-  expect_true(results[["noncentered"]]$n_samples > 0)
+  expect_true(results[["auto"]]$n_samples > 0)
 })
 
 # Stress test with multiple seeds
-test_that("MSGP non-centered is robust across seeds", {
+test_that("MSGP is robust across seeds", {
   skip_on_cran()
   skip_if_not(Sys.getenv("RUN_SLOW_TESTS") == "true",
               "Skipping slow benchmark (set RUN_SLOW_TESTS=true to run)")
@@ -182,7 +194,7 @@ test_that("MSGP non-centered is robust across seeds", {
   for (seed in seeds) {
     df <- generate_msgp_data(n = 35, seed = seed)
 
-    ms <- spatial_multiscale(~ x + y, nn_local = 5, nn_regional = 10, sampler = "noncentered")
+    ms <- spatial_multiscale(~ x + y, nn_local = 5, nn_regional = 10, sampler = "auto")
 
     fit <- tryCatch({
       suppressWarnings(

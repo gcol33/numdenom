@@ -601,21 +601,22 @@ fit_laplace_spatial <- function(formula,
     message("Fitting spatial model with Laplace approximation...")
   }
 
-  # Prepare spatial structure
-  spatial_info <- prepare_spatial_for_laplace(spatial, data, formula)
-
-  if (verbose) {
-    message(sprintf("  Spatial units: %d", spatial_info$n_units))
-    message(sprintf("  Spatial type: %s", spatial$type %||% "ICAR"))
-  }
-
-  # Check spatial type and dispatch appropriately
   spatial_type <- spatial$type %||% "car"
 
   if (spatial_type == "car_proper") {
     stop("Proper CAR (`spatial_car(..., proper = TRUE)`) is not supported by ",
          "the Laplace backend. Use `mode = \"hmc\"`.", call. = FALSE)
   }
+
+  if (spatial_type == "hsgp" || spatial_type == "svc") {
+    stop(sprintf(
+      "Spatial structure `%s` is not supported by the Laplace backend. Use `mode = \"hmc\"`.",
+      spatial_type), call. = FALSE)
+  }
+
+  # Coordinate-based fields carry coordinates and neighbour sets rather than an
+  # areal grouping, so they dispatch ahead of the adjacency preparation the
+  # areal paths need.
 
   # GP spatial
   if (spatial_type == "gp" || inherits(spatial, "ratiod_gp")) {
@@ -635,6 +636,34 @@ fit_laplace_spatial <- function(formula,
       cores = cores,
       verbose = verbose
     ))
+  }
+
+  # Multi-scale GP (local + regional)
+  if (spatial_type == "multiscale" || inherits(spatial, "ratiod_multiscale")) {
+    return(fit_laplace_multiscale_gp(
+      formula = formula,
+      data = data,
+      family = family,
+      family_type = family_type,
+      spatial = spatial,
+      y = y,
+      n_trials = n_trials,
+      X = X,
+      re_info = re_info,
+      phi = phi,
+      sigma_re = sigma_re,
+      n_samples = n_samples,
+      cores = cores,
+      verbose = verbose
+    ))
+  }
+
+  # Prepare spatial structure (areal fields: ICAR, BYM2, RSR)
+  spatial_info <- prepare_spatial_for_laplace(spatial, data, formula)
+
+  if (verbose) {
+    message(sprintf("  Spatial units: %d", spatial_info$n_units))
+    message(sprintf("  Spatial type: %s", spatial$type %||% "ICAR"))
   }
 
   # RSR (Restricted Spatial Regression)
@@ -763,7 +792,10 @@ prepare_spatial_for_laplace <- function(spatial, data, formula) {
   # Get the spatial grouping variable
   group_var <- spatial$group_var
   if (is.null(group_var)) {
-    stop("Spatial structure must specify group_var")
+    stop(sprintf(
+      paste0("Areal spatial structures need `group_var`; `%s` carries coordinates ",
+             "instead and is fitted by its own Laplace path."),
+      spatial$type %||% "car"), call. = FALSE)
   }
 
   # Get group indices
@@ -1310,10 +1342,14 @@ fit_laplace_gp <- function(formula,
     re_idx = re_info$group_idx,
     n_re_groups = re_info$n_groups,
     sigma_re = sigma_re,
-    coords = spatial$coords_matrix,
+    coords = spatial$unique_coords,
+    obs_to_loc = as.integer(spatial$obs_to_loc) - 1L,
     nn_idx = nn_info$nn_idx,
     nn_dist = nn_info$nn_dist,
-    nn_order = nn_info$nn_order,
+    # The sampler entry reads nn_order 0-based; compute_nngp_neighbors()
+    # returns it 1-based, the same conversion prepare_gp_for_hmc() leaves
+    # to C++.
+    nn_order = as.integer(nn_info$nn_order) - 1L,
     n_spatial = spatial$n_spatial,
     nn = spatial$nn,
     sigma2_gp = sigma2_gp,
@@ -1359,11 +1395,122 @@ fit_laplace_gp <- function(formula,
 }
 
 
+#' Fit multi-scale GP spatial model using Laplace approximation
+#'
+#' @inheritParams fit_laplace_gp
+#' @param spatial A `ratiod_multiscale` specification
+#'
+#' @return A ratiod_fit object
+#' @keywords internal
+fit_laplace_multiscale_gp <- function(formula,
+                                      data,
+                                      family,
+                                      family_type,
+                                      spatial,
+                                      y,
+                                      n_trials,
+                                      X,
+                                      re_info,
+                                      phi,
+                                      sigma_re,
+                                      n_samples,
+                                      cores,
+                                      verbose) {
+
+  if (verbose) {
+    message("Fitting multi-scale GP spatial model with Laplace approximation...")
+  }
+
+  spatial <- validate_gp(spatial, data)
+
+  local_info <- spatial$neighbor_info_local
+  regional_info <- spatial$neighbor_info_regional
+
+  # The Laplace backend conditions on fixed covariance hyperparameters. Each
+  # scale takes the geometric centre of its range prior, the value equidistant
+  # from both bounds on the log scale a range parameter lives on.
+  phi_local <- spatial$phi_local %||% sqrt(prod(spatial$range_local))
+  phi_regional <- spatial$phi_regional %||% sqrt(prod(spatial$range_regional))
+  sigma2_local <- spatial$sigma2_local %||% 1.0
+  sigma2_regional <- spatial$sigma2_regional %||% 1.0
+
+  if (verbose) {
+    message(sprintf("  Locations: %d", spatial$n_spatial))
+    message(sprintf("  Neighbors: %d local, %d regional",
+                    spatial$nn_local, spatial$nn_regional))
+    message(sprintf("  Ranges held at: %.3g local, %.3g regional",
+                    phi_local, phi_regional))
+    message("Finding mode of posterior...")
+  }
+
+  result <- cpp_laplace_fit_multiscale_gp(
+    y = as.integer(y),
+    n = as.integer(n_trials),
+    X = X,
+    re_idx = re_info$group_idx,
+    n_re_groups = re_info$n_groups,
+    sigma_re = sigma_re,
+    coords = spatial$unique_coords,
+    obs_to_loc = as.integer(spatial$obs_to_loc) - 1L,
+    nn_idx_local = local_info$nn_idx,
+    nn_dist_local = local_info$nn_dist,
+    nn_order_local = as.integer(local_info$nn_order) - 1L,
+    nn_local = spatial$nn_local,
+    nn_idx_regional = regional_info$nn_idx,
+    nn_dist_regional = regional_info$nn_dist,
+    nn_order_regional = as.integer(regional_info$nn_order) - 1L,
+    nn_regional = spatial$nn_regional,
+    n_spatial = spatial$n_spatial,
+    sigma2_local = sigma2_local,
+    phi_local = phi_local,
+    sigma2_regional = sigma2_regional,
+    phi_regional = phi_regional,
+    cov_type = cov_type_code(spatial$cov),
+    family = family_type,
+    phi = phi,
+    max_iter = 100L,
+    tol = 1e-6,
+    n_threads = as.integer(cores)
+  )
+
+  if (!result$converged) {
+    warning("Laplace approximation did not converge")
+  }
+
+  if (verbose) {
+    message(sprintf("  Converged in %d iterations", result$n_iter))
+    message("Sampling from Laplace approximation...")
+  }
+
+  samples <- cpp_laplace_sample(
+    mode = result$mode,
+    H = result$hessian,
+    n_samples = as.integer(n_samples)
+  )
+
+  convert_laplace_gp_to_ratiod_fit(
+    samples = samples,
+    result = result,
+    formula = formula,
+    data = data,
+    family = family,
+    X = X,
+    re_info = re_info,
+    spatial = spatial,
+    n_samples = n_samples,
+    field_names = c("w_local", "w_regional"),
+    spatial_type = "multiscale"
+  )
+}
+
+
 #' Convert GP Laplace results to ratiod_fit
 #' @keywords internal
 convert_laplace_gp_to_ratiod_fit <- function(samples, result, formula, data,
                                               family, X, re_info, spatial,
-                                              n_samples) {
+                                              n_samples,
+                                              field_names = "w_gp",
+                                              spatial_type = "gp") {
   p <- ncol(X)
   n_re <- re_info$n_groups
   n_spatial <- spatial$n_spatial
@@ -1380,10 +1527,18 @@ convert_laplace_gp_to_ratiod_fit <- function(samples, result, formula, data,
     draws_list[[beta_names[j]]] <- samples[, j]
   }
 
-  # Add spatial effects (first 10 for summary, rest stored internally)
+  # One block of n_spatial columns per field, in the order the mode vector
+  # lays them out. The summary carries the leading entries of each; the whole
+  # block goes to .internal.
   n_show <- min(10, n_spatial)
-  for (s in seq_len(n_show)) {
-    draws_list[[paste0("w_gp[", s, "]")]] <- samples[, spatial_start + s]
+  fields <- list()
+  for (b in seq_along(field_names)) {
+    block_start <- spatial_start + (b - 1L) * n_spatial
+    for (s in seq_len(n_show)) {
+      draws_list[[paste0(field_names[b], "[", s, "]")]] <- samples[, block_start + s]
+    }
+    fields[[field_names[b]]] <-
+      samples[, (block_start + 1):(block_start + n_spatial), drop = FALSE]
   }
 
   draws <- do.call(cbind, draws_list)
@@ -1397,15 +1552,17 @@ convert_laplace_gp_to_ratiod_fit <- function(samples, result, formula, data,
     backend = "laplace",
     n_save = n_samples,
     laplace_result = result,
-    spatial_type = "gp",
-    .internal = list(
-      mode = result$mode,
-      log_marginal = result$log_marginal,
-      X = X,
-      re_info = re_info,
-      spatial = spatial,
-      w_gp = samples[, (spatial_start + 1):(spatial_start + n_spatial), drop = FALSE],
-      samples = samples
+    spatial_type = spatial_type,
+    .internal = c(
+      list(
+        mode = result$mode,
+        log_marginal = result$log_marginal,
+        X = X,
+        re_info = re_info,
+        spatial = spatial,
+        samples = samples
+      ),
+      fields
     )
   )
 

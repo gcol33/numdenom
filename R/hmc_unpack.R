@@ -66,7 +66,19 @@ MODEL_DISPERSION_NAMES <- list(
 
 #' Temporal types the sampler allocates a temporal block for
 #' @keywords internal
-TEMPORAL_TYPES_SAMPLED <- c("rw1", "rw2", "ar1", "gp")
+TEMPORAL_TYPES_SAMPLED <- c("rw1", "rw2", "ar1", "iid", "gp")
+
+
+#' Single-component temporal types, the ones carrying one precision parameter
+#'
+#' @description
+#' The structures `temporal_rw1()`, `temporal_rw2()`, `temporal_ar1()` and
+#' `temporal_iid()` build. Each puts `log_tau` and one coefficient per time
+#' point in the parameter vector, AR1 adding its correlation. The temporal GP
+#' and the multi-scale temporal term have layouts of their own.
+#'
+#' @keywords internal
+TEMPORAL_TYPES_SINGLE <- c("rw1", "rw2", "ar1", "iid")
 
 
 #' Build the parameter layout of an HMC fit

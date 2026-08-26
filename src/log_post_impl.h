@@ -154,6 +154,7 @@ T compute_log_post_impl(
 
     // Temporal effects
     std::vector<T> phi_temporal;
+    std::vector<T> z_temporal;  // Non-centred AR1's sampled block
     T tau_temporal = T(1.0);
     T rho_ar1 = T(0.0);
     T sigma2_temporal_gp = T(1.0);
@@ -186,6 +187,26 @@ T compute_log_post_impl(
             if (layout.is_ar1) {
                 rho_ar1 = ratiod_ar1::rho_from_logit(
                     params[layout.logit_rho_ar1_idx]);
+            }
+        }
+
+        // Non-centred AR1: the block holds z ~ N(0, I). Every reader below
+        // wants the effects, so reconstruct them here and keep z for the
+        // prior, mirroring temporal_effects() on the analytic side.
+        if (data.temporal_type == TemporalType::AR1 &&
+            data.temporal_parameterization == 1) {
+            z_temporal = phi_temporal;
+            const int T_nc = data.n_times;
+            T inv_sqrt_tau = T(1.0) / safe_sqrt(tau_temporal);
+            T inv_sqrt_tau_omr2 =
+                inv_sqrt_tau / safe_sqrt(ratiod_ar1::one_minus_rho2(rho_ar1));
+            for (int g = 0; g < data.n_temporal_groups; g++) {
+                const int off = g * T_nc;
+                phi_temporal[off] = z_temporal[off] * inv_sqrt_tau_omr2;
+                for (int t = 1; t < T_nc; t++) {
+                    phi_temporal[off + t] = rho_ar1 * phi_temporal[off + t - 1]
+                                          + z_temporal[off + t] * inv_sqrt_tau;
+                }
             }
         }
     }
@@ -371,7 +392,11 @@ T compute_log_post_impl(
     std::vector<T> ms_gp_w_regional;
     std::vector<T> ms_gp_effect;
 
-    if (layout.is_multiscale_gp && data.has_multiscale_gp) {
+    // A structure log_post_impl_gap names is one this density does not write.
+    // Falling into the NNGP block on an HSGP field would read neighbour sets
+    // sized for the locations against a block sized for the basis, so the gap
+    // is skipped here as well as reported there.
+    if (layout.is_multiscale_gp && data.has_multiscale_gp && !data.msgp_is_hsgp) {
         // Extract 4 hyperparameters from log-scale
         T log_sigma2_local = params[layout.log_sigma2_gp_local_idx];
         T log_phi_local = params[layout.log_phi_gp_local_idx];
@@ -616,14 +641,41 @@ T compute_log_post_impl(
                 log_post = log_post + ratiod_ar1::log_prior_rho(
                     rho_ar1, data.temporal_rho_prior_a, data.temporal_rho_prior_b);
 
-                // The normalized density, both the stationary first observation
-                // and the conditional residuals, since the gaussian normalizers
-                // carry the +0.5*T*log(tau) a gradient-based sampler needs.
-                for (int g = 0; g < data.n_temporal_groups; g++) {
-                    log_post = log_post + ratiod_ar1::ar1_log_density(
-                        &phi_temporal[g * T_times], T_times, rho_ar1,
-                        tau_temporal);
+                if (data.temporal_parameterization == 1) {
+                    // Non-centred: the block holds the N(0, I) innovations the
+                    // effects were reconstructed from, and the transform's
+                    // Jacobian is what carries tau and rho.
+                    const int n_z = static_cast<int>(z_temporal.size());
+                    for (int i = 0; i < n_z; i++) {
+                        log_post = log_post - T(0.5) * z_temporal[i] * z_temporal[i];
+                    }
+                    log_post = log_post - T(0.5 * n_z * std::log(2.0 * M_PI));
+                } else {
+                    // The normalized density, both the stationary first
+                    // observation and the conditional residuals, since the
+                    // gaussian normalizers carry the +0.5*T*log(tau) a
+                    // gradient-based sampler needs.
+                    for (int g = 0; g < data.n_temporal_groups; g++) {
+                        log_post = log_post + ratiod_ar1::ar1_log_density(
+                            &phi_temporal[g * T_times], T_times, rho_ar1,
+                            tau_temporal);
+                    }
                 }
+
+            } else if (data.temporal_type == TemporalType::IID) {
+                // IID N(0, 1/tau). Full rank and proper, so no sum-to-zero
+                // pin -- the same terms the analytic log posterior writes.
+                T quad_form = T(0.0);
+                for (int g = 0; g < data.n_temporal_groups; g++) {
+                    for (int t = 0; t < T_times; t++) {
+                        T phi_t = phi_temporal[g * T_times + t];
+                        quad_form = quad_form + phi_t * phi_t;
+                    }
+                }
+                const int n_iid = T_times * data.n_temporal_groups;
+                log_post = log_post + T(0.5 * n_iid) * log_tau
+                         - T(0.5 * n_iid * std::log(2.0 * M_PI));
+                log_post = log_post - T(0.5) * tau_temporal * quad_form;
             }
         }
     }

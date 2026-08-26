@@ -4,7 +4,13 @@
 \alias{temporal_ar1}
 \title{AR1 temporal structure (First-order Autoregressive)}
 \usage{
-temporal_ar1(time_var, group_var = NULL, shared = TRUE, rho_prior = NULL)
+temporal_ar1(
+  time_var,
+  group_var = NULL,
+  shared = TRUE,
+  rho_prior = NULL,
+  parameterization = c("centered", "noncentered")
+)
 }
 \arguments{
 \item{time_var}{Name of the time variable in data. Can be a formula

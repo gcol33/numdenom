@@ -189,6 +189,10 @@ struct ModelData {
   int n_temporal_params = 0;            // Total temporal parameters
   bool temporal_cyclic = false;         // Whether RW is cyclic
   bool temporal_shared = true;          // Whether effect is shared between num/denom
+  // AR1 coordinate the sampler moves in: 0 = the effects themselves,
+  // 1 = the N(0, I) innovations they are reconstructed from. Only AR1 has a
+  // second coordinate; RW1 and RW2 are intrinsic and IID is already unit-scale.
+  int temporal_parameterization = 0;
   double tau_temporal_shape = 1.0;      // Gamma shape for temporal precision
   double tau_temporal_rate = 0.01;      // Gamma rate for temporal precision
   // Beta(a, b) on u = (rho + 1) / 2 for an AR1 temporal correlation, which is
@@ -2033,6 +2037,58 @@ bool compute_softabs_metric(
     std::vector<double>& G_inv,
     std::vector<double>& L_G_inv
 );
+
+// =====================================================================
+// The standalone temporal field's effects
+// =====================================================================
+
+// Whether the AR1 temporal field is sampled in its non-centred coordinate:
+// the parameter block holds z ~ N(0, I) rather than the effects themselves.
+inline bool temporal_ar1_nc(const ModelData& data, const ParamLayout& layout) {
+  return layout.has_temporal &&
+         data.temporal_type == TemporalType::AR1 &&
+         data.temporal_parameterization == 1;
+}
+
+// The temporal effects at `params`: read in place when the field is sampled
+// centred, reconstructed into `buf` when it is not. Every density and every
+// gradient reads the effects, so the transform lives here and nowhere else.
+inline const double* temporal_effects(
+    const std::vector<double>& params,
+    const ModelData& data,
+    const ParamLayout& layout,
+    std::vector<double>& buf
+) {
+  const double* z = &params[layout.temporal_start];
+  if (!temporal_ar1_nc(data, layout)) return z;
+
+  const int T = data.n_times;
+  const int G = data.n_temporal_groups;
+  buf.assign(static_cast<size_t>(T) * G, 0.0);
+
+  const double tau = std::exp(params[layout.log_tau_temporal_idx]);
+  const double rho = ratiod_ar1::rho_from_logit(params[layout.logit_rho_ar1_idx]);
+  for (int g = 0; g < G; g++) {
+    ratiod_temporal::ar1_nc_forward(z + g * T, buf.data() + g * T, T, rho, tau);
+  }
+  return buf.data();
+}
+
+// The temporal block as a density or a gradient needs it: `phi`, the effects
+// that enter the linear predictor, and `z`, the coordinate the sampler moves
+// in. The two are the same pointer unless the field is non-centred, and the
+// buffer backing a reconstruction lives as long as the view does.
+struct TemporalView {
+  std::vector<double> buf;
+  const double* phi = nullptr;
+  const double* z = nullptr;
+
+  void read(const std::vector<double>& params, const ModelData& data,
+            const ParamLayout& layout) {
+    z = &params[layout.temporal_start];
+    phi = temporal_effects(params, data, layout, buf);
+  }
+};
 
 } // namespace ratiod_hmc
 

@@ -499,23 +499,6 @@ is_connected <- function(adjacency) {
 #'   Ignored for non-Matern covariance functions.
 #' @param nn Number of nearest neighbors for NNGP approximation. Default 15.
 #'   Larger values give better approximation but slower computation.
-#' @param solver Linear algebra solver for GP computations:
-#'   - `"auto"` (default): Automatically select based on problem size.
-#'     Uses Cholesky for N < 2000, CG for larger problems. Uses GPU if
-#'     available and N > 5000.
-#'   - `"cholesky"`: Direct Cholesky decomposition. Exact but O(N*k^3).
-#'     Best for smaller datasets or when high precision is critical.
-#'   - `"cg"`: Conjugate Gradient iterative solver. O(N*k^2*iter).
-#'     Better for large N (> 2000) with good preconditioning.
-#'   - `"pcg"`: Preconditioned CG with diagonal preconditioner.
-#'     Faster convergence than CG for ill-conditioned systems.
-#'   - `"gpu"`: GPU-accelerated batched Cholesky using CUDA (if available).
-#'     Requires tulpaRatio to be compiled with GPU support. Falls back to PCG
-#'     if GPU is unavailable. Best for large datasets (N > 5000) with
-#'     CUDA-capable GPU. Use [gpu_available()] to check support.
-#' @param cg_tol Convergence tolerance for CG/PCG solvers. Default 1e-6.
-#'   Smaller values give more accurate solutions but slower convergence.
-#' @param cg_maxiter Maximum iterations for CG/PCG. Default 100.
 #' @param shared Logical; if TRUE (default), spatial effect enters both
 #'   numerator and denominator. Set to FALSE for process-specific spatial
 #'   effects (triggers warning about potential confounding).
@@ -605,26 +588,12 @@ spatial_gp <- function(coords,
                        cov = c("exponential", "matern", "gaussian", "spherical"),
                        nu = 1.5,
                        nn = 15,
-                       solver = c("auto", "cholesky", "cg", "pcg", "gpu"),
-                       cg_tol = 1e-6,
-                       cg_maxiter = 100,
                        shared = TRUE,
                        scale_coords = TRUE,
                        parameterization = c("centered", "noncentered", "collapsed")) {
 
   cov <- match.arg(cov)
-  solver <- match.arg(solver)
   parameterization <- match.arg(parameterization)
-
-  # Check GPU availability if requested
-
-if (solver == "gpu" && !gpu_available()) {
-    warning("GPU solver requested but GPU support is not available. ",
-            "Falling back to PCG solver. ",
-            "To enable GPU support, reinstall tulpaRatio with CUDA.",
-            call. = FALSE)
-    solver <- "pcg"
-  }
 
   # Parse coordinate specification
   if (inherits(coords, "formula")) {
@@ -653,15 +622,6 @@ if (solver == "gpu" && !gpu_available()) {
   }
   nn <- as.integer(nn)
 
-  # Validate CG parameters
-  if (!is.numeric(cg_tol) || length(cg_tol) != 1 || cg_tol <= 0) {
-    stop("`cg_tol` must be a positive number", call. = FALSE)
-  }
-  if (!is.numeric(cg_maxiter) || length(cg_maxiter) != 1 || cg_maxiter < 1) {
-    stop("`cg_maxiter` must be a positive integer", call. = FALSE)
-  }
-  cg_maxiter <- as.integer(cg_maxiter)
-
   # Warning for non-shared spatial effects
   if (!shared) {
     warning(
@@ -679,9 +639,6 @@ if (solver == "gpu" && !gpu_available()) {
       cov = cov,
       nu = if (cov == "matern") nu else NULL,
       nn = nn,
-      solver = solver,
-      cg_tol = cg_tol,
-      cg_maxiter = cg_maxiter,
       shared = shared,
       scale_coords = scale_coords,
       parameterization = parameterization,
@@ -713,17 +670,6 @@ print.ratiod_gp <- function(x, ...) {
   }
   cat("Covariance:", cov_str, "\n")
   cat("Neighbors (NNGP):", x$nn, "\n")
-
-  # Solver info
-  solver_str <- switch(x$solver,
-    auto = "auto (Cholesky<2k, PCG<5k, GPU/CG for larger)",
-    cholesky = "Cholesky (exact, O(N*k^3))",
-    cg = sprintf("CG (iterative, tol=%.0e, maxiter=%d)", x$cg_tol, x$cg_maxiter),
-    pcg = sprintf("PCG (preconditioned, tol=%.0e, maxiter=%d)", x$cg_tol, x$cg_maxiter),
-    gpu = "GPU (CUDA/OpenCL batched Cholesky)",
-    x$solver
-  )
-  cat("Solver:", solver_str, "\n")
 
   cat("Shared:", if (x$shared) "Yes (enters both processes)" else "No", "\n")
 
@@ -941,28 +887,6 @@ validate_hsgp <- function(spatial, data) {
 }
 
 
-#' Validate a multiscale HSGP specification
-#'
-#' Reserved for the HSGP-MSGP path. Multi-scale HSGP is not yet supported;
-#' this function exists so the dispatch branch in `backend_hmc.R` resolves at
-#' load time. Reachable only when a `ratiod_multiscale` object carries an
-#' explicit `approx = "hsgp"` field, which the public constructor does not
-#' set.
-#'
-#' @param spatial A `ratiod_multiscale` spec.
-#' @param data The data frame.
-#' @keywords internal
-#' @noRd
-validate_hsgp_multiscale <- function(spatial, data) {
-  stop(
-    "Multi-scale HSGP (`approx = \"hsgp\"` on `spatial_multiscale()`) is not ",
-    "implemented. Use the default NNGP backend, or `spatial_hsgp()` for ",
-    "single-scale HSGP.",
-    call. = FALSE
-  )
-}
-
-
 #' Multi-Scale Gaussian Process spatial structure
 #'
 #' @description
@@ -983,16 +907,27 @@ validate_hsgp_multiscale <- function(spatial, data) {
 #' @param cov Covariance function: `"exponential"` (default), `"matern"`,
 #'   `"gaussian"`, or `"spherical"`.
 #' @param nu Smoothness parameter for Matern covariance.
+#' @param approx Approximation for the two fields: `"nngp"` (default), a
+#'   nearest-neighbour Gaussian process per scale, or `"hsgp"`, a Hilbert-space
+#'   basis expansion shared by both scales. The basis costs `m^2` coefficients
+#'   per scale regardless of how many locations there are, so it is the cheaper
+#'   of the two once locations outnumber basis functions; the neighbour sets
+#'   follow the data more closely at short ranges.
 #' @param nn_local Number of nearest neighbors for local scale. Default 10.
+#'   Used when `approx = "nngp"`.
 #' @param nn_regional Number of nearest neighbors for regional scale. Default 30.
+#'   Used when `approx = "nngp"`.
+#' @param m Basis functions per dimension when `approx = "hsgp"`, giving `m^2`
+#'   coefficients per scale. Default 10.
+#' @param c_boundary Boundary factor when `approx = "hsgp"`: the domain is
+#'   extended by this multiple before the basis is built. Default 1.5.
 #' @param shared Logical; if TRUE (default), spatial effects enter both
 #'   numerator and denominator.
 #' @param scale_coords Logical; if TRUE (default), coordinates are scaled to
 #'   unit variance before computing distances.
-#' @param sampler HMC sampler / parameterization strategy. One of `"auto"`
-#'   (default), `"noncentered"`, `"centered"`, `"interweaved"`, `"adaptive"`,
-#'   `"riemannian"`, or `"lbfgs"`. `"auto"` selects based on identifiability
-#'   diagnostics.
+#' @param sampler Warmup mass-matrix adaptation for the two GP blocks:
+#'   `"auto"` (default) leaves the sampler's own adaptation in place, `"lbfgs"`
+#'   runs an L-BFGS pass during warmup to initialize it.
 #'
 #' @return A `ratiod_multiscale` object
 #'
@@ -1021,8 +956,10 @@ validate_hsgp_multiscale <- function(spatial, data) {
 #' )
 #' print(ms)
 #'
-#' \dontrun{
-#' # Generate synthetic spatial data (not run - multiscale not fully supported)
+#' # On a shared spectral basis rather than two neighbour sets
+#' spatial_multiscale(~ lon + lat, approx = "hsgp", m = 8)
+#'
+#' \donttest{
 #' set.seed(101)
 #' n <- 60
 #' df <- data.frame(
@@ -1059,14 +996,17 @@ spatial_multiscale <- function(coords,
                                range_regional = c(1, 10),
                                cov = c("exponential", "matern", "gaussian", "spherical"),
                                nu = 1.5,
+                               approx = c("nngp", "hsgp"),
                                nn_local = 10,
                                nn_regional = 30,
+                               m = 10,
+                               c_boundary = 1.5,
                                shared = TRUE,
                                scale_coords = TRUE,
-                               sampler = c("auto", "noncentered", "centered",
-                                          "interweaved", "adaptive", "riemannian", "lbfgs")) {
+                               sampler = c("auto", "lbfgs")) {
 
   cov <- match.arg(cov)
+  approx <- match.arg(approx)
   sampler <- match.arg(sampler)
 
   # Parse coordinate specification
@@ -1115,6 +1055,15 @@ spatial_multiscale <- function(coords,
     stop("`nn_regional` must be a positive integer", call. = FALSE)
   }
 
+  # Validate the HSGP basis
+  if (!is.numeric(m) || length(m) != 1 || m < 1) {
+    stop("`m` must be a positive integer", call. = FALSE)
+  }
+  m <- as.integer(m)
+  if (!is.numeric(c_boundary) || length(c_boundary) != 1 || c_boundary < 1) {
+    stop("`c_boundary` must be >= 1", call. = FALSE)
+  }
+
   # Warning for non-shared
   if (!shared) {
     warning(
@@ -1132,8 +1081,11 @@ spatial_multiscale <- function(coords,
       range_regional = range_regional,
       cov = cov,
       nu = if (cov == "matern") nu else NULL,
+      approx = approx,
       nn_local = as.integer(nn_local),
       nn_regional = as.integer(nn_regional),
+      m = m,
+      c_boundary = c_boundary,
       shared = shared,
       scale_coords = scale_coords,
       sampler = sampler,
@@ -1162,13 +1114,22 @@ print.ratiod_multiscale <- function(x, ...) {
   cat("Coordinates:", paste(x$coord_vars, collapse = ", "), "\n")
   cat("Scales:", paste(x$scales, collapse = " + "), "\n\n")
 
+  is_hsgp <- identical(x$approx %||% "nngp", "hsgp")
+
   cat("Local scale:\n")
   cat("  Range prior: [", x$range_local[1], ", ", x$range_local[2], "]\n", sep = "")
-  cat("  Neighbors:", x$nn_local, "\n")
+  if (!is_hsgp) cat("  Neighbors:", x$nn_local, "\n")
 
   cat("\nRegional scale:\n")
   cat("  Range prior: [", x$range_regional[1], ", ", x$range_regional[2], "]\n", sep = "")
-  cat("  Neighbors:", x$nn_regional, "\n")
+  if (!is_hsgp) cat("  Neighbors:", x$nn_regional, "\n")
+
+  if (is_hsgp) {
+    cat("\nApproximation: HSGP,", x$m, "basis functions per dim (",
+        x$m^2, "per scale ), boundary factor", x$c_boundary, "\n")
+  } else {
+    cat("\nApproximation: NNGP\n")
+  }
 
   cov_str <- x$cov
   if (x$cov == "matern" && !is.null(x$nu)) {

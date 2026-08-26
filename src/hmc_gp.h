@@ -20,26 +20,19 @@ namespace ratiod_gp {
 using ratiod_svc::CovType;
 using ratiod_svc::compute_cov;
 
-// MSGP sampler strategies for advanced optimization
+// How the multi-scale GP blocks' mass matrix is adapted during warmup. This
+// selects an adaptation strategy, not a parameterization of the field: the
+// field is centred, and spatial_multiscale() offers no other coordinate for
+// it.
 enum class MSGPSampler {
-  AUTO,           // Default: use non-centered
-  NONCENTERED,    // z ~ N(0,1), w = transform(z) - current default
-  CENTERED,       // w ~ NNGP directly
-  INTERWEAVED,    // Alternate between centered/non-centered each iteration
-  ADAPTIVE,       // Per-parameter adaptive centering (alpha in [0,1])
-  RIEMANNIAN,     // Simplified Riemannian HMC with diagonal Fisher metric
-  LBFGS           // L-BFGS quasi-Newton mass matrix adaptation - O(md) per step
+  AUTO,   // The sampler's own warmup adaptation
+  LBFGS   // L-BFGS quasi-Newton mass matrix adaptation - O(md) per step
 };
 
 // Parse sampler string to enum
 inline MSGPSampler parse_msgp_sampler(const std::string& s) {
-  if (s == "noncentered" || s == "auto") return MSGPSampler::NONCENTERED;
-  if (s == "centered") return MSGPSampler::CENTERED;
-  if (s == "interweaved") return MSGPSampler::INTERWEAVED;
-  if (s == "adaptive") return MSGPSampler::ADAPTIVE;
-  if (s == "riemannian") return MSGPSampler::RIEMANNIAN;
   if (s == "lbfgs") return MSGPSampler::LBFGS;
-  return MSGPSampler::NONCENTERED;  // Default fallback
+  return MSGPSampler::AUTO;
 }
 
 // =============================================================================
@@ -195,62 +188,6 @@ struct LBFGSState {
     }
 };
 
-// =============================================================================
-// GP Solver Configuration
-// =============================================================================
-
-enum class GPSolver {
-  AUTO,       // Auto-select based on problem size and GPU availability
-  CHOLESKY,   // Direct Cholesky (exact, O(k^3))
-  CG,         // Conjugate Gradient (iterative)
-  PCG,        // Preconditioned CG
-  GPU         // GPU-accelerated (CUDA or OpenCL)
-};
-
-struct GPSolverConfig {
-  GPSolver solver = GPSolver::AUTO;
-  double cg_tol = 1e-6;
-  int cg_maxiter = 100;
-  int n_obs = 0;  // For auto selection
-  bool gpu_available = false;  // Set by runtime check
-
-  // Select actual solver based on config, problem size, and GPU availability
-  GPSolver effective_solver() const {
-    // If explicitly set to non-auto, use that (with GPU fallback if unavailable)
-    if (solver == GPSolver::GPU) {
-      return gpu_available ? GPSolver::GPU : GPSolver::PCG;
-    }
-    if (solver != GPSolver::AUTO) {
-      return solver;
-    }
-
-    // Auto selection logic:
-    // - Small: Cholesky (exact, low overhead)
-    // - Medium: PCG (iterative, good balance)
-    // - Large with GPU: GPU (parallel batched Cholesky)
-    // - Large without GPU: CG (iterative)
-    if (n_obs < 2000) {
-      return GPSolver::CHOLESKY;
-    } else if (n_obs < 5000) {
-      return GPSolver::PCG;
-    } else if (gpu_available) {
-      return GPSolver::GPU;
-    } else {
-      return GPSolver::CG;
-    }
-  }
-};
-
-// Parse solver string from R
-inline GPSolver parse_gp_solver(const std::string& s) {
-  if (s == "auto") return GPSolver::AUTO;
-  if (s == "cholesky") return GPSolver::CHOLESKY;
-  if (s == "cg") return GPSolver::CG;
-  if (s == "pcg") return GPSolver::PCG;
-  if (s == "gpu") return GPSolver::GPU;
-  return GPSolver::AUTO;
-}
-
 // Single-scale GP data structure
 struct GPData {
   int n_obs;                          // Number of unique locations
@@ -272,9 +209,6 @@ struct GPData {
   CovType cov_type;
   double nu;                          // Matern smoothness (if applicable)
   bool shared;                        // Whether GP is shared between num/denom
-
-  // Solver configuration
-  GPSolverConfig solver_config;
 };
 
 // Multi-scale GP data structure
@@ -311,7 +245,7 @@ struct MultiscaleGPData {
   bool shared;
 
   // Advanced sampler strategy
-  MSGPSampler sampler = MSGPSampler::NONCENTERED;
+  MSGPSampler sampler = MSGPSampler::AUTO;
 };
 
 // -----------------------------------------------------------------------------
@@ -578,6 +512,42 @@ inline double gp_nngp_log_lik(
 // Multi-scale GP likelihood
 // -----------------------------------------------------------------------------
 
+// The two scales of a multi-scale GP as single-scale GPData, so that every
+// routine written against one NNGP field serves both. Every field GPData
+// declares is filled: a routine reading nn_neighbor_dist off a view that left
+// it empty indexes past the end of an empty vector rather than failing.
+inline std::pair<GPData, GPData> make_msgp_gp_views(const MultiscaleGPData& ms) {
+  GPData gp_local;
+  gp_local.n_obs = ms.n_obs;
+  gp_local.nn = ms.nn_local;
+  gp_local.coords = ms.coords;
+  gp_local.nn_idx = ms.nn_idx_local;
+  gp_local.nn_dist = ms.nn_dist_local;
+  gp_local.nn_neighbor_dist = ms.nn_neighbor_dist_local;
+  gp_local.nn_order = ms.nn_order_local;
+  gp_local.nn_order_inv = ms.nn_order_inv_local;
+  gp_local.obs_to_loc = ms.obs_to_loc;
+  gp_local.cov_type = ms.cov_type;
+  gp_local.nu = ms.nu;
+  gp_local.shared = ms.shared;
+
+  GPData gp_regional;
+  gp_regional.n_obs = ms.n_obs;
+  gp_regional.nn = ms.nn_regional;
+  gp_regional.coords = ms.coords;
+  gp_regional.nn_idx = ms.nn_idx_regional;
+  gp_regional.nn_dist = ms.nn_dist_regional;
+  gp_regional.nn_neighbor_dist = ms.nn_neighbor_dist_regional;
+  gp_regional.nn_order = ms.nn_order_regional;
+  gp_regional.nn_order_inv = ms.nn_order_inv_regional;
+  gp_regional.obs_to_loc = ms.obs_to_loc;
+  gp_regional.cov_type = ms.cov_type;
+  gp_regional.nu = ms.nu;
+  gp_regional.shared = ms.shared;
+
+  return {gp_local, gp_regional};
+}
+
 // Compute log-likelihood for multi-scale GP (local + regional)
 // w_local: local-scale spatial effect (length n_obs)
 // w_regional: regional-scale spatial effect (length n_obs)
@@ -591,28 +561,9 @@ inline double multiscale_gp_log_lik(
     double phi_regional,
     const MultiscaleGPData& ms_data
 ) {
-  // Create temporary GPData structures for each scale
-  GPData gp_local;
-  gp_local.n_obs = ms_data.n_obs;
-  gp_local.nn = ms_data.nn_local;
-  gp_local.coords = ms_data.coords;
-  gp_local.nn_idx = ms_data.nn_idx_local;
-  gp_local.nn_dist = ms_data.nn_dist_local;
-  gp_local.nn_neighbor_dist = ms_data.nn_neighbor_dist_local;
-  gp_local.nn_order = ms_data.nn_order_local;
-  gp_local.nn_order_inv = ms_data.nn_order_inv_local;
-  gp_local.cov_type = ms_data.cov_type;
-
-  GPData gp_regional;
-  gp_regional.n_obs = ms_data.n_obs;
-  gp_regional.nn = ms_data.nn_regional;
-  gp_regional.coords = ms_data.coords;
-  gp_regional.nn_idx = ms_data.nn_idx_regional;
-  gp_regional.nn_dist = ms_data.nn_dist_regional;
-  gp_regional.nn_neighbor_dist = ms_data.nn_neighbor_dist_regional;
-  gp_regional.nn_order = ms_data.nn_order_regional;
-  gp_regional.nn_order_inv = ms_data.nn_order_inv_regional;
-  gp_regional.cov_type = ms_data.cov_type;
+  std::pair<GPData, GPData> views = make_msgp_gp_views(ms_data);
+  const GPData& gp_local = views.first;
+  const GPData& gp_regional = views.second;
 
   // Compute log-likelihood for each scale
   double ll_local = gp_nngp_log_lik(w_local, sigma2_local, phi_local, gp_local);

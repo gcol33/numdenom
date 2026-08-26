@@ -898,8 +898,10 @@ void compute_gradient_fused(
     }
   }
   const double* phi_temporal = nullptr;
+  TemporalView tview;
   if (layout.has_temporal) {
-    phi_temporal = &params[layout.temporal_start];
+    tview.read(params, data, layout);
+    phi_temporal = tview.phi;
   }
 
   // Families using exp(eta) benefit from Eigen-vectorized exp (SIMD 2-4x faster).
@@ -1459,7 +1461,9 @@ void compute_obs_gradients_vectorized(
 
   // Add temporal
   if (layout.has_temporal && !data.temporal_time_idx.empty()) {
-    const double* phi_temporal = &params[layout.temporal_start];
+    TemporalView tview;
+    tview.read(params, data, layout);
+    const double* phi_temporal = tview.phi;
     expand_temporal(data, phi_temporal, ws.effect_dense.data(), N);
     Eigen::Map<VectorXd>(ws.eta_num.data(), N) +=
         Eigen::Map<const VectorXd>(ws.effect_dense.data(), N);

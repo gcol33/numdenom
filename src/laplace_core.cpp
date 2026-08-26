@@ -1705,8 +1705,16 @@ inline void nngp_conditional_laplace(
     const Rcpp::IntegerVector& nn_order,
     int nn,
     double& cond_mean,
-    double& cond_var
+    double& cond_var,
+    // The Kriging weights and the field positions they multiply. A caller
+    // assembling the NNGP precision needs both; one reading only the
+    // conditional moments passes nullptr.
+    std::vector<int>* nb_out = nullptr,
+    std::vector<double>* alpha_out = nullptr
 ) {
+  if (nb_out) nb_out->clear();
+  if (alpha_out) alpha_out->clear();
+
   int n_neighbors = 0;
   for (int j = 0; j < nn; j++) {
     if (nn_idx(i, j) > 0) n_neighbors++;
@@ -1778,6 +1786,8 @@ inline void nngp_conditional_laplace(
   for (int j = 0; j < n_neighbors; j++) {
     int nn_orig = nn_order[nn_idx(i, j) - 1];
     cond_mean += alpha[j] * w[nn_orig];
+    if (nb_out) nb_out->push_back(nn_orig);
+    if (alpha_out) alpha_out->push_back(alpha[j]);
   }
 
   double c_Cinv_c = 0.0;
@@ -1787,8 +1797,100 @@ inline void nngp_conditional_laplace(
   cond_var = std::max(1e-10, sigma2 - c_Cinv_c);
 }
 
-// Laplace mode finding with GP spatial (NNGP)
-ratiod::LaplaceResult laplace_mode_gp(
+// One NNGP field block's prior, accumulated into the Newton system and
+// returned as a log density at the current field values.
+//
+// The NNGP prior is Q = (I - A)' D^{-1} (I - A): each location's residual
+// r_i = w_i - sum_j alpha_ij w_j carries precision d_i = 1 / cond_var_i. Both
+// the gradient and the Hessian therefore reach the neighbours as well as the
+// location itself -- reading only the diagonal leaves Newton converging to
+// something other than the mode of the density log_marginal then reports.
+//
+// `block_start` is where this field begins in the parameter vector, so the
+// same routine serves a single-scale GP and each scale of a multi-scale one.
+inline double add_nngp_block_laplace(
+    const std::vector<double>& w,
+    int block_start,
+    int n_spatial,
+    double sigma2,
+    double phi_range,
+    int cov_type,
+    const Rcpp::NumericMatrix& coords,
+    const Rcpp::IntegerMatrix& nn_idx,
+    const Rcpp::NumericMatrix& nn_dist,
+    const Rcpp::IntegerVector& nn_order,
+    int nn,
+    Rcpp::NumericVector& grad,
+    Rcpp::NumericMatrix& H
+) {
+  double log_prior = 0.0;
+  std::vector<int> nb;
+  std::vector<double> alpha;
+
+  // nn_order maps a position in the NNGP ordering to a location, 0-based. A
+  // caller handing over the 1-based ordering R builds would write one past the
+  // block on the last location, which corrupts the heap rather than failing.
+  if ((int)nn_order.size() < n_spatial) {
+    Rcpp::stop("NNGP ordering holds %d entries for %d locations",
+               (int)nn_order.size(), n_spatial);
+  }
+  for (int i = 0; i < n_spatial; i++) {
+    if (nn_order[i] < 0 || nn_order[i] >= n_spatial) {
+      Rcpp::stop("NNGP ordering entry %d is %d, outside 0..%d; it must be 0-based",
+                 i, nn_order[i], n_spatial - 1);
+    }
+  }
+
+  for (int i = 0; i < n_spatial; i++) {
+    const int obs_idx = nn_order[i];
+    double cond_mean, cond_var;
+    nngp_conditional_laplace(obs_idx, i, w, sigma2, phi_range, cov_type,
+                             coords, nn_idx, nn_dist, nn_order, nn,
+                             cond_mean, cond_var, &nb, &alpha);
+
+    const double d_i = 1.0 / cond_var;
+    const double resid = w[obs_idx] - cond_mean;
+    log_prior += -0.5 * std::log(2.0 * M_PI * cond_var) - 0.5 * resid * resid * d_i;
+
+    const int self = block_start + obs_idx;
+    grad[self] -= d_i * resid;
+    H(self, self) += d_i;
+
+    const int k = static_cast<int>(nb.size());
+    for (int a = 0; a < k; a++) {
+      const int ia = block_start + nb[a];
+      grad[ia] += d_i * resid * alpha[a];
+      const double cross = d_i * alpha[a];
+      H(self, ia) -= cross;
+      H(ia, self) -= cross;
+      for (int b = 0; b < k; b++) {
+        H(ia, block_start + nb[b]) += cross * alpha[b];
+      }
+    }
+  }
+
+  return log_prior;
+}
+
+// One NNGP field over the shared set of locations: its covariance parameters
+// and the neighbour structure the ordering was built with. A single-scale GP
+// contributes one, a multi-scale GP one per scale.
+struct NNGPBlock {
+  const Rcpp::IntegerMatrix* nn_idx;
+  const Rcpp::NumericMatrix* nn_dist;
+  const Rcpp::IntegerVector* nn_order;
+  int nn;
+  double sigma2;
+  double phi_range;
+};
+
+// Newton mode-finder for a latent field of fixed effects, group random
+// effects, and any number of additive NNGP blocks over the same locations.
+//
+// `coords` holds one row per location and `obs_to_loc` maps each observation
+// to the location entering its linear predictor, so repeated coordinates share
+// a field value instead of the trailing observations losing the spatial term.
+ratiod::LaplaceResult laplace_mode_nngp(
     const Rcpp::IntegerVector& y,
     const Rcpp::IntegerVector& n,
     const Rcpp::NumericMatrix& X,
@@ -1796,23 +1898,21 @@ ratiod::LaplaceResult laplace_mode_gp(
     int n_re_groups,
     double sigma_re,
     const Rcpp::NumericMatrix& coords,
-    const Rcpp::IntegerMatrix& nn_idx,
-    const Rcpp::NumericMatrix& nn_dist,
-    const Rcpp::IntegerVector& nn_order,
+    const Rcpp::IntegerVector& obs_to_loc,
     int n_spatial,
-    int nn,
-    double sigma2_gp,
-    double phi_gp,
     int cov_type,
+    const std::vector<NNGPBlock>& blocks,
     const std::string& family,
     double phi,
     int max_iter,
     double tol,
     int n_threads
 ) {
-  int N = y.size();
-  int p = X.ncol();
-  int n_x = p + n_re_groups + n_spatial;
+  const int N = y.size();
+  const int p = X.ncol();
+  const int n_blocks = static_cast<int>(blocks.size());
+  const int gp_start = p + n_re_groups;
+  const int n_x = gp_start + n_blocks * n_spatial;
 
   ratiod::LaplaceResult result;
   result.mode = Rcpp::NumericVector(n_x, 0.0);
@@ -1820,78 +1920,87 @@ ratiod::LaplaceResult laplace_mode_gp(
   result.n_iter = 0;
 
   Rcpp::NumericVector x(n_x, 0.0);
-  Rcpp::NumericVector grad(n_x);
+  Rcpp::NumericVector grad(n_x, 0.0);
   Rcpp::NumericMatrix H(n_x, n_x);
+  Rcpp::NumericVector eta(N);
 
-  double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
-  int gp_start = p + n_re_groups;
+  const double tau_re = 1.0 / (sigma_re * sigma_re + 1e-10);
+  const double tau_beta = 1e-4;
 
   std::vector<double> w(n_spatial);
+  std::vector<std::pair<int, double> > loads;
+  loads.reserve(p + 1 + n_blocks);
+
+  double log_lik = 0.0;
+  double log_prior_gp = 0.0;
 
   ratiod_omp::ScopedThreadCount thread_scope(n_threads);
 
-  for (int iter = 0; iter < max_iter; iter++) {
-    for (int s = 0; s < n_spatial; s++) {
-      w[s] = x[gp_start + s];
-    }
-
-    Rcpp::NumericVector eta(N);
-    for (int i = 0; i < N; i++) {
-      eta[i] = 0.0;
-      for (int j = 0; j < p; j++) {
-        eta[i] += X(i, j) * x[j];
-      }
-      if (n_re_groups > 0) {
-        int g = (int)re_idx[i] - 1;
-        if (g >= 0 && g < n_re_groups) {
-          eta[i] += x[p + g];
-        }
-      }
-      if (i < n_spatial) {
-        eta[i] += x[gp_start + i];
-      }
-    }
-
+  // Assemble eta, the gradient, and the negative Hessian at the current x.
+  // Called once per Newton step and once more at the converged point, so the
+  // Hessian, its log-determinant, and the log-marginal all describe the mode
+  // rather than the step before it.
+  auto assemble = [&]() {
     std::fill(grad.begin(), grad.end(), 0.0);
-    for (int j = 0; j < n_x; j++) {
-      for (int k = 0; k < n_x; k++) {
-        H(j, k) = 0.0;
+    std::fill(H.begin(), H.end(), 0.0);
+    log_lik = 0.0;
+    log_prior_gp = 0.0;
+
+    for (int i = 0; i < N; i++) {
+      double e = 0.0;
+      for (int j = 0; j < p; j++) e += X(i, j) * x[j];
+      if (n_re_groups > 0) {
+        const int g = static_cast<int>(re_idx[i]) - 1;
+        if (g >= 0 && g < n_re_groups) e += x[p + g];
       }
+      const int s = obs_to_loc[i];
+      if (s >= 0 && s < n_spatial) {
+        for (int b = 0; b < n_blocks; b++) e += x[gp_start + b * n_spatial + s];
+      }
+      eta[i] = e;
     }
 
     for (int i = 0; i < N; i++) {
       double g_i, h_i;
-
       if (family == "binomial") {
         g_i = ratiod::grad_log_lik_binomial(y[i], n[i], eta[i]);
         h_i = ratiod::neg_hess_log_lik_binomial(y[i], n[i], eta[i]);
+        log_lik += ratiod::log_lik_binomial(y[i], n[i], eta[i]);
       } else if (family == "negbin") {
         g_i = ratiod::grad_log_lik_negbin(y[i], eta[i], phi);
         h_i = ratiod::neg_hess_log_lik_negbin(y[i], eta[i], phi);
+        log_lik += ratiod::log_lik_negbin(y[i], eta[i], phi);
       } else {
         g_i = ratiod::grad_log_lik_poisson(y[i], eta[i]);
         h_i = ratiod::neg_hess_log_lik_poisson(y[i], eta[i]);
+        log_lik += ratiod::log_lik_poisson(y[i], eta[i]);
       }
 
+      // Every coordinate this observation loads, with the weight it enters
+      // eta by. The likelihood reaches the whole outer product of that set,
+      // which is what carries the fixed-effect / random-effect / spatial
+      // cross terms a block-diagonal assembly drops.
+      loads.clear();
       for (int j = 0; j < p; j++) {
-        grad[j] += g_i * X(i, j);
-        for (int k = 0; k < p; k++) {
-          H(j, k) += h_i * X(i, j) * X(i, k);
-        }
+        if (X(i, j) != 0.0) loads.push_back(std::make_pair(j, X(i, j)));
       }
-
       if (n_re_groups > 0) {
-        int g = (int)re_idx[i] - 1;
-        if (g >= 0 && g < n_re_groups) {
-          grad[p + g] += g_i;
-          H(p + g, p + g) += h_i;
-        }
+        const int g = static_cast<int>(re_idx[i]) - 1;
+        if (g >= 0 && g < n_re_groups) loads.push_back(std::make_pair(p + g, 1.0));
+      }
+      const int s = obs_to_loc[i];
+      if (s >= 0 && s < n_spatial) {
+        for (int b = 0; b < n_blocks; b++)
+          loads.push_back(std::make_pair(gp_start + b * n_spatial + s, 1.0));
       }
 
-      if (i < n_spatial) {
-        int gp_idx = gp_start + i;
-        grad[gp_idx] += g_i;
-        H(gp_idx, gp_idx) += h_i;
+      const int n_load = static_cast<int>(loads.size());
+      for (int a = 0; a < n_load; a++) {
+        grad[loads[a].first] += g_i * loads[a].second;
+        const double ha = h_i * loads[a].second;
+        for (int c = 0; c < n_load; c++) {
+          H(loads[a].first, loads[c].first) += ha * loads[c].second;
+        }
       }
     }
 
@@ -1900,33 +2009,30 @@ ratiod::LaplaceResult laplace_mode_gp(
       H(p + g, p + g) += tau_re;
     }
 
-    for (int i = 0; i < n_spatial; i++) {
-      int obs_idx = nn_order[i];
-      int gp_idx = gp_start + obs_idx;
-
-      double cond_mean, cond_var;
-      nngp_conditional_laplace(obs_idx, i, w, sigma2_gp, phi_gp, cov_type,
-                               coords, nn_idx, nn_dist, nn_order, nn,
-                               cond_mean, cond_var);
-
-      double tau_cond = 1.0 / cond_var;
-      grad[gp_idx] -= tau_cond * (w[obs_idx] - cond_mean);
-      H(gp_idx, gp_idx) += tau_cond;
+    for (int b = 0; b < n_blocks; b++) {
+      const int bs = gp_start + b * n_spatial;
+      for (int s = 0; s < n_spatial; s++) w[s] = x[bs + s];
+      log_prior_gp += add_nngp_block_laplace(
+          w, bs, n_spatial, blocks[b].sigma2, blocks[b].phi_range, cov_type,
+          coords, *blocks[b].nn_idx, *blocks[b].nn_dist, *blocks[b].nn_order,
+          blocks[b].nn, grad, H);
     }
 
-    double tau_beta = 1e-4;
     for (int j = 0; j < p; j++) {
       grad[j] -= tau_beta * x[j];
       H(j, j) += tau_beta;
     }
+  };
 
-    Rcpp::NumericMatrix L(n_x, n_x);
+  // Cholesky of the negative Hessian, reused for the Newton step and, at the
+  // mode, for the log-determinant the Laplace correction needs.
+  Rcpp::NumericMatrix L(n_x, n_x);
+  auto factor = [&]() {
+    std::fill(L.begin(), L.end(), 0.0);
     for (int j = 0; j < n_x; j++) {
       for (int k = 0; k <= j; k++) {
         double sum = H(j, k);
-        for (int m = 0; m < k; m++) {
-          sum -= L(j, m) * L(k, m);
-        }
+        for (int m = 0; m < k; m++) sum -= L(j, m) * L(k, m);
         if (j == k) {
           if (sum <= 0) sum = 1e-6;
           L(j, k) = std::sqrt(sum);
@@ -1935,22 +2041,23 @@ ratiod::LaplaceResult laplace_mode_gp(
         }
       }
     }
+  };
+
+  for (int iter = 0; iter < max_iter; iter++) {
+    assemble();
+    factor();
 
     Rcpp::NumericVector z(n_x);
     for (int j = 0; j < n_x; j++) {
       double sum = grad[j];
-      for (int k = 0; k < j; k++) {
-        sum -= L(j, k) * z[k];
-      }
+      for (int k = 0; k < j; k++) sum -= L(j, k) * z[k];
       z[j] = sum / L(j, j);
     }
 
     Rcpp::NumericVector delta(n_x);
     for (int j = n_x - 1; j >= 0; j--) {
       double sum = z[j];
-      for (int k = j + 1; k < n_x; k++) {
-        sum -= L(k, j) * delta[k];
-      }
+      for (int k = j + 1; k < n_x; k++) sum -= L(k, j) * delta[k];
       delta[j] = sum / L(j, j);
     }
 
@@ -1960,62 +2067,20 @@ ratiod::LaplaceResult laplace_mode_gp(
       x[j] += delta[j];
     }
 
+    result.n_iter = iter + 1;
     if (max_delta < tol) {
       result.converged = true;
-      result.n_iter = iter + 1;
       break;
     }
-    result.n_iter = iter + 1;
   }
 
-  result.mode = x;
+  // At the mode: the Hessian the sampler draws from, its log-determinant, and
+  // the log-marginal built from the same terms this assembly just evaluated.
+  assemble();
+  factor();
 
   double log_det = 0.0;
-  Rcpp::NumericMatrix L_final(n_x, n_x);
-  for (int j = 0; j < n_x; j++) {
-    for (int k = 0; k <= j; k++) {
-      double sum = H(j, k);
-      for (int m = 0; m < k; m++) {
-        sum -= L_final(j, m) * L_final(k, m);
-      }
-      if (j == k) {
-        if (sum <= 0) sum = 1e-6;
-        L_final(j, k) = std::sqrt(sum);
-        log_det += std::log(L_final(j, k));
-      } else {
-        L_final(j, k) = sum / L_final(k, k);
-      }
-    }
-  }
-  result.log_det_Q = 2.0 * log_det;
-
-  double log_lik = 0.0;
-  Rcpp::NumericVector eta_final(N);
-  for (int i = 0; i < N; i++) {
-    eta_final[i] = 0.0;
-    for (int j = 0; j < p; j++) {
-      eta_final[i] += X(i, j) * x[j];
-    }
-    if (n_re_groups > 0) {
-      int g = (int)re_idx[i] - 1;
-      if (g >= 0 && g < n_re_groups) {
-        eta_final[i] += x[p + g];
-      }
-    }
-    if (i < n_spatial) {
-      eta_final[i] += x[gp_start + i];
-    }
-  }
-
-  for (int i = 0; i < N; i++) {
-    if (family == "binomial") {
-      log_lik += ratiod::log_lik_binomial(y[i], n[i], eta_final[i]);
-    } else if (family == "negbin") {
-      log_lik += ratiod::log_lik_negbin(y[i], eta_final[i], phi);
-    } else {
-      log_lik += ratiod::log_lik_poisson(y[i], eta_final[i]);
-    }
-  }
+  for (int j = 0; j < n_x; j++) log_det += std::log(L(j, j));
 
   double log_prior_re = 0.0;
   for (int g = 0; g < n_re_groups; g++) {
@@ -2025,21 +2090,9 @@ ratiod::LaplaceResult laplace_mode_gp(
     log_prior_re += 0.5 * n_re_groups * std::log(tau_re / (2.0 * M_PI));
   }
 
-  double log_prior_gp = 0.0;
-  for (int s = 0; s < n_spatial; s++) {
-    w[s] = x[gp_start + s];
-  }
-  for (int i = 0; i < n_spatial; i++) {
-    int obs_idx = nn_order[i];
-    double cond_mean, cond_var;
-    nngp_conditional_laplace(obs_idx, i, w, sigma2_gp, phi_gp, cov_type,
-                             coords, nn_idx, nn_dist, nn_order, nn,
-                             cond_mean, cond_var);
-    double resid = w[obs_idx] - cond_mean;
-    log_prior_gp += -0.5 * std::log(2.0 * M_PI * cond_var) -
-                    0.5 * resid * resid / cond_var;
-  }
-
+  result.mode = x;
+  result.hessian = H;
+  result.log_det_Q = 2.0 * log_det;
   result.log_marginal = log_lik + log_prior_re + log_prior_gp
                         - 0.5 * result.log_det_Q + 0.5 * n_x * std::log(2.0 * M_PI);
 
@@ -2464,6 +2517,7 @@ Rcpp::List cpp_laplace_fit_gp(
     int n_re_groups,
     double sigma_re,
     Rcpp::NumericMatrix coords,
+    Rcpp::IntegerVector obs_to_loc,
     Rcpp::IntegerMatrix nn_idx,
     Rcpp::NumericMatrix nn_dist,
     Rcpp::IntegerVector nn_order,
@@ -2478,15 +2532,23 @@ Rcpp::List cpp_laplace_fit_gp(
     double tol = 1e-6,
     int n_threads = 1
 ) {
-  ratiod::LaplaceResult result = laplace_mode_gp(
+  std::vector<NNGPBlock> blocks(1);
+  blocks[0].nn_idx = &nn_idx;
+  blocks[0].nn_dist = &nn_dist;
+  blocks[0].nn_order = &nn_order;
+  blocks[0].nn = nn;
+  blocks[0].sigma2 = sigma2_gp;
+  blocks[0].phi_range = phi_gp;
+
+  ratiod::LaplaceResult result = laplace_mode_nngp(
     y, n, X, re_idx, n_re_groups, sigma_re,
-    coords, nn_idx, nn_dist, nn_order, n_spatial, nn,
-    sigma2_gp, phi_gp, cov_type,
+    coords, obs_to_loc, n_spatial, cov_type, blocks,
     family, phi, max_iter, tol, n_threads
   );
 
   return Rcpp::List::create(
     Rcpp::Named("mode") = result.mode,
+    Rcpp::Named("hessian") = result.hessian,
     Rcpp::Named("log_det_Q") = result.log_det_Q,
     Rcpp::Named("log_marginal") = result.log_marginal,
     Rcpp::Named("n_iter") = result.n_iter,
@@ -2494,265 +2556,7 @@ Rcpp::List cpp_laplace_fit_gp(
   );
 }
 
-// Laplace approximation for multiscale GP (local + regional)
-// This treats local and regional as independent GP components
 namespace ratiod {
-LaplaceResult laplace_mode_multiscale_gp(
-    const Rcpp::IntegerVector& y,
-    const Rcpp::IntegerVector& n,
-    const Rcpp::NumericMatrix& X,
-    const Rcpp::NumericVector& re_idx,
-    int n_re_groups,
-    double sigma_re,
-    const Rcpp::NumericMatrix& coords,
-    const Rcpp::IntegerMatrix& nn_idx_local,
-    const Rcpp::NumericMatrix& nn_dist_local,
-    const Rcpp::IntegerVector& nn_order_local,
-    int nn_local,
-    const Rcpp::IntegerMatrix& nn_idx_regional,
-    const Rcpp::NumericMatrix& nn_dist_regional,
-    const Rcpp::IntegerVector& nn_order_regional,
-    int nn_regional,
-    int n_spatial,
-    double sigma2_local,
-    double phi_local,
-    double sigma2_regional,
-    double phi_regional,
-    int cov_type,
-    const std::string& family,
-    double phi,
-    int max_iter,
-    double tol,
-    int n_threads
-) {
-  // n_spatial = n_obs for point-referenced data
-  // Parameter layout: [beta(p)] [re(n_re_groups)] [w_local(n_spatial)] [w_regional(n_spatial)]
-  int N = y.size();
-  int p = X.ncol();
-
-  int local_start = p + n_re_groups;
-  int regional_start = local_start + n_spatial;
-  int n_x = regional_start + n_spatial;
-
-  ratiod::LaplaceResult result;
-  result.mode = Rcpp::NumericVector(n_x, 0.0);
-  result.log_det_Q = 0.0;
-  result.log_marginal = 0.0;
-  result.n_iter = 0;
-  result.converged = false;
-
-  // Initialize
-  Rcpp::NumericVector x = Rcpp::clone(result.mode);
-
-  // RE precision
-  double tau_re = (sigma_re > 0) ? 1.0 / (sigma_re * sigma_re) : 0.01;
-
-  for (int iter = 0; iter < max_iter; iter++) {
-    // Compute eta = X*beta + re + w_local + w_regional
-    Rcpp::NumericVector eta(N, 0.0);
-    for (int i = 0; i < N; i++) {
-      for (int j = 0; j < p; j++) {
-        eta[i] += X(i, j) * x[j];
-      }
-      if (n_re_groups > 0) {
-        int g = (int)re_idx[i] - 1;
-        if (g >= 0 && g < n_re_groups) {
-          eta[i] += x[p + g];
-        }
-      }
-      // Add local GP effect
-      if (i < n_spatial) {
-        eta[i] += x[local_start + i];
-        eta[i] += x[regional_start + i];
-      }
-    }
-
-    // Compute gradient and Hessian
-    Rcpp::NumericVector grad(n_x, 0.0);
-    Rcpp::NumericMatrix H(n_x, n_x);
-
-    // Likelihood contributions
-    for (int i = 0; i < N; i++) {
-      double g_i, h_i;
-      if (family == "binomial") {
-        g_i = grad_log_lik_binomial(y[i], n[i], eta[i]);
-        h_i = neg_hess_log_lik_binomial(y[i], n[i], eta[i]);
-      } else if (family == "negbin") {
-        g_i = grad_log_lik_negbin(y[i], eta[i], phi);
-        h_i = neg_hess_log_lik_negbin(y[i], eta[i], phi);
-      } else {
-        g_i = grad_log_lik_poisson(y[i], eta[i]);
-        h_i = neg_hess_log_lik_poisson(y[i], eta[i]);
-      }
-
-      // Fixed effects
-      for (int j = 0; j < p; j++) {
-        grad[j] += g_i * X(i, j);
-        for (int k = 0; k < p; k++) {
-          H(j, k) += h_i * X(i, j) * X(i, k);
-        }
-      }
-
-      // Random effects
-      if (n_re_groups > 0) {
-        int g = (int)re_idx[i] - 1;
-        if (g >= 0 && g < n_re_groups) {
-          grad[p + g] += g_i;
-          H(p + g, p + g) += h_i;
-        }
-      }
-
-      // Local GP effect
-      if (i < n_spatial) {
-        int idx_local = local_start + i;
-        grad[idx_local] += g_i;
-        H(idx_local, idx_local) += h_i;
-
-        // Regional GP effect
-        int idx_regional = regional_start + i;
-        grad[idx_regional] += g_i;
-        H(idx_regional, idx_regional) += h_i;
-
-        // Cross terms between local and regional
-        H(idx_local, idx_regional) += h_i;
-        H(idx_regional, idx_local) += h_i;
-      }
-    }
-
-    // Prior contributions for random effects
-    for (int g = 0; g < n_re_groups; g++) {
-      grad[p + g] -= tau_re * x[p + g];
-      H(p + g, p + g) += tau_re;
-    }
-
-    // GP prior contribution - local (sparse NNGP)
-    double tau_local = 1.0 / sigma2_local;
-    for (int i = 0; i < n_spatial; i++) {
-      int idx = local_start + i;
-
-      // Compute conditional mean from neighbors
-      double cond_mean = 0.0;
-      double cond_prec = tau_local;
-      int n_neighbors = 0;
-
-      for (int k = 0; k < nn_local; k++) {
-        int neighbor = nn_idx_local(i, k) - 1;
-        if (neighbor >= 0 && neighbor < n_spatial) {
-          double dist = nn_dist_local(i, k);
-          double cov_val = std::exp(-dist / phi_local);  // Exponential covariance
-          cond_mean += cov_val * x[local_start + neighbor];
-          n_neighbors++;
-        }
-      }
-      if (n_neighbors > 0) {
-        cond_mean *= tau_local;
-      }
-
-      grad[idx] -= tau_local * x[idx] - cond_mean;
-      H(idx, idx) += tau_local;
-    }
-
-    // GP prior contribution - regional (sparse NNGP)
-    double tau_regional = 1.0 / sigma2_regional;
-    for (int i = 0; i < n_spatial; i++) {
-      int idx = regional_start + i;
-
-      double cond_mean = 0.0;
-      double cond_prec = tau_regional;
-      int n_neighbors = 0;
-
-      for (int k = 0; k < nn_regional; k++) {
-        int neighbor = nn_idx_regional(i, k) - 1;
-        if (neighbor >= 0 && neighbor < n_spatial) {
-          double dist = nn_dist_regional(i, k);
-          double cov_val = std::exp(-dist / phi_regional);  // Exponential covariance
-          cond_mean += cov_val * x[regional_start + neighbor];
-          n_neighbors++;
-        }
-      }
-      if (n_neighbors > 0) {
-        cond_mean *= tau_regional;
-      }
-
-      grad[idx] -= tau_regional * x[idx] - cond_mean;
-      H(idx, idx) += tau_regional;
-    }
-
-    // Regularization for fixed effects
-    double tau_beta = 1e-4;
-    for (int j = 0; j < p; j++) {
-      grad[j] -= tau_beta * x[j];
-      H(j, j) += tau_beta;
-    }
-
-    // Newton step (using Cholesky decomposition)
-    Rcpp::NumericMatrix L(n_x, n_x);
-    for (int j = 0; j < n_x; j++) {
-      for (int k = 0; k <= j; k++) {
-        double sum = H(j, k);
-        for (int i = 0; i < k; i++) {
-          sum -= L(j, i) * L(k, i);
-        }
-        if (j == k) {
-          if (sum <= 0) sum = 1e-6;
-          L(j, k) = std::sqrt(sum);
-        } else {
-          L(j, k) = sum / L(k, k);
-        }
-      }
-    }
-
-    // Forward substitution
-    Rcpp::NumericVector z(n_x);
-    for (int j = 0; j < n_x; j++) {
-      double sum = grad[j];
-      for (int k = 0; k < j; k++) {
-        sum -= L(j, k) * z[k];
-      }
-      z[j] = sum / L(j, j);
-    }
-
-    // Back substitution
-    Rcpp::NumericVector delta(n_x);
-    for (int j = n_x - 1; j >= 0; j--) {
-      double sum = z[j];
-      for (int k = j + 1; k < n_x; k++) {
-        sum -= L(k, j) * delta[k];
-      }
-      delta[j] = sum / L(j, j);
-    }
-
-    // Update
-    double max_delta = 0.0;
-    for (int j = 0; j < n_x; j++) {
-      max_delta = std::max(max_delta, std::abs(delta[j]));
-      x[j] += delta[j];
-    }
-
-    if (max_delta < tol) {
-      result.converged = true;
-      result.n_iter = iter + 1;
-      break;
-    }
-    result.n_iter = iter + 1;
-  }
-
-  // Center GP effects (sum-to-zero)
-  double mean_local = 0.0, mean_regional = 0.0;
-  for (int i = 0; i < n_spatial; i++) {
-    mean_local += x[local_start + i];
-    mean_regional += x[regional_start + i];
-  }
-  mean_local /= n_spatial;
-  mean_regional /= n_spatial;
-  for (int i = 0; i < n_spatial; i++) {
-    x[local_start + i] -= mean_local;
-    x[regional_start + i] -= mean_regional;
-  }
-
-  result.mode = x;
-  return result;
-}
 
 // ---------------------------------------------------------------------
 // Laplace mode finding with RSR (Restricted Spatial Regression)
@@ -3218,6 +3022,7 @@ Rcpp::List cpp_laplace_fit_multiscale_gp(
     int n_re_groups,
     double sigma_re,
     Rcpp::NumericMatrix coords,
+    Rcpp::IntegerVector obs_to_loc,
     Rcpp::IntegerMatrix nn_idx_local,
     Rcpp::NumericMatrix nn_dist_local,
     Rcpp::IntegerVector nn_order_local,
@@ -3238,17 +3043,29 @@ Rcpp::List cpp_laplace_fit_multiscale_gp(
     double tol = 1e-6,
     int n_threads = 1
 ) {
-  ratiod::LaplaceResult result = ratiod::laplace_mode_multiscale_gp(
+  std::vector<NNGPBlock> blocks(2);
+  blocks[0].nn_idx = &nn_idx_local;
+  blocks[0].nn_dist = &nn_dist_local;
+  blocks[0].nn_order = &nn_order_local;
+  blocks[0].nn = nn_local;
+  blocks[0].sigma2 = sigma2_local;
+  blocks[0].phi_range = phi_local;
+  blocks[1].nn_idx = &nn_idx_regional;
+  blocks[1].nn_dist = &nn_dist_regional;
+  blocks[1].nn_order = &nn_order_regional;
+  blocks[1].nn = nn_regional;
+  blocks[1].sigma2 = sigma2_regional;
+  blocks[1].phi_range = phi_regional;
+
+  ratiod::LaplaceResult result = laplace_mode_nngp(
     y, n, X, re_idx, n_re_groups, sigma_re,
-    coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local,
-    nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional,
-    n_spatial,
-    sigma2_local, phi_local, sigma2_regional, phi_regional,
-    cov_type, family, phi, max_iter, tol, n_threads
+    coords, obs_to_loc, n_spatial, cov_type, blocks,
+    family, phi, max_iter, tol, n_threads
   );
 
   return Rcpp::List::create(
     Rcpp::Named("mode") = result.mode,
+    Rcpp::Named("hessian") = result.hessian,
     Rcpp::Named("log_det_Q") = result.log_det_Q,
     Rcpp::Named("log_marginal") = result.log_marginal,
     Rcpp::Named("n_iter") = result.n_iter,

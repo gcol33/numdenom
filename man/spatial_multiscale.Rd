@@ -11,12 +11,14 @@ spatial_multiscale(
   range_regional = c(1, 10),
   cov = c("exponential", "matern", "gaussian", "spherical"),
   nu = 1.5,
+  approx = c("nngp", "hsgp"),
   nn_local = 10,
   nn_regional = 30,
+  m = 10,
+  c_boundary = 1.5,
   shared = TRUE,
   scale_coords = TRUE,
-  sampler = c("auto", "noncentered", "centered", "interweaved", "adaptive", "riemannian",
-    "lbfgs")
+  sampler = c("auto", "lbfgs")
 )
 }
 \arguments{
@@ -36,9 +38,24 @@ Default: \code{c(1, 10)} (after scaling).}
 
 \item{nu}{Smoothness parameter for Matern covariance.}
 
-\item{nn_local}{Number of nearest neighbors for local scale. Default 10.}
+\item{approx}{Approximation for the two fields: \code{"nngp"} (default), a
+nearest-neighbour Gaussian process per scale, or \code{"hsgp"}, a Hilbert-space
+basis expansion shared by both scales. The basis costs \code{m^2} coefficients
+per scale regardless of how many locations there are, so it is the cheaper
+of the two once locations outnumber basis functions; the neighbour sets
+follow the data more closely at short ranges.}
 
-\item{nn_regional}{Number of nearest neighbors for regional scale. Default 30.}
+\item{nn_local}{Number of nearest neighbors for local scale. Default 10.
+Used when \code{approx = "nngp"}.}
+
+\item{nn_regional}{Number of nearest neighbors for regional scale. Default 30.
+Used when \code{approx = "nngp"}.}
+
+\item{m}{Basis functions per dimension when \code{approx = "hsgp"}, giving \code{m^2}
+coefficients per scale. Default 10.}
+
+\item{c_boundary}{Boundary factor when \code{approx = "hsgp"}: the domain is
+extended by this multiple before the basis is built. Default 1.5.}
 
 \item{shared}{Logical; if TRUE (default), spatial effects enter both
 numerator and denominator.}
@@ -46,10 +63,9 @@ numerator and denominator.}
 \item{scale_coords}{Logical; if TRUE (default), coordinates are scaled to
 unit variance before computing distances.}
 
-\item{sampler}{HMC sampler / parameterization strategy. One of \code{"auto"}
-(default), \code{"noncentered"}, \code{"centered"}, \code{"interweaved"}, \code{"adaptive"},
-\code{"riemannian"}, or \code{"lbfgs"}. \code{"auto"} selects based on identifiability
-diagnostics.}
+\item{sampler}{Warmup mass-matrix adaptation for the two GP blocks:
+\code{"auto"} (default) leaves the sampler's own adaptation in place, \code{"lbfgs"}
+runs an L-BFGS pass during warmup to initialize it.}
 }
 \value{
 A \code{ratiod_multiscale} object
@@ -87,8 +103,10 @@ ms <- spatial_multiscale(
 )
 print(ms)
 
-\dontrun{
-# Generate synthetic spatial data (not run - multiscale not fully supported)
+# On a shared spectral basis rather than two neighbour sets
+spatial_multiscale(~ lon + lat, approx = "hsgp", m = 8)
+
+\donttest{
 set.seed(101)
 n <- 60
 df <- data.frame(

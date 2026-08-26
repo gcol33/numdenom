@@ -1,5 +1,98 @@
 # tulpaRatio 1.7.2
 
+* **`temporal_iid()` reaches the standalone temporal field, and
+  `temporal_ar1(parameterization = "noncentered")` reaches the AR1 one (#40).**
+  `TemporalType::IID` had a branch in `temporal_log_prior()` and in its
+  templated twin, but no R constructor and no `"iid"` case in the C++ parser,
+  so nothing could select it; the H-mode and A/A_r branches had no IID case at
+  all and would have contributed zero. A complete non-centred AR1
+  reparameterization -- `ar1_nc_forward`, `ar1_nc_log_prior`, `ar1_nc_gradient`
+  -- sat in `hmc_temporal.h` with no callers anywhere. Both are now wired:
+  `temporal_effects()` reconstructs the effects wherever a density or a
+  gradient reads the block, and `temporal_gmrf_prior_grad()` writes the
+  gradient in whichever coordinate the sampler moves in. Wiring
+  `ar1_nc_gradient` up showed it was wrong: its `log_tau` and `logit_rho` sums
+  paired the backward adjoint `adj[t]`, which carries the AR1 recursion
+  backward, with a forward derivative `dphi[t]/dtheta` that already carries the
+  same recursion, counting it twice. Against central differences of the log
+  posterior the two hyperparameters were off by 12% and 8% while all ten field
+  entries matched to 4e-10; the correct pairing is the direct partial
+  `grad_phi_lik[t]`, which the function's own `T == 1` branch already used.
+  All four gradient modes now agree with finite differences on `temporal_iid`
+  and `temporal_ar1_nc`, both added to `test_gradient_check.cpp`.
+
+* **`spatial_multiscale()` under `mode = "laplace"` fits instead of reporting a
+  missing `group_var` (#39).** `cpp_laplace_fit_multiscale_gp` was a registered
+  export with no caller: `fit_laplace_spatial()` had no `"multiscale"` branch,
+  so the model fell through to the areal path and failed on a message about
+  areal grouping. `spatial_gp()` failed the same way -- the areal preparation
+  ran ahead of the GP dispatch -- and would have failed again on
+  `result$hessian`, which `cpp_laplace_fit_gp` never returned. The two
+  coordinate-based fields now dispatch before the areal preparation, and both
+  run through one mode-finder: `laplace_mode_nngp()` takes a list of NNGP
+  blocks, so a single-scale GP passes one and a multi-scale GP passes two,
+  replacing two near-identical Newton loops. Three defects went with the
+  duplication: the multi-scale copy ignored `cov_type` and hard-coded an
+  exponential covariance, and wrote a conditional mean from raw covariances
+  rather than the Kriging weights; both copies assembled only the diagonal of
+  the NNGP precision, so Newton converged somewhere other than the mode the
+  reported log-marginal describes; and both mapped observation `i` to location
+  `i`, dropping the spatial term entirely for every observation past the last
+  unique location. `obs_to_loc` is now passed in, the Hessian is assembled at
+  the converged point and returned, and `hsgp` and `svc` name themselves in
+  `BACKEND_STRUCTURE_SUPPORT` rather than reaching a dispatch that would fit
+  the model without the field.
+
+  The Laplace NNGP path also read R's 1-based `nn_order` as 0-based, writing one
+  past the end of the field block on the last location. Nothing reached it
+  before; it now converts at the call site, as the sampler entry does, and
+  `add_nngp_block_laplace()` refuses an ordering outside `0..n-1` rather than
+  corrupting the heap.
+
+* **Multi-scale HSGP is reachable (#38).** `data.msgp_is_hsgp` selected a
+  complete C++ branch that swapped the two neighbour sets for one shared
+  Hilbert-space basis, and no R function could set it -- `spatial_multiscale()`
+  had no `approx` argument, and the internal validator the dispatch resolved to
+  raised an error saying so. `spatial_multiscale(approx = "hsgp", m =,
+  c_boundary =)` now selects it, the neighbour computation is skipped on that
+  path, and `msgp_hsgp` joins the finite-difference harness. On 90 observations
+  with `m = 8` it fits in 3.2 s against 14.3 s for the neighbour sets. The
+  templated log posterior still declares the gap it declared before, and now
+  also skips the block rather than reading neighbour sets sized for the
+  locations against a parameter block sized for the basis.
+
+* **`spatial_multiscale(sampler =)` offers the two strategies that exist
+  (#36).** Five of its seven names -- `"noncentered"`, `"centered"`,
+  `"interweaved"`, `"adaptive"`, `"riemannian"` -- produced byte-identical
+  sampling: the field is centred at every site that reads it for the density or
+  the gradient, and the only enumerator read anywhere selects L-BFGS warmup
+  adaptation. The argument now takes `"auto"` and `"lbfgs"`, which is what it
+  selects between, and the enum's documented default no longer claims a
+  parameterization the code does not carry. A non-centred coordinate for the
+  multi-scale field is filed separately.
+
+  `make_msgp_gp_views()` existed twice, and the copy feeding the gradients left
+  `nn_neighbor_dist` empty. Its current callers do not read that field, but the
+  non-centred NNGP helpers do, so the two are now one builder that fills every
+  field `GPData` declares.
+
+* **`spatial_gp(solver =, cg_tol =, cg_maxiter =)` are gone (#37).** The CG /
+  PCG / GPU dispatch in `hmc_gp_cg.h` was complete and had no callers -- the
+  header was not `#include`d anywhere, so it was never compiled. Routing the
+  sampler through it would have made the package slower: the systems it solves
+  are the `k x k` neighbour covariances, and CG needs about `k` iterations on a
+  dense covariance rather than converging early. Measured against the Cholesky
+  already running, on exponential-covariance neighbourhoods in the unit square,
+  10,000 solves each: k=5 3.1x slower, k=10 2.3x, k=15 (the `nn` default) 3.1x,
+  k=30 (the `nn_regional` default) 2.4x, k=50 2.8x, returning a 1e-6 solution
+  rather than a machine-accurate one. The N-scaling of an NNGP is `O(N k^3)`
+  and the inner solver does not touch N, so `"cg"`'s documented case -- "better
+  for large N (> 2000)" -- does not hold. `"gpu"` had no path either: nothing in
+  the package builds CUDA, and its own caller commented the GPU branch out. The
+  three arguments and the dead header are removed; `gpu_available()` and
+  `gpu_info()` are unaffected.
+
+
 * **An areal spatial field paired with `temporal_multiscale()` now gets its
   multi-scale block (#74).** `cpp_hmc_fit` set `has_multiscale_temporal` from
   the temporal bundle and then cleared it about a hundred lines later, among

@@ -13,7 +13,9 @@ convert_laplace_gp_to_ratiod_fit(
   X,
   re_info,
   spatial,
-  n_samples
+  n_samples,
+  field_names = "w_gp",
+  spatial_type = "gp"
 )
 }
 \description{

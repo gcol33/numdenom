@@ -7,8 +7,15 @@
 
 # temporal_ar1 is the temporal block's own AR1 arm, which carries a rho the rw1
 # and rw2 arms have no counterpart for and so reaches gradient terms neither of
-# them does.
-FIELDS <- c("icar", "bym2", "rw1", "rw2", "temporal_ar1", "icar_rw1")
+# them does. temporal_iid is the diagonal arm, with no differencing stencil and
+# no sum-to-zero pin. temporal_ar1_nc samples the AR1 field in its non-centred
+# coordinate, where tau and rho reach the effects through the transform rather
+# than through a quadratic form: the hyperparameter chain rule there paired the
+# backward adjoint with a forward derivative that already carried the same
+# recursion, which is a factor no finite difference of the density agrees with
+# (gcol33/tulpaRatio#40).
+FIELDS <- c("icar", "bym2", "rw1", "rw2", "temporal_ar1", "temporal_iid",
+            "temporal_ar1_nc", "icar_rw1")
 # The spatial field carried alongside a second structure, which routes to the
 # multi-feature gradient paths rather than the main one. Those paths identified
 # the field by a soft penalty while the log posterior hard-centred it, so their
@@ -94,7 +101,11 @@ KERNEL_FIELDS <- c("gp", "gp_matern", "gp_gaussian", "gp_spherical",
 #                   w = L(sigma2, phi) z, so both hyperparameters reach eta
 #                   through the transform. compute_log_post_impl has no
 #                   non-centred branch and says so (gcol33/tulpaRatio#26).
-KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc")
+#   msgp_hsgp    -- spatial_multiscale(approx = "hsgp"): both scales read one
+#                   Hilbert-space basis rather than two neighbour sets.
+#                   compute_log_post_impl has no branch for it and says so
+#                   (gcol33/tulpaRatio#26, #38).
+KERNEL_COLLAPSED_FIELDS <- c("gp_collapsed", "gp_nc", "msgp_hsgp")
 # Cases the harness can build whose gradient does not match the density it
 # reports. Each names the defect it is blocked on; the case is written out so
 # the fix has a test to turn green, and the deviation each measures today is

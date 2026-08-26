@@ -126,7 +126,7 @@ NNGPNeighbors build_nngp(const std::vector<double>& coords, int n, int k) {
 const char* const KNOWN_FIELDS[] = {
   "none",
   "icar", "bym2", "car_proper",
-  "rw1", "rw2", "temporal_ar1", "icar_rw1",
+  "rw1", "rw2", "temporal_ar1", "temporal_ar1_nc", "temporal_iid", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
   "st4_ar1_nc", "st2", "st2_rw2", "st2_ar1", "st3",
   "stgp", "stgp_matern", "stgp_gneiting", "stgp_latent",
@@ -137,7 +137,7 @@ const char* const KNOWN_FIELDS[] = {
   "re", "re_crossed", "re_slopes", "re_slopes_corr",
   "gp", "gp_matern", "gp_gaussian", "gp_spherical",
   "gp_nc", "gp_collapsed", "gp_temporal",
-  "msgp", "msgp_temporal",
+  "msgp", "msgp_temporal", "msgp_hsgp",
   "svc", "svc_hsgp",
   "temporal_gp", "ms_temporal", "latent",
   // Combinations a specialized gradient used to be selected for while writing
@@ -313,8 +313,15 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                           field == "gp_temporal_st4");
   const bool want_rw2  = (field == "rw2");
   // The temporal block's own AR1 arm, which carries a rho of its own. rw1 and
-  // rw2 reach the same kernels without it.
-  const bool want_temporal_ar1 = (field == "temporal_ar1");
+  // rw2 reach the same kernels without it. temporal_ar1_nc samples the same
+  // field in its non-centred coordinate, where the block holds the N(0, I)
+  // innovations and both hyperparameters reach the effects through the
+  // transform rather than through a quadratic form.
+  const bool want_temporal_ar1 = (field == "temporal_ar1" ||
+                                  field == "temporal_ar1_nc");
+  // The unstructured arm: a diagonal, full-rank, proper temporal prior, which
+  // is the one branch with no differencing stencil and no sum-to-zero pin.
+  const bool want_temporal_iid = (field == "temporal_iid");
   const bool want_hsgp = (field == "hsgp");
   const bool want_tvc  = (field == "tvc" || field == "tvc_iid" ||
                           field == "tvc_ar1" || field == "tvc_st4");
@@ -335,7 +342,11 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                         field == "gp_slopes" || field == "gp_slopes_corr" ||
                         field == "gp_crossed");
   const bool want_msgp = (field == "msgp" || field == "msgp_temporal" ||
-                          field == "msgp_st4");
+                          field == "msgp_st4" || field == "msgp_hsgp");
+  // The multi-scale field on a shared spectral basis rather than two neighbour
+  // sets. The templated density does not express it (log_post_impl_gap names
+  // it), so only the analytic reference can check this one.
+  const bool want_msgp_hsgp = (field == "msgp_hsgp");
   const bool want_svc_hsgp = (field == "svc_hsgp");
   const bool want_svc = (field == "svc" || want_svc_hsgp || field == "svc_ms");
   const bool want_temporal_gp = (field == "temporal_gp" ||
@@ -539,8 +550,6 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       gp.cov_type = cov;
       gp.nu = 1.5;
       gp.shared = true;
-      gp.solver_config.solver = ratiod_gp::GPSolver::CHOLESKY;
-      gp.solver_config.n_obs = n_units;
       // spatial_gp() offers "centered", "noncentered" and "collapsed" and
       // defaults to centered, which is the parameterization these fields
       // build; gp_nc is the non-centred one.
@@ -552,9 +561,9 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     } else {
       data.spatial_type = SpatialType::MULTISCALE_GP;
       data.has_multiscale_gp = true;
-      data.msgp_is_hsgp = false;
+      data.msgp_is_hsgp = want_msgp_hsgp;
       auto& ms = data.multiscale_gp_data;
-      ms.n_obs = n_units;
+      ms.n_obs = want_msgp_hsgp ? n_obs : n_units;
       ms.coords = gp_coords;
       ms.obs_to_loc = obs_to_loc;
       ms.nn_local = nn;
@@ -578,7 +587,25 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       ms.cov_type = cov;
       ms.nu = 1.5;
       ms.shared = true;
-      ms.sampler = ratiod_gp::MSGPSampler::NONCENTERED;
+      ms.sampler = ratiod_gp::MSGPSampler::AUTO;
+
+      if (want_msgp_hsgp) {
+        // Both scales read one basis built over the observation locations, so
+        // the field is m_total coefficients per scale rather than one value
+        // per location.
+        std::vector<double> hs_coords(static_cast<size_t>(n_obs) * 2);
+        std::uniform_real_distribution<double> runif_h(0.0, 1.0);
+        for (int i = 0; i < n_obs; i++) {
+          hs_coords[static_cast<size_t>(i) * 2 + 0] = runif_h(rng);
+          hs_coords[static_cast<size_t>(i) * 2 + 1] = runif_h(rng);
+        }
+        ratiod_hsgp::setup_hsgp_2d(hs_coords, n_obs, 3, 1.5, /*shared=*/true,
+                                   data.msgp_hsgp_data);
+        data.ms_log_ls_local_mean = std::log(0.1);
+        data.ms_log_ls_local_sd = 0.5;
+        data.ms_log_ls_regional_mean = std::log(1.0);
+        data.ms_log_ls_regional_sd = 0.5;
+      }
     }
     data.n_spatial_units = 0;
     data.bym2_scale_factor = 1.0;
@@ -706,10 +733,12 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.temporal_gp_phi_prior_lower = 0.01;
     data.temporal_gp_phi_prior_upper = 10.0;
     data.temporal_gp_parameterization = 1;
-  } else if (want_rw1 || want_rw2 || want_temporal_ar1) {
-    data.temporal_type = want_temporal_ar1 ? TemporalType::AR1
-                       : want_rw2          ? TemporalType::RW2
-                                           : TemporalType::RW1;
+  } else if (want_rw1 || want_rw2 || want_temporal_ar1 || want_temporal_iid) {
+    data.temporal_type = want_temporal_ar1  ? TemporalType::AR1
+                       : want_temporal_iid  ? TemporalType::IID
+                       : want_rw2           ? TemporalType::RW2
+                                            : TemporalType::RW1;
+    data.temporal_parameterization = (field == "temporal_ar1_nc") ? 1 : 0;
     data.n_times = n_times;
     data.n_temporal_groups = 1;
     data.n_temporal_params = n_times;

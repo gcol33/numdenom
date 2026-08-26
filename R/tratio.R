@@ -232,7 +232,7 @@ tratio <- function(formula,
     if (!inherits(temporal, "ratiod_temporal")) {
       stop(
         "`temporal` must be a ratiod_temporal object.\n",
-        "Options: temporal_rw1(), temporal_rw2(), temporal_ar1(), temporal_tvc()",
+        "Options: temporal_rw1(), temporal_rw2(), temporal_ar1(), temporal_iid(), temporal_tvc()",
         call. = FALSE
       )
     }

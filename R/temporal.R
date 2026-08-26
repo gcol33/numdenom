@@ -9,6 +9,92 @@
 #' @name ratiod_temporal
 NULL
 
+
+#' The single-component temporal specification every constructor returns
+#'
+#' @description
+#' `temporal_rw1()`, `temporal_rw2()`, `temporal_ar1()` and `temporal_iid()`
+#' differ in the `type` string the sampler dispatches on and in the extra
+#' fields their structure carries. Everything else -- how a time or group
+#' variable is read from a formula or a name, the warning a non-shared effect
+#' earns, and the shape of the returned object -- is settled here, so a new
+#' structure is a `type` string and its own fields.
+#'
+#' @param type The structure's name, as the C++ temporal parser reads it
+#' @param time_var Time variable, formula or name
+#' @param group_var Optional grouping variable, formula or name
+#' @param cyclic Whether the random walk wraps around
+#' @param shared Whether the effect enters both linear predictors
+#' @param extra Named list of fields specific to this structure
+#'
+#' @return A `ratiod_temporal` object
+#' @keywords internal
+new_ratiod_temporal <- function(type, time_var, group_var = NULL,
+                                cyclic = FALSE, shared = TRUE,
+                                extra = list()) {
+
+  time_var <- temporal_var_name(time_var, "time_var")
+  if (!is.null(group_var)) {
+    group_var <- temporal_var_name(group_var, "group_var")
+  }
+
+  if (!shared) {
+    warning(
+      "Non-shared temporal effects (shared = FALSE) may lead to confounded ratio estimates.\n",
+      "Consider whether temporal effects should be shared between\n",
+      "numerator and denominator to prevent spurious temporal patterns in ratios.",
+      call. = FALSE
+    )
+  }
+
+  structure(
+    c(
+      list(
+        type = type,
+        time_var = time_var,
+        group_var = group_var,
+        cyclic = cyclic,
+        shared = shared
+      ),
+      extra,
+      list(
+        # Filled in when validated against data
+        n_times = NULL,
+        n_groups = NULL,
+        time_index = NULL,
+        group_index = NULL,
+        precision_structure = NULL
+      )
+    ),
+    class = c("ratiod_temporal", "list")
+  )
+}
+
+
+#' Read a variable name from a one-sided formula or a character scalar
+#'
+#' @param x A formula (`~ year`) or a single name
+#' @param arg The argument name, for the error message
+#'
+#' @return A single character string
+#' @keywords internal
+temporal_var_name <- function(x, arg) {
+  if (inherits(x, "formula")) {
+    v <- all.vars(x)
+    if (length(v) != 1) {
+      stop(sprintf("`%s` formula must specify exactly 1 variable", arg),
+           call. = FALSE)
+    }
+    return(v)
+  }
+  if (!is.character(x) || length(x) != 1) {
+    stop(sprintf("`%s` must be a formula (~ %s) or single character string",
+                 arg, arg), call. = FALSE)
+  }
+  x
+}
+
+
 #' RW1 temporal structure (First-order Random Walk)
 #'
 #' @description
@@ -104,57 +190,8 @@ NULL
 #' @export
 temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
                          shared = TRUE) {
-
-  # Accept either formula (~ time) or character string ("time")
-  if (inherits(time_var, "formula")) {
-    time_var <- all.vars(time_var)
-    if (length(time_var) != 1) {
-      stop("`time_var` formula must specify exactly 1 variable", call. = FALSE)
-    }
-  } else if (!is.character(time_var) || length(time_var) != 1) {
-    stop("`time_var` must be a formula (~ time) or single character string",
-         call. = FALSE)
-  }
-
-  # Accept either formula or character for group_var
-  if (!is.null(group_var)) {
-    if (inherits(group_var, "formula")) {
-      group_var <- all.vars(group_var)
-      if (length(group_var) != 1) {
-        stop("`group_var` formula must specify exactly 1 variable", call. = FALSE)
-      }
-    } else if (!is.character(group_var) || length(group_var) != 1) {
-      stop("`group_var` must be a formula or single character string",
-           call. = FALSE)
-    }
-  }
-
- # Warning for non-shared temporal effects
- if (!shared) {
-   warning(
-     "Non-shared temporal effects (shared = FALSE) may lead to confounded ratio estimates.\n",
-     "Consider whether temporal effects should be shared between\n",
-     "numerator and denominator to prevent spurious temporal patterns in ratios.",
-     call. = FALSE
-   )
- }
-
- structure(
-   list(
-     type = "rw1",
-     time_var = time_var,
-     group_var = group_var,
-     cyclic = cyclic,
-     shared = shared,
-     # These will be filled in when validated against data
-     n_times = NULL,
-     n_groups = NULL,
-     time_index = NULL,
-     group_index = NULL,
-     precision_structure = NULL
-   ),
-   class = c("ratiod_temporal", "list")
- )
+  new_ratiod_temporal("rw1", time_var, group_var, cyclic = cyclic,
+                      shared = shared)
 }
 
 
@@ -203,56 +240,8 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #' @export
 temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
                          shared = TRUE) {
-
-  # Accept either formula (~ time) or character string ("time")
-  if (inherits(time_var, "formula")) {
-    time_var <- all.vars(time_var)
-    if (length(time_var) != 1) {
-      stop("`time_var` formula must specify exactly 1 variable", call. = FALSE)
-    }
-  } else if (!is.character(time_var) || length(time_var) != 1) {
-    stop("`time_var` must be a formula (~ time) or single character string",
-         call. = FALSE)
-  }
-
-  # Accept either formula or character for group_var
-  if (!is.null(group_var)) {
-    if (inherits(group_var, "formula")) {
-      group_var <- all.vars(group_var)
-      if (length(group_var) != 1) {
-        stop("`group_var` formula must specify exactly 1 variable", call. = FALSE)
-      }
-    } else if (!is.character(group_var) || length(group_var) != 1) {
-      stop("`group_var` must be a formula or single character string",
-           call. = FALSE)
-    }
-  }
-
-  # Warning for non-shared temporal effects
- if (!shared) {
-   warning(
-     "Non-shared temporal effects (shared = FALSE) may lead to confounded ratio estimates.\n",
-     "Consider whether temporal effects should be shared between\n",
-     "numerator and denominator to prevent spurious temporal patterns in ratios.",
-     call. = FALSE
-   )
- }
-
- structure(
-   list(
-     type = "rw2",
-     time_var = time_var,
-     group_var = group_var,
-     cyclic = cyclic,
-     shared = shared,
-     n_times = NULL,
-     n_groups = NULL,
-     time_index = NULL,
-     group_index = NULL,
-     precision_structure = NULL
-   ),
-   class = c("ratiod_temporal", "list")
- )
+  new_ratiod_temporal("rw2", time_var, group_var, cyclic = cyclic,
+                      shared = shared)
 }
 
 
@@ -331,48 +320,70 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'
 #' @export
 temporal_ar1 <- function(time_var, group_var = NULL, shared = TRUE,
-                         rho_prior = NULL) {
+                         rho_prior = NULL,
+                         parameterization = c("centered", "noncentered")) {
 
-  # Accept either formula (~ time) or character string ("time")
-  if (inherits(time_var, "formula")) {
-    time_var <- all.vars(time_var)
-    if (length(time_var) != 1) {
-      stop("`time_var` formula must specify exactly 1 variable", call. = FALSE)
-    }
-  } else if (!is.character(time_var) || length(time_var) != 1) {
-    stop("`time_var` must be a formula (~ time) or single character string",
-         call. = FALSE)
-  }
+  parameterization <- match.arg(parameterization)
 
-  # Accept either formula or character for group_var
-  if (!is.null(group_var)) {
-    if (inherits(group_var, "formula")) {
-      group_var <- all.vars(group_var)
-      if (length(group_var) != 1) {
-        stop("`group_var` formula must specify exactly 1 variable", call. = FALSE)
-      }
-    } else if (!is.character(group_var) || length(group_var) != 1) {
-      stop("`group_var` must be a formula or single character string",
-           call. = FALSE)
-    }
-  }
+  new_ratiod_temporal(
+    "ar1", time_var, group_var,
+    cyclic = FALSE,  # AR1 is not cyclic
+    shared = shared,
+    extra = list(
+      rho_prior = validate_rho_prior(rho_prior),
+      parameterization = parameterization
+    )
+  )
+}
 
-  structure(
-   list(
-     type = "ar1",
-     time_var = time_var,
-     group_var = group_var,
-     cyclic = FALSE,  # AR1 is not cyclic
-     shared = shared,
-     rho_prior = validate_rho_prior(rho_prior),
-     n_times = NULL,
-     n_groups = NULL,
-     time_index = NULL,
-     group_index = NULL,
-     precision_structure = NULL
-   ),
-   class = c("ratiod_temporal", "list")
- )
+
+#' IID temporal structure (Independent Effects)
+#'
+#' @description
+#' Specify an independent temporal random effect: each time point gets its own
+#' coefficient with `phi[t] ~ N(0, sigma^2)`, no dependence between them.
+#'
+#' Use it for a year or season effect that varies without a trend, and as the
+#' unstructured comparison against which `temporal_rw1()`, `temporal_rw2()`
+#' and `temporal_ar1()` add smoothness.
+#'
+#' @inheritParams temporal_rw1
+#'
+#' @return A `ratiod_temporal` object
+#'
+#' @details
+#' The precision matrix is `tau * I`: diagonal and full rank, so no constraint
+#' is needed and no ordering of the time points is used. A model whose time
+#' points carry no meaningful order fits the same way here as one whose do.
+#'
+#' @examples
+#' # Create temporal IID specification
+#' temporal_iid("year")
+#'
+#' \donttest{
+#' # Unstructured year effects
+#' set.seed(129)
+#' df <- data.frame(
+#'   year = rep(2010:2029, each = 2),
+#'   x = rnorm(40),
+#'   count = rpois(40, lambda = 22),
+#'   effort = rgamma(40, shape = 4, rate = 1)
+#' )
+#'
+#' fit <- tratio(
+#'   count | effort ~ x,
+#'   data = df,
+#'   family = ratiod_poisson_gamma(),
+#'   temporal = temporal_iid("year"),
+#'   mode = "hmc",
+#'   control = list(iter = 200, warmup = 100, chains = 1)
+#' )
+#' }
+#'
+#' @export
+temporal_iid <- function(time_var, group_var = NULL, shared = TRUE) {
+  new_ratiod_temporal("iid", time_var, group_var, cyclic = FALSE,
+                      shared = shared)
 }
 
 
@@ -390,6 +401,7 @@ print.ratiod_temporal <- function(x, ...) {
    rw1 = "RW1 (First-order Random Walk)",
    rw2 = "RW2 (Second-order Random Walk)",
    ar1 = "AR1 (First-order Autoregressive)",
+   iid = "IID (Independent Effects)",
    x$type
  )
 
@@ -402,6 +414,10 @@ print.ratiod_temporal <- function(x, ...) {
 
  if (x$type %in% c("rw1", "rw2") && x$cyclic) {
    cat("Cyclic: Yes\n")
+ }
+
+ if (identical(x$type, "ar1")) {
+   cat("Parameterization:", x$parameterization %||% "centered", "\n")
  }
 
  cat("Shared:", if (x$shared) "Yes (enters both processes)" else "No", "\n")
@@ -555,6 +571,18 @@ build_temporal_precision_structure <- function(temporal) {
      type = "ar1",
      T = T,
      # Full precision matrix constructed at runtime with rho
+     rank_deficiency = 0  # Full rank
+   )
+
+ } else if (temporal$type == "iid") {
+   # IID precision matrix: tau * I, diagonal and full rank
+
+   list(
+     type = "iid",
+     T = T,
+     cyclic = FALSE,
+     diag = rep(1, T),
+     off_diag = numeric(0),
      rank_deficiency = 0  # Full rank
    )
  }

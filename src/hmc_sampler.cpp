@@ -1194,9 +1194,11 @@ double compute_log_post(
   const double* phi_temporal = nullptr;
   double sigma2_temporal_gp = 1.0, phi_temporal_gp = 1.0;
   std::vector<double> temporal_f_nc;  // Reconstructed f for NC temporal GP
+  TemporalView tview;
 
   if (layout.has_temporal) {
-    phi_temporal = &params[layout.temporal_start];
+    tview.read(params, data, layout);
+    phi_temporal = tview.phi;
 
     if (layout.is_temporal_gp) {
       if (precomputed_tgp_log_prior) {
@@ -1314,7 +1316,23 @@ double compute_log_post(
           log_post += ratiod_temporal::sum_to_zero_penalty(phi_g, T);
 
         } else if (data.temporal_type == TemporalType::AR1) {
-          log_post += ratiod_temporal::ar1_log_density(phi_g, T, rho_ar1, tau_temporal);
+          if (temporal_ar1_nc(data, layout)) {
+            // Non-centred: the sampled block is the N(0, I) innovations, and
+            // the transform's Jacobian is exactly what turns that density into
+            // the AR1 one, so writing the AR1 density on phi(z) here instead
+            // would double-count tau and rho.
+            log_post += ratiod_temporal::ar1_nc_log_prior(tview.z + g * T, T);
+          } else {
+            log_post += ratiod_temporal::ar1_log_density(phi_g, T, rho_ar1, tau_temporal);
+          }
+
+        } else if (data.temporal_type == TemporalType::IID) {
+          // IID N(0, 1/tau). Full rank and proper, so no sum-to-zero pin: the
+          // prior itself identifies the field against the intercept.
+          double quad = 0.0;
+          for (int t = 0; t < T; t++) quad += phi_g[t] * phi_g[t];
+          log_post += 0.5 * T * (log_tau_temporal - std::log(2.0 * M_PI))
+                    - 0.5 * tau_temporal * quad;
         }
       }
     }
@@ -2454,7 +2472,7 @@ static inline void tau_temporal_prior_grad(
 static inline void temporal_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
     double tau_temporal, double rho_ar1,
-    const double* phi_temporal, int T_len,
+    const double* phi_temporal, const double* z_temporal, int T_len,
     const double* grad_temporal_lik, double* grad);
 static inline double read_temporal_rho_ar1(
     const std::vector<double>& params, const ModelData& data,
@@ -2464,8 +2482,6 @@ static inline void temporal_rho_prior_grad(
     double rho_ar1, double* grad);
 static inline double gp_pc_prior_grad_log_sigma2(
     double sigma2, double U, double alpha);
-static inline std::pair<GPData, GPData> make_msgp_gp_views(
-    const MultiscaleGPData& msgp);
 static inline void spatial_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
     const double* phi_spatial, double phi_raw_sum, bool centered,
@@ -2567,12 +2583,14 @@ void compute_gradient_analytical(
   int T_len = 0;
   const double* phi_temporal = nullptr;
   std::vector<double> grad_temporal_lik;  // Likelihood contribution
+  TemporalView tview;
 
   if (layout.has_temporal) {
     log_tau_temporal = params[layout.log_tau_temporal_idx];
     tau_temporal = std::exp(log_tau_temporal);
     T_len = layout.temporal_end - layout.temporal_start;
-    phi_temporal = &params[layout.temporal_start];
+    tview.read(params, data, layout);
+    phi_temporal = tview.phi;
     grad_temporal_lik.assign(T_len, 0.0);
 
     // tau prior: Gamma(shape, rate) via log transform
@@ -3783,7 +3801,7 @@ void compute_gradient_analytical(
   // ============ Temporal GMRF prior gradients ============
   if (layout.has_temporal && T_len > 0) {
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
+                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
   }
 
   // ============ Spatial GMRF prior gradients (ICAR and BYM2) ============
@@ -4441,20 +4459,47 @@ static inline void temporal_rho_prior_grad(
 }
 
 // =====================================================================
-// Temporal GMRF prior gradient helper (RW1/RW2/AR1)
+// Temporal prior gradient helper (RW1 / RW2 / AR1 / IID)
 // Shared by all gradient functions that include temporal effects.
-// Writes phi gradients, tau gradient, and rho gradient (for AR1).
-// Expects grad_temporal_lik[0..T_len-1] to hold likelihood contributions.
+// Writes the sampled block's gradients, the tau gradient, and the rho
+// gradient (for AR1).
+//
+// `phi_temporal` holds the effects, from temporal_effects(); `z_temporal` the
+// block the sampler moves in, which is the same pointer unless the field is
+// non-centred. `grad_temporal_lik[0..T_len-1]` holds the likelihood
+// contributions with respect to the effects, and the gradient written out is
+// always with respect to the sampled block.
 // =====================================================================
 static inline void temporal_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
     double tau_temporal, double rho_ar1,
-    const double* phi_temporal, int T_len,
+    const double* phi_temporal, const double* z_temporal, int T_len,
     const double* grad_temporal_lik,
     double* grad
 ) {
     int T = data.n_times;
     int n_groups = data.n_temporal_groups;
+
+    if (temporal_ar1_nc(data, layout)) {
+        // Non-centred AR1: the chain rule through phi = L(tau, rho) z carries
+        // the likelihood to z and to both hyperparameters, and seeds z's own
+        // N(0, I) prior, so nothing here initializes the block first.
+        double grad_log_tau = 0.0, grad_logit_rho = 0.0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const int base = layout.temporal_start + gg * T;
+            std::pair<double, double> hyper = ratiod_temporal::ar1_nc_gradient(
+                z_temporal + gg * T, phi_temporal + gg * T,
+                grad_temporal_lik + gg * T, &grad[base],
+                T, rho_ar1, tau_temporal);
+            grad_log_tau += hyper.first;
+            grad_logit_rho += hyper.second;
+        }
+        grad[layout.log_tau_temporal_idx] += grad_log_tau;
+        if (layout.logit_rho_ar1_idx >= 0) {
+            grad[layout.logit_rho_ar1_idx] += grad_logit_rho;
+        }
+        return;
+    }
 
     // Initialize temporal gradients with likelihood contribution
     for (int t = 0; t < T_len; t++) {
@@ -4551,6 +4596,18 @@ static inline void temporal_gmrf_prior_grad(
             double gr = -n_groups * rho_ar1 / omr2 + total_gr;
             grad[layout.logit_rho_ar1_idx] += gr * ratiod_ar1::drho_dlogit(rho_ar1);
         }
+
+    } else if (data.temporal_type == TemporalType::IID) {
+        double total_qf = 0.0;
+        for (int gg = 0; gg < n_groups; gg++) {
+            const double* phi_g = phi_temporal + gg * T;
+            int base = layout.temporal_start + gg * T;
+            for (int t = 0; t < T; t++) {
+                grad[base + t] += -tau_temporal * phi_g[t];
+                total_qf += phi_g[t] * phi_g[t];
+            }
+        }
+        grad[layout.log_tau_temporal_idx] += 0.5 * T_len - 0.5 * tau_temporal * total_qf;
     }
 }
 
@@ -4567,34 +4624,6 @@ static inline double gp_pc_prior_grad_log_sigma2(
     return -0.5 * rate * sigma + 0.5;
 }
 
-// =====================================================================
-// Build GPData views from MultiscaleGPData for local and regional scales
-// =====================================================================
-static inline std::pair<GPData, GPData> make_msgp_gp_views(
-    const MultiscaleGPData& msgp
-) {
-    GPData gp_local;
-    gp_local.n_obs = msgp.n_obs;
-    gp_local.nn = msgp.nn_local;
-    gp_local.coords = msgp.coords;
-    gp_local.nn_idx = msgp.nn_idx_local;
-    gp_local.nn_dist = msgp.nn_dist_local;
-    gp_local.nn_order = msgp.nn_order_local;
-    gp_local.nn_order_inv = msgp.nn_order_inv_local;
-    gp_local.cov_type = msgp.cov_type;
-
-    GPData gp_regional;
-    gp_regional.n_obs = msgp.n_obs;
-    gp_regional.nn = msgp.nn_regional;
-    gp_regional.coords = msgp.coords;
-    gp_regional.nn_idx = msgp.nn_idx_regional;
-    gp_regional.nn_dist = msgp.nn_dist_regional;
-    gp_regional.nn_order = msgp.nn_order_regional;
-    gp_regional.nn_order_inv = msgp.nn_order_inv_regional;
-    gp_regional.cov_type = msgp.cov_type;
-
-    return {gp_local, gp_regional};
-}
 
 // =====================================================================
 // Spatial ICAR/BYM2 GMRF prior gradient.
@@ -5712,8 +5741,10 @@ void compute_gradient_icar_collapsed(
             if (t_base < 0 || t_base >= T_temporal) continue;
             grad_temporal_lik[t_base] += data.temporal_shared ? (resid_num[i] + resid_denom[i]) : resid_num[i];
         }
+        TemporalView tview;
+        tview.read(params, data, layout);
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 &params[layout.temporal_start], T_temporal,
+                                 tview.phi, tview.z, T_temporal,
                                  grad_temporal_lik.data(), grad.data());
     }
 
@@ -5802,7 +5833,9 @@ void compute_gradient_gp_temporal_handcoded(
 
     double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
     int T_len = layout.temporal_end - layout.temporal_start;
-    const double* phi_temporal = &params[layout.temporal_start];
+    TemporalView tview;
+    tview.read(params, data, layout);
+    const double* phi_temporal = tview.phi;
     double rho_ar1 = read_temporal_rho_ar1(params, data, layout);
 
     // Prior gradients
@@ -5892,7 +5925,7 @@ void compute_gradient_gp_temporal_handcoded(
 
     // Temporal GMRF gradients
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
+                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -6239,7 +6272,9 @@ void compute_gradient_msgp_temporal_handcoded(
     // Temporal parameters
     double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
     int T_len = layout.temporal_end - layout.temporal_start;
-    const double* phi_temporal = &params[layout.temporal_start];
+    TemporalView tview;
+    tview.read(params, data, layout);
+    const double* phi_temporal = tview.phi;
     double rho_ar1 = read_temporal_rho_ar1(params, data, layout);
 
     // Bounds check for phi
@@ -6360,7 +6395,7 @@ void compute_gradient_msgp_temporal_handcoded(
 
     // Temporal GMRF gradients
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
+                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -7898,11 +7933,13 @@ void compute_gradient_hsgp(
   double tau_temporal = 0.0;
   int T_len = 0;
   const double* phi_temporal = nullptr;
+  TemporalView tview;
   double rho_ar1 = 0.0;
   if (layout.has_temporal) {
     tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
     T_len = layout.temporal_end - layout.temporal_start;
-    phi_temporal = &params[layout.temporal_start];
+    tview.read(params, data, layout);
+    phi_temporal = tview.phi;
     rho_ar1 = read_temporal_rho_ar1(params, data, layout);
   }
 
@@ -8055,7 +8092,7 @@ void compute_gradient_hsgp(
   // Temporal GMRF gradients
   if (layout.has_temporal && T_len > 0) {
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
+                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
   }
 
     // Non-centered RE chain rule transformation
@@ -8122,11 +8159,13 @@ void compute_gradient_msgp_hsgp(
     double tau_temporal = 0.0;
     int T_len = 0;
     const double* phi_temporal = nullptr;
+    TemporalView tview;
     double rho_ar1 = 0.0;
     if (layout.has_temporal) {
         tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
         T_len = layout.temporal_end - layout.temporal_start;
-        phi_temporal = &params[layout.temporal_start];
+        tview.read(params, data, layout);
+        phi_temporal = tview.phi;
         rho_ar1 = read_temporal_rho_ar1(params, data, layout);
     }
 
@@ -8297,7 +8336,7 @@ void compute_gradient_msgp_hsgp(
     // Temporal GMRF gradients
     if (layout.has_temporal && T_len > 0) {
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 phi_temporal, T_len, grad_temporal_lik.data(), grad.data());
+                                 phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
     }
 
     // Non-centered RE chain rule transformation
@@ -8625,11 +8664,13 @@ void compute_gradient_spatiotemporal_handcoded(
     double tau_temporal = 0.0;
     int T_temporal = 0;
     const double* phi_temporal = nullptr;
+    TemporalView tview;
     double rho_ar1 = 0.0;
     if (layout.has_temporal) {
         tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
         T_temporal = layout.temporal_end - layout.temporal_start;
-        phi_temporal = &params[layout.temporal_start];
+        tview.read(params, data, layout);
+        phi_temporal = tview.phi;
         rho_ar1 = read_temporal_rho_ar1(params, data, layout);
     }
 
@@ -8875,7 +8916,7 @@ void compute_gradient_spatiotemporal_handcoded(
     // Temporal GMRF prior gradients
     if (layout.has_temporal && T_temporal > 0) {
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 phi_temporal, T_temporal, grad_temporal_lik.data(), grad.data());
+                                 phi_temporal, tview.z, T_temporal, grad_temporal_lik.data(), grad.data());
     }
 
     // =========================================================================
@@ -9083,13 +9124,15 @@ void compute_gradient_composite(
     double tau_temporal = 0.0;
     int T_temporal = 0;
     const double* phi_temporal = nullptr;
+    TemporalView tview;
     double rho_ar1 = 0.0;
     const bool has_gmrf_temporal = layout.has_temporal && !layout.is_temporal_gp &&
                                    !layout.has_multiscale_temporal && !layout.has_tvc;
     if (has_gmrf_temporal) {
         tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
         T_temporal = layout.temporal_end - layout.temporal_start;
-        phi_temporal = &params[layout.temporal_start];
+        tview.read(params, data, layout);
+        phi_temporal = tview.phi;
         rho_ar1 = read_temporal_rho_ar1(params, data, layout);
     }
 
@@ -9995,7 +10038,7 @@ void compute_gradient_composite(
     // Temporal GMRF prior
     if (has_gmrf_temporal && T_temporal > 0) {
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 phi_temporal, T_temporal, grad_temporal_lik.data(), grad.data());
+                                 phi_temporal, tview.z, T_temporal, grad_temporal_lik.data(), grad.data());
     }
 
     // Temporal GP backward pass
@@ -13118,24 +13161,32 @@ HMCResultCpp run_hmc_chain_cpp(
 
     // Store sample (flat row-major storage, single memcpy)
     if (!is_warmup) {
-      // NC GP: transform z -> w for stored samples (keep q as z for sampling)
-      if (data.gp_parameterization == 1 && data.has_gp && layout.is_gp) {
-          double sigma2_store = std::exp(q[layout.log_sigma2_gp_idx]);
-          double phi_store = std::exp(q[layout.log_phi_gp_idx]);
-          RATIOD_TLS_WORKSPACE(ratiod_gp::NNGPNCWorkspace, nc_ws_store);
-          ratiod_gp::nngp_nc_forward(&q[layout.gp_w_start], sigma2_store, phi_store,
-                                     data.gp_data, nc_ws_store);
-          // Copy q, replace z with w
-          std::memcpy(result.sample_row(sample_idx), q.data(),
-                      n_params * sizeof(double));
+      std::memcpy(result.sample_row(sample_idx), q.data(),
+                  n_params * sizeof(double));
+      // A non-centred block is sampled in a coordinate that is not the effect
+      // it stands for, so the stored row carries the effect. q keeps the
+      // sampled coordinate.
+      {
           double* row = result.sample_row(sample_idx);
-          int N_gp = data.gp_data.n_obs;
-          for (int i = 0; i < N_gp; i++) {
-              row[layout.gp_w_start + i] = nc_ws_store.w[i];
+          if (data.gp_parameterization == 1 && data.has_gp && layout.is_gp) {
+              double sigma2_store = std::exp(q[layout.log_sigma2_gp_idx]);
+              double phi_store = std::exp(q[layout.log_phi_gp_idx]);
+              RATIOD_TLS_WORKSPACE(ratiod_gp::NNGPNCWorkspace, nc_ws_store);
+              ratiod_gp::nngp_nc_forward(&q[layout.gp_w_start], sigma2_store, phi_store,
+                                         data.gp_data, nc_ws_store);
+              int N_gp = data.gp_data.n_obs;
+              for (int i = 0; i < N_gp; i++) {
+                  row[layout.gp_w_start + i] = nc_ws_store.w[i];
+              }
           }
-      } else {
-          std::memcpy(result.sample_row(sample_idx), q.data(),
-                      n_params * sizeof(double));
+          if (temporal_ar1_nc(data, layout)) {
+              std::vector<double> phi_store_buf;
+              const double* phi_store = temporal_effects(q, data, layout, phi_store_buf);
+              const int T_store = layout.temporal_end - layout.temporal_start;
+              for (int i = 0; i < T_store; i++) {
+                  row[layout.temporal_start + i] = phi_store[i];
+              }
+          }
       }
       result.log_prob[sample_idx] = log_prob_current;
       result.accept_prob[sample_idx] = alpha;
@@ -13769,9 +13820,6 @@ Rcpp::List cpp_hmc_fit_gp(
   double gp_phi_prior_upper = Rcpp::as<double>(gp_params["phi_prior_upper"]);
 
   // GP solver configuration
-  std::string gp_solver_str = Rcpp::as<std::string>(gp_params["solver"]);
-  double gp_cg_tol = Rcpp::as<double>(gp_params["cg_tol"]);
-  int gp_cg_maxiter = Rcpp::as<int>(gp_params["cg_maxiter"]);
 
   // Observation-to-location mapping (1-based from R, convert to 0-based)
   std::vector<int> gp_obs_to_loc_r = Rcpp::as<std::vector<int>>(gp_params["gp_obs_to_loc"]);
@@ -13928,10 +13976,6 @@ Rcpp::List cpp_hmc_fit_gp(
     data.gp_data.shared = gp_shared;
 
     // Set solver configuration
-    data.gp_data.solver_config.solver = ratiod_gp::parse_gp_solver(gp_solver_str);
-    data.gp_data.solver_config.cg_tol = gp_cg_tol;
-    data.gp_data.solver_config.cg_maxiter = gp_cg_maxiter;
-    data.gp_data.solver_config.n_obs = gp_n_unique;  // Unique locations
 
     data.gp_sigma2_prior_U = gp_sigma2_prior_U;
     data.gp_sigma2_prior_alpha = gp_sigma2_prior_alpha;

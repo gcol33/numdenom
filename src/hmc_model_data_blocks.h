@@ -503,15 +503,22 @@ inline void apply_temporal_params(ModelData& data, const Rcpp::List& temporal_pa
   double temporal_rho_prior_b = temporal_params.containsElementNamed("rho_prior_b")
       ? Rcpp::as<double>(temporal_params["rho_prior_b"]) : ratiod_ar1::RHO_PRIOR_B;
 
-  if (temporal_type_str == "rw1") {
-    data.temporal_type = TemporalType::RW1;
-  } else if (temporal_type_str == "rw2") {
-    data.temporal_type = TemporalType::RW2;
-  } else if (temporal_type_str == "ar1") {
-    data.temporal_type = TemporalType::AR1;
-  } else if (temporal_type_str == "gp") {
-    data.temporal_type = TemporalType::GP;
+  // The single-component types read straight off the shared parser; the two
+  // names below carry data of their own on top of it.
+  data.temporal_type = ratiod_temporal::parse_temporal_type(temporal_type_str);
+  data.has_temporal_gp = false;
 
+  // AR1 alone carries a second coordinate; the string is read for every type
+  // so a model that never reaches AR1 still leaves the flag at centred.
+  {
+    std::string ar1_param_str = "centered";
+    if (temporal_params.containsElementNamed("ar1_parameterization")) {
+      ar1_param_str = Rcpp::as<std::string>(temporal_params["ar1_parameterization"]);
+    }
+    data.temporal_parameterization = (ar1_param_str == "noncentered") ? 1 : 0;
+  }
+
+  if (temporal_type_str == "gp") {
     data.has_temporal_gp = true;
     data.temporal_gp_data.n_obs = data.n_times;  // Use n_times, not N (total obs)
     data.temporal_gp_data.n_groups = n_temporal_groups;
@@ -537,7 +544,6 @@ inline void apply_temporal_params(ModelData& data, const Rcpp::List& temporal_pa
     data.temporal_gp_parameterization = (gp_param_str == "centered") ? 0 : 1;
   } else if (temporal_type_str == "multiscale") {
     data.temporal_type = TemporalType::NONE;  // MS_t uses its own data path
-    data.has_temporal_gp = false;
     data.has_multiscale_temporal = true;
 
     data.multiscale_temporal_data.n_times = n_times;
@@ -575,9 +581,6 @@ inline void apply_temporal_params(ModelData& data, const Rcpp::List& temporal_pa
       data.ms_sigma2_short_prior_U = Rcpp::as<double>(temporal_params["sigma2_short_prior_U"]);
     if (temporal_params.containsElementNamed("sigma2_short_prior_alpha"))
       data.ms_sigma2_short_prior_alpha = Rcpp::as<double>(temporal_params["sigma2_short_prior_alpha"]);
-  } else {
-    data.temporal_type = TemporalType::NONE;
-    data.has_temporal_gp = false;
   }
 
   data.temporal_time_idx = temporal_time_idx;

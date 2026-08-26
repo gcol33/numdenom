@@ -362,6 +362,10 @@ fit_hmc <- function(formula,
     gp_phi_prior_lower = priors$temporal_gp_phi_prior_lower %||% 0.01,
     gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0,
     gp_parameterization = temporal_info$parameterization %||% "noncentered",
+    # AR1's own coordinate, read only when type = "ar1"
+    ar1_parameterization = if (identical(temporal_info$type, "ar1")) {
+      temporal_info$parameterization %||% "centered"
+    } else "centered",
     # Multiscale temporal fields (only used when type = "multiscale")
     trend_type = temporal_info$trend %||% "rw1",
     short_term_type = temporal_info$short_term %||% "ar1",
@@ -527,9 +531,6 @@ fit_hmc <- function(formula,
       hsgp_m = as.integer(gp_info$hsgp_m %||% 8L),
       hsgp_c = gp_info$hsgp_c %||% 1.5,
       # GP solver configuration
-      solver = gp_info$solver %||% "auto",
-      cg_tol = gp_info$cg_tol %||% 1e-6,
-      cg_maxiter = as.integer(gp_info$cg_maxiter %||% 100L),
       # Observation-to-location mapping (1-based)
       gp_obs_to_loc = as.integer(gp_info$gp_obs_to_loc),
       n_unique = as.integer(gp_info$n_unique),
@@ -561,7 +562,7 @@ fit_hmc <- function(formula,
       sigma2_local_prior_alpha = priors$ms_sigma2_local_prior_alpha %||% 0.01,
       sigma2_regional_prior_U = priors$ms_sigma2_regional_prior_U %||% 1.0,
       sigma2_regional_prior_alpha = priors$ms_sigma2_regional_prior_alpha %||% 0.01,
-      sampler = gp_info$sampler %||% "noncentered"
+      sampler = gp_info$sampler %||% "auto"
     )
 
     # Bundle multiscale temporal parameters
@@ -719,7 +720,7 @@ fit_hmc <- function(formula,
     # cyclic still fall back to legacy.
     temporal_type_v <- temporal_info$type %||% "none"
     temporal_supported <- identical(temporal_type_v, "none") ||
-      (temporal_type_v %in% c("rw1", "rw2", "ar1") &&
+      (temporal_type_v %in% TEMPORAL_TYPES_SINGLE &&
        !isTRUE(temporal_info$precision_structure$cyclic))
     specs_eligible <- use_specs_path &&
       zi_supported &&
@@ -803,7 +804,7 @@ fit_hmc <- function(formula,
         bym2 = 2L + 2L * (spatial_info$n_units %||% 0L),
         0L
       )
-      p_temporal_n <- if (temporal_type_v %in% c("rw1", "rw2", "ar1")) {
+      p_temporal_n <- if (temporal_type_v %in% TEMPORAL_TYPES_SINGLE) {
         hyper <- if (temporal_type_v == "ar1") 2L else 1L
         hyper + (temporal_info$n_temporal_params %||% 0L)
       } else 0L
@@ -1541,6 +1542,7 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
     precision_structure = temporal$precision_structure,
     shared = temporal$shared,
     rho_prior = temporal$rho_prior,
+    parameterization = temporal$parameterization %||% "centered",
     # TVC fields (not used for regular temporal)
     n_tvc = 0L,
     structure = temporal$type  # Use type as structure for consistency
@@ -2353,11 +2355,7 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       cov_type = "exponential",
       nu = 1.5,
       shared = TRUE,
-      sampler = "noncentered",
-      # Solver config (defaults)
-      solver = "auto",
-      cg_tol = 1e-6,
-      cg_maxiter = 100L,
+      sampler = "auto",
       gp_obs_to_loc = integer(0),
       n_unique = 0L
     ))
@@ -2400,29 +2398,20 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       range_regional_upper = 10,
       cov_type = "exponential",
       nu = 1.5,
-      sampler = "noncentered",
+      sampler = "auto",
       # Solver config (HSGP uses Cholesky internally, but keep consistent interface)
-      solver = "cholesky",
-      cg_tol = 1e-6,
-      cg_maxiter = 100L,
       gp_obs_to_loc = integer(0),
       n_unique = 0L
     ))
   }
 
-  # Validate GP specification (computes neighbor structure)
-  validated <- validate_gp(gp, data)
-
-  # Extract unique coordinates (NNGP computed on unique locations only)
-  coords_mat <- validated$unique_coords
-  coords_flat <- as.vector(t(coords_mat))  # Row-major flatten
-
   if (inherits(gp, "ratiod_multiscale") && isTRUE(gp$approx == "hsgp")) {
-    # HSGP-MSGP: two HSGP evaluations with shared basis (no NNGP needed)
-    validated_hsgp <- validate_hsgp_multiscale(gp, data)
+    # HSGP-MSGP: two HSGP evaluations over a shared basis. The basis is built
+    # from the observation coordinates, so no neighbour structure is computed.
+    validated_hsgp <- validate_hsgp(gp, data)
     coords_flat_hsgp <- as.vector(t(validated_hsgp$coords_matrix))
 
-    list(
+    return(list(
       gp_type = "multiscale_gp",
       msgp_approx = "hsgp",
       hsgp_m = as.integer(gp$m),
@@ -2437,11 +2426,8 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       cov_type = gp$cov %||% "exponential",
       nu = gp$nu %||% 1.5,
       shared = gp$shared,
-      sampler = gp$sampler %||% "noncentered",
+      sampler = gp$sampler %||% "auto",
       parameterization = "noncentered",  # HSGP always NC
-      solver = "cholesky",
-      cg_tol = 1e-6,
-      cg_maxiter = 100L,
       # Empty NNGP placeholders
       nn_idx = integer(0), nn_dist = numeric(0),
       nn_order = integer(0), nn_order_inv = integer(0),
@@ -2454,8 +2440,17 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       nn_regional = 0L, nn_neighbor_dist_regional = numeric(0),
       gp_obs_to_loc = integer(0),
       n_unique = 0L
-    )
-  } else if (inherits(gp, "ratiod_multiscale")) {
+    ))
+  }
+
+  # Validate GP specification (computes neighbor structure)
+  validated <- validate_gp(gp, data)
+
+  # Extract unique coordinates (NNGP computed on unique locations only)
+  coords_mat <- validated$unique_coords
+  coords_flat <- as.vector(t(coords_mat))  # Row-major flatten
+
+  if (inherits(gp, "ratiod_multiscale")) {
     # NNGP-MSGP: standard neighbor-based multi-scale GP
     local_info <- validated$neighbor_info_local
     regional_info <- validated$neighbor_info_regional
@@ -2497,12 +2492,9 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       cov_type = gp$cov,
       nu = gp$nu,
       shared = gp$shared,
-      sampler = gp$sampler %||% "noncentered",
+      sampler = gp$sampler %||% "auto",
       parameterization = gp$parameterization %||% "centered",
       # Solver config (multiscale uses Cholesky by default)
-      solver = "cholesky",
-      cg_tol = 1e-6,
-      cg_maxiter = 100L,
       # Observation-to-location mapping (1-based)
       gp_obs_to_loc = as.integer(validated$obs_to_loc),
       n_unique = validated$n_unique
@@ -2553,9 +2545,6 @@ prepare_gp_for_hmc <- function(gp, data, N) {
       shared = gp$shared,
       parameterization = gp$parameterization %||% "centered",
       # Solver config
-      solver = gp$solver %||% "auto",
-      cg_tol = gp$cg_tol %||% 1e-6,
-      cg_maxiter = as.integer(gp$cg_maxiter %||% 100L),
       # Observation-to-location mapping (1-based)
       gp_obs_to_loc = as.integer(validated$obs_to_loc),
       n_unique = validated$n_unique

@@ -207,21 +207,25 @@ inline std::pair<double, double> ar1_nc_gradient(
   // ---- log_tau gradient via chain rule through phi transformation ----
   // d(phi[0])/d(log_tau) = -0.5 * phi[0]
   // d(phi[t])/d(log_tau) = rho * d(phi[t-1])/d(log_tau) - 0.5 * (phi[t] - rho*phi[t-1])
+  //
+  // These derivatives are total: each already carries the recursion forward.
+  // They pair with the DIRECT partial grad_phi_lik[t], not with adj[t], which
+  // carries the same recursion backward -- using both counts it twice.
   double dphi_dlt = -0.5 * phi[0];
-  double grad_log_tau = adj[0] * dphi_dlt;
+  double grad_log_tau = grad_phi_lik[0] * dphi_dlt;
   for (int t = 1; t < T; t++) {
     dphi_dlt = rho * dphi_dlt - 0.5 * (phi[t] - rho * phi[t - 1]);
-    grad_log_tau += adj[t] * dphi_dlt;
+    grad_log_tau += grad_phi_lik[t] * dphi_dlt;
   }
 
   // ---- rho gradient via chain rule through phi transformation ----
   // d(phi[0])/d(rho) = phi[0] * rho / (1 - rho^2)
   // d(phi[t])/d(rho) = phi[t-1] + rho * d(phi[t-1])/d(rho)
   double dphi_drho = phi[0] * rho / omr2;
-  double grad_rho = adj[0] * dphi_drho;
+  double grad_rho = grad_phi_lik[0] * dphi_drho;
   for (int t = 1; t < T; t++) {
     dphi_drho = phi[t - 1] + rho * dphi_drho;
-    grad_rho += adj[t] * dphi_drho;
+    grad_rho += grad_phi_lik[t] * dphi_drho;
   }
   // Chain rule from rho on (-1, 1) to its sampled logit coordinate.
   double grad_logit_rho = grad_rho * ratiod_ar1::drho_dlogit(rho);

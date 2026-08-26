@@ -361,8 +361,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_laplace_fit_gp
-Rcpp::List cpp_laplace_fit_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::NumericMatrix coords, Rcpp::IntegerMatrix nn_idx, Rcpp::NumericMatrix nn_dist, Rcpp::IntegerVector nn_order, int n_spatial, int nn, double sigma2_gp, double phi_gp, int cov_type, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _tulpaRatio_cpp_laplace_fit_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP nn_idxSEXP, SEXP nn_distSEXP, SEXP nn_orderSEXP, SEXP n_spatialSEXP, SEXP nnSEXP, SEXP sigma2_gpSEXP, SEXP phi_gpSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+Rcpp::List cpp_laplace_fit_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::NumericMatrix coords, Rcpp::IntegerVector obs_to_loc, Rcpp::IntegerMatrix nn_idx, Rcpp::NumericMatrix nn_dist, Rcpp::IntegerVector nn_order, int n_spatial, int nn, double sigma2_gp, double phi_gp, int cov_type, std::string family, double phi, int max_iter, double tol, int n_threads);
+RcppExport SEXP _tulpaRatio_cpp_laplace_fit_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP obs_to_locSEXP, SEXP nn_idxSEXP, SEXP nn_distSEXP, SEXP nn_orderSEXP, SEXP n_spatialSEXP, SEXP nnSEXP, SEXP sigma2_gpSEXP, SEXP phi_gpSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -373,6 +373,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
     Rcpp::traits::input_parameter< double >::type sigma_re(sigma_reSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type coords(coordsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type obs_to_loc(obs_to_locSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerMatrix >::type nn_idx(nn_idxSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type nn_dist(nn_distSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order(nn_orderSEXP);
@@ -386,7 +387,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type max_iter(max_iterSEXP);
     Rcpp::traits::input_parameter< double >::type tol(tolSEXP);
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_laplace_fit_gp(y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp, phi_gp, cov_type, family, phi, max_iter, tol, n_threads));
+    rcpp_result_gen = Rcpp::wrap(cpp_laplace_fit_gp(y, n, X, re_idx, n_re_groups, sigma_re, coords, obs_to_loc, nn_idx, nn_dist, nn_order, n_spatial, nn, sigma2_gp, phi_gp, cov_type, family, phi, max_iter, tol, n_threads));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -420,8 +421,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_laplace_fit_multiscale_gp
-Rcpp::List cpp_laplace_fit_multiscale_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::NumericMatrix coords, Rcpp::IntegerMatrix nn_idx_local, Rcpp::NumericMatrix nn_dist_local, Rcpp::IntegerVector nn_order_local, int nn_local, Rcpp::IntegerMatrix nn_idx_regional, Rcpp::NumericMatrix nn_dist_regional, Rcpp::IntegerVector nn_order_regional, int nn_regional, int n_spatial, double sigma2_local, double phi_local, double sigma2_regional, double phi_regional, int cov_type, std::string family, double phi, int max_iter, double tol, int n_threads);
-RcppExport SEXP _tulpaRatio_cpp_laplace_fit_multiscale_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP nn_idx_localSEXP, SEXP nn_dist_localSEXP, SEXP nn_order_localSEXP, SEXP nn_localSEXP, SEXP nn_idx_regionalSEXP, SEXP nn_dist_regionalSEXP, SEXP nn_order_regionalSEXP, SEXP nn_regionalSEXP, SEXP n_spatialSEXP, SEXP sigma2_localSEXP, SEXP phi_localSEXP, SEXP sigma2_regionalSEXP, SEXP phi_regionalSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
+Rcpp::List cpp_laplace_fit_multiscale_gp(Rcpp::IntegerVector y, Rcpp::IntegerVector n, Rcpp::NumericMatrix X, Rcpp::NumericVector re_idx, int n_re_groups, double sigma_re, Rcpp::NumericMatrix coords, Rcpp::IntegerVector obs_to_loc, Rcpp::IntegerMatrix nn_idx_local, Rcpp::NumericMatrix nn_dist_local, Rcpp::IntegerVector nn_order_local, int nn_local, Rcpp::IntegerMatrix nn_idx_regional, Rcpp::NumericMatrix nn_dist_regional, Rcpp::IntegerVector nn_order_regional, int nn_regional, int n_spatial, double sigma2_local, double phi_local, double sigma2_regional, double phi_regional, int cov_type, std::string family, double phi, int max_iter, double tol, int n_threads);
+RcppExport SEXP _tulpaRatio_cpp_laplace_fit_multiscale_gp(SEXP ySEXP, SEXP nSEXP, SEXP XSEXP, SEXP re_idxSEXP, SEXP n_re_groupsSEXP, SEXP sigma_reSEXP, SEXP coordsSEXP, SEXP obs_to_locSEXP, SEXP nn_idx_localSEXP, SEXP nn_dist_localSEXP, SEXP nn_order_localSEXP, SEXP nn_localSEXP, SEXP nn_idx_regionalSEXP, SEXP nn_dist_regionalSEXP, SEXP nn_order_regionalSEXP, SEXP nn_regionalSEXP, SEXP n_spatialSEXP, SEXP sigma2_localSEXP, SEXP phi_localSEXP, SEXP sigma2_regionalSEXP, SEXP phi_regionalSEXP, SEXP cov_typeSEXP, SEXP familySEXP, SEXP phiSEXP, SEXP max_iterSEXP, SEXP tolSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -432,6 +433,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type n_re_groups(n_re_groupsSEXP);
     Rcpp::traits::input_parameter< double >::type sigma_re(sigma_reSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type coords(coordsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type obs_to_loc(obs_to_locSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerMatrix >::type nn_idx_local(nn_idx_localSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type nn_dist_local(nn_dist_localSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type nn_order_local(nn_order_localSEXP);
@@ -451,7 +453,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type max_iter(max_iterSEXP);
     Rcpp::traits::input_parameter< double >::type tol(tolSEXP);
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_laplace_fit_multiscale_gp(y, n, X, re_idx, n_re_groups, sigma_re, coords, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local, phi_local, sigma2_regional, phi_regional, cov_type, family, phi, max_iter, tol, n_threads));
+    rcpp_result_gen = Rcpp::wrap(cpp_laplace_fit_multiscale_gp(y, n, X, re_idx, n_re_groups, sigma_re, coords, obs_to_loc, nn_idx_local, nn_dist_local, nn_order_local, nn_local, nn_idx_regional, nn_dist_regional, nn_order_regional, nn_regional, n_spatial, sigma2_local, phi_local, sigma2_regional, phi_regional, cov_type, family, phi, max_iter, tol, n_threads));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -2093,9 +2095,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_laplace_fit_spatial", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_spatial, 17},
     {"_tulpaRatio_cpp_laplace_sample", (DL_FUNC) &_tulpaRatio_cpp_laplace_sample, 3},
     {"_tulpaRatio_cpp_laplace_fit_bym2", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_bym2, 19},
-    {"_tulpaRatio_cpp_laplace_fit_gp", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_gp, 20},
+    {"_tulpaRatio_cpp_laplace_fit_gp", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_gp, 21},
     {"_tulpaRatio_cpp_laplace_fit_rsr", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_rsr, 19},
-    {"_tulpaRatio_cpp_laplace_fit_multiscale_gp", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_multiscale_gp, 26},
+    {"_tulpaRatio_cpp_laplace_fit_multiscale_gp", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_multiscale_gp, 27},
     {"_tulpaRatio_cpp_laplace_fit_multiscale_temporal", (DL_FUNC) &_tulpaRatio_cpp_laplace_fit_multiscale_temporal, 20},
     {"_tulpaRatio_cpp_pg_binomial_gibbs", (DL_FUNC) &_tulpaRatio_cpp_pg_binomial_gibbs, 13},
     {"_tulpaRatio_cpp_pg_get_max_threads", (DL_FUNC) &_tulpaRatio_cpp_pg_get_max_threads, 0},

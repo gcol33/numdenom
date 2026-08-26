@@ -183,6 +183,31 @@ multiscale_temporal_support <- function(temporal, structures) {
 }
 
 
+#' Spatial support rule for the Laplace sampler
+#'
+#' @description
+#' The Laplace backend holds a mode-finder per spatial field: ICAR, BYM2, RSR,
+#' single-scale NNGP, and multi-scale NNGP. Proper CAR needs a dense
+#' log-determinant, and the HSGP basis and spatially-varying coefficients have
+#' no mode-finder here, so each of those names itself rather than reaching a
+#' dispatch that would fit the model without the field.
+#'
+#' @inheritParams tvc_temporal_support
+#' @param spatial The spatial specification
+#' @return `TRUE`, or a phrase naming the restriction
+#' @keywords internal
+laplace_spatial_support <- function(spatial, structures) {
+  type <- spatial$type %||% "car"
+  if (type == "car_proper") {
+    return("proper CAR needs a dense log-determinant, which is not written here")
+  }
+  if (type %in% c("hsgp", "svc")) {
+    return(sprintf("no mode-finder for `%s` is written here", type))
+  }
+  TRUE
+}
+
+
 #' Which structures each backend can fit
 #'
 #' @description
@@ -221,7 +246,7 @@ BACKEND_STRUCTURE_SUPPORT <- list(
     zi = TRUE, latent = FALSE
   ),
   laplace = list(
-    spatial = TRUE, temporal = multiscale_temporal_support,
+    spatial = laplace_spatial_support, temporal = multiscale_temporal_support,
     spatiotemporal = FALSE, zi = FALSE, latent = FALSE
   ),
   vi = list(
