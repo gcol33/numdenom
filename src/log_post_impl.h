@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <limits>
+#include <type_traits>
 #include "autodiff_utils.h"
 #include "ar1_shared.h"  // AR1 rho: the floored 1 - rho^2 and its prior
 #include <tulpa/soft_sum_to_zero.h>
@@ -22,6 +23,10 @@
 #include "hmc_tvc_autodiff.h"  // Templated TVC functions
 #include "hmc_latent_autodiff.h"  // Templated latent factor functions
 #include "hmc_temporal_multiscale.h"  // Templated multiscale temporal functions
+#include "tls_workspace.h"
+#include "hmc_gp_collapsed.h"     // Collapsed GP marginal (double only)
+#include "hmc_icar_collapsed.h"   // Collapsed ICAR/BYM2 marginal (double only)
+#include "hmc_car_proper.h"       // Proper CAR precision and log-determinant
 
 // Expects these to be defined by including hmc_sampler.h first:
 // - ratiod_hmc::ModelData
@@ -61,23 +66,64 @@ inline const char* log_post_impl_gap(const ModelData& data,
     return nullptr;
 }
 
+// phi' Q phi for the ICAR precision Q = D - W over the CSR adjacency, for both
+// arms of the spatial prior and for the analytic gradient paths.
+template<typename T>
+inline T icar_quadratic_form_t(const T* phi, int J, const ModelData& data) {
+    T quad_form = T(0.0);
+    for (int i = 0; i < J; i++) {
+        quad_form = quad_form + T(data.n_neighbors[i]) * phi[i] * phi[i];
+        const int row_start = data.adj_row_ptr[i];
+        const int row_end = data.adj_row_ptr[i + 1];
+        for (int k = row_start; k < row_end; k++) {
+            const int j = data.adj_col_idx[k];
+            if (j > i) {
+                quad_form = quad_form - T(2.0) * phi[i] * phi[j];
+            }
+        }
+    }
+    return quad_form;
+}
+
+// What a caller wants of the density that is not the density. A fused gradient
+// pass has already walked the observations, and for the non-centred temporal GP
+// has already accumulated that block's prior, so it asks for the rest rather
+// than paying for either twice.
+struct LogPostOptions {
+    bool skip_obs_loop = false;
+    const double* precomputed_tgp_log_prior = nullptr;
+};
+
 // ============================================================================
-// Templated log-posterior computation
-// T = double for evaluation, T = ad::Var for autodiff gradients
+// Log-posterior computation
+// T = double for evaluation, T = ad::Var / fwd::Dual / arena::Var for gradients
+//
+// The double instantiation is the whole of compute_log_post: the structures no
+// autodiff scalar can express (the collapsed marginals, proper CAR's dense
+// log-determinant), the parallel observation loop and the per-thread
+// workspaces sit behind `if constexpr`, and log_post_impl_gap names what the
+// other instantiations therefore leave out.
 // ============================================================================
 
 template<typename T>
 T compute_log_post_impl(
     const std::vector<T>& params_in,
     const ModelData& data,
-    const ParamLayout& layout
+    const ParamLayout& layout,
+    const LogPostOptions& opts = LogPostOptions()
 ) {
+    constexpr bool kDouble = std::is_same<T, double>::value;
+
     // Hard sum-to-zero: centre the spatial block once, matching the analytic
     // compute_log_post. See spatial_field_constraint.h.
     std::vector<T> params_centered;
     T phi_spatial_raw_sum = T(0.0);
+    // Proper CAR has a full-rank precision (rho < 1), so its mean is already
+    // identified by the prior; centring it would impose a constraint the model
+    // does not need, unlike ICAR/BYM2's rank-deficient Q.
     const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                                && !data.icar_collapsed && !data.bym2_collapsed;
+                                && !data.icar_collapsed && !data.bym2_collapsed
+                                && !layout.is_car_proper;
     if (center_spatial) {
         params_centered = params_in;
         phi_spatial_raw_sum = ratiod_constraints::center_spatial_block(
@@ -129,9 +175,9 @@ T compute_log_post_impl(
     T sigma_u_bym2 = T(1.0);
     const T* theta_bym2 = nullptr;
 
-    if (spatial_in_params) {
-        phi_spatial = &params[layout.spatial_start];
-
+    // The scale parameters are read whether or not the field has a slot: a
+    // marginalized field still carries its own prior on them.
+    if (layout.has_spatial) {
         if (layout.is_bym2) {
             // Riebler reparameterization: sigma_total, rho -> sigma_s, sigma_u
             T sigma_total_bym2 = safe_exp(params[layout.log_sigma_bym2_idx]);
@@ -140,10 +186,57 @@ T compute_log_post_impl(
             sigma_s_bym2 = sigma_total_bym2 * sqrt(rho_bym2);
             sigma_u_bym2 = sigma_total_bym2 * sqrt(T(1.0) - rho_bym2);
 
-            theta_bym2 = &params[layout.theta_bym2_start];
+            if (spatial_in_params) {
+                phi_spatial = &params[layout.spatial_start];
+                theta_bym2 = &params[layout.theta_bym2_start];
+            }
         } else {
             T log_tau = params[layout.log_tau_spatial_idx];
             tau_spatial = safe_exp(log_tau);
+
+            if (spatial_in_params) {
+                phi_spatial = &params[layout.spatial_start];
+            }
+        }
+    }
+
+    // Collapsed ICAR/BYM2: the field is marginalized out, so its mode is found
+    // by an inner Newton and a Laplace correction added, and phi_spatial points
+    // at that mode rather than at a parameter slot. Neither is a closed-form
+    // function of the parameters, so only the double instantiation carries it;
+    // log_post_impl_gap names the structure for the others.
+    if (data.icar_collapsed || data.bym2_collapsed) {
+        if constexpr (kDouble) {
+            // Actual RE values for the mode finder (non-centred -> actual)
+            std::vector<double> re_vals_collapsed;
+            if (layout.has_re) {
+                const int n_re = layout.re_end - layout.re_start;
+                const double sigma_re = std::exp(params[layout.log_sigma_re_idx]);
+                const double* re_ptr = &params[layout.re_start];
+                re_vals_collapsed.resize(n_re);
+                for (int g = 0; g < n_re; g++) {
+                    re_vals_collapsed[g] = (data.re_parameterization == 1)
+                        ? sigma_re * re_ptr[g] : re_ptr[g];
+                }
+            }
+
+            CollapsedTemporalOffset collapsed_temporal_offset =
+                collapsed_temporal_obs_offset(data, layout, params);
+
+            auto cres = collapsed_icar_log_post_contribution(
+                data.bym2_collapsed, tau_spatial,
+                data.bym2_collapsed ? std::exp(params[layout.log_sigma_bym2_idx]) : 0.0,
+                data.bym2_collapsed ? params[layout.logit_rho_bym2_idx] : 0.0,
+                data.bym2_scale_factor, phi_num, phi_denom,
+                &params[layout.beta_num_start], &params[layout.beta_denom_start],
+                re_vals_collapsed.empty() ? nullptr : re_vals_collapsed.data(),
+                data, collapsed_icar_ws(),
+                collapsed_temporal_offset.num_ptr(),
+                collapsed_temporal_offset.denom_ptr());
+
+            phi_spatial = cres.phi_spatial;
+            theta_bym2 = cres.theta_bym2;
+            log_post = log_post + cres.log_post_contribution;
         }
     }
 
@@ -229,8 +322,12 @@ T compute_log_post_impl(
         log_post = log_post + log_prior_gamma(log_phi, data.phi_prior_shape, data.phi_prior_rate);
     }
 
-    // Spatial priors
-    if (spatial_in_params) {
+    // Spatial priors. The scale parameters carry a prior whether or not the
+    // field has a slot; the field's own quadratic form is inside the collapsed
+    // contribution above when it does not.
+    if (layout.has_spatial) {
+        const int J = data.n_spatial_units;
+
         if (layout.is_bym2) {
             // BYM2 Riebler: Half-Cauchy on sigma_total
             T log_sigma = params[layout.log_sigma_bym2_idx];
@@ -243,55 +340,63 @@ T compute_log_post_impl(
             log_post = log_post + log(rho_bym2_prior)
                                 + log(T(1.0) - rho_bym2_prior);
 
-            // ICAR prior on phi_spatial
-            T quad_form = T(0.0);
-            for (int i = 0; i < data.n_spatial_units; i++) {
-                quad_form = quad_form + T(data.n_neighbors[i]) * phi_spatial[i] * phi_spatial[i];
-                int row_start = data.adj_row_ptr[i];
-                int row_end = data.adj_row_ptr[i + 1];
-                for (int k = row_start; k < row_end; k++) {
-                    int j = data.adj_col_idx[k];
-                    if (j > i) {
-                        quad_form = quad_form - T(2.0) * phi_spatial[i] * phi_spatial[j];
-                    }
+            if (spatial_in_params) {
+                // phi_scaled ~ N(0, (Q + 11'/J)^{-1}); the likelihood sees phi
+                // centred, so the constant direction is a free draw at the
+                // field's own scale.
+                T quad_form = icar_quadratic_form_t(phi_spatial, J, data);
+                log_post = log_post - T(0.5) * (quad_form
+                    + ratiod_constraints::free_direction_quad(phi_spatial_raw_sum, J));
+
+                // N(0, I) prior on theta
+                for (int s = 0; s < J; s++) {
+                    log_post = log_post - T(0.5) * theta_bym2[s] * theta_bym2[s];
                 }
             }
-            // phi_scaled ~ N(0, (Q + 11'/J)^{-1}); the likelihood sees phi
-            // centred, so the constant direction is a free draw at the
-            // field's own scale.
-            log_post = log_post - T(0.5) * (quad_form
-                + ratiod_constraints::free_direction_quad(
-                      phi_spatial_raw_sum, data.n_spatial_units));
-
-            // N(0, I) prior on theta
-            for (int s = 0; s < data.n_spatial_units; s++) {
-                log_post = log_post - T(0.5) * theta_bym2[s] * theta_bym2[s];
-            }
-        } else {
+        } else if (!layout.is_car_proper) {
             // ICAR: Gamma prior on tau
             T log_tau = params[layout.log_tau_spatial_idx];
             log_post = log_post + log_prior_gamma(log_tau, data.tau_spatial_shape, data.tau_spatial_rate);
 
-            // ICAR prior on phi_spatial
-            T quad_form = T(0.0);
-            for (int i = 0; i < data.n_spatial_units; i++) {
-                quad_form = quad_form + T(data.n_neighbors[i]) * phi_spatial[i] * phi_spatial[i];
-                int row_start = data.adj_row_ptr[i];
-                int row_end = data.adj_row_ptr[i + 1];
-                for (int k = row_start; k < row_end; k++) {
-                    int j = data.adj_col_idx[k];
-                    if (j > i) {
-                        quad_form = quad_form - T(2.0) * phi_spatial[i] * phi_spatial[j];
-                    }
-                }
+            if (spatial_in_params) {
+                T quad_form = icar_quadratic_form_t(phi_spatial, J, data);
+                // (Q + 11'/J) is full rank, so the exponent on tau is J/2 rather
+                // than (J-1)/2, and the quadratic form carries the freed direction.
+                log_post = log_post + T(0.5 * J) * log_tau
+                         - T(0.5) * tau_spatial * (quad_form
+                             + ratiod_constraints::free_direction_quad(phi_spatial_raw_sum, J));
             }
-            int J = data.n_spatial_units;
-            T log_tau_sp = params[layout.log_tau_spatial_idx];
-            // (Q + 11'/J) is full rank, so the exponent on tau is J/2 rather
-            // than (J-1)/2, and the quadratic form carries the freed direction.
-            log_post = log_post + T(0.5 * J) * log_tau_sp
-                     - T(0.5) * tau_spatial * (quad_form
-                         + ratiod_constraints::free_direction_quad(phi_spatial_raw_sum, J));
+        } else {
+            // Proper CAR: tau ~ Gamma(shape, rate); rho ~ Beta(a, b) scaled to
+            // (car_rho_lower, car_rho_upper), with the logit-transform Jacobian
+            // folded in (the untransformed density is car_proper::log_prior_rho;
+            // the Jacobian log(upper-lower) + log(u) + log(1-u) combines with it
+            // to a*log(u) + b*log(1-u)). Its log|Q(rho)| needs a dense Cholesky,
+            // which has no templated form, so only the double instantiation
+            // carries the block; log_post_impl_gap names it for the others.
+            if constexpr (kDouble) {
+                const double log_tau_sp = params[layout.log_tau_spatial_idx];
+                log_post += (data.tau_spatial_shape - 1.0) * log_tau_sp
+                          - data.tau_spatial_rate * tau_spatial + log_tau_sp;
+
+                const double u_rho =
+                    1.0 / (1.0 + std::exp(-params[layout.logit_rho_car_idx]));
+                const double rho_car = data.car_rho_lower
+                    + (data.car_rho_upper - data.car_rho_lower) * u_rho;
+                log_post += data.car_rho_prior_a * std::log(u_rho)
+                          + data.car_rho_prior_b * std::log(1.0 - u_rho);
+
+                // phi ~ N(0, (tau * Q(rho))^{-1}), Q(rho) = D - rho*W; full rank
+                // for |rho| < 1, so no sum-to-zero identification term is needed.
+                auto Q = ratiod_car_proper::compute_car_precision(
+                    J, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors, rho_car);
+                const double log_det_Q = ratiod_car_proper::car_log_det(J, Q);
+                const double quad = ratiod_car_proper::car_quadratic_form(
+                    phi_spatial, J, data.adj_row_ptr, data.adj_col_idx,
+                    data.n_neighbors, rho_car);
+                log_post += 0.5 * log_det_Q + 0.5 * J * log_tau_sp
+                          - 0.5 * tau_spatial * quad;
+            }
         }
     }
 
@@ -319,13 +424,27 @@ T compute_log_post_impl(
             phi_gp, data.gp_phi_prior_lower, data.gp_phi_prior_upper);
         log_post = log_post + log_phi_gp;  // Jacobian
 
-        if (layout.gp_w_start < 0 ||
-            layout.gp_w_start + data.gp_data.n_obs > (int)params.size()) {
-            return T(-INFINITY);  // Invalid parameter layout
-        }
-        int n_gp = layout.gp_w_end - layout.gp_w_start;
+        if (data.gp_collapsed) {
+            // The field is marginalized out: its mode is located with Newton and
+            // a Laplace correction added, which is not a closed-form function of
+            // the parameters. Only the double instantiation carries it;
+            // log_post_impl_gap names the structure for the others.
+            if constexpr (kDouble) {
+                auto gp_res = collapsed_gp_log_post_contribution(
+                    &params[layout.beta_num_start], &params[layout.beta_denom_start],
+                    sigma2_gp, phi_gp, phi_num, phi_denom, data, collapsed_gp_ws());
 
-        if (data.gp_parameterization == 1) {
+                // w* is what the observation loop reads.
+                const int n_star = data.gp_data.n_obs;
+                gp_w.assign(collapsed_gp_ws().w_star.begin(),
+                            collapsed_gp_ws().w_star.begin() + n_star);
+                log_post = log_post + gp_res.log_post_contribution;
+            }
+        } else if (layout.gp_w_start < 0 ||
+                   layout.gp_w_start + data.gp_data.n_obs > (int)params.size()) {
+            return T(-INFINITY);  // Invalid parameter layout
+        } else if (data.gp_parameterization == 1) {
+            const int n_gp = layout.gp_w_end - layout.gp_w_start;
             // Non-centred: the slot holds z, and the field is w = L(sigma2, phi) z
             // built by the NNGP autoregression. The NNGP prior on w and the
             // Jacobian |dw/dz| cancel exactly, so what remains of the field's
@@ -340,12 +459,13 @@ T compute_log_post_impl(
             }
             log_post = log_post - T(0.5) * z_sq_sum;
 
-            ratiod_gp::NNGPNCWorkspaceT<T> nc_ws;
+            ratiod_gp::NNGPNCWorkspaceT<T>& nc_ws = ratiod_gp::nngp_nc_ws<T>();
             ratiod_gp::nngp_nc_forward(z_gp.data(), sigma2_gp, phi_gp,
                                        data.gp_data, nc_ws);
-            gp_w.swap(nc_ws.w);
+            gp_w.assign(nc_ws.w.begin(), nc_ws.w.begin() + n_gp);
         } else {
             // Centred: the slot holds w, which carries the NNGP prior directly.
+            const int n_gp = layout.gp_w_end - layout.gp_w_start;
             gp_w.resize(n_gp);
             for (int k = 0; k < n_gp; k++) {
                 gp_w[k] = params[layout.gp_w_start + k];
@@ -550,7 +670,12 @@ T compute_log_post_impl(
     if (layout.has_temporal) {
         int T_times = data.n_times;
 
-        if (layout.is_temporal_gp) {
+        if (layout.is_temporal_gp && opts.precomputed_tgp_log_prior) {
+            // Fused path: the gradient function has already accumulated every
+            // temporal GP prior term. Only passed alongside skip_obs_loop, so
+            // nothing reads the effects the branch below would reconstruct.
+            log_post = log_post + T(*opts.precomputed_tgp_log_prior);
+        } else if (layout.is_temporal_gp) {
             // Temporal GP: PC prior on sigma2, logit-bounded phi (lengthscale)
             T log_sigma2 = params[layout.log_sigma2_temporal_gp_idx];
 
@@ -868,23 +993,20 @@ T compute_log_post_impl(
                 // LogNormal(0,1) on lengthscale
                 log_post = log_post - T(0.5) * log_ls * log_ls;
 
-                // Extract beta_j and compute f_j = Phi * (sqrt(S_j) * beta_j)
-                // N(0, I) prior on beta
+                // N(0, I) prior on beta_j, then f_j = Phi * (sqrt(S_j) .* beta_j)
+                // through the one expansion every HSGP block reads.
+                std::vector<T> beta_j(m_total);
                 for (int k = 0; k < m_total; k++) {
-                    T beta_jk = params[layout.svc_w_start + j * m_total + k];
-                    log_post = log_post - T(0.5) * beta_jk * beta_jk;
+                    beta_j[k] = params[layout.svc_w_start + j * m_total + k];
+                    log_post = log_post - T(0.5) * beta_j[k] * beta_j[k];
+                }
 
-                    // Compute scaled beta: sqrt(S(eigenvalue_k, sigma2_j, ls_j)) * beta_jk
-                    double omega_sq = data.svc_hsgp_data.eigenvalues[k];
-                    T sqrt_S_k = safe_sqrt(ratiod_hsgp::spectral_density_se(
-                        omega_sq, sigma2_j, ls_j));
-
-                    // Accumulate f_j[i] = sum_k phi[i,k] * sqrt_S_k * beta_jk
-                    for (int i = 0; i < n_obs; i++) {
-                        double phi_ik = data.svc_hsgp_data.phi_flat[i * m_total + k];
-                        svc_eta[i] = svc_eta[i] + T(phi_ik) * sqrt_S_k * beta_jk *
-                                     T(data.svc_data.X_svc[i * n_svc + j]);
-                    }
+                std::vector<T> f_j;
+                ratiod_hsgp::hsgp_evaluate_t(beta_j.data(), sigma2_j, ls_j,
+                                             data.svc_hsgp_data, f_j);
+                for (int i = 0; i < n_obs; i++) {
+                    svc_eta[i] = svc_eta[i]
+                        + f_j[i] * T(data.svc_data.X_svc[i * n_svc + j]);
                 }
             }
         } else {
@@ -1246,10 +1368,9 @@ T compute_log_post_impl(
     // LIKELIHOOD
     // ========================================================================
 
-    // Note: No OpenMP here - autodiff tape is not thread-safe
-    // For double, this is slightly slower but correct
-
-    for (int i = 0; i < data.N; i++) {
+    // One observation's contribution, written once for every scalar type. How
+    // the sum over observations is taken is what differs, below.
+    auto obs_log_lik_i = [&](int i) -> T {
         // Compute linear predictors
         T eta_num = T(0.0);
         T eta_denom = T(0.0);
@@ -1268,8 +1389,10 @@ T compute_log_post_impl(
             eta_denom = eta_denom + re_contrib;
         }
 
-        // Add spatial effects
-        if (spatial_in_params && !data.spatial_group.empty() && data.spatial_group[i] > 0) {
+        // Add spatial effects. A collapsed field has no slot but does have a
+        // mode, which the collapsed contribution above pointed phi_spatial at.
+        if (layout.has_spatial && phi_spatial != nullptr
+            && !data.spatial_group.empty() && data.spatial_group[i] > 0) {
             int s = data.spatial_group[i] - 1;
             T spatial_effect;
 
@@ -1495,7 +1618,33 @@ T compute_log_post_impl(
             ll_i = log_lik_beta_binomial(y, n, p, phi_num);
         }
 
-        log_post = log_post + ll_i;
+        return ll_i;
+    };
+
+    // A caller that accumulated the observation likelihood during a fused
+    // gradient pass asks for the prior and structural terms alone.
+    if (!opts.skip_obs_loop) {
+        if constexpr (kDouble) {
+            // Only the double instantiation takes this in parallel: an autodiff
+            // tape is not thread-safe. The NNGP paths read shared neighbour
+            // structures, so they stay on one thread.
+            double obs_log_lik = 0.0;
+            const int n_rows = data.N;
+#ifdef _OPENMP
+            const int use_threads =
+                (layout.is_gp || layout.is_multiscale_gp) ? 1 : data.n_threads;
+            #pragma omp parallel for reduction(+:obs_log_lik) schedule(static) \
+                    num_threads(use_threads)
+#endif
+            for (int i = 0; i < n_rows; i++) obs_log_lik += obs_log_lik_i(i);
+            log_post = log_post + obs_log_lik;
+        } else {
+            T obs_log_lik = T(0.0);
+            for (int i = 0; i < data.N; i++) {
+                obs_log_lik = obs_log_lik + obs_log_lik_i(i);
+            }
+            log_post = log_post + obs_log_lik;
+        }
     }
 
     return log_post;

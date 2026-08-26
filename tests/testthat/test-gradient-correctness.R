@@ -383,16 +383,19 @@ for (case in ZI_COUNT_CASES) {
   }
 }
 
-test_that("a count-response ZI or hurdle term reaches both log posteriors", {
+test_that("a count-response ZI or hurdle term reaches both instantiations", {
   # Before #34 the templated density returned the same number for zi_poisson,
   # hurdle_poisson and no zero-inflation at all, and differed from the analytic
-  # density by between 1.7 and 46 log units across these six.
+  # density by between 1.7 and 46 log units across these six. Since
+  # gcol33/tulpaRatio#28 there is one density, so what this compares is its two
+  # instantiations: log_post is compute_log_post_impl<double> and log_post_mode
+  # under "arena" is the value the arena::Var one carries through the tape.
   for (case in ZI_COUNT_CASES) {
     r <- tulpaRatio:::cpp_gradient_check("rw1", mode = "arena",
                                          family = case$family, zi = case$zi)
     info <- sprintf("%s / %s", case$family, case$zi)
     expect_true(is.na(r$impl_gap), label = info)
-    expect_equal(r$log_post, r$log_post_impl, tolerance = 1e-8, info = info)
+    expect_equal(r$log_post, r$log_post_mode, tolerance = 1e-8, info = info)
   }
 })
 
@@ -430,16 +433,16 @@ test_that("an unshared temporal effect changes the density it is meant to change
   )
 })
 
-test_that("the two log posteriors are the same function, not the same shape", {
-  # compute_log_post and compute_log_post_impl<double> must return the same
-  # number, not merely have the same gradient. They differed by the binomial
-  # coefficient, which the eta-form likelihood drops as constant in eta, and per
-  # structure by whatever that structure was missing; a gradient comparison alone
-  # sees neither, since both are constant in the parameters at a fixed point.
+test_that("the density does not depend on how many threads sum it", {
+  # compute_log_post is compute_log_post_impl<double> (gcol33/tulpaRatio#28), and
+  # the observation loop is the one part of it that runs in parallel -- only in
+  # that instantiation, since an autodiff tape is not thread-safe. A term that
+  # the reduction does not carry, or one accumulated into shared state rather
+  # than returned per observation, shows up as a thread-count-dependent number.
   for (field in ALL_FIELDS) {
-    r <- tulpaRatio:::cpp_gradient_check(field, mode = "arena")
-    expect_true(is.na(r$impl_gap), label = sprintf("field = %s", field))
-    expect_equal(r$log_post, r$log_post_impl, tolerance = 1e-8,
+    one <- tulpaRatio:::cpp_gradient_check(field, n_threads = 1L)
+    many <- tulpaRatio:::cpp_gradient_check(field, n_threads = 4L)
+    expect_equal(one$log_post, many$log_post, tolerance = 1e-8,
                  info = sprintf("field = %s", field))
   }
 })
@@ -447,6 +450,13 @@ test_that("the two log posteriors are the same function, not the same shape", {
 test_that("the value each mode reports is the density its gradient describes", {
   # NUTS consumes the fused value as log_prob, so a mode whose value disagrees
   # with its own gradient drives the Hamiltonian off a different density.
+  #
+  # This is also what holds the merged density's two escapes to it. The
+  # handcoded case fuses compute_log_post(skip_obs_loop = TRUE) with an
+  # observation likelihood the gradient kernel accumulated itself, so a term the
+  # option drops or double-counts lands here; the arena case is the arena::Var
+  # instantiation, so a value the `if constexpr` arms compute differently from
+  # the double one lands here too.
   for (mode in c("arena", "handcoded")) {
     for (field in ALL_FIELDS) {
       r <- tulpaRatio:::cpp_gradient_check(field, mode = mode)
@@ -508,7 +518,12 @@ for (field in c("temporal_ar1", "tvc_ar1", "ms_temporal", "st4_ar1",
     expect_true(is.finite(r$log_post), label = sprintf("%s: log_post", field))
     expect_true(all(is.finite(r$analytic)),
                 label = sprintf("%s: analytic gradient", field))
-    expect_equal(r$log_post, r$log_post_impl, tolerance = 1e-8,
+    # The floor is inside the density, so the two instantiations of it have to
+    # agree there as well: the arena run's fused value is the arena::Var one at
+    # the same parameter point.
+    a <- tulpaRatio:::cpp_gradient_check(field, mode = "arena",
+                                         near_unit_rho = TRUE)
+    expect_equal(r$log_post, a$log_post_mode, tolerance = 1e-8,
                  info = sprintf("field = %s", field))
   })
 }

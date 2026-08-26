@@ -185,8 +185,8 @@ cpp_gradient_dispatch <- function(field, n_obs = 40L, n_units = 8L, n_times = 5L
     .Call(`_tulpaRatio_cpp_gradient_dispatch`, field, n_obs, n_units, n_times, seed, family)
 }
 
-cpp_gradient_check <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, eps = 1e-5, seed = 42L, mode = "handcoded", precenter = FALSE, family = "binomial", temporal_shared = TRUE, reference = "analytic", zi = "none", near_unit_rho = FALSE) {
-    .Call(`_tulpaRatio_cpp_gradient_check`, field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared, reference, zi, near_unit_rho)
+cpp_gradient_check <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, eps = 1e-5, seed = 42L, mode = "handcoded", precenter = FALSE, family = "binomial", temporal_shared = TRUE, zi = "none", near_unit_rho = FALSE, n_threads = 1L) {
+    .Call(`_tulpaRatio_cpp_gradient_check`, field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared, zi, near_unit_rho, n_threads)
 }
 
 cpp_logpost_at <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, seed = 42L, family = "binomial", temporal_shared = TRUE, zi = "none") {

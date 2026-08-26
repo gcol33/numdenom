@@ -187,18 +187,6 @@ inline void hsgp_matvec(
     f_vec.noalias() = Phi * scaled_beta;
 }
 
-// Evaluate HSGP spatial effects: f = Phi * (sqrt(S) ⊙ beta)
-inline void hsgp_evaluate(
-    const std::vector<double>& beta,
-    double sigma2,
-    double lengthscale,
-    const HSGPData& data,
-    std::vector<double>& f
-) {
-    f.resize(data.n_obs);
-    hsgp_matvec(beta.data(), sigma2, lengthscale, data, f.data());
-}
-
 // The same expansion for any scalar type. The double instantiation is the
 // matvec above, so the templated density and the analytic one cannot disagree
 // about what f is; the other scalars take the loop, which is what the tape
@@ -227,15 +215,6 @@ inline void hsgp_evaluate_t(
             }
         }
     }
-}
-
-// Log prior on beta: N(0, I)
-inline double hsgp_log_prior_beta(const std::vector<double>& beta) {
-    double log_prior = 0.0;
-    for (size_t j = 0; j < beta.size(); j++) {
-        log_prior += -0.5 * beta[j] * beta[j];
-    }
-    return log_prior;
 }
 
 // Gradient structure for HSGP

@@ -1,5 +1,68 @@
 # tulpaRatio 1.7.2
 
+* **`compute_log_post` is `compute_log_post_impl<double>` (#28).** The two
+  densities returned the same number on every structure the templated one
+  expressed, so keeping them apart bought nothing and cost the standing risk
+  every bug in #11, #14 and #18 came from: a term in one copy and not the
+  other, invisible because the runtime gradient check differences whichever
+  density the active mode differentiates. The analytic body is deleted; what
+  used to separate the two now sits inside the template.
+
+  The structures no autodiff scalar can express -- the collapsed ICAR/BYM2 and
+  collapsed GP marginals, which locate a mode with Newton and add a Laplace
+  correction, and proper CAR's dense log-determinant -- are `if constexpr`
+  arms, so `log_post_impl_gap()` names exactly the blocks the other
+  instantiations leave out, as before. The observation loop is one lambda,
+  summed by an OpenMP reduction in the `double` instantiation and serially in
+  the others, so the H path keeps its parallel likelihood without a second copy
+  of the 250-line body. `skip_obs_loop` and the temporal GP's precomputed block
+  prior become a `LogPostOptions` struct defaulted to the full density;
+  `precomputed_st_log_prior` goes, having never had a caller.
+
+  Writing the collapsed fields into the template found the guard they needed:
+  the spatial hyperparameter priors were gated on the field having a parameter
+  slot, so a marginalized field would have dropped the prior on its own scale.
+  Nothing reached that -- the gap kept collapsed models out of the templated
+  density entirely -- but the merge could not have kept it.
+
+  The double twins the deleted body was the last caller of go with it:
+  `gp_nngp_log_lik`, `multiscale_gp_log_lik`, `log_prior_sigma2_pc`,
+  `log_prior_phi_uniform` and `gp_gradient_w` in `hmc_gp.h`, `hsgp_evaluate`
+  and `hsgp_log_prior_beta` in `hmc_hsgp.h`, `ar1_nc_log_prior` in
+  `hmc_temporal.h` and `log_prior_temporal_sigma2_pc` in `hmc_temporal_gp.h`,
+  each of which had a templated counterpart that is now the only definition.
+  So do `compute_gradient_gp_autodiff`, `compute_gradient_msgp_autodiff` and
+  `compute_gradient_gp_temporal_autodiff`, three hand-written `ad::Var`
+  transcriptions of the density that `resolve_gradient_fn` never returned and
+  nothing else named -- a copy no test could reach and no assertion could hold
+  to the original. 2260 lines net.
+
+  What the harness asserts changes with it: comparing `compute_log_post` to
+  `compute_log_post_impl<double>` is now comparing a function with itself, so
+  that check is replaced by two that still have content. The density must not
+  depend on how many threads sum it, which is what the new `n_threads` argument
+  to `cpp_gradient_check` reaches; and the value each mode reports must be the
+  density its gradient describes, which holds the fused `skip_obs_loop` path
+  and the `arena::Var` instantiation to the `double` one.
+
+  Across twenty-two structures every entry of the analytic gradient is
+  bit-identical to before, and the density moves by at most 3.7e-16 relative --
+  one to two units in the last place, from summing the same terms in the
+  template's order. Wall-clock on a 4000-row binomial fit, 400 iterations,
+  before and after: plain GLM 0.59 s / 0.60 s, ICAR + RW1 16.5 s / 15.7 s,
+  collapsed ICAR + RW1 320 s / 281 s, crossed random effects 46.7 s / 44.1 s.
+
+* **`test-temporal.R`'s AR1 fit asserts a correlation its fixture identifies.**
+  It read `mean(rho_samples) > 0` on ten time points, where the posterior for
+  rho is nearly its prior: sd 0.32 around a mean of 0.07, with a 90% interval
+  of [-0.54, +0.69] even at 8000 iterations. The sign of the mean over 100
+  retained draws sat inside its own Monte Carlo error, and across five seeds it
+  came out anywhere from -0.03 to +0.40, so what the assertion turned on was
+  which trajectory the sampler happened to take. The fixture now carries eighty
+  time points, where the posterior mean is +0.47 or better across eight seeds
+  against 0 for a chain that left rho at its prior, and the threshold says so.
+  The strengthened fixture passes on the code either side of #28.
+
 * **The templated log posterior expresses the HSGP multi-scale GP and the
   non-centred GP (#26).** These were the two structures `log_post_impl_gap()`
   named as expressible but unwritten, and both were reachable from R:

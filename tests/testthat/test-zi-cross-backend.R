@@ -259,11 +259,13 @@ for (backend in c("ess", "sghmc")) {
 # The checks above compare a backend's ZI logit against HMC's with a tolerance
 # of 1.5, on data whose true ZI logit is about -1. A backend that ignored the
 # ZI term entirely would sample beta_zi from its N(0, zi_prior_sd) prior and
-# land within that band, so those tests hold either way for ESS. ESS is the one
-# backend that evaluates compute_log_post_impl rather than compute_log_post,
-# and that density branched on zi_type only for binomial responses: a
-# Poisson/NegBin ZI or hurdle term was dropped, and beta_zi was sampled against
-# a likelihood that did not contain it.
+# land within that band, so those tests hold either way for ESS. ESS called
+# compute_log_post_impl where the other backends called compute_log_post, and
+# at the time those were two densities: the templated one branched on zi_type
+# only for binomial responses, so a Poisson/NegBin ZI or hurdle term was
+# dropped and beta_zi was sampled against a likelihood that did not contain it.
+# They are one function since gcol33/tulpaRatio#28, which is what keeps that
+# from recurring; this still checks the term reaches the sampler.
 #
 # Separating the two takes a true ZI logit far from the prior mean.
 

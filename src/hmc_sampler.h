@@ -488,15 +488,19 @@ int get_n_params(const ModelData& data);
 // Log-posterior computation (with OpenMP parallelization)
 // =====================================================================
 
-// Main log-posterior function
+// Main log-posterior function: compute_log_post_impl<double>, so that a term
+// cannot be present in the density the H path evaluates and absent from the one
+// the autodiff modes differentiate.
+//
 // When skip_obs_loop=true, returns only prior+structural terms (O(p+S+T)),
-// skipping the O(N) observation loop. Used by fused gradient+log_post computation.
+// skipping the O(N) observation loop. Used by fused gradient+log_post
+// computation, which passes the temporal GP's prior in the same way when it has
+// already accumulated it.
 double compute_log_post(
     const std::vector<double>& params,
     const ModelData& data,
     const ParamLayout& layout,
     bool skip_obs_loop = false,
-    const double* precomputed_st_log_prior = nullptr,
     const double* precomputed_tgp_log_prior = nullptr
 );
 

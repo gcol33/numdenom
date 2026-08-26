@@ -23,6 +23,7 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppEigen.h>
+#include "tls_workspace.h"
 // NOTE: This header must be included AFTER hmc_sampler.h (which defines ModelData/ModelType)
 // and hmc_gp.h (which defines GPData in namespace ratiod_gp).
 // It is included from hmc_sampler.cpp in the correct order.
@@ -1246,6 +1247,11 @@ inline CollapsedGPLogPostResult collapsed_gp_log_post_contribution(
 
     return res;
 }
+
+// The collapsed GP scratch this thread reuses across calls. Shared by the log
+// posterior and by compute_gradient_gp_collapsed, which reads w_star from it
+// after the density has written the mode there.
+RATIOD_TLS_WORKSPACE_FN(CollapsedGPWorkspace, collapsed_gp_ws)
 
 // Store collapsed GP mode values (w*) into result buffer
 inline void collapsed_gp_store_sample(

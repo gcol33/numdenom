@@ -176,8 +176,14 @@ test_that("HMC with temporal AR1 runs", {
   skip_on_cran()
 
   set.seed(444)
-  n_times <- 10
-  n_per_time <- 15
+  # Enough time points for the likelihood to say anything about rho. At the ten
+  # this fixture used to carry, the posterior for rho was almost the prior --
+  # sd 0.32 around a mean of 0.07, with a 90% interval of [-0.54, +0.69] even
+  # at 8000 iterations -- so the sign of the mean over 100 retained draws was
+  # inside its own Monte Carlo error and came out anywhere from -0.03 to +0.40
+  # depending on the seed. At eighty it is +0.47 or better across eight seeds.
+  n_times <- 80
+  n_per_time <- 6
   n <- n_times * n_per_time
 
   # Simulate AR1 process
@@ -196,9 +202,10 @@ test_that("HMC with temporal AR1 runs", {
 
   X <- cbind(1, x)
 
-  # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 1 logit_rho + 10 temporal = 15
+  # Parameters: 2 beta_num + 1 beta_denom + 1 log_tau + 1 logit_rho + n_times
+  n_params <- 5L + n_times
   result <- tulpaRatio:::cpp_hmc_fit(
-    q_init = rep(0, 15),
+    q_init = rep(0, n_params),
     y_num = as.integer(successes),
     y_denom = as.integer(trials),
     y_num_cont = rep(0.0, n),
@@ -224,7 +231,7 @@ test_that("HMC with temporal AR1 runs", {
     verbose = FALSE
   )
 
-  expect_equal(ncol(result$samples), 15)
+  expect_equal(ncol(result$samples), n_params)
   expect_equal(nrow(result$samples), 100)
 
   # rho lives on (-1, 1): the sampled coordinate is logit((rho + 1) / 2).
@@ -233,8 +240,11 @@ test_that("HMC with temporal AR1 runs", {
   logit_rho_idx <- 5  # After 2 beta_num + 1 beta_denom + 1 log_tau
   rho_samples <- 2 * plogis(result$samples[, logit_rho_idx]) - 1
   expect_true(all(rho_samples > -1 & rho_samples < 1))
-  # The fixture is simulated at rho = 0.7.
-  expect_gt(mean(rho_samples), 0)
+  # The fixture is simulated at rho = 0.7, and a sampler that left rho at its
+  # prior would sit at 0. Measured across eight seeds the posterior mean runs
+  # +0.47 to +0.67, so 0.2 separates the two without asserting the shrinkage a
+  # 100-draw chain has not shaken off.
+  expect_gt(mean(rho_samples), 0.2)
 })
 
 

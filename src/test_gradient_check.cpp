@@ -344,8 +344,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   const bool want_msgp = (field == "msgp" || field == "msgp_temporal" ||
                           field == "msgp_st4" || field == "msgp_hsgp");
   // The multi-scale field on a shared spectral basis rather than two neighbour
-  // sets. The templated density does not express it (log_post_impl_gap names
-  // it), so only the analytic reference can check this one.
+  // sets, with a PC prior on each scale's sigma and a LogNormal on its
+  // lengthscale in place of an NNGP density.
   const bool want_msgp_hsgp = (field == "msgp_hsgp");
   const bool want_svc_hsgp = (field == "svc_hsgp");
   const bool want_svc = (field == "svc" || want_svc_hsgp || field == "svc_ms");
@@ -950,11 +950,15 @@ Rcpp::List cpp_gradient_check(std::string field,
                               bool precenter = false,
                               std::string family = "binomial",
                               bool temporal_shared = true,
-                              std::string reference = "analytic",
                               std::string zi = "none",
-                              bool near_unit_rho = false) {
+                              bool near_unit_rho = false,
+                              int n_threads = 1) {
   ModelData data = make_model(field, n_obs, n_units, n_times, seed,
                               family, temporal_shared, zi);
+  // The observation loop is the one part of the density that runs in parallel,
+  // and only in the double instantiation. make_model() builds a single-threaded
+  // model, so a caller that wants that arm reached has to ask for it.
+  data.n_threads = n_threads;
   ParamLayout layout = compute_param_layout(data);
   const int n_params = get_n_params(data);
 
@@ -1030,15 +1034,10 @@ Rcpp::List cpp_gradient_check(std::string field,
   double lp_from_mode = 0.0;
   compute_gradient(params, data, layout, grad_analytic, &lp_from_mode);
 
-  // `reference` selects which density is differenced. "analytic" is
-  // compute_log_post; "impl" is compute_log_post_impl<double>, the templated
-  // density the arena/forward/tape modes actually differentiate. Comparing the
-  // two finite-difference gradients against each other is what shows a
-  // structure present in one density and absent from the other.
-  const bool fd_impl = (reference == "impl");
+  // compute_log_post is compute_log_post_impl<double>, so differencing it is
+  // differencing the density every mode reports a value for.
   auto lp_at = [&](const std::vector<double>& p) {
-    return fd_impl ? ratiod::compute_log_post_impl(p, data, layout)
-                   : compute_log_post(p, data, layout);
+    return compute_log_post(p, data, layout);
   };
 
   std::vector<double> grad_fd(n_params, 0.0);
@@ -1092,7 +1091,6 @@ Rcpp::List cpp_gradient_check(std::string field,
     Rcpp::Named("params") = Rcpp::wrap(params),
     Rcpp::Named("n_params") = n_params,
     Rcpp::Named("log_post") = compute_log_post(params, data, layout),
-    Rcpp::Named("log_post_impl") = ratiod::compute_log_post_impl(params, data, layout),
     Rcpp::Named("log_post_mode") = lp_from_mode,
     Rcpp::Named("impl_gap") = (impl_gap == nullptr)
       ? Rcpp::CharacterVector::create(NA_STRING)

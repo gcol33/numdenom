@@ -34,9 +34,12 @@
   type& name = *name##_tls_slot_
 
 // Namespace-scope counterpart: defines `fn()` returning this thread's workspace,
-// for scratch shared by several functions.
+// for scratch shared by several functions. External linkage, not internal: a
+// function template reaches these, and a template instantiated in two
+// translation units must find the same workspace in both rather than whichever
+// internal-linkage copy the linker happened to keep.
 #define RATIOD_TLS_WORKSPACE_FN(type, fn)  \
-  static inline type& fn() {               \
+  inline type& fn() {                      \
     RATIOD_TLS_WORKSPACE(type, ws);        \
     return ws;                             \
   }

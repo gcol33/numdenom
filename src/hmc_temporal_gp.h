@@ -248,13 +248,6 @@ inline double temporal_gp_log_lik(
 // Priors for GP hyperparameters
 // -----------------------------------------------------------------------------
 
-// Log prior for temporal variance (PC prior style)
-inline double log_prior_temporal_sigma2_pc(double sigma2, double U, double alpha) {
-  double rate = -std::log(alpha) / U;
-  double sigma = std::sqrt(sigma2);
-  return std::log(rate) - rate * sigma - std::log(2.0 * sigma);
-}
-
 // Log prior for temporal range (uniform or PC)
 inline double log_prior_temporal_phi_uniform(double phi, double lower, double upper) {
   if (phi < lower || phi > upper) return -INFINITY;

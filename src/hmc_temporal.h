@@ -146,16 +146,6 @@ inline void ar1_nc_forward(
   }
 }
 
-// Non-centered AR1 log-prior on z: z ~ N(0, I)
-// Returns log p(z) = -0.5 * sum(z[t]^2) - 0.5*T*log(2*pi)
-inline double ar1_nc_log_prior(const double* z, int T) {
-  double lp = -0.5 * T * std::log(2.0 * M_PI);
-  for (int t = 0; t < T; t++) {
-    lp -= 0.5 * z[t] * z[t];
-  }
-  return lp;
-}
-
 // Compute gradients for non-centered AR1 parameterization.
 // Given grad_phi_lik = d(likelihood)/d(phi), computes:
 //   grad_z[t] = d(log_post)/d(z[t]) including N(0,1) prior

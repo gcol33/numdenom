@@ -24,6 +24,7 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppEigen.h>
+#include "tls_workspace.h"
 
 // NOTE: Must be included AFTER hmc_sampler.h (which defines ModelData/ModelType).
 using ratiod_hmc::ModelData;
@@ -2046,6 +2047,9 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
 // temporal GP, multiscale temporal, latent factors and HSGP remain
 // untouched.
 // =========================================================================
+
+// The collapsed ICAR/BYM2 scratch this thread reuses across calls.
+RATIOD_TLS_WORKSPACE_FN(CollapsedICARWorkspace, collapsed_icar_ws)
 
 struct CollapsedTemporalOffset {
     std::vector<double> num;
