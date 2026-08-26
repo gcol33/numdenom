@@ -13580,10 +13580,12 @@ Rcpp::List cpp_hmc_fit(
   // multi-chain team the same size across fits.
   data.n_cores = (n_cores > 0) ? n_cores : n_chains;
 
-  // Initialize feature flags that are not used in cpp_hmc_fit (only in cpp_hmc_fit_gp)
+  // Feature flags this entry never sets, which belong to cpp_hmc_fit_gp.
+  // has_multiscale_temporal is not among them: the temporal bundle above sets
+  // it for temporal_multiscale(), and compute_param_layout() allocates the
+  // trend, seasonal and short-term blocks off it.
   data.has_gp = false;
   data.has_multiscale_gp = false;
-  data.has_multiscale_temporal = false;
   data.has_rsr = false;
   data.has_hsgp = false;
 

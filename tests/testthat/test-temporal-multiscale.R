@@ -186,3 +186,86 @@ test_that("validate_temporal_multiscale handles factor time variable", {
   expect_equal(validated$n_times, 4)
   expect_equal(validated$time_levels, c("Q1", "Q2", "Q3", "Q4"))
 })
+
+# ============================================================================
+# The multi-scale block under the non-GP sampler entry (#74)
+# ============================================================================
+#
+# use_gp_sampler is is_gp_spatial(spatial) || (is_multiscale_temporal(temporal)
+# && !has_areal_spatial), so a multi-scale temporal term paired with an AREAL
+# spatial field is the one combination that routes to cpp_hmc_fit rather than
+# the GP entry. That entry set data.has_multiscale_temporal from the temporal
+# bundle and then cleared it a hundred lines later, among flags belonging to
+# cpp_hmc_fit_gp. compute_param_layout() reads that field to allocate the
+# trend/seasonal/short-term blocks, so it allocated none of them while R went
+# on naming their columns, and every multi-scale column was read at an offset
+# holding something else.
+#
+# The arbiter is the prior support, as in test-gp-sampler-blocks.R: rho_short
+# is logit-mapped onto the OPEN interval (-1, 1) and the variances are
+# exp-transformed, so no draw of them can be 0, +/-1, infinite or NaN. Reading
+# the fit from the outside this way needs no knowledge of the layout, which is
+# exactly what the mislabelling defeated.
+
+ms_areal_fixture <- function(S = 6L, T_ = 12L, seed = 3L) {
+  set.seed(seed)
+  grid <- expand.grid(unit = seq_len(S), year = seq_len(T_))
+  d <- data.frame(unit = factor(grid$unit), year = grid$year,
+                  x = rnorm(nrow(grid)))
+  d$denom <- rpois(nrow(d), 60) + 5L
+  d$num <- rpois(nrow(d), 0.3 * d$denom)
+  side <- ceiling(sqrt(S))
+  A <- matrix(0, S, S)
+  for (i in seq_len(S)) for (j in seq_len(S)) {
+    li <- c((i - 1L) %% side, (i - 1L) %/% side)
+    lj <- c((j - 1L) %% side, (j - 1L) %/% side)
+    if (i != j && sum((li - lj)^2) <= 1) A[i, j] <- 1
+  }
+  dimnames(A) <- list(levels(d$unit), levels(d$unit))
+  list(data = d, adj = A)
+}
+
+test_that("an areal spatial field carries a multi-scale temporal block, and its draws stay in support", {
+  skip_on_cran()
+  fx <- ms_areal_fixture()
+  fit <- tratio(
+    num | denom ~ x,
+    data = fx$data,
+    family = ratiod_poisson_gamma(),
+    mode = "hmc",
+    spatial = spatial_car(fx$adj, level = "group", group_var = "unit"),
+    temporal = temporal_multiscale("year", trend = "rw1", short_term = "ar1"),
+    control = list(iter = 100, warmup = 50, chains = 1, seed = 3, verbose = FALSE)
+  )
+  dr <- as.matrix(fit$draws)
+
+  # The block has to be named at all before anything below means something.
+  field_cols <- grep("^(trend|short_term)\\[", colnames(dr), value = TRUE)
+  expect_gt(length(field_cols), 0L)
+
+  for (nm in c("sigma2_trend", "sigma2_short")) {
+    expect_true(nm %in% colnames(dr))
+    v <- dr[, nm]
+    expect_true(all(is.finite(v)),
+                label = sprintf("%s finite: min %.4g, max %.4g", nm, min(v), max(v)))
+    expect_true(all(v > 0),
+                label = sprintf("%s > 0: min %.4g", nm, min(v)))
+  }
+
+  expect_true("rho_short" %in% colnames(dr))
+  rho <- dr[, "rho_short"]
+  expect_true(all(is.finite(rho) & rho > -1 & rho < 1),
+              label = sprintf("rho_short in (-1, 1): min %.4g, max %.4g",
+                              min(rho), max(rho)))
+
+  # A field under a proper prior does not wander to a standard deviation in the
+  # thousands over 50 draws; the unallocated block did, on every column.
+  for (nm in field_cols) {
+    expect_lt(sd(dr[, nm]), 10,
+              label = sprintf("%s sd %.4g", nm, sd(dr[, nm])))
+  }
+
+  # Each column has to be a draw, not one value repeated: an offset landing on
+  # a constant slot would satisfy the bounds above while carrying no posterior.
+  expect_gt(min(vapply(field_cols, function(nm) length(unique(dr[, nm])), integer(1))), 1L)
+})

@@ -1,5 +1,26 @@
 # tulpaRatio 1.7.2
 
+* **An areal spatial field paired with `temporal_multiscale()` now gets its
+  multi-scale block (#74).** `cpp_hmc_fit` set `has_multiscale_temporal` from
+  the temporal bundle and then cleared it about a hundred lines later, among
+  the feature flags that belong to `cpp_hmc_fit_gp`. `compute_param_layout()`
+  reads that field to allocate the trend, seasonal and short-term blocks, so it
+  allocated none of them while R went on naming their columns. The combination
+  is reachable because `use_gp_sampler` is
+  `is_gp_spatial(spatial) || (is_multiscale_temporal(temporal) && !has_areal_spatial)`:
+  a multi-scale temporal term with an areal spatial field is the one case that
+  routes to `cpp_hmc_fit`. Measured on `num | denom ~ x` with
+  `spatial_car(level = "group")` and
+  `temporal_multiscale("year", trend = "rw1", short_term = "ar1")`, 6 units by
+  12 times, poisson_gamma, 100 iterations: R named 39 columns, 27 of them the
+  multi-scale block's, and those 27 were not a posterior -- `sigma2_trend` and
+  `sigma2_short` spanned `[0, Inf]` with a standard deviation of `NaN`,
+  `rho_short` reached exactly -1 and 1 though it is logit-mapped onto the open
+  interval, and the field columns had standard deviations in the thousands.
+  All 27 now respect their own priors. `test-temporal-multiscale.R` checks the
+  block against its prior support the way `test-gp-sampler-blocks.R` does, and
+  fails 29 assertions without the fix.
+
 * **The GP sampler entry carries the random-effect block it was handed (#72).**
   `cpp_hmc_fit_gp` set `n_re_terms = 0` and `has_re_slopes = false`
   unconditionally, and the R backend handed it `re_group` / `n_re_groups`
