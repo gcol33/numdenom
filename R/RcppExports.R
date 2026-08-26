@@ -45,8 +45,8 @@ cpp_get_max_threads <- function() {
     .Call(`_tulpaRatio_cpp_get_max_threads`)
 }
 
-cpp_hmc_fit_gp <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, latent_params, st_params, tvc_params, svc_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth = 10L, adapt_delta = -1.0, metric_str = "auto", gradient_mode_str = "auto") {
-    .Call(`_tulpaRatio_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_group, n_re_groups, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, latent_params, st_params, tvc_params, svc_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta, metric_str, gradient_mode_str)
+cpp_hmc_fit_gp <- function(q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_params, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, latent_params, st_params, tvc_params, svc_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth = 10L, adapt_delta = -1.0, metric_str = "auto", gradient_mode_str = "auto") {
+    .Call(`_tulpaRatio_cpp_hmc_fit_gp`, q_init, y_num, y_denom, y_denom_cont, X_num, X_denom, re_params, model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params, temporal_params, latent_params, st_params, tvc_params, svc_params, sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate, zi_type_str, X_zi, zi_prior_sd, n_iter, n_warmup, L, n_chains, seed, n_threads, verbose, max_treedepth, adapt_delta, metric_str, gradient_mode_str)
 }
 
 cpp_hmc_fit_gp_v2 <- function(args) {

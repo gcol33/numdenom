@@ -23,6 +23,7 @@
 #include "st_prior_grad.h"
 #include "cov_type_code.h"
 #include "hmc_model_data_blocks.h"
+#include "hmc_re_blocks_grad.h"
 #include <Rcpp.h>
 
 // Include log_post_impl.h AFTER hmc_sampler.h so types are defined
@@ -206,6 +207,7 @@ ParamLayout compute_param_layout(const ModelData& data) {
   } else if (data.n_re_terms > 1) {
     // Multiple RE terms (intercept only): allocate sigma and RE for each term
     layout.log_sigma_re_multi.resize(data.n_re_terms);
+    layout.log_sigma_re_slopes.resize(data.n_re_terms);
     layout.re_start_multi.resize(data.n_re_terms);
     layout.re_end_multi.resize(data.n_re_terms);
     layout.re_n_coefs_multi.resize(data.n_re_terms, 1);  // All intercept-only
@@ -215,6 +217,10 @@ ParamLayout compute_param_layout(const ModelData& data) {
 
     for (int t = 0; t < data.n_re_terms; t++) {
       layout.log_sigma_re_multi[t] = idx++;
+      // The per-coefficient sigma index table the slope layout fills, at the
+      // one coefficient an intercept-only term has, so a loop over
+      // (term, coefficient) reads either layout.
+      layout.log_sigma_re_slopes[t].assign(1, layout.log_sigma_re_multi[t]);
     }
     for (int t = 0; t < data.n_re_terms; t++) {
       layout.re_start_multi[t] = idx;
@@ -2546,239 +2552,14 @@ void compute_gradient_analytical(
   // phi priors: Gamma(shape, rate) via log transform
   phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
-  // RE prior: N(0, sigma_re^2)
-  // d/d(re[g]) = -tau_re * re[g]
-  // Also accumulates contribution to sigma_re gradient
-  double re_prior_grad_sigma = 0.0;
-  std::vector<std::vector<double>> grad_re_slopes_lik;  // [term][g*n_coefs+c] likelihood contributions
-  int n_re_terms_slopes = 0;
-  bool slopes_nc = (layout.has_re_slopes && data.re_parameterization == 1);
-
-  // Non-centered slopes: pre-computed RE values for observation loop
-  std::vector<double> re_nc_flat;
-  // Per-term storage for non-centered chain rule in write-back
-  std::vector<std::vector<double>> nc_L_flats;   // [term] -> L_flat
-  std::vector<std::vector<double>> nc_sigmas_vec; // [term] -> sigmas
-
-  if (layout.has_re && layout.has_re_slopes && !layout.has_re_correlated_slopes) {
-    // ============ Uncorrelated random slopes prior gradients ============
-    n_re_terms_slopes = data.n_re_terms;
-    grad_re_slopes_lik.resize(n_re_terms_slopes);
-
-    for (int t = 0; t < n_re_terms_slopes; t++) {
-      int n_groups = data.re_n_groups_multi[t];
-      int n_coefs = layout.re_n_coefs_multi[t];
-      int re_start_t = layout.re_start_multi[t];
-      grad_re_slopes_lik[t].assign(n_groups * n_coefs, 0.0);
-
-      // Extract sigma parameters and compute priors
-      for (int c = 0; c < n_coefs; c++) {
-        int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
-        double log_sigma_c = params[log_sigma_idx];
-        double sigma_c = std::exp(log_sigma_c);
-
-        // Half-Cauchy prior on sigma_c
-        double ratio_c = sigma_c / data.sigma_re_scale;
-        double ratio_c_sq = ratio_c * ratio_c;
-        grad[log_sigma_idx] = -2.0 * ratio_c_sq / (1.0 + ratio_c_sq) + 1.0;
-
-        if (slopes_nc) {
-          // Non-centered: params store z ~ N(0,1). Prior: -0.5*z^2
-          // No sigma contribution from z prior (chain rule applied after obs loop)
-          for (int g = 0; g < n_groups; g++) {
-            double z_gc = params[re_start_t + g * n_coefs + c];
-            grad[re_start_t + g * n_coefs + c] = -z_gc;
-          }
-        } else {
-          // Centered: params store re ~ N(0, sigma_c^2)
-          double tau_c = 1.0 / (sigma_c * sigma_c + 1e-10);
-          double sigma_grad_c = 0.0;
-          for (int g = 0; g < n_groups; g++) {
-            double re_gc = params[re_start_t + g * n_coefs + c];
-            grad[re_start_t + g * n_coefs + c] = -tau_c * re_gc;
-            sigma_grad_c += tau_c * re_gc * re_gc - 1.0;
-          }
-          grad[log_sigma_idx] += sigma_grad_c;
-        }
-      }
-    }
-  } else if (layout.has_re && layout.has_re_slopes && layout.has_re_correlated_slopes) {
-    // ============ Correlated random slopes prior gradients ============
-    // Multivariate normal with Sigma = diag(sigma) * L * L' * diag(sigma)
-    // where L is lower-triangular Cholesky factor with L[i,i] = sqrt(1 - sum_{j<i} L[i,j]^2)
-    // LKJ(eta=2) prior on correlation matrix
-    n_re_terms_slopes = data.n_re_terms;
-    grad_re_slopes_lik.resize(n_re_terms_slopes);
-
-    for (int t = 0; t < n_re_terms_slopes; t++) {
-      int n_groups = data.re_n_groups_multi[t];
-      int n_coefs = layout.re_n_coefs_multi[t];
-      int re_start_t = layout.re_start_multi[t];
-      bool is_correlated = layout.re_correlated_multi[t];
-      grad_re_slopes_lik[t].assign(n_groups * n_coefs, 0.0);
-
-      // Extract sigma parameters
-      std::vector<double> sigmas(n_coefs);
-      for (int c = 0; c < n_coefs; c++) {
-        int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
-        sigmas[c] = std::exp(params[log_sigma_idx]);
-
-        // Half-Cauchy prior on sigma_c: d/d(log_sigma) = -2*(sigma/scale)^2/(1+(sigma/scale)^2) + 1
-        double ratio_c = sigmas[c] / data.sigma_re_scale;
-        double ratio_c_sq = ratio_c * ratio_c;
-        grad[log_sigma_idx] = -2.0 * ratio_c_sq / (1.0 + ratio_c_sq) + 1.0;
-      }
-
-      if (is_correlated && n_coefs > 1) {
-        // Build Cholesky factor L with tanh parameterization
-        // Must match compute_log_post: L[i,j] = tanh(raw[idx])
-        int chol_start = layout.chol_re_start_multi[t];
-        std::vector<double> L_flat(n_coefs * n_coefs, 0.0);
-
-        int chol_idx = 0;
-        for (int i = 0; i < n_coefs; i++) {
-          double row_sum_sq = 0.0;
-          for (int j = 0; j < i; j++) {
-            double raw_ij = params[chol_start + chol_idx];
-            L_flat[i * n_coefs + j] = std::tanh(raw_ij);
-            row_sum_sq += L_flat[i * n_coefs + j] * L_flat[i * n_coefs + j];
-            chol_idx++;
-          }
-          double diag_sq = 1.0 - row_sum_sq;
-          if (diag_sq < 1e-10) {
-            // Safety guard (shouldn't trigger with tanh)
-            return;
-          }
-          L_flat[i * n_coefs + i] = std::sqrt(diag_sq);
-        }
-
-        // LKJ(eta=2) prior gradient w.r.t. Cholesky elements
-        // LKJ contribution: sum_k (eta - 1 + (n-k-1)/2) * 2 * log(L[k,k])
-        // Jacobian contribution: sum_{k>0} (n - k) * log(L[k,k])
-        double eta = 2.0;
-        int n_chol = n_coefs * (n_coefs - 1) / 2;
-        std::vector<double> grad_chol(n_chol, 0.0);
-
-        // Gradient of LKJ + Jacobian w.r.t. L[i,j] (off-diagonal)
-        // d(log L[k,k])/d(L[i,j]) = -L[i,j] / L[i,i]^2 if i = k
-        for (int k = 1; k < n_coefs; k++) {
-          double L_kk = L_flat[k * n_coefs + k];
-          double coef_lkj = (eta - 1.0 + (n_coefs - k - 1) / 2.0) * 2.0;
-          double coef_jac = (n_coefs - k);
-          double coef_total = coef_lkj + coef_jac;
-
-          // d/d(L[k,j]) for j < k
-          int chol_base = k * (k - 1) / 2;
-          for (int j = 0; j < k; j++) {
-            double L_kj = L_flat[k * n_coefs + j];
-            // d(log L[k,k])/d(L[k,j]) = -L[k,j] / (L[k,k]^2)
-            grad_chol[chol_base + j] += coef_total * (-L_kj / (L_kk * L_kk));
-          }
-        }
-
-        // ---- Non-centered parameterization ----
-        // Params store z ~ N(0,1). Compute re = diag(sigma) * L * z for observation loop.
-
-        // Allocate re_nc_flat if needed
-        if (re_nc_flat.empty()) {
-          re_nc_flat.assign(params.size(), 0.0);
-        }
-
-        // Pre-compute re from z for all groups
-        for (int g = 0; g < n_groups; g++) {
-          for (int c = 0; c < n_coefs; c++) {
-            double Lz_c = 0.0;
-            for (int k = 0; k <= c; k++) {
-              Lz_c += L_flat[c * n_coefs + k] * params[re_start_t + g * n_coefs + k];
-            }
-            re_nc_flat[re_start_t + g * n_coefs + c] = sigmas[c] * Lz_c;
-          }
-        }
-
-        // Save term data for write-back chain rule
-        nc_L_flats.resize(n_re_terms_slopes);
-        nc_sigmas_vec.resize(n_re_terms_slopes);
-        nc_L_flats[t] = L_flat;
-        nc_sigmas_vec[t] = sigmas;
-
-        // Prior on z: N(0, I) -> grad[z_idx] = -z[g,c]
-        for (int g = 0; g < n_groups; g++) {
-          for (int c = 0; c < n_coefs; c++) {
-            grad[re_start_t + g * n_coefs + c] = -params[re_start_t + g * n_coefs + c];
-          }
-        }
-
-        // Sigma: Half-Cauchy prior already written above. No centered contribution.
-        // In non-centered, the log-det of Jacobian (re = diag(sigma)*L*z)
-        // cancels with the |Sigma|^{-1/2} normalization, so no -n_groups term.
-
-        // Cholesky: write LKJ prior gradient only (with tanh chain rule)
-        // No centered prior contribution in non-centered parameterization
-        {
-          int cidx = 0;
-          for (int i = 1; i < n_coefs; i++) {
-            for (int j = 0; j < i; j++) {
-              double raw_val = params[chol_start + cidx];
-              double l_val = std::tanh(raw_val);
-              double sech2 = 1.0 - l_val * l_val;
-              grad[chol_start + cidx] = grad_chol[cidx] * sech2 - 2.0 * l_val;
-              cidx++;
-            }
-          }
-        }
-      } else {
-        // Uncorrelated term within a mixed model (fallback)
-        for (int c = 0; c < n_coefs; c++) {
-          double tau_c = 1.0 / (sigmas[c] * sigmas[c] + 1e-10);
-          double sigma_grad_c = 0.0;
-          for (int g = 0; g < n_groups; g++) {
-            double re_gc = params[re_start_t + g * n_coefs + c];
-            grad[re_start_t + g * n_coefs + c] = -tau_c * re_gc;
-            sigma_grad_c += tau_c * re_gc * re_gc - 1.0;
-          }
-          int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
-          grad[log_sigma_idx] += sigma_grad_c;
-        }
-      }
-    }
-  } else if (layout.has_re && !layout.has_re_slopes) {
-    // Intercept-only RE (single or crossed terms)
-    int n_terms = (data.n_re_terms > 1) ? data.n_re_terms : 1;
-
-    for (int t = 0; t < n_terms; t++) {
-      // Get term-specific parameters
-      int log_sigma_idx = (n_terms > 1) ? layout.log_sigma_re_multi[t] : layout.log_sigma_re_idx;
-      int re_start_t = (n_terms > 1) ? layout.re_start_multi[t] : layout.re_start;
-      int n_groups_t = (n_terms > 1) ? data.re_n_groups_multi[t] : data.n_re_groups;
-
-      double log_sigma_t = params[log_sigma_idx];
-      double sigma_t = std::exp(log_sigma_t);
-
-      // Half-Cauchy prior on sigma_t (same for both parameterizations)
-      double ratio_t = sigma_t / data.sigma_re_scale;
-      double ratio_t_sq = ratio_t * ratio_t;
-      grad[log_sigma_idx] = -2.0 * ratio_t_sq / (1.0 + ratio_t_sq) + 1.0;
-
-      if (data.re_parameterization == 1) {
-        // Non-centered: z ~ N(0, 1), prior grad = -z
-        // No sigma contribution from z prior (sigma gradient comes from likelihood chain rule)
-        for (int g = 0; g < n_groups_t; g++) {
-          double z_g = params[re_start_t + g];
-          grad[re_start_t + g] = -z_g;
-        }
-      } else {
-        // Centered: re ~ N(0, sigma_t^2)
-        double tau_t = 1.0 / (sigma_t * sigma_t + 1e-10);
-        double sigma_grad_t = 0.0;
-        for (int g = 0; g < n_groups_t; g++) {
-          double re_g = params[re_start_t + g];
-          grad[re_start_t + g] = -tau_t * re_g;
-          sigma_grad_t += tau_t * re_g * re_g - 1.0;
-        }
-        grad[log_sigma_idx] += sigma_grad_t;
-      }
-    }
-  }
+  // RE priors, and the effective effects a non-centred correlated term's
+  // loops read. See hmc_re_blocks_grad.h.
+  ReBlockGrad re_ws;
+  if (!re_blocks_prior_grad(params, data, layout, grad, re_ws)) return;
+  std::vector<std::vector<double>>& grad_re_slopes_lik = re_ws.lik;
+  const int n_re_terms_slopes = re_ws.n_terms;
+  const bool slopes_nc = re_ws.nc;
+  const std::vector<double>& re_nc_flat = re_ws.re_nc_flat;
 
   // ============ Temporal prior gradients ============
   double log_tau_temporal = 0.0, tau_temporal = 1.0;
@@ -3993,131 +3774,11 @@ void compute_gradient_analytical(
 
   } // end if (!used_vectorized)
 
-  // Random slopes likelihood gradients (MUST be outside used_vectorized check:
-  // the hybrid slopes path sets used_vectorized=true but populates grad_re_slopes_lik
-  // via its own scatter pass — the write-back chain rule runs for all paths)
-  if (layout.has_re_slopes && n_re_terms_slopes > 0) {
-    for (int t = 0; t < n_re_terms_slopes; t++) {
-      int n_groups = data.re_n_groups_multi[t];
-      int n_coefs = layout.re_n_coefs_multi[t];
-      int re_start_t = layout.re_start_multi[t];
-      bool is_nc = (t < (int)nc_L_flats.size() && !nc_L_flats[t].empty());
-
-      if (is_nc) {
-        // Non-centered correlated slopes: chain rule transformation
-        // grad_re_slopes_lik[t] contains dLL/d(re), but params store z.
-        // Need to transform to dLL/d(z) and add sigma/chol gradients.
-        const auto& L_flat = nc_L_flats[t];
-        const auto& sigmas = nc_sigmas_vec[t];
-
-        // 1. Transform grad_re_lik to grad_z via chain rule:
-        //    dLL/dz[g,k] = sum_{c>=k} dLL/dre[g,c] * sigma[c] * L[c,k]
-        for (int g = 0; g < n_groups; g++) {
-          for (int k = 0; k < n_coefs; k++) {
-            double grad_z_lik = 0.0;
-            for (int c = k; c < n_coefs; c++) {
-              grad_z_lik += grad_re_slopes_lik[t][g * n_coefs + c] *
-                            sigmas[c] * L_flat[c * n_coefs + k];
-            }
-            grad[re_start_t + g * n_coefs + k] += grad_z_lik;
-          }
-        }
-
-        // 2. Sigma gradient from likelihood:
-        //    dLL/d(log_sigma[c]) = sum_g dLL/dre[g,c] * re_nc[g,c]
-        for (int c = 0; c < n_coefs; c++) {
-          double sigma_lik_grad = 0.0;
-          for (int g = 0; g < n_groups; g++) {
-            sigma_lik_grad += grad_re_slopes_lik[t][g * n_coefs + c] *
-                              re_nc_flat[re_start_t + g * n_coefs + c];
-          }
-          int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
-          grad[log_sigma_idx] += sigma_lik_grad;
-        }
-
-        // 3. Cholesky gradient from likelihood:
-        //    dLL/dL[i,j] = sigma[i] * (S_ij - S_ii * L[i,j] / L[i,i])
-        //    where S_ik = sum_g dLL/dre[g,i] * z[g,k]
-        //    Then apply tanh chain rule: grad_raw += grad_L * sech^2
-        int chol_start = layout.chol_re_start_multi[t];
-        for (int ii = 1; ii < n_coefs; ii++) {
-          double L_ii = L_flat[ii * n_coefs + ii];
-          // Compute S_i_k for k = 0..ii
-          std::vector<double> S_i(ii + 1, 0.0);
-          for (int k = 0; k <= ii; k++) {
-            for (int g = 0; g < n_groups; g++) {
-              S_i[k] += grad_re_slopes_lik[t][g * n_coefs + ii] *
-                        params[re_start_t + g * n_coefs + k];  // z[g,k]
-            }
-          }
-
-          int chol_base = ii * (ii - 1) / 2;
-          for (int j = 0; j < ii; j++) {
-            double L_ij = L_flat[ii * n_coefs + j];
-            double grad_L_ij = sigmas[ii] * (S_i[j] - S_i[ii] * L_ij / L_ii);
-
-            // Apply tanh chain rule and ADD to existing chol gradient
-            double raw_val = params[chol_start + chol_base + j];
-            double l_val = std::tanh(raw_val);
-            double sech2 = 1.0 - l_val * l_val;
-            grad[chol_start + chol_base + j] += grad_L_ij * sech2;
-          }
-        }
-
-      } else if (data.re_parameterization == 1) {
-        // Uncorrelated non-centered: apply chain rule re = sigma * z
-        // grad_re_slopes_lik[t][g*nc+c] = dLL/d(re[g,c])
-        // grad[z_gc] += dLL/d(re_gc) * sigma_c
-        // grad[log_sigma_c] += dLL/d(re_gc) * z_gc * sigma_c
-        for (int c = 0; c < n_coefs; c++) {
-          double sigma_c = std::exp(params[layout.log_sigma_re_slopes[t][c]]);
-          double sigma_lik_grad = 0.0;
-          for (int g = 0; g < n_groups; g++) {
-            double lik_gc = grad_re_slopes_lik[t][g * n_coefs + c];
-            double z_gc = params[re_start_t + g * n_coefs + c];
-            grad[re_start_t + g * n_coefs + c] += lik_gc * sigma_c;
-            sigma_lik_grad += lik_gc * z_gc * sigma_c;
-          }
-          grad[layout.log_sigma_re_slopes[t][c]] += sigma_lik_grad;
-        }
-      } else {
-        // Uncorrelated centered: add grad_re_slopes_lik directly
-        for (int g = 0; g < n_groups; g++) {
-          for (int c = 0; c < n_coefs; c++) {
-            grad[re_start_t + g * n_coefs + c] += grad_re_slopes_lik[t][g * n_coefs + c];
-          }
-        }
-      }
-    }
-  }
-
-  // ============ Non-centered RE post-processing ============
-  // At this point, grad[re+g] = prior_grad + centered_lik_grad
-  // For non-centered: prior_grad = -z_g, so centered_lik = grad[re+g] + z_g
-  // Transform: grad[z_g] = -z_g + sigma * centered_lik (chain rule through re = sigma*z)
-  //            grad[log_sigma] += sigma * sum(z_g * centered_lik)
-  if (layout.has_re && !layout.has_re_slopes && data.re_parameterization == 1) {
-    int n_terms = (data.n_re_terms > 1) ? data.n_re_terms : 1;
-    for (int t = 0; t < n_terms; t++) {
-      int re_start_t = (n_terms > 1) ? layout.re_start_multi[t] : layout.re_start;
-      int n_groups_t = (n_terms > 1) ? data.re_n_groups_multi[t] : data.n_re_groups;
-      int log_sigma_idx = (n_terms > 1) ? layout.log_sigma_re_multi[t] : layout.log_sigma_re_idx;
-      double sigma_t = std::exp(params[log_sigma_idx]);
-
-      double sigma_lik_grad = 0.0;
-      for (int g = 0; g < n_groups_t; g++) {
-        double z_g = params[re_start_t + g];
-        // Extract centered lik grad: total - prior = (grad[re+g]) - (-z_g) = grad[re+g] + z_g
-        double centered_lik = grad[re_start_t + g] + z_g;
-        // z gradient = prior + chain rule through sigma*z
-        grad[re_start_t + g] = -z_g + sigma_t * centered_lik;
-        // sigma gradient from likelihood: z_g * d_ll/d_re_g
-        sigma_lik_grad += z_g * centered_lik;
-      }
-      // d_ll/d_log_sigma = sigma * sum(z_g * d_ll/d_re_g)
-      grad[log_sigma_idx] += sigma_t * sigma_lik_grad;
-    }
-  }
+  // The chain rule back onto the sampled parameters, for every RE term and
+  // both parameterizations. Outside the used_vectorized check: the hybrid
+  // slopes path sets used_vectorized = true and still fills the block's
+  // likelihood accumulator through its own scatter pass.
+  re_blocks_writeback(params, data, layout, grad, re_ws);
 
   // ============ Temporal GMRF prior gradients ============
   if (layout.has_temporal && T_len > 0) {
@@ -9642,14 +9303,12 @@ void compute_gradient_composite(
         }
     }
 
-    // --- Random slopes ---
-    const bool has_slopes = layout.has_re_slopes;
-    bool slopes_nc = has_slopes && (data.re_parameterization == 1);
-    int n_re_terms_slopes = 0;
-    RATIOD_TLS_WORKSPACE(std::vector<std::vector<double>>, grad_re_slopes_lik);
-    RATIOD_TLS_WORKSPACE(std::vector<std::vector<double>>, nc_L_flats);
-    RATIOD_TLS_WORKSPACE(std::vector<std::vector<double>>, nc_sigmas_vec);
-    // Slopes priors and eta contribution are handled inline below
+    // --- Random effects, one block per term ---
+    // The same prior phase, eta contribution and chain rule
+    // compute_gradient_analytical uses, from hmc_re_blocks_grad.h: crossed and
+    // nested terms, random slopes, correlated or not, centred or not. The
+    // legacy single-term block is the one-term case of it.
+    ReBlockGrad re_ws;
 
     // --- Multiscale temporal ---
     const bool has_ms_temporal = layout.has_multiscale_temporal;
@@ -9693,7 +9352,7 @@ void compute_gradient_composite(
     // Phase 2: Prior gradients (independent of data, computed first)
     // =========================================================================
     beta_gradient_prior(data, layout, beta_num, beta_denom, grad.data());
-    if (!has_slopes) re_gradient_prior(data, layout, re, grad.data(), sigma_re);
+    if (!re_blocks_prior_grad(params, data, layout, grad, re_ws)) return;
     phi_gradient_prior(data, layout, phi_num, phi_denom, grad.data());
 
     // ICAR/BYM2/pCAR spatial priors
@@ -9914,42 +9573,6 @@ void compute_gradient_composite(
         }
     }
 
-    // Slopes priors (delegate to existing pattern from compute_gradient_analytical)
-    if (has_slopes) {
-        n_re_terms_slopes = data.n_re_terms;
-        grad_re_slopes_lik.resize(n_re_terms_slopes);
-        for (int t = 0; t < n_re_terms_slopes; t++) {
-            int n_groups = data.re_n_groups_multi[t];
-            int n_coefs = layout.re_n_coefs_multi[t];
-            int re_start_t = layout.re_start_multi[t];
-            grad_re_slopes_lik[t].assign(n_groups * n_coefs, 0.0);
-
-            for (int c = 0; c < n_coefs; c++) {
-                int log_sigma_idx = layout.log_sigma_re_slopes[t][c];
-                double sigma_c = std::exp(params[log_sigma_idx]);
-                double ratio_c = sigma_c / data.sigma_re_scale;
-                double ratio_c_sq = ratio_c * ratio_c;
-                grad[log_sigma_idx] = -2.0 * ratio_c_sq / (1.0 + ratio_c_sq) + 1.0;
-
-                if (slopes_nc) {
-                    for (int g = 0; g < n_groups; g++) {
-                        double z_gc = params[re_start_t + g * n_coefs + c];
-                        grad[re_start_t + g * n_coefs + c] = -z_gc;
-                    }
-                } else {
-                    double tau_c = 1.0 / (sigma_c * sigma_c + 1e-10);
-                    double sigma_grad_c = 0.0;
-                    for (int g = 0; g < n_groups; g++) {
-                        double re_gc = params[re_start_t + g * n_coefs + c];
-                        grad[re_start_t + g * n_coefs + c] = -tau_c * re_gc;
-                        sigma_grad_c += tau_c * re_gc * re_gc - 1.0;
-                    }
-                    grad[log_sigma_idx] += sigma_grad_c;
-                }
-            }
-        }
-    }
-
     // =========================================================================
     // Phase 3: Observation loop — compute eta, residuals, scatter gradients
     // =========================================================================
@@ -9986,45 +9609,11 @@ void compute_gradient_composite(
         if (!is_binomial)
             for (int j = 0; j < data.p_denom; j++) eta_denom_i += data.X_denom_flat[i * data.p_denom + j] * beta_denom[j];
 
-        // RE (simple intercept, no slopes)
-        if (layout.has_re && !has_slopes && data.re_group[i] > 0) {
-            double re_eff = re_value_for_eta(re, data.re_group[i] - 1, sigma_re, data.re_parameterization);
-            eta_num_i += re_eff;
-            if (!is_binomial) eta_denom_i += re_eff;
-        }
-
-        // RE (slopes — multi-term)
-        if (has_slopes) {
-            for (int t_re = 0; t_re < n_re_terms_slopes; t_re++) {
-                int n_coefs = layout.re_n_coefs_multi[t_re];
-                int re_start_t = layout.re_start_multi[t_re];
-                int g = -1;
-                if (data.n_re_terms > 1 && !data.re_group_multi_flat.empty()) {
-                    g = data.re_group_multi_flat[i * data.n_re_terms + t_re] - 1;
-                } else if (data.re_group[i] > 0) {
-                    g = data.re_group[i] - 1;
-                }
-                if (g < 0) continue;
-
-                // Intercept (coef 0)
-                double re_val_0 = params[re_start_t + g * n_coefs + 0];
-                if (slopes_nc) re_val_0 *= std::exp(params[layout.log_sigma_re_slopes[t_re][0]]);
-                eta_num_i += re_val_0;
-                if (!is_binomial) eta_denom_i += re_val_0;
-
-                // Slopes (coef 1+) — use re_slope_matrices for covariate values
-                int n_slopes = n_coefs - 1;
-                if (n_slopes > 0 && t_re < (int)data.re_slope_matrices.size() && !data.re_slope_matrices[t_re].empty()) {
-                    for (int s = 0; s < n_slopes; s++) {
-                        double re_val_s = params[re_start_t + g * n_coefs + 1 + s];
-                        if (slopes_nc) re_val_s *= std::exp(params[layout.log_sigma_re_slopes[t_re][1 + s]]);
-                        double x_slope = data.re_slope_matrices[t_re][i * n_slopes + s];
-                        double eff = re_val_s * x_slope;
-                        eta_num_i += eff;
-                        if (!is_binomial) eta_denom_i += eff;
-                    }
-                }
-            }
+        // Random effects
+        {
+            const double re_eta_i = re_blocks_eta(params, data, layout, re_ws, i);
+            eta_num_i += re_eta_i;
+            if (!is_binomial) eta_denom_i += re_eta_i;
         }
 
         // ICAR/BYM2 spatial
@@ -10235,32 +9824,8 @@ void compute_gradient_composite(
         if (!is_binomial)
             for (int j = 0; j < data.p_denom; j++) grad[layout.beta_denom_start + j] += dLL_denom * data.X_denom_flat[i * data.p_denom + j];
 
-        // Scatter to RE (simple)
-        if (layout.has_re && !has_slopes && data.re_group[i] > 0)
-            grad[layout.re_start + data.re_group[i] - 1] += dLL_shared;
-
-        // Scatter to RE (slopes)
-        if (has_slopes) {
-            for (int t_re = 0; t_re < n_re_terms_slopes; t_re++) {
-                int n_coefs = layout.re_n_coefs_multi[t_re];
-                int g = -1;
-                if (data.n_re_terms > 1 && !data.re_group_multi_flat.empty())
-                    g = data.re_group_multi_flat[i * data.n_re_terms + t_re] - 1;
-                else if (data.re_group[i] > 0)
-                    g = data.re_group[i] - 1;
-                if (g < 0) continue;
-                // Intercept
-                grad_re_slopes_lik[t_re][g * n_coefs + 0] += dLL_shared;
-                // Slopes
-                int n_slopes_sc = n_coefs - 1;
-                if (n_slopes_sc > 0 && t_re < (int)data.re_slope_matrices.size() && !data.re_slope_matrices[t_re].empty()) {
-                    for (int s = 0; s < n_slopes_sc; s++) {
-                        double x_slope = data.re_slope_matrices[t_re][i * n_slopes_sc + s];
-                        grad_re_slopes_lik[t_re][g * n_coefs + 1 + s] += dLL_shared * x_slope;
-                    }
-                }
-            }
-        }
+        // Scatter to the RE blocks
+        re_blocks_scatter(data, layout, re_ws, i, dLL_shared, grad);
 
         // Scatter to ICAR/BYM2 spatial
         if (has_icar_bym2 && data.spatial_group[i] > 0) {
@@ -10588,38 +10153,8 @@ void compute_gradient_composite(
         }
     }
 
-    // NC RE chain rule (simple intercepts)
-    if (!has_slopes) re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
-
-    // NC slopes chain rule
-    if (has_slopes) {
-        for (int t_re = 0; t_re < n_re_terms_slopes; t_re++) {
-            int n_groups = data.re_n_groups_multi[t_re];
-            int n_coefs = layout.re_n_coefs_multi[t_re];
-            int re_start_t = layout.re_start_multi[t_re];
-            if (slopes_nc) {
-                for (int g = 0; g < n_groups; g++) {
-                    for (int c = 0; c < n_coefs; c++) {
-                        int idx = re_start_t + g * n_coefs + c;
-                        double z_gc = params[idx];
-                        double sigma_c = std::exp(params[layout.log_sigma_re_slopes[t_re][c]]);
-                        double lik_grad = grad_re_slopes_lik[t_re][g * n_coefs + c];
-                        // Chain rule: d/dz = -z + sigma * dLL/d(re), where re = sigma*z
-                        grad[idx] += sigma_c * lik_grad;
-                        // Sigma gradient from likelihood
-                        grad[layout.log_sigma_re_slopes[t_re][c]] += z_gc * lik_grad * sigma_c;
-                    }
-                }
-            } else {
-                for (int g = 0; g < n_groups; g++) {
-                    for (int c = 0; c < n_coefs; c++) {
-                        int idx = re_start_t + g * n_coefs + c;
-                        grad[idx] += grad_re_slopes_lik[t_re][g * n_coefs + c];
-                    }
-                }
-            }
-        }
-    }
+    // The chain rule back onto the sampled parameters.
+    re_blocks_writeback(params, data, layout, grad, re_ws);
 
     // Fused log-posterior. params_in, not params: compute_log_post centres its
     // own copy and recovers phi_raw_sum from the raw field, which the centred
@@ -10678,7 +10213,12 @@ enum GradFeature : unsigned {
   // rather than GF_AREAL / GF_GP so that a function written for the sampled
   // field cannot be selected for it.
   GF_AREAL_COLLAPSED = 1u << 12,
-  GF_GP_COLLAPSED    = 1u << 13
+  GF_GP_COLLAPSED    = 1u << 13,
+  // Crossed / nested RE terms. The specialized functions read the legacy
+  // single-term block (data.re_group, layout.re_start), which holds one term
+  // of several, so a model carrying more than one needs its own bit to fall
+  // through to the composite on.
+  GF_RE_MULTI        = 1u << 14
 };
 
 inline unsigned model_grad_features(const ModelData& data, const ParamLayout& layout) {
@@ -10698,6 +10238,7 @@ inline unsigned model_grad_features(const ModelData& data, const ParamLayout& la
   if (layout.has_spatiotemporal)                         f |= GF_SPATIOTEMPORAL;
   if (layout.has_latent && data.latent_n_factors > 0)    f |= GF_LATENT;
   if (layout.has_re_slopes)                              f |= GF_RE_SLOPES;
+  if (data.n_re_terms > 1)                               f |= GF_RE_MULTI;
   return f;
 }
 
@@ -13824,41 +13365,8 @@ Rcpp::List cpp_hmc_fit(
   // Extract bundled parameters from lists with defensive checks
   // =========================================================================
 
-  // Random effects parameters
-  // Use eager deep copies to prevent R GC from invalidating memory during HMC
-  std::vector<int> re_group = Rcpp::as<std::vector<int>>(re_params["group"]);
-  int n_re_groups = Rcpp::as<int>(re_params["n_groups"]);
-  int n_re_terms = Rcpp::as<int>(re_params["n_terms"]);
-
-  // Handle group_matrix which may be numeric or integer
-  Rcpp::IntegerMatrix re_group_matrix;
-  SEXP group_mat_sexp = re_params["group_matrix"];
-  if (Rf_isMatrix(group_mat_sexp)) {
-    if (TYPEOF(group_mat_sexp) == INTSXP) {
-      re_group_matrix = Rcpp::as<Rcpp::IntegerMatrix>(group_mat_sexp);
-    } else {
-      // Convert numeric to integer
-      Rcpp::NumericMatrix nm(group_mat_sexp);
-      re_group_matrix = Rcpp::IntegerMatrix(nm.nrow(), nm.ncol());
-      for (int i = 0; i < nm.nrow(); i++) {
-        for (int j = 0; j < nm.ncol(); j++) {
-          re_group_matrix(i, j) = static_cast<int>(nm(i, j));
-        }
-      }
-    }
-  } else {
-    // Create dummy matrix
-    re_group_matrix = Rcpp::IntegerMatrix(1, 1);
-    re_group_matrix(0, 0) = 0;
-  }
-
-  std::vector<int> re_n_groups_vec = Rcpp::as<std::vector<int>>(re_params["n_groups_vec"]);
-  bool has_re_slopes = Rcpp::as<bool>(re_params["has_slopes"]);
-  bool has_re_correlated_slopes = Rcpp::as<bool>(re_params["has_correlated_slopes"]);
-  std::vector<int> re_n_coefs_vec = Rcpp::as<std::vector<int>>(re_params["n_coefs_vec"]);
-  std::vector<int> re_correlated_vec = Rcpp::as<std::vector<int>>(re_params["correlated_vec"]);
-  std::vector<int> re_n_chol_vec = Rcpp::as<std::vector<int>>(re_params["n_chol_vec"]);
-  Rcpp::List slope_matrices_list = re_params["slope_matrices"];
+  // The random-effect bundle is read by apply_re_params() below, once data.N
+  // is known: see hmc_model_data_blocks.h.
 
   // Spatial parameters (eager deep copies)
   std::string spatial_type_str = Rcpp::as<std::string>(spatial_params["type"]);
@@ -13882,21 +13390,7 @@ Rcpp::List cpp_hmc_fit(
     }
   }
 
-  // Temporal parameters (eager deep copies)
-  std::string temporal_type_str = Rcpp::as<std::string>(temporal_params["type"]);
-  std::vector<int> temporal_time_idx = Rcpp::as<std::vector<int>>(temporal_params["time_idx"]);
-  std::vector<int> temporal_group_idx = Rcpp::as<std::vector<int>>(temporal_params["group_idx"]);
-  int n_times = Rcpp::as<int>(temporal_params["n_times"]);
-  int n_temporal_groups = Rcpp::as<int>(temporal_params["n_groups"]);
-  int n_temporal_params = Rcpp::as<int>(temporal_params["n_params"]);
-  bool temporal_cyclic = Rcpp::as<bool>(temporal_params["cyclic"]);
-  bool temporal_shared = Rcpp::as<bool>(temporal_params["shared"]);
-  double tau_temporal_shape = Rcpp::as<double>(temporal_params["tau_shape"]);
-  double tau_temporal_rate = Rcpp::as<double>(temporal_params["tau_rate"]);
-  double temporal_rho_prior_a = temporal_params.containsElementNamed("rho_prior_a")
-      ? Rcpp::as<double>(temporal_params["rho_prior_a"]) : ratiod_ar1::RHO_PRIOR_A;
-  double temporal_rho_prior_b = temporal_params.containsElementNamed("rho_prior_b")
-      ? Rcpp::as<double>(temporal_params["rho_prior_b"]) : ratiod_ar1::RHO_PRIOR_B;
+  // The temporal bundle is read by apply_temporal_params() below.
 
   // Prior parameters
   double sigma_beta = Rcpp::as<double>(prior_params["sigma_beta"]);
@@ -13973,93 +13467,8 @@ Rcpp::List cpp_hmc_fit(
     }
   }
 
-  // Random effects (already deep copied above)
-  data.re_group = re_group;
-  data.n_re_groups = n_re_groups;
-  data.n_re_terms = n_re_terms;
-
-  // Random slopes flags
-  data.has_re_slopes = has_re_slopes;
-  data.has_re_correlated_slopes = has_re_correlated_slopes;
-
-  // RE parameterization: 0 = centered, 1 = non-centered
-  // Non-centered uses z ~ N(0,1) prior, centered uses re ~ N(0, sigma^2)
-  data.re_parameterization = Rcpp::as<int>(re_params["parameterization"]);
-
-  if (n_re_terms > 0) {
-    // Multi-term RE structure (with or without slopes)
-    data.re_group_multi.resize(n_re_terms);
-    data.re_n_groups_multi.resize(n_re_terms);
-    data.re_offsets.resize(n_re_terms);
-    data.re_n_coefs.resize(n_re_terms);
-    data.re_correlated.resize(n_re_terms);
-    data.re_n_chol.resize(n_re_terms);
-    data.re_n_slopes.resize(n_re_terms);
-    data.re_slope_matrices.resize(n_re_terms);
-
-    int offset = 0;
-    int total_re_params = 0;
-    int total_sigma_params = 0;
-    int total_chol_params = 0;
-
-    for (int t = 0; t < n_re_terms; t++) {
-      data.re_n_groups_multi[t] = re_n_groups_vec[t];
-      data.re_offsets[t] = offset;
-
-      // Slopes metadata
-      int n_coefs = has_re_slopes ? re_n_coefs_vec[t] : 1;
-      data.re_n_coefs[t] = n_coefs;
-      data.re_correlated[t] = has_re_slopes ? (re_correlated_vec[t] != 0) : false;
-      data.re_n_chol[t] = has_re_slopes ? re_n_chol_vec[t] : 0;
-      data.re_n_slopes[t] = n_coefs - 1;  // Number of slopes (excluding intercept)
-
-      // Process slope matrix for this term
-      if (has_re_slopes && data.re_n_slopes[t] > 0 && slope_matrices_list.size() > t) {
-        SEXP mat_sexp = slope_matrices_list[t];
-        if (!Rf_isNull(mat_sexp)) {
-          Rcpp::NumericMatrix slope_mat(mat_sexp);
-          int n_rows = slope_mat.nrow();
-          int n_cols = slope_mat.ncol();
-          data.re_slope_matrices[t].resize(n_rows * n_cols);
-          for (int i = 0; i < n_rows; i++) {
-            for (int j = 0; j < n_cols; j++) {
-              data.re_slope_matrices[t][i * n_cols + j] = slope_mat(i, j);
-            }
-          }
-        }
-      }
-
-      offset += re_n_groups_vec[t];
-      total_re_params += re_n_groups_vec[t] * n_coefs;
-      total_sigma_params += n_coefs;
-      total_chol_params += data.re_n_chol[t];
-
-      // Extract column t from re_group_matrix
-      data.re_group_multi[t].resize(data.N);
-      for (int i = 0; i < data.N; i++) {
-        data.re_group_multi[t][i] = re_group_matrix(i, t);
-      }
-    }
-    data.total_re_groups = offset;
-
-    // Build contiguous flat array: obs-major layout re_group_multi_flat[i * n_re_terms + t]
-    // Obs-major is cache-friendly: inner loop over terms for each observation
-    data.re_group_multi_flat.resize(n_re_terms * data.N);
-    for (int i = 0; i < data.N; i++) {
-      for (int t = 0; t < n_re_terms; t++) {
-        data.re_group_multi_flat[i * n_re_terms + t] = data.re_group_multi[t][i];
-      }
-    }
-    data.total_re_params = total_re_params;
-    data.total_sigma_params = total_sigma_params;
-    data.total_chol_params = total_chol_params;
-  } else {
-    // No RE terms
-    data.total_re_groups = n_re_groups;
-    data.total_re_params = n_re_groups;
-    data.total_sigma_params = (n_re_groups > 0) ? 1 : 0;
-    data.total_chol_params = 0;
-  }
+  // Random effects
+  apply_re_params(data, re_params);
 
   // Model type
   if (model_type_str == "binomial") {
@@ -14126,97 +13535,7 @@ Rcpp::List cpp_hmc_fit(
   }
 
   // Temporal structure
-  if (temporal_type_str == "rw1") {
-    data.temporal_type = TemporalType::RW1;
-  } else if (temporal_type_str == "rw2") {
-    data.temporal_type = TemporalType::RW2;
-  } else if (temporal_type_str == "ar1") {
-    data.temporal_type = TemporalType::AR1;
-  } else if (temporal_type_str == "gp") {
-    data.temporal_type = TemporalType::GP;
-
-    // GP-specific parameters
-    data.has_temporal_gp = true;
-    data.temporal_gp_data.n_obs = data.n_times;  // Use n_times, not N (total obs)
-    data.temporal_gp_data.n_groups = n_temporal_groups;
-    data.temporal_gp_data.time_values = Rcpp::as<std::vector<double>>(temporal_params["time_values"]);
-    data.temporal_gp_data.group_index = temporal_group_idx;
-
-    // Parse covariance type
-    std::string cov_type_str = Rcpp::as<std::string>(temporal_params["cov_type"]);
-    data.temporal_gp_data.cov_type = ratiod_temporal_gp::parse_temporal_cov_type(cov_type_str);
-    data.temporal_gp_data.nu = Rcpp::as<double>(temporal_params["nu"]);
-    data.temporal_gp_data.period = Rcpp::as<double>(temporal_params["period"]);
-    data.temporal_gp_data.shared = temporal_shared;
-
-    // GP priors
-    data.temporal_gp_sigma2_prior_U = Rcpp::as<double>(temporal_params["gp_sigma2_prior_U"]);
-    data.temporal_gp_sigma2_prior_alpha = Rcpp::as<double>(temporal_params["gp_sigma2_prior_alpha"]);
-    data.temporal_gp_phi_prior_lower = Rcpp::as<double>(temporal_params["gp_phi_prior_lower"]);
-    data.temporal_gp_phi_prior_upper = Rcpp::as<double>(temporal_params["gp_phi_prior_upper"]);
-
-    // Parameterization: 0=centered, 1=non-centered (default NC)
-    std::string gp_param_str = "noncentered";
-    if (temporal_params.containsElementNamed("gp_parameterization")) {
-        gp_param_str = Rcpp::as<std::string>(temporal_params["gp_parameterization"]);
-    }
-    data.temporal_gp_parameterization = (gp_param_str == "centered") ? 0 : 1;
-  } else if (temporal_type_str == "multiscale") {
-    data.temporal_type = TemporalType::NONE;  // MS_t uses its own data path
-    data.has_temporal_gp = false;
-    data.has_multiscale_temporal = true;
-
-    // Extract MS_t data from temporal_params
-    data.multiscale_temporal_data.n_times = n_times;
-    data.multiscale_temporal_data.n_groups = n_temporal_groups;
-    data.multiscale_temporal_data.n_obs = data.N;
-    data.multiscale_temporal_data.time_index = temporal_time_idx;
-    data.multiscale_temporal_data.group_index = temporal_group_idx;
-    data.multiscale_temporal_data.shared = temporal_shared;
-
-    int ms_seasonal_period = 0;
-    if (temporal_params.containsElementNamed("seasonal_period"))
-      ms_seasonal_period = Rcpp::as<int>(temporal_params["seasonal_period"]);
-    data.multiscale_temporal_data.seasonal_period = ms_seasonal_period;
-
-    std::string ms_trend_type = "rw1";
-    if (temporal_params.containsElementNamed("trend_type"))
-      ms_trend_type = Rcpp::as<std::string>(temporal_params["trend_type"]);
-    std::string ms_short_type = "ar1";
-    if (temporal_params.containsElementNamed("short_term_type"))
-      ms_short_type = Rcpp::as<std::string>(temporal_params["short_term_type"]);
-    data.multiscale_temporal_data.trend_type = ratiod_temporal::parse_temporal_type(ms_trend_type);
-    data.multiscale_temporal_data.short_term_type = ratiod_temporal::parse_temporal_type(ms_short_type);
-
-    // MS_t priors
-    data.ms_sigma2_trend_prior_U = 1.0;
-    data.ms_sigma2_trend_prior_alpha = 0.01;
-    data.ms_sigma2_seasonal_prior_U = 1.0;
-    data.ms_sigma2_seasonal_prior_alpha = 0.01;
-    data.ms_sigma2_short_prior_U = 1.0;
-    data.ms_sigma2_short_prior_alpha = 0.01;
-    if (temporal_params.containsElementNamed("sigma2_trend_prior_U"))
-      data.ms_sigma2_trend_prior_U = Rcpp::as<double>(temporal_params["sigma2_trend_prior_U"]);
-    if (temporal_params.containsElementNamed("sigma2_trend_prior_alpha"))
-      data.ms_sigma2_trend_prior_alpha = Rcpp::as<double>(temporal_params["sigma2_trend_prior_alpha"]);
-    if (temporal_params.containsElementNamed("sigma2_short_prior_U"))
-      data.ms_sigma2_short_prior_U = Rcpp::as<double>(temporal_params["sigma2_short_prior_U"]);
-    if (temporal_params.containsElementNamed("sigma2_short_prior_alpha"))
-      data.ms_sigma2_short_prior_alpha = Rcpp::as<double>(temporal_params["sigma2_short_prior_alpha"]);
-  } else {
-    data.temporal_type = TemporalType::NONE;
-    data.has_temporal_gp = false;
-  }
-
-  data.temporal_time_idx = temporal_time_idx;  // Already deep copied above
-  data.temporal_group_idx = temporal_group_idx;
-  data.n_times = n_times;
-  data.n_temporal_groups = n_temporal_groups;
-  data.n_temporal_params = n_temporal_params;
-  data.temporal_cyclic = temporal_cyclic;
-  data.temporal_shared = temporal_shared;
-  data.tau_temporal_shape = tau_temporal_shape;
-  data.tau_temporal_rate = tau_temporal_rate;
+  apply_temporal_params(data, temporal_params);
 
   // Zero-inflation structure
   data.zi_type = ratiod_zi::parse_zi_type(zi_type_str);
@@ -14253,8 +13572,6 @@ Rcpp::List cpp_hmc_fit(
   data.phi_prior_rate = phi_prior_rate;
   data.tau_spatial_shape = tau_spatial_shape;
   data.tau_spatial_rate = tau_spatial_rate;
-  data.temporal_rho_prior_a = temporal_rho_prior_a;
-  data.temporal_rho_prior_b = temporal_rho_prior_b;
 
   // Parallelization
   data.n_threads = n_threads;
@@ -14388,8 +13705,7 @@ Rcpp::List cpp_hmc_fit_gp(
     Rcpp::NumericVector y_denom_cont,
     Rcpp::NumericMatrix X_num,
     Rcpp::NumericMatrix X_denom,
-    Rcpp::IntegerVector re_group,
-    int n_re_groups,
+    Rcpp::List re_params,
     std::string model_type_str,
     Rcpp::List gp_params,
     Rcpp::List ms_gp_params,
@@ -14538,15 +13854,11 @@ Rcpp::List cpp_hmc_fit_gp(
     }
   }
 
-  // Random effects (single-term legacy path)
-  data.re_group = std::vector<int>(re_group.begin(), re_group.end());
-  data.n_re_groups = n_re_groups;
-
-  // Initialize multi-term RE fields to indicate single-term mode
-  data.n_re_terms = 0;  // 0 means use legacy single-term path
-  data.total_re_groups = n_re_groups;
-  data.has_re_slopes = false;  // GP interface doesn't support random slopes
-  data.has_re_correlated_slopes = false;
+  // Random effects. The same bundle cpp_hmc_fit reads, through the same
+  // builder: random slopes and crossed / nested terms are laid out by
+  // compute_param_layout() off these fields, and R names the columns off the
+  // same structure.
+  apply_re_params(data, re_params);
 
   // Model type
   if (model_type_str == "binomial") {
@@ -14762,6 +14074,11 @@ Rcpp::List cpp_hmc_fit_gp(
   data.n_spatial_units = 0;
   data.bym2_scale_factor = 1.0;
 
+  // The temporal margin and its prior anchors, from the same builder
+  // cpp_hmc_fit reads. It runs ahead of the multi-scale block below, which
+  // carries its own dedicated bundle and keeps precedence.
+  apply_temporal_params(data, temporal_params);
+
   // Multi-scale temporal structure
   if (ms_temporal_type_str == "multiscale") {
     data.has_multiscale_temporal = true;
@@ -14791,34 +14108,6 @@ Rcpp::List cpp_hmc_fit_gp(
     data.multiscale_temporal_data.short_term_type = ratiod_temporal::TemporalType::NONE;
     data.multiscale_temporal_data.seasonal_period = 0;
   }
-
-  // Regular temporal (RW1/RW2/AR1) — now supported in GP interface
-  {
-    std::string temporal_type_str = Rcpp::as<std::string>(temporal_params["type"]);
-    if (temporal_type_str == "rw1") {
-      data.temporal_type = TemporalType::RW1;
-    } else if (temporal_type_str == "rw2") {
-      data.temporal_type = TemporalType::RW2;
-    } else if (temporal_type_str == "ar1") {
-      data.temporal_type = TemporalType::AR1;
-    } else {
-      data.temporal_type = TemporalType::NONE;
-    }
-    data.temporal_time_idx = Rcpp::as<std::vector<int>>(temporal_params["time_idx"]);
-    data.temporal_group_idx = Rcpp::as<std::vector<int>>(temporal_params["group_idx"]);
-    data.n_times = Rcpp::as<int>(temporal_params["n_times"]);
-    data.n_temporal_groups = Rcpp::as<int>(temporal_params["n_groups"]);
-    data.n_temporal_params = Rcpp::as<int>(temporal_params["n_params"]);
-    data.temporal_cyclic = Rcpp::as<bool>(temporal_params["cyclic"]);
-    data.temporal_shared = Rcpp::as<bool>(temporal_params["shared"]);
-    data.tau_temporal_shape = Rcpp::as<double>(temporal_params["tau_shape"]);
-    data.tau_temporal_rate = Rcpp::as<double>(temporal_params["tau_rate"]);
-  }
-
-  // Multi-term RE structure (not used in GP interface - single term only)
-  data.total_re_params = 0;
-  data.total_sigma_params = 0;
-  data.total_chol_params = 0;
 
   // RSR structure - use pre-copied std::vector
   data.has_rsr = has_rsr;
@@ -14953,8 +14242,7 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
   Rcpp::NumericVector y_denom_cont = Rcpp::as<Rcpp::NumericVector>(args["y_denom_cont"]);
   Rcpp::NumericMatrix X_num = Rcpp::as<Rcpp::NumericMatrix>(args["X_num"]);
   Rcpp::NumericMatrix X_denom = Rcpp::as<Rcpp::NumericMatrix>(args["X_denom"]);
-  Rcpp::IntegerVector re_group = Rcpp::as<Rcpp::IntegerVector>(args["re_group"]);
-  int n_re_groups = Rcpp::as<int>(args["n_re_groups"]);
+  Rcpp::List re_params = Rcpp::as<Rcpp::List>(args["re_params"]);
   std::string model_type_str = Rcpp::as<std::string>(args["model_type_str"]);
   Rcpp::List gp_params = Rcpp::as<Rcpp::List>(args["gp_params"]);
   Rcpp::List ms_gp_params = Rcpp::as<Rcpp::List>(args["ms_gp_params"]);
@@ -14999,7 +14287,7 @@ Rcpp::List cpp_hmc_fit_gp_v2(Rcpp::List args) {
   // Delegate to the original implementation (metric/gradient parsed inside)
   return cpp_hmc_fit_gp(
     q_init, y_num, y_denom, y_denom_cont,
-    X_num, X_denom, re_group, n_re_groups,
+    X_num, X_denom, re_params,
     model_type_str, gp_params, ms_gp_params, ms_temporal_params, rsr_params,
     temporal_params, latent_params, st_params, tvc_params, svc_params,
     sigma_beta, sigma_re_scale, phi_prior_shape, phi_prior_rate,

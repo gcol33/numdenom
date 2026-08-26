@@ -145,7 +145,7 @@ const char* const KNOWN_FIELDS[] = {
   // of these is what says the function it lands on writes both blocks.
   "gp_st4", "gp_stgp", "gp_temporal_st4", "msgp_st4", "gp_collapsed_st4",
   "icar_collapsed_st4", "bym2_collapsed_st4", "tvc_st4", "temporal_gp_st4",
-  "gp_tgp", "svc_ms", "gp_slopes"
+  "gp_tgp", "svc_ms", "gp_slopes", "gp_slopes_corr", "gp_crossed"
 };
 
 bool is_known_field(const std::string& field) {
@@ -332,7 +332,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                         want_gp_collapsed ||
                         field == "gp_st4" || field == "gp_stgp" ||
                         field == "gp_temporal_st4" || field == "gp_tgp" ||
-                        field == "gp_slopes");
+                        field == "gp_slopes" || field == "gp_slopes_corr" ||
+                        field == "gp_crossed");
   const bool want_msgp = (field == "msgp" || field == "msgp_temporal" ||
                           field == "msgp_st4");
   const bool want_svc_hsgp = (field == "svc_hsgp");
@@ -345,8 +346,9 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // not use: one sigma per coefficient, and for the correlated variant a
   // tanh-Cholesky factor with an LKJ prior and re = diag(sigma) L z.
   const bool want_re_slopes = (field == "re_slopes" || field == "re_slopes_corr" ||
-                               field == "gp_slopes");
-  const bool want_re = (field == "re" || field == "re_crossed" || want_re_slopes);
+                               field == "gp_slopes" || field == "gp_slopes_corr");
+  const bool want_re = (field == "re" || field == "re_crossed" ||
+                        field == "gp_crossed" || want_re_slopes);
 
   data.N = n_obs;
   data.model_type = is_binomial          ? ModelType::BINOMIAL
@@ -420,9 +422,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
 
   data.re_parameterization = 0;
   if (want_re) {
-    const int n_terms = (field == "re_crossed") ? 2 : 1;
+    const int n_terms = (field == "re_crossed" || field == "gp_crossed") ? 2 : 1;
     const int n_coefs = want_re_slopes ? 2 : 1;
-    const bool correlated = (field == "re_slopes_corr");
+    const bool correlated = (field == "re_slopes_corr" ||
+                             field == "gp_slopes_corr");
     const int n_groups = 5;
 
     data.n_re_terms = n_terms;

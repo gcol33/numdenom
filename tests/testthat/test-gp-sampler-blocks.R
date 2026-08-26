@@ -122,3 +122,116 @@ test_that("a GP main effect carries a latent factor", {
   dr <- expect_draws_in_support(fit)
   expect_true(any(grepl("^sigma_latent|^latent", colnames(dr))))
 })
+
+
+# The same entry point declared its random-effect block single-term and
+# slope-free (`data.n_re_terms = 0`, `has_re_slopes = false`) while
+# prepare_hmc_data() and hmc_param_layout() above it parsed and named the slope
+# and multi-term structure. The two layouts then disagreed on the size of the
+# RE block and every column after it was read at the wrong offset
+# (gcol33/tulpaRatio#72). Both bundles now go through the builder both entry
+# points call.
+
+test_that("a GP main effect carries a correlated random slope", {
+  skip_on_cran()
+  d <- gp_st_data()
+  fit <- tratio(
+    num | denom ~ x + (1 + x | unit),
+    data = d,
+    family = ratiod_poisson_gamma(),
+    mode = "hmc",
+    spatial = spatial_gp(~ lon + lat, nn = 3),
+    control = list(iter = 200, warmup = 100, chains = 1, seed = 4,
+                   verbose = FALSE)
+  )
+  dr <- expect_draws_in_support(fit)
+  # The slope block reached the sampler: its own scale, its Cholesky factor and
+  # a per-group slope are all reported.
+  expect_true(any(colnames(dr) == "sigma_re[1,x]"))
+  expect_true(any(startsWith(colnames(dr), "L_chol[")))
+  expect_true(any(colnames(dr) == "re[1,1,x]"))
+})
+
+
+test_that("a GP main effect carries an uncorrelated random slope", {
+  skip_on_cran()
+  d <- gp_st_data()
+  fit <- tratio(
+    num | denom ~ x + (1 + x || unit),
+    data = d,
+    family = ratiod_poisson_gamma(),
+    mode = "hmc",
+    spatial = spatial_gp(~ lon + lat, nn = 3),
+    control = list(iter = 200, warmup = 100, chains = 1, seed = 5,
+                   verbose = FALSE)
+  )
+  dr <- expect_draws_in_support(fit)
+  expect_true(any(colnames(dr) == "sigma_re[1,x]"))
+  expect_false(any(startsWith(colnames(dr), "L_chol[")))
+})
+
+
+test_that("a GP main effect carries crossed random-effect terms", {
+  skip_on_cran()
+  d <- gp_st_data()
+  d$block <- rep(1:2, length.out = nrow(d))
+  fit <- tratio(
+    num | denom ~ x + (1 | unit) + (1 | block),
+    data = d,
+    family = ratiod_poisson_gamma(),
+    mode = "hmc",
+    spatial = spatial_gp(~ lon + lat, nn = 3),
+    control = list(iter = 200, warmup = 100, chains = 1, seed = 6,
+                   verbose = FALSE)
+  )
+  dr <- expect_draws_in_support(fit)
+  # Both terms' scales are reported, which is what says the second block was
+  # allocated rather than named over the first one's columns.
+  expect_gte(length(grep("^sigma_re", colnames(dr))), 2L)
+})
+
+
+# The temporal bundle reached the same entry with rho_prior_a / rho_prior_b on
+# it, and the entry's own extraction stopped short of them: the values crossed
+# the .Call boundary and the fit ran on ModelData's defaults
+# (gcol33/tulpaRatio#73). Two priors have to give two posteriors, on both entry
+# points -- the areal one is the control, and it moved before the fix.
+
+test_that("the AR1 rho prior reaches both sampler entry points", {
+  skip_on_cran()
+  d <- gp_st_data(S = 6L, T_ = 10L)
+  adj <- matrix(0, 6, 6)
+  for (i in 1:5) adj[i, i + 1L] <- adj[i + 1L, i] <- 1
+
+  fit_rho <- function(spatial_arg, prior) {
+    tratio(
+      num | denom ~ x,
+      data = d,
+      family = ratiod_poisson_gamma(),
+      mode = "hmc",
+      spatial = spatial_arg,
+      temporal = temporal_ar1("year"),
+      priors = ratiod_priors(rho_temporal = prior),
+      control = list(iter = 200, warmup = 100, chains = 1, seed = 7,
+                     verbose = FALSE)
+    )
+  }
+  rho_draws <- function(fit) {
+    dr <- as.matrix(fit$draws)
+    cn <- grep("^rho_ar1", colnames(dr), value = TRUE)
+    expect_gt(length(cn), 0L)
+    dr[, cn[1], drop = TRUE]
+  }
+
+  arms <- list(
+    gp = spatial_gp(~ lon + lat, nn = 4),
+    areal = spatial_car(adj, level = "group", group_var = "unit")
+  )
+  for (nm in names(arms)) {
+    flat <- rho_draws(fit_rho(arms[[nm]], prior_beta(2, 2)))
+    tight <- rho_draws(fit_rho(arms[[nm]], prior_beta(50, 1)))
+    expect_false(identical(flat, tight), label = sprintf("%s draws differ", nm))
+    # Beta(50, 1) on u = (rho + 1) / 2 puts its mass at rho near 1.
+    expect_gt(mean(tight), mean(flat) + 0.5)
+  }
+})

@@ -324,6 +324,54 @@ fit_hmc <- function(formula,
   # branch: a bundle a branch does not build is a block C++ leaves unwritten
   # while the layout above still names its columns.
 
+  re_params <- list(
+    group = as.integer(hmc_data$re_group),
+    n_groups = as.integer(hmc_data$n_re_groups),
+    n_terms = as.integer(n_re_terms),
+    group_matrix = as.matrix(re_group_matrix),
+    n_groups_vec = as.integer(re_n_groups_vec),
+    has_slopes = has_re_slopes,
+    has_correlated_slopes = has_re_correlated_slopes,
+    n_coefs_vec = as.integer(re_n_coefs_vec),
+    correlated_vec = as.logical(re_correlated_vec),
+    n_chol_vec = as.integer(re_n_chol_vec),
+    slope_matrices = slope_matrices_list,
+    parameterization = as.integer(if (re_param == "centered") 0L else 1L)
+  )
+
+  temporal_params <- list(
+    type = temporal_info$type,
+    time_idx = as.integer(temporal_info$time_index),
+    group_idx = as.integer(temporal_info$group_index),
+    n_times = as.integer(temporal_info$n_times),
+    n_groups = as.integer(temporal_info$n_groups),
+    n_params = as.integer(temporal_info$n_temporal_params),
+    cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
+    shared = temporal_info$shared %||% TRUE,
+    tau_shape = tau_temporal_shape,
+    tau_rate = tau_temporal_rate,
+    rho_prior_a = rho_temporal_ab[["a"]],
+    rho_prior_b = rho_temporal_ab[["b"]],
+    # GP-specific fields (only used when type = "gp")
+    time_values = temporal_info$time_values %||% numeric(0),
+    cov_type = temporal_info$cov_type %||% "exponential",
+    nu = temporal_info$nu %||% 1.5,
+    period = temporal_info$period %||% 1.0,
+    gp_sigma2_prior_U = priors$temporal_gp_sigma2_prior_U %||% 1.0,
+    gp_sigma2_prior_alpha = priors$temporal_gp_sigma2_prior_alpha %||% 0.01,
+    gp_phi_prior_lower = priors$temporal_gp_phi_prior_lower %||% 0.01,
+    gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0,
+    gp_parameterization = temporal_info$parameterization %||% "noncentered",
+    # Multiscale temporal fields (only used when type = "multiscale")
+    trend_type = temporal_info$trend %||% "rw1",
+    short_term_type = temporal_info$short_term %||% "ar1",
+    seasonal_period = as.integer(temporal_info$precision_structure$seasonal_period %||% 0L),
+    sigma2_trend_prior_U = priors$ms_sigma2_trend_prior_U %||% 1.0,
+    sigma2_trend_prior_alpha = priors$ms_sigma2_trend_prior_alpha %||% 0.01,
+    sigma2_short_prior_U = priors$ms_sigma2_short_prior_U %||% 1.0,
+    sigma2_short_prior_alpha = priors$ms_sigma2_short_prior_alpha %||% 0.01
+  )
+
   latent_params <- list(
     has_latent = latent_info$type != "none",
     n_factors = as.integer(latent_info$n_factors),
@@ -542,23 +590,6 @@ fit_hmc <- function(formula,
       n = as.integer(rsr_info$rsr_n)
     )
 
-    # Bundle regular temporal parameters for GP interface
-    # (previously missing — temporal was silently dropped for GP/HSGP models)
-    temporal_params_gp <- list(
-      type = temporal_info$type,
-      time_idx = as.integer(temporal_info$time_index),
-      group_idx = as.integer(temporal_info$group_index),
-      n_times = as.integer(temporal_info$n_times),
-      n_groups = as.integer(temporal_info$n_groups),
-      n_params = as.integer(temporal_info$n_temporal_params),
-      cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
-      shared = temporal_info$shared %||% TRUE,
-      tau_shape = tau_temporal_shape,
-      tau_rate = tau_temporal_rate,
-      rho_prior_a = rho_temporal_ab[["a"]],
-      rho_prior_b = rho_temporal_ab[["b"]]
-    )
-
     # Use O2-safe interface with single List parameter
     # This minimizes Rcpp template instantiation at ABI boundary
     fit_raw <- cpp_hmc_fit_gp_v2(list(
@@ -568,15 +599,14 @@ fit_hmc <- function(formula,
       y_denom_cont = hmc_data$y_denom_cont,
       X_num = hmc_data$X_num,
       X_denom = hmc_data$X_denom,
-      re_group = as.integer(hmc_data$re_group),
-      n_re_groups = as.integer(hmc_data$n_re_groups),
+      re_params = re_params,
       model_type_str = model_type,
       # Bundled parameter lists
       gp_params = gp_params,
       ms_gp_params = ms_gp_params,
       ms_temporal_params = ms_temporal_params,
       rsr_params = rsr_params,
-      temporal_params = temporal_params_gp,
+      temporal_params = temporal_params,
       latent_params = latent_params,
       st_params = st_params,
       tvc_params = tvc_params,
@@ -605,21 +635,6 @@ fit_hmc <- function(formula,
     ))
   } else {
     # Bundle parameters into lists to stay under R's 65-argument limit for .Call
-    re_params <- list(
-      group = as.integer(hmc_data$re_group),
-      n_groups = as.integer(hmc_data$n_re_groups),
-      n_terms = as.integer(n_re_terms),
-      group_matrix = as.matrix(re_group_matrix),
-      n_groups_vec = as.integer(re_n_groups_vec),
-      has_slopes = has_re_slopes,
-      has_correlated_slopes = has_re_correlated_slopes,
-      n_coefs_vec = as.integer(re_n_coefs_vec),
-      correlated_vec = as.logical(re_correlated_vec),
-      n_chol_vec = as.integer(re_n_chol_vec),
-      slope_matrices = slope_matrices_list,
-      parameterization = as.integer(if (re_param == "centered") 0L else 1L)
-    )
-
     spatial_params <- list(
       type = spatial_info$type,
       group = as.integer(spatial_info$group),
@@ -635,39 +650,6 @@ fit_hmc <- function(formula,
       rho_upper = spatial_info$rho_upper %||% 1.0,
       rho_prior_a = spatial_info$rho_prior_a %||% 1.0,
       rho_prior_b = spatial_info$rho_prior_b %||% 1.0
-    )
-
-    temporal_params <- list(
-      type = temporal_info$type,
-      time_idx = as.integer(temporal_info$time_index),
-      group_idx = as.integer(temporal_info$group_index),
-      n_times = as.integer(temporal_info$n_times),
-      n_groups = as.integer(temporal_info$n_groups),
-      n_params = as.integer(temporal_info$n_temporal_params),
-      cyclic = temporal_info$precision_structure$cyclic %||% FALSE,
-      shared = temporal_info$shared %||% TRUE,
-      tau_shape = tau_temporal_shape,
-      tau_rate = tau_temporal_rate,
-      rho_prior_a = rho_temporal_ab[["a"]],
-      rho_prior_b = rho_temporal_ab[["b"]],
-      # GP-specific fields (only used when type = "gp")
-      time_values = temporal_info$time_values %||% numeric(0),
-      cov_type = temporal_info$cov_type %||% "exponential",
-      nu = temporal_info$nu %||% 1.5,
-      period = temporal_info$period %||% 1.0,
-      gp_sigma2_prior_U = priors$temporal_gp_sigma2_prior_U %||% 1.0,
-      gp_sigma2_prior_alpha = priors$temporal_gp_sigma2_prior_alpha %||% 0.01,
-      gp_phi_prior_lower = priors$temporal_gp_phi_prior_lower %||% 0.01,
-      gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0,
-      gp_parameterization = temporal_info$parameterization %||% "noncentered",
-      # Multiscale temporal fields (only used when type = "multiscale")
-      trend_type = temporal_info$trend %||% "rw1",
-      short_term_type = temporal_info$short_term %||% "ar1",
-      seasonal_period = as.integer(temporal_info$precision_structure$seasonal_period %||% 0L),
-      sigma2_trend_prior_U = priors$ms_sigma2_trend_prior_U %||% 1.0,
-      sigma2_trend_prior_alpha = priors$ms_sigma2_trend_prior_alpha %||% 0.01,
-      sigma2_short_prior_U = priors$ms_sigma2_short_prior_U %||% 1.0,
-      sigma2_short_prior_alpha = priors$ms_sigma2_short_prior_alpha %||% 0.01
     )
 
     prior_params <- list(

@@ -16,6 +16,8 @@
 #include "hmc_sampler.h"
 #include "ar1_shared.h"
 #include "cov_type_code.h"
+#include "hmc_temporal_gp.h"
+#include "hmc_temporal_multiscale.h"
 
 namespace ratiod_hmc {
 
@@ -354,6 +356,242 @@ inline void apply_svc_params(ModelData& data, const Rcpp::List& svc_params) {
     data.svc_data.nn = 0;
     data.svc_is_hsgp = false;
   }
+}
+
+
+// The random-effect block. compute_param_layout() sizes the sigma, Cholesky
+// and effect blocks off these fields, and the R backend lays the same blocks
+// over the returned draws, so an entry point that declares the block
+// single-term samples a shorter vector than the one R names and every column
+// after it is read at the wrong offset.
+//
+// data.N has to be set before this runs: the per-term group column and the
+// slope design are read over it.
+inline void apply_re_params(ModelData& data, const Rcpp::List& re_params) {
+  // Eager deep copies, so R's GC cannot invalidate a view during sampling.
+  std::vector<int> re_group = Rcpp::as<std::vector<int>>(re_params["group"]);
+  int n_re_groups = Rcpp::as<int>(re_params["n_groups"]);
+  int n_re_terms = Rcpp::as<int>(re_params["n_terms"]);
+
+  // group_matrix arrives numeric or integer depending on how R built it.
+  Rcpp::IntegerMatrix re_group_matrix;
+  SEXP group_mat_sexp = re_params["group_matrix"];
+  if (Rf_isMatrix(group_mat_sexp)) {
+    if (TYPEOF(group_mat_sexp) == INTSXP) {
+      re_group_matrix = Rcpp::as<Rcpp::IntegerMatrix>(group_mat_sexp);
+    } else {
+      Rcpp::NumericMatrix nm(group_mat_sexp);
+      re_group_matrix = Rcpp::IntegerMatrix(nm.nrow(), nm.ncol());
+      for (int i = 0; i < nm.nrow(); i++) {
+        for (int j = 0; j < nm.ncol(); j++) {
+          re_group_matrix(i, j) = static_cast<int>(nm(i, j));
+        }
+      }
+    }
+  } else {
+    re_group_matrix = Rcpp::IntegerMatrix(1, 1);
+    re_group_matrix(0, 0) = 0;
+  }
+
+  std::vector<int> re_n_groups_vec = Rcpp::as<std::vector<int>>(re_params["n_groups_vec"]);
+  bool has_re_slopes = Rcpp::as<bool>(re_params["has_slopes"]);
+  bool has_re_correlated_slopes = Rcpp::as<bool>(re_params["has_correlated_slopes"]);
+  std::vector<int> re_n_coefs_vec = Rcpp::as<std::vector<int>>(re_params["n_coefs_vec"]);
+  std::vector<int> re_correlated_vec = Rcpp::as<std::vector<int>>(re_params["correlated_vec"]);
+  std::vector<int> re_n_chol_vec = Rcpp::as<std::vector<int>>(re_params["n_chol_vec"]);
+  Rcpp::List slope_matrices_list = re_params["slope_matrices"];
+
+  data.re_group = re_group;
+  data.n_re_groups = n_re_groups;
+  data.n_re_terms = n_re_terms;
+
+  data.has_re_slopes = has_re_slopes;
+  data.has_re_correlated_slopes = has_re_correlated_slopes;
+
+  // RE parameterization: 0 = centered, 1 = non-centered
+  data.re_parameterization = Rcpp::as<int>(re_params["parameterization"]);
+
+  if (n_re_terms > 0) {
+    // Multi-term RE structure (with or without slopes)
+    data.re_group_multi.resize(n_re_terms);
+    data.re_n_groups_multi.resize(n_re_terms);
+    data.re_offsets.resize(n_re_terms);
+    data.re_n_coefs.resize(n_re_terms);
+    data.re_correlated.resize(n_re_terms);
+    data.re_n_chol.resize(n_re_terms);
+    data.re_n_slopes.resize(n_re_terms);
+    data.re_slope_matrices.resize(n_re_terms);
+
+    int offset = 0;
+    int total_re_params = 0;
+    int total_sigma_params = 0;
+    int total_chol_params = 0;
+
+    for (int t = 0; t < n_re_terms; t++) {
+      data.re_n_groups_multi[t] = re_n_groups_vec[t];
+      data.re_offsets[t] = offset;
+
+      int n_coefs = has_re_slopes ? re_n_coefs_vec[t] : 1;
+      data.re_n_coefs[t] = n_coefs;
+      data.re_correlated[t] = has_re_slopes ? (re_correlated_vec[t] != 0) : false;
+      data.re_n_chol[t] = has_re_slopes ? re_n_chol_vec[t] : 0;
+      data.re_n_slopes[t] = n_coefs - 1;
+
+      if (has_re_slopes && data.re_n_slopes[t] > 0 && slope_matrices_list.size() > t) {
+        SEXP mat_sexp = slope_matrices_list[t];
+        if (!Rf_isNull(mat_sexp)) {
+          Rcpp::NumericMatrix slope_mat(mat_sexp);
+          int n_rows = slope_mat.nrow();
+          int n_cols = slope_mat.ncol();
+          data.re_slope_matrices[t].resize(n_rows * n_cols);
+          for (int i = 0; i < n_rows; i++) {
+            for (int j = 0; j < n_cols; j++) {
+              data.re_slope_matrices[t][i * n_cols + j] = slope_mat(i, j);
+            }
+          }
+        }
+      }
+
+      offset += re_n_groups_vec[t];
+      total_re_params += re_n_groups_vec[t] * n_coefs;
+      total_sigma_params += n_coefs;
+      total_chol_params += data.re_n_chol[t];
+
+      data.re_group_multi[t].resize(data.N);
+      for (int i = 0; i < data.N; i++) {
+        data.re_group_multi[t][i] = re_group_matrix(i, t);
+      }
+    }
+    data.total_re_groups = offset;
+
+    // Obs-major flat array: inner loop over terms for each observation.
+    data.re_group_multi_flat.resize(n_re_terms * data.N);
+    for (int i = 0; i < data.N; i++) {
+      for (int t = 0; t < n_re_terms; t++) {
+        data.re_group_multi_flat[i * n_re_terms + t] = data.re_group_multi[t][i];
+      }
+    }
+    data.total_re_params = total_re_params;
+    data.total_sigma_params = total_sigma_params;
+    data.total_chol_params = total_chol_params;
+  } else {
+    data.total_re_groups = n_re_groups;
+    data.total_re_params = n_re_groups;
+    data.total_sigma_params = (n_re_groups > 0) ? 1 : 0;
+    data.total_chol_params = 0;
+  }
+}
+
+// The temporal block: the RW1 / RW2 / AR1 margin, the continuous-time GP
+// margin, the multi-scale decomposition, and the prior anchors each of them
+// reads. Every field the bundle carries is assigned here, so a knob the R
+// backend puts on the list is one both entry points honour rather than one
+// whichever extraction happens to name it.
+inline void apply_temporal_params(ModelData& data, const Rcpp::List& temporal_params) {
+  std::string temporal_type_str = Rcpp::as<std::string>(temporal_params["type"]);
+  std::vector<int> temporal_time_idx = Rcpp::as<std::vector<int>>(temporal_params["time_idx"]);
+  std::vector<int> temporal_group_idx = Rcpp::as<std::vector<int>>(temporal_params["group_idx"]);
+  int n_times = Rcpp::as<int>(temporal_params["n_times"]);
+  int n_temporal_groups = Rcpp::as<int>(temporal_params["n_groups"]);
+  int n_temporal_params = Rcpp::as<int>(temporal_params["n_params"]);
+  bool temporal_cyclic = Rcpp::as<bool>(temporal_params["cyclic"]);
+  bool temporal_shared = Rcpp::as<bool>(temporal_params["shared"]);
+  double tau_temporal_shape = Rcpp::as<double>(temporal_params["tau_shape"]);
+  double tau_temporal_rate = Rcpp::as<double>(temporal_params["tau_rate"]);
+  double temporal_rho_prior_a = temporal_params.containsElementNamed("rho_prior_a")
+      ? Rcpp::as<double>(temporal_params["rho_prior_a"]) : ratiod_ar1::RHO_PRIOR_A;
+  double temporal_rho_prior_b = temporal_params.containsElementNamed("rho_prior_b")
+      ? Rcpp::as<double>(temporal_params["rho_prior_b"]) : ratiod_ar1::RHO_PRIOR_B;
+
+  if (temporal_type_str == "rw1") {
+    data.temporal_type = TemporalType::RW1;
+  } else if (temporal_type_str == "rw2") {
+    data.temporal_type = TemporalType::RW2;
+  } else if (temporal_type_str == "ar1") {
+    data.temporal_type = TemporalType::AR1;
+  } else if (temporal_type_str == "gp") {
+    data.temporal_type = TemporalType::GP;
+
+    data.has_temporal_gp = true;
+    data.temporal_gp_data.n_obs = data.n_times;  // Use n_times, not N (total obs)
+    data.temporal_gp_data.n_groups = n_temporal_groups;
+    data.temporal_gp_data.time_values = Rcpp::as<std::vector<double>>(temporal_params["time_values"]);
+    data.temporal_gp_data.group_index = temporal_group_idx;
+
+    std::string cov_type_str = Rcpp::as<std::string>(temporal_params["cov_type"]);
+    data.temporal_gp_data.cov_type = ratiod_temporal_gp::parse_temporal_cov_type(cov_type_str);
+    data.temporal_gp_data.nu = Rcpp::as<double>(temporal_params["nu"]);
+    data.temporal_gp_data.period = Rcpp::as<double>(temporal_params["period"]);
+    data.temporal_gp_data.shared = temporal_shared;
+
+    data.temporal_gp_sigma2_prior_U = Rcpp::as<double>(temporal_params["gp_sigma2_prior_U"]);
+    data.temporal_gp_sigma2_prior_alpha = Rcpp::as<double>(temporal_params["gp_sigma2_prior_alpha"]);
+    data.temporal_gp_phi_prior_lower = Rcpp::as<double>(temporal_params["gp_phi_prior_lower"]);
+    data.temporal_gp_phi_prior_upper = Rcpp::as<double>(temporal_params["gp_phi_prior_upper"]);
+
+    // Parameterization: 0=centered, 1=non-centered (default NC)
+    std::string gp_param_str = "noncentered";
+    if (temporal_params.containsElementNamed("gp_parameterization")) {
+        gp_param_str = Rcpp::as<std::string>(temporal_params["gp_parameterization"]);
+    }
+    data.temporal_gp_parameterization = (gp_param_str == "centered") ? 0 : 1;
+  } else if (temporal_type_str == "multiscale") {
+    data.temporal_type = TemporalType::NONE;  // MS_t uses its own data path
+    data.has_temporal_gp = false;
+    data.has_multiscale_temporal = true;
+
+    data.multiscale_temporal_data.n_times = n_times;
+    data.multiscale_temporal_data.n_groups = n_temporal_groups;
+    data.multiscale_temporal_data.n_obs = data.N;
+    data.multiscale_temporal_data.time_index = temporal_time_idx;
+    data.multiscale_temporal_data.group_index = temporal_group_idx;
+    data.multiscale_temporal_data.shared = temporal_shared;
+
+    int ms_seasonal_period = 0;
+    if (temporal_params.containsElementNamed("seasonal_period"))
+      ms_seasonal_period = Rcpp::as<int>(temporal_params["seasonal_period"]);
+    data.multiscale_temporal_data.seasonal_period = ms_seasonal_period;
+
+    std::string ms_trend_type = "rw1";
+    if (temporal_params.containsElementNamed("trend_type"))
+      ms_trend_type = Rcpp::as<std::string>(temporal_params["trend_type"]);
+    std::string ms_short_type = "ar1";
+    if (temporal_params.containsElementNamed("short_term_type"))
+      ms_short_type = Rcpp::as<std::string>(temporal_params["short_term_type"]);
+    data.multiscale_temporal_data.trend_type = ratiod_temporal::parse_temporal_type(ms_trend_type);
+    data.multiscale_temporal_data.short_term_type = ratiod_temporal::parse_temporal_type(ms_short_type);
+
+    data.ms_sigma2_trend_prior_U = 1.0;
+    data.ms_sigma2_trend_prior_alpha = 0.01;
+    data.ms_sigma2_seasonal_prior_U = 1.0;
+    data.ms_sigma2_seasonal_prior_alpha = 0.01;
+    data.ms_sigma2_short_prior_U = 1.0;
+    data.ms_sigma2_short_prior_alpha = 0.01;
+    if (temporal_params.containsElementNamed("sigma2_trend_prior_U"))
+      data.ms_sigma2_trend_prior_U = Rcpp::as<double>(temporal_params["sigma2_trend_prior_U"]);
+    if (temporal_params.containsElementNamed("sigma2_trend_prior_alpha"))
+      data.ms_sigma2_trend_prior_alpha = Rcpp::as<double>(temporal_params["sigma2_trend_prior_alpha"]);
+    if (temporal_params.containsElementNamed("sigma2_short_prior_U"))
+      data.ms_sigma2_short_prior_U = Rcpp::as<double>(temporal_params["sigma2_short_prior_U"]);
+    if (temporal_params.containsElementNamed("sigma2_short_prior_alpha"))
+      data.ms_sigma2_short_prior_alpha = Rcpp::as<double>(temporal_params["sigma2_short_prior_alpha"]);
+  } else {
+    data.temporal_type = TemporalType::NONE;
+    data.has_temporal_gp = false;
+  }
+
+  data.temporal_time_idx = temporal_time_idx;
+  data.temporal_group_idx = temporal_group_idx;
+  data.n_times = n_times;
+  data.n_temporal_groups = n_temporal_groups;
+  data.n_temporal_params = n_temporal_params;
+  data.temporal_cyclic = temporal_cyclic;
+  data.temporal_shared = temporal_shared;
+  data.tau_temporal_shape = tau_temporal_shape;
+  data.tau_temporal_rate = tau_temporal_rate;
+  // Beta anchors on u = (rho + 1) / 2 for an AR1 correlation.
+  data.temporal_rho_prior_a = temporal_rho_prior_a;
+  data.temporal_rho_prior_b = temporal_rho_prior_b;
 }
 
 }  // namespace ratiod_hmc

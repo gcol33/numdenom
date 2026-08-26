@@ -1,3 +1,55 @@
+# tulpaRatio 1.7.2
+
+* **The GP sampler entry carries the random-effect block it was handed (#72).**
+  `cpp_hmc_fit_gp` set `n_re_terms = 0` and `has_re_slopes = false`
+  unconditionally, and the R backend handed it `re_group` / `n_re_groups`
+  alone rather than the `re_params` bundle `cpp_hmc_fit` receives.
+  `prepare_hmc_data()` and `hmc_param_layout()` above it parsed and named the
+  slope and multi-term structure regardless, so the two layouts disagreed on
+  the size of the RE block and every column after it was read at the wrong
+  offset. Measured on `num | denom ~ x + (1 + x | g)` with
+  `spatial_gp(~ lon + lat, nn = 3)`: R named 28 columns, the sampler wrote the
+  legacy block instead, and the column labelled `phi_gp` ran to 2.37e+149
+  against a uniform prior on `(0.01, 100)`. It now reports 4.08 to 98.10.
+  Affects random slopes (correlated and uncorrelated) and crossed / nested
+  multi-term random effects on `spatial_gp()`, `spatial_multiscale()`,
+  `spatial_hsgp()`, and on a multiscale temporal model with no areal spatial
+  term.
+
+* **The AR1 temporal rho prior reaches the GP sampler entry (#73).** That
+  entry's temporal block read `type`, `time_idx`, `group_idx`, `n_times`,
+  `n_groups`, `n_params`, `cyclic`, `shared`, `tau_shape` and `tau_rate` and
+  stopped there, so the `rho_prior_a` / `rho_prior_b` the R backend put on the
+  list crossed the `.Call` boundary and were never assigned; the fit ran on
+  `ModelData`'s default anchors. Measured on `num | denom ~ x` with
+  `temporal_ar1("year")`, 6 groups x 10 times: the posterior mean of `rho_ar1`
+  under `prior_beta(2, 2)` and `prior_beta(50, 1)` was bit-identical on a GP
+  main effect and moved from -0.071 to 0.972 on an areal one. The GP arm now
+  moves -0.103 to 0.933.
+
+* Both bundles are assembled by one builder each entry point calls
+  (`apply_re_params` / `apply_temporal_params`, `src/hmc_model_data_blocks.h`),
+  the way #70 did for the spatiotemporal, latent, TVC and SVC bundles, and the
+  R backend builds them once above the branch. A field read by one extraction
+  and not the other is what both of these were.
+
+* **The random-effect gradient is written once (#72).** With the block
+  reaching the sampler, `resolve_gradient_fn()` has to keep such a model off
+  the specialized functions, which read the legacy single-term block: crossed
+  and nested terms now raise their own feature bit (`GF_RE_MULTI`) alongside
+  `GF_RE_SLOPES`, and both fall through to `compute_gradient_composite`. That
+  function carried a partial copy of the block -- no Cholesky factor, no LKJ
+  prior, no `re = diag(sigma) L z` transform -- so a correlated slope beside a
+  GP field reached it with the slope scale's gradient at zero against a
+  finite difference of 0.409, and the runtime gradient check fell back to
+  numerical. The prior phase and the chain rule are now
+  `re_blocks_prior_grad()` / `re_blocks_writeback()`
+  (`src/hmc_re_blocks_grad.h`), called by `compute_gradient_analytical()` and
+  by the composite alike, with `re_blocks_eta()` / `re_blocks_scatter()` for
+  the observation loop. Three new finite-difference fixtures cover what could
+  not be built before: `gp_slopes_corr`, `gp_crossed`, and `gp_slopes` at the
+  composite it now dispatches to.
+
 # tulpaRatio 1.7.1
 
 * **A GP spatial main effect carries the blocks beside it (#70).**

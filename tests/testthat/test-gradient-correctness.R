@@ -108,9 +108,15 @@ BLOCKED_FIELDS <- character(0)
 # -- a GP margin and a GMRF margin are different temporal blocks, a multiscale
 # temporal term is not an SVC term, and no specialized function writes the
 # random-slope block at all.
+# gp_slopes_corr and gp_crossed are the RE side of the same separation
+# (gcol33/tulpaRatio#72). The GP entry point declared its RE block single-term
+# and slope-free, so neither model could reach the sampler at all; now that they
+# can, the mask has to keep them off compute_gradient_gp_handcoded, which reads
+# the legacy single-term block. gp_crossed is what GF_RE_MULTI is for -- a
+# crossed term carries no slope, so GF_RE_SLOPES does not see it.
 DISPATCH_MASK_FIELDS <- c("gp_st4", "gp_stgp", "gp_temporal_st4", "msgp_st4",
                           "tvc_st4", "temporal_gp_st4", "gp_tgp", "svc_ms",
-                          "gp_slopes")
+                          "gp_slopes", "gp_slopes_corr", "gp_crossed")
 # The same, for a collapsed field. Its marginal is an inner Laplace at a mode
 # that moves with every other block in eta, which nothing but the collapsed
 # kernels' own companion-temporal path carries, so the dispatch returns the
@@ -220,6 +226,7 @@ test_that("resolve_gradient_fn sends each model to the function written for it",
     gp_temporal_st4 = "composite", msgp_st4 = "composite",
     tvc_st4 = "composite", temporal_gp_st4 = "composite",
     gp_tgp = "composite", svc_ms = "composite", gp_slopes = "composite",
+    gp_slopes_corr = "composite", gp_crossed = "composite",
     stgp_latent = "composite",
     # A collapsed marginal alongside a second block.
     gp_collapsed_st4 = "numerical", icar_collapsed_st4 = "numerical",
