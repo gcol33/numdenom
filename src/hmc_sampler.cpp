@@ -4842,13 +4842,16 @@ void compute_gradient_svc_handcoded(
     double phi_num = cp.phi_num;
     double phi_denom = cp.phi_denom;
 
-    // SVC parameters
+    // SVC parameters (per-thread scratch: data.svc_data is shared by every
+    // chain thread, so its own buffers cannot be written from here)
     int n_svc = data.svc_data.n_svc;
     int N_obs = data.svc_data.n_obs;
 
-    // Use pre-allocated workspace buffers
-    double* svc_sigma2 = data.svc_data.sigma2_ws.data();
-    double* svc_phi = data.svc_data.phi_ws.data();
+    RATIOD_TLS_WORKSPACE(ratiod_svc::SVCGradWorkspace, svc_scratch);
+    svc_scratch.resize(n_svc, N_obs);
+
+    double* svc_sigma2 = svc_scratch.sigma2.data();
+    double* svc_phi = svc_scratch.phi.data();
     for (int j = 0; j < n_svc; j++) {
         svc_sigma2[j] = std::exp(params[layout.log_sigma2_svc_start + j]);
         svc_phi[j] = std::exp(params[layout.log_phi_svc_start + j]);
@@ -4859,8 +4862,8 @@ void compute_gradient_svc_handcoded(
         }
     }
 
-    // Extract SVC spatial effects (pre-allocated workspace)
-    double* svc_w_flat = data.svc_data.w_flat_ws.data();
+    // Extract SVC spatial effects into per-thread scratch
+    double* svc_w_flat = svc_scratch.w_flat.data();
     for (int k = 0; k < N_obs * n_svc; k++) {
         svc_w_flat[k] = params[layout.svc_w_start + k];
     }
@@ -4889,28 +4892,10 @@ void compute_gradient_svc_handcoded(
     // =========================================================================
     // Compute NNGP gradients w.r.t. SVC effects (analytical)
     // =========================================================================
-    // Reuse w_j workspace buffer across SVC terms
-    double* w_j_ptr = data.svc_data.w_j_ws.data();
-    for (int j = 0; j < n_svc; j++) {
-        // Extract w for this SVC term into workspace
-        for (int i = 0; i < N_obs; i++) {
-            w_j_ptr[i] = svc_w_flat[j * N_obs + i];
-        }
-
-        // nngp_gradients takes vector ref - wrap workspace pointer
-        std::vector<double> w_j_vec(w_j_ptr, w_j_ptr + N_obs);
-        ratiod_svc::SVCGradients svc_grads;
-        ratiod_svc::svc_nngp_gradients(w_j_vec, svc_sigma2[j], svc_phi[j], data.svc_data, svc_grads);
-
-        // Add NNGP prior gradient contributions for w
-        for (int i = 0; i < N_obs; i++) {
-            grad[layout.svc_w_start + j * N_obs + i] += svc_grads.grad_w[i];
-        }
-
-        // Add NNGP gradient contributions for SVC hyperparameters
-        grad[layout.log_sigma2_svc_start + j] += svc_grads.grad_log_sigma2;
-        grad[layout.log_phi_svc_start + j] += svc_grads.grad_log_phi;
-    }
+    ratiod_svc::svc_nngp_prior_grads(
+        svc_w_flat, svc_sigma2, svc_phi, data.svc_data,
+        layout.svc_w_start, layout.log_sigma2_svc_start, layout.log_phi_svc_start,
+        svc_scratch, grad.data());
 
     // Sum-to-zero gradient, over all terms at once, from the same helper the
     // log-posterior's penalty is written in, so the two share one constant.
@@ -7399,6 +7384,9 @@ void compute_gradient_composite(
     // NNGP field prior, and the sum-to-zero penalty from the same helper the
     // log posterior writes it in.
     if (has_svc_nngp) {
+        RATIOD_TLS_WORKSPACE(ratiod_svc::SVCGradWorkspace, svc_scratch);
+        svc_scratch.resize(n_svc, N_svc);
+
         for (int j = 0; j < n_svc; j++) {
             const double sigma_j = std::exp(0.5 * params[layout.log_sigma2_svc_start + j]);
             const double ratio = sigma_j / data.svc_sigma2_prior_scale;
@@ -7406,17 +7394,13 @@ void compute_gradient_composite(
             grad[layout.log_sigma2_svc_start + j] += -ratio_sq / (1.0 + ratio_sq) + 1.0;
             grad[layout.log_phi_svc_start + j] += 1.0;
 
-            std::vector<double> w_j(svc_w_nngp.begin() + static_cast<size_t>(j) * N_svc,
-                                    svc_w_nngp.begin() + static_cast<size_t>(j + 1) * N_svc);
-            ratiod_svc::SVCGradients svc_grads;
-            ratiod_svc::svc_nngp_gradients(
-                w_j, std::exp(params[layout.log_sigma2_svc_start + j]),
-                std::exp(params[layout.log_phi_svc_start + j]), data.svc_data, svc_grads);
-            for (int i = 0; i < N_svc; i++)
-                grad[layout.svc_w_start + j * N_svc + i] += svc_grads.grad_w[i];
-            grad[layout.log_sigma2_svc_start + j] += svc_grads.grad_log_sigma2;
-            grad[layout.log_phi_svc_start + j] += svc_grads.grad_log_phi;
+            svc_scratch.sigma2[j] = std::exp(params[layout.log_sigma2_svc_start + j]);
+            svc_scratch.phi[j] = std::exp(params[layout.log_phi_svc_start + j]);
         }
+        ratiod_svc::svc_nngp_prior_grads(
+            svc_w_nngp.data(), svc_scratch.sigma2.data(), svc_scratch.phi.data(),
+            data.svc_data, layout.svc_w_start, layout.log_sigma2_svc_start,
+            layout.log_phi_svc_start, svc_scratch, grad.data());
         ratiod_svc::svc_sum_to_zero_penalty_grad(svc_w_nngp.data(), data.svc_data,
                                                  layout.svc_w_start, grad.data());
     }

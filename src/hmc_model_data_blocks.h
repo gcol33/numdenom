@@ -347,9 +347,6 @@ inline void apply_svc_params(ModelData& data, const Rcpp::List& svc_params) {
     data.svc_sigma2_prior_scale = svc_sigma2_scale;
     data.svc_phi_prior_lower = svc_phi_lower;
     data.svc_phi_prior_upper = svc_phi_upper;
-
-    // Pre-allocate SVC workspace buffers
-    data.svc_data.init_workspace();
   } else {
     data.svc_data.n_svc = 0;
     data.svc_data.n_obs = data.N;

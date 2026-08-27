@@ -22,6 +22,7 @@
 
 #include <vector>
 #include <cmath>
+#include <cstdint>
 #include <algorithm>
 #include <RcppEigen.h>
 #include "tls_workspace.h"
@@ -63,11 +64,28 @@ struct CollapsedICARWorkspace {
     bool obs_map_built = false;
     int obs_map_N = 0;                // N when map was built
 
+    // The model whose structure is cached here. This workspace is thread-local
+    // and outlives the fit that filled it, so a later fit can be handed a
+    // workspace holding an earlier model's unit->obs map and Newton mode.
+    // (S, bym2, N) does not separate the two: a second fit over a spatial field
+    // with the same units and observation count reads both.
+    std::uint64_t model_id = 0;
+
+    // Every cached quantity is a function of the model, so none of it survives
+    // a change of model or of the inner dimension.
+    void invalidate() {
+        mode_found = false;
+        obs_map_built = false;
+    }
+
+    void bind(std::uint64_t id) {
+        if (id == model_id) return;
+        model_id = id;
+        invalidate();
+    }
+
     void init(int n_units, bool bym2) {
-        if (n_units != S || bym2 != is_bym2) {
-            mode_found = false;
-            obs_map_built = false;
-        }
+        if (n_units != S || bym2 != is_bym2) invalidate();
         S = n_units;
         is_bym2 = bym2;
         inner_dim = bym2 ? 2 * S : S;
@@ -88,7 +106,9 @@ struct CollapsedICARWorkspace {
     }
 };
 
-// Build unit→obs CSR mapping for O(1) per-unit observation lookup
+// Build unit→obs CSR mapping for O(1) per-unit observation lookup.
+// Reads data.spatial_group and data.N, so the map it leaves behind belongs to
+// one model; ws.bind() is what retires it when the model changes.
 inline void build_unit_obs_map(CollapsedICARWorkspace& ws, const ModelData& data) {
     if (ws.obs_map_built && ws.obs_map_N == data.N && ws.S == (int)ws.unit_obs_ptr.size() - 1) return;
     int S = ws.S;
@@ -768,6 +788,8 @@ inline double collapsed_icar_find_mode(
     bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
                         data.model_type == ModelType::BETA_BINOMIAL);
 
+    // Drop anything this thread cached for a different model before reading it.
+    ws.bind(data.unique_id);
     ws.init(S, false);
 
     // Build unit→obs mapping (cached, O(N) first time, O(1) after)
@@ -888,6 +910,8 @@ inline double collapsed_bym2_find_mode(
     double a = sigma_s * scale_factor;  // coefficient for phi
     double c = sigma_u;                  // coefficient for theta
 
+    // Drop anything this thread cached for a different model before reading it.
+    ws.bind(data.unique_id);
     ws.init(S, true);
 
     // Build unit→obs mapping (cached)
@@ -2050,6 +2074,10 @@ inline LaplaceGradFullResult compute_laplace_gradient_bym2_H(
 
 // The collapsed ICAR/BYM2 scratch this thread reuses across calls.
 RATIOD_TLS_WORKSPACE_FN(CollapsedICARWorkspace, collapsed_icar_ws)
+
+// Discards this thread's Newton warm start, the counterpart of
+// collapsed_gp_reset_warm_start() for the collapsed ICAR/BYM2 mode.
+inline void collapsed_icar_reset_warm_start() { collapsed_icar_ws().mode_found = false; }
 
 struct CollapsedTemporalOffset {
     std::vector<double> num;

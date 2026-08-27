@@ -43,22 +43,6 @@ struct SVCData {
 
   CovType cov_type;
   bool shared;                        // Whether SVC is shared between num/denom
-
-  // Pre-allocated workspace buffers (avoid per-gradient-call heap allocation)
-  mutable std::vector<double> w_flat_ws;    // n_obs * n_svc
-  mutable std::vector<double> sigma2_ws;    // n_svc
-  mutable std::vector<double> phi_ws;       // n_svc
-  mutable std::vector<double> w_j_ws;       // n_obs (reused per SVC term)
-  mutable std::vector<double> eta_ws;       // n_obs (SVC contribution to eta)
-
-  void init_workspace() const {
-    if (n_obs <= 0 || n_svc <= 0) return;
-    w_flat_ws.resize(n_obs * n_svc);
-    sigma2_ws.resize(n_svc);
-    phi_ws.resize(n_svc);
-    w_j_ws.resize(n_obs);
-    eta_ws.resize(n_obs);
-  }
 };
 
 // -----------------------------------------------------------------------------
@@ -307,6 +291,27 @@ struct SVCGradients {
   double grad_log_phi;                // Gradient w.r.t. log(phi)
 };
 
+// Scratch for a gradient pass over every SVC term. Held per-thread (via
+// RATIOD_TLS_WORKSPACE at the call site), never as members of SVCData: SVCData
+// hangs off the single ModelData that every chain thread shares, so buffers
+// living there are the same memory for every chain and a concurrent write from
+// one chain overwrites what another chain's gradient evaluation is reading.
+struct SVCGradWorkspace {
+  std::vector<double> sigma2;   // size n_svc
+  std::vector<double> phi;      // size n_svc
+  std::vector<double> w_flat;   // size n_obs * n_svc
+  std::vector<double> w_j;      // size n_obs (reused per term)
+  SVCGradients grads;           // grad_w sized n_obs, reused per term
+
+  void resize(int n_svc, int n_obs) {
+    sigma2.resize(n_svc);
+    phi.resize(n_svc);
+    w_flat.resize(static_cast<size_t>(n_obs) * n_svc);
+    w_j.resize(n_obs);
+    grads.grad_w.resize(n_obs);
+  }
+};
+
 using ratiod_cov::dcov_dphi;
 
 // Fully analytical NNGP gradients for SVC - single pass, no redundant function calls
@@ -449,6 +454,39 @@ inline void svc_nngp_gradients(
     double dv_dphi = -2.0 * alpha_dc + alpha_dC_alpha;
     double dr_dphi = -dc_beta + alpha_dC_beta;
     grads.grad_log_phi += (dll_dv * dv_dphi + (-r / v) * dr_dphi) * phi;
+  }
+}
+
+// Accumulate the NNGP field prior's gradient for every SVC term: d/dw into
+// `grad` at `w_start` in the j-major layout the field is stored in, and the two
+// hyperparameter derivatives at their own slots. Every gradient path reads the
+// field prior the same way, so it is written once and the per-term extraction
+// buffer comes from the caller's per-thread workspace.
+inline void svc_nngp_prior_grads(
+    const double* w_flat,
+    const double* sigma2,
+    const double* phi,
+    const SVCData& svc_data,
+    int w_start,
+    int log_sigma2_start,
+    int log_phi_start,
+    SVCGradWorkspace& ws,
+    double* grad
+) {
+  const int n_obs = svc_data.n_obs;
+  const int n_svc = svc_data.n_svc;
+
+  for (int j = 0; j < n_svc; j++) {
+    const double* w_j_src = w_flat + static_cast<size_t>(j) * n_obs;
+    std::copy(w_j_src, w_j_src + n_obs, ws.w_j.begin());
+
+    svc_nngp_gradients(ws.w_j, sigma2[j], phi[j], svc_data, ws.grads);
+
+    for (int i = 0; i < n_obs; i++) {
+      grad[w_start + j * n_obs + i] += ws.grads.grad_w[i];
+    }
+    grad[log_sigma2_start + j] += ws.grads.grad_log_sigma2;
+    grad[log_phi_start + j] += ws.grads.grad_log_phi;
   }
 }
 

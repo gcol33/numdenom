@@ -181,12 +181,20 @@ cpp_num_procs <- function() {
     .Call(`_tulpaRatio_cpp_num_procs`)
 }
 
+cpp_gradient_fields <- function() {
+    .Call(`_tulpaRatio_cpp_gradient_fields`)
+}
+
 cpp_gradient_dispatch <- function(field, n_obs = 40L, n_units = 8L, n_times = 5L, seed = 42L, family = "binomial") {
     .Call(`_tulpaRatio_cpp_gradient_dispatch`, field, n_obs, n_units, n_times, seed, family)
 }
 
 cpp_gradient_check <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, eps = 1e-5, seed = 42L, mode = "handcoded", precenter = FALSE, family = "binomial", temporal_shared = TRUE, zi = "none", near_unit_rho = FALSE, n_threads = 1L) {
     .Call(`_tulpaRatio_cpp_gradient_check`, field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared, zi, near_unit_rho, n_threads)
+}
+
+cpp_gradient_race <- function(field, n_points = 8L, n_threads = 4L, rounds = 8L, n_obs = 200L, n_units = 16L, n_times = 8L, seed = 42L, family = "binomial", prime_other_model = FALSE) {
+    .Call(`_tulpaRatio_cpp_gradient_race`, field, n_points, n_threads, rounds, n_obs, n_units, n_times, seed, family, prime_other_model)
 }
 
 cpp_logpost_at <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, seed = 42L, family = "binomial", temporal_shared = TRUE, zi = "none") {

@@ -21,6 +21,7 @@
 
 #include <vector>
 #include <cmath>
+#include <cstdint>
 #include <algorithm>
 #include <RcppEigen.h>
 #include "tls_workspace.h"
@@ -68,7 +69,7 @@ struct CollapsedGPWorkspace {
     bool structure_built = false;
     bool mode_found = false;
 
-    // Fix 2: NNGP structure cache — avoid rebuild when (sigma2, phi) unchanged
+    // NNGP structure cache — avoid rebuild when (sigma2, phi) unchanged
     double cached_sigma2 = -1.0;
     double cached_phi = -1.0;
 
@@ -77,13 +78,31 @@ struct CollapsedGPWorkspace {
     std::vector<int> loc_obs_idx;    // Observation indices for each location
     bool loc_map_built = false;
 
+    // The model whose structure is cached here. This workspace is thread-local
+    // and outlives the fit that filled it, so a later fit can be handed a
+    // workspace holding an earlier model's NNGP coefficients, loc->obs map and
+    // Newton mode. n_gp does not separate the two: a second fit over a GP field
+    // with the same number of locations reads all three.
+    std::uint64_t model_id = 0;
+
+    // Every cached quantity is a function of the model, so none of it survives
+    // a change of model or of the number of locations.
+    void invalidate() {
+        structure_built = false;
+        mode_found = false;
+        loc_map_built = false;
+        cached_sigma2 = -1.0;
+        cached_phi = -1.0;
+    }
+
+    void bind(std::uint64_t id) {
+        if (id == model_id) return;
+        model_id = id;
+        invalidate();
+    }
+
     void init(int n_gp, int max_nn) {
-        if (n_gp != N_gp) {
-            mode_found = false;
-            loc_map_built = false;
-            cached_sigma2 = -1.0;
-            cached_phi = -1.0;
-        }
+        if (n_gp != N_gp) invalidate();
         N_gp = n_gp;
         nn = max_nn;
         B_flat.assign(n_gp * max_nn, 0.0);
@@ -101,7 +120,9 @@ struct CollapsedGPWorkspace {
     }
 };
 
-// Build loc→obs CSR mapping for O(1) per-location observation lookup
+// Build loc→obs CSR mapping for O(1) per-location observation lookup.
+// Reads data.gp_data.obs_to_loc and data.N, so the map it leaves behind belongs
+// to one model; ws.bind() is what retires it when the model changes.
 inline void build_loc_obs_map(CollapsedGPWorkspace& ws, const ModelData& data) {
     if (ws.loc_map_built) return;
     int N_gp = ws.N_gp;
@@ -787,7 +808,10 @@ inline double collapsed_gp_find_mode(
     bool is_binomial = (data.model_type == ModelType::BINOMIAL ||
                         data.model_type == ModelType::BETA_BINOMIAL);
 
-    // Fix 2: Only rebuild NNGP structure if (sigma2, phi) changed
+    // Drop anything this thread cached for a different model before reading it.
+    ws.bind(data.unique_id);
+
+    // Only rebuild NNGP structure if (sigma2, phi) changed
     if (sigma2 != ws.cached_sigma2 || phi != ws.cached_phi || !ws.structure_built) {
         build_nngp_B_D(sigma2, phi, data.gp_data, ws);
         ws.cached_sigma2 = sigma2;
@@ -1252,6 +1276,13 @@ inline CollapsedGPLogPostResult collapsed_gp_log_post_contribution(
 // posterior and by compute_gradient_gp_collapsed, which reads w_star from it
 // after the density has written the mode there.
 RATIOD_TLS_WORKSPACE_FN(CollapsedGPWorkspace, collapsed_gp_ws)
+
+// Discards this thread's Newton warm start. Within one trajectory the mode of
+// the previous leapfrog step is a good start for the next and is what the warm
+// start is for, but it also makes the value returned here a function of the
+// point AND of what this thread evaluated before it. A caller that needs the
+// gradient to depend on the point alone clears the warm start first.
+inline void collapsed_gp_reset_warm_start() { collapsed_gp_ws().mode_found = false; }
 
 // Store collapsed GP mode values (w*) into result buffer
 inline void collapsed_gp_store_sample(

@@ -12,6 +12,9 @@
 #include <random>
 #include <algorithm>
 #include <utility>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include "hmc_sampler.h"
 #include "hmc_temporal.h"
 #include "log_post_impl.h"
@@ -657,7 +660,6 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.svc_sigma2_prior_scale = 1.0;
     data.svc_phi_prior_lower = 0.001;
     data.svc_phi_prior_upper = 100.0;
-    svc.init_workspace();
   }
 
   // Latent factors: observation-level effects shared by both arms, which is
@@ -918,7 +920,48 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   return data;
 }
 
+// A point away from the origin, so that terms which vanish at zero (a
+// sum-to-zero penalty among them) still contribute.
+std::vector<double> draw_params(const ParamLayout& layout, int n_params,
+                                unsigned int seed) {
+  std::mt19937 rng(seed + 1000u);
+  std::normal_distribution<double> rnorm(0.0, 0.35);
+  std::vector<double> params(n_params);
+  for (int i = 0; i < n_params; i++) params[i] = rnorm(rng);
+
+  // The GP locations sit in the unit square, so a draw centred on log phi = 0
+  // asks for a correlation range the size of the whole domain. Every neighbour
+  // block is then numerically singular, the conditional variance sits on its
+  // floor, and the density is not differentiable in sigma2 there -- the
+  // comparison would measure the floor rather than the gradient. Centre the
+  // range on a tenth of the domain instead, which the random draw still moves.
+  // The floor binds harder the smoother the kernel: measured relative deviation
+  // on log_sigma2 at log phi = 0 was 2e-07 exponential, 2.4e-05 Matern 3/2 and
+  // 7.0e-02 Gaussian, all flat in the difference step.
+  const double log_phi_center = std::log(0.1);
+  for (int idx : {layout.log_phi_gp_idx, layout.log_phi_gp_local_idx,
+                  layout.log_phi_gp_regional_idx,
+                  layout.log_phi_st_space_idx, layout.log_phi_st_time_idx}) {
+    if (idx >= 0 && idx < n_params) params[idx] += log_phi_center;
+  }
+  if (layout.log_phi_svc_start >= 0) {
+    for (int j = layout.log_phi_svc_start; j < layout.log_phi_svc_end; j++) {
+      if (j < n_params) params[j] += log_phi_center;
+    }
+  }
+  return params;
+}
+
 }  // namespace
+
+// Every field make_model() builds a structure for, so a sweep over the harness
+// reaches a newly added one without a second list to keep in step.
+// [[Rcpp::export]]
+Rcpp::CharacterVector cpp_gradient_fields() {
+  Rcpp::CharacterVector out(sizeof(KNOWN_FIELDS) / sizeof(KNOWN_FIELDS[0]));
+  for (int i = 0; i < out.size(); i++) out[i] = KNOWN_FIELDS[i];
+  return out;
+}
 
 // Returns the analytic gradient alongside a central-difference gradient of the
 // log posterior, both evaluated at the same random point.
@@ -972,33 +1015,7 @@ Rcpp::List cpp_gradient_check(std::string field,
   // what the gap is. Report it so a caller can assert on it.
   const char* impl_gap = ratiod::log_post_impl_gap(data, layout);
 
-  // A point away from the origin, so that terms which vanish at zero (a
-  // sum-to-zero penalty among them) still contribute.
-  std::mt19937 rng(seed + 1000u);
-  std::normal_distribution<double> rnorm(0.0, 0.35);
-  std::vector<double> params(n_params);
-  for (int i = 0; i < n_params; i++) params[i] = rnorm(rng);
-
-  // The GP locations sit in the unit square, so a draw centred on log phi = 0
-  // asks for a correlation range the size of the whole domain. Every neighbour
-  // block is then numerically singular, the conditional variance sits on its
-  // floor, and the density is not differentiable in sigma2 there -- the
-  // comparison would measure the floor rather than the gradient. Centre the
-  // range on a tenth of the domain instead, which the random draw still moves.
-  // The floor binds harder the smoother the kernel: measured relative deviation
-  // on log_sigma2 at log phi = 0 was 2e-07 exponential, 2.4e-05 Matern 3/2 and
-  // 7.0e-02 Gaussian, all flat in the difference step.
-  const double log_phi_center = std::log(0.1);
-  for (int idx : {layout.log_phi_gp_idx, layout.log_phi_gp_local_idx,
-                  layout.log_phi_gp_regional_idx,
-                  layout.log_phi_st_space_idx, layout.log_phi_st_time_idx}) {
-    if (idx >= 0 && idx < n_params) params[idx] += log_phi_center;
-  }
-  if (layout.log_phi_svc_start >= 0) {
-    for (int j = layout.log_phi_svc_start; j < layout.log_phi_svc_end; j++) {
-      if (j < n_params) params[j] += log_phi_center;
-    }
-  }
+  std::vector<double> params = draw_params(layout, n_params, seed);
 
   // Every AR1 correlation is drawn centred on rho = 0, so nothing in the
   // sweep reaches the edge of its range. near_unit_rho places each sampled
@@ -1096,6 +1113,108 @@ Rcpp::List cpp_gradient_check(std::string field,
       ? Rcpp::CharacterVector::create(NA_STRING)
       : Rcpp::CharacterVector::create(impl_gap)
   );
+}
+
+// Evaluates one gradient function at several points, first one at a time and
+// then concurrently over a single shared ModelData, and returns how far the two
+// results are apart.
+//
+// This is the shape a fit takes: chains run in parallel over one ModelData,
+// each at its own position, and a gradient function that keeps intermediates in
+// that shared object has every chain writing the same memory. The gradient is
+// then a function of what the other chains happened to be doing, so a
+// single-point finite-difference check agrees while the sampler follows a
+// density its gradient does not describe. Per-thread scratch makes the two
+// passes agree exactly, so this returns 0 and any nonzero value is a shared
+// buffer.
+//
+// The collapsed fields warm-start their inner Newton search from the mode of
+// the thread's previous call, which is a second way for two passes to disagree
+// and not the one being measured: the two passes visit the points in different
+// orders on different threads, so each point is reached from a different start.
+// Both passes therefore clear the warm start before every evaluation, leaving
+// the gradient a function of the point alone.
+// [[Rcpp::export]]
+double cpp_gradient_race(std::string field,
+                         int n_points = 8,
+                         int n_threads = 4,
+                         int rounds = 8,
+                         int n_obs = 200,
+                         int n_units = 16,
+                         int n_times = 8,
+                         unsigned int seed = 42,
+                         std::string family = "binomial",
+                         bool prime_other_model = false) {
+  if (!is_known_field(field)) {
+    Rcpp::stop("Unknown field '%s'.", field.c_str());
+  }
+  // One ModelData for every point, exactly as one fit shares it across chains.
+  ModelData data = make_model(field, n_obs, n_units, n_times, seed,
+                              family, /*temporal_shared=*/true, "none");
+  data.n_threads = 1;  // the region below is the parallelism under test
+  ParamLayout layout = compute_param_layout(data);
+  const int n_params = get_n_params(data);
+  set_gradient_mode(GradientMode::HANDCODED);
+  GradientFn fn = resolve_gradient_fn(GradientMode::HANDCODED, data, layout);
+
+  std::vector<std::vector<double>> points(n_points);
+  for (int k = 0; k < n_points; k++) {
+    points[k] = draw_params(layout, n_params, seed + static_cast<unsigned int>(k));
+  }
+
+  // Hands the calling thread a second model of the same dimensions at the same
+  // point first, so it enters the race holding that model's cached structure
+  // while the workers of the concurrent pass build the current one's. The two
+  // models differ only in their data, so a workspace keyed on size alone finds
+  // its cache valid -- same number of locations, same (sigma2, phi) -- and
+  // returns the other model's NNGP coefficients. That is gcol33/tulpaRatio#76;
+  // a workspace keyed on the model rebuilds and the two passes agree.
+  if (prime_other_model) {
+    ModelData other = make_model(field, n_obs, n_units, n_times, seed + 977u,
+                                 family, /*temporal_shared=*/true, "none");
+    other.n_threads = 1;
+    ParamLayout other_layout = compute_param_layout(other);
+    if (get_n_params(other) != n_params) {
+      Rcpp::stop("cpp_gradient_race: '%s' does not size its parameter vector "
+                 "from the dimensions alone, so the two models cannot be "
+                 "evaluated at the same point.", field.c_str());
+    }
+    std::vector<double> discard(n_params, 0.0);
+    GradientFn other_fn = resolve_gradient_fn(GradientMode::HANDCODED, other,
+                                              other_layout);
+    other_fn(points[0], other, other_layout, discard, nullptr);
+  }
+
+  std::vector<std::vector<double>> serial(n_points);
+  for (int k = 0; k < n_points; k++) {
+    serial[k].assign(n_params, 0.0);
+    collapsed_gp_reset_warm_start();
+    collapsed_icar_reset_warm_start();
+    fn(points[k], data, layout, serial[k], nullptr);
+  }
+
+  double max_dev = 0.0;
+  for (int r = 0; r < rounds; r++) {
+    std::vector<std::vector<double>> concurrent(n_points);
+    for (int k = 0; k < n_points; k++) concurrent[k].assign(n_params, 0.0);
+
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static) num_threads(n_threads)
+#endif
+    for (int k = 0; k < n_points; k++) {
+      collapsed_gp_reset_warm_start();
+      collapsed_icar_reset_warm_start();
+      fn(points[k], data, layout, concurrent[k], nullptr);
+    }
+
+    for (int k = 0; k < n_points; k++) {
+      for (int i = 0; i < n_params; i++) {
+        const double d = std::fabs(concurrent[k][i] - serial[k][i]);
+        if (d > max_dev) max_dev = d;
+      }
+    }
+  }
+  return max_dev;
 }
 
 // Evaluates the log posterior at a shared point so the analytic and autodiff

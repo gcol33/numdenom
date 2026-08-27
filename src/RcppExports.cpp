@@ -997,6 +997,16 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_gradient_fields
+Rcpp::CharacterVector cpp_gradient_fields();
+RcppExport SEXP _tulpaRatio_cpp_gradient_fields() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(cpp_gradient_fields());
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_gradient_dispatch
 std::string cpp_gradient_dispatch(std::string field, int n_obs, int n_units, int n_times, unsigned int seed, std::string family);
 RcppExport SEXP _tulpaRatio_cpp_gradient_dispatch(SEXP fieldSEXP, SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_timesSEXP, SEXP seedSEXP, SEXP familySEXP) {
@@ -1033,6 +1043,26 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type near_unit_rho(near_unit_rhoSEXP);
     Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
     rcpp_result_gen = Rcpp::wrap(cpp_gradient_check(field, n_obs, n_units, n_times, eps, seed, mode, precenter, family, temporal_shared, zi, near_unit_rho, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_gradient_race
+double cpp_gradient_race(std::string field, int n_points, int n_threads, int rounds, int n_obs, int n_units, int n_times, unsigned int seed, std::string family, bool prime_other_model);
+RcppExport SEXP _tulpaRatio_cpp_gradient_race(SEXP fieldSEXP, SEXP n_pointsSEXP, SEXP n_threadsSEXP, SEXP roundsSEXP, SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_timesSEXP, SEXP seedSEXP, SEXP familySEXP, SEXP prime_other_modelSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type field(fieldSEXP);
+    Rcpp::traits::input_parameter< int >::type n_points(n_pointsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    Rcpp::traits::input_parameter< int >::type rounds(roundsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_obs(n_obsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_units(n_unitsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_times(n_timesSEXP);
+    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< std::string >::type family(familySEXP);
+    Rcpp::traits::input_parameter< bool >::type prime_other_model(prime_other_modelSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_gradient_race(field, n_points, n_threads, rounds, n_obs, n_units, n_times, seed, family, prime_other_model));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -2121,8 +2151,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_set_max_threads", (DL_FUNC) &_tulpaRatio_cpp_set_max_threads, 1},
     {"_tulpaRatio_cpp_within_chain_team", (DL_FUNC) &_tulpaRatio_cpp_within_chain_team, 3},
     {"_tulpaRatio_cpp_num_procs", (DL_FUNC) &_tulpaRatio_cpp_num_procs, 0},
+    {"_tulpaRatio_cpp_gradient_fields", (DL_FUNC) &_tulpaRatio_cpp_gradient_fields, 0},
     {"_tulpaRatio_cpp_gradient_dispatch", (DL_FUNC) &_tulpaRatio_cpp_gradient_dispatch, 6},
     {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 13},
+    {"_tulpaRatio_cpp_gradient_race", (DL_FUNC) &_tulpaRatio_cpp_gradient_race, 10},
     {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 8},
     {"_tulpaRatio_cpp_test_leapfrog", (DL_FUNC) &_tulpaRatio_cpp_test_leapfrog, 4},
     {"_tulpaRatio_cpp_test_hamiltonian", (DL_FUNC) &_tulpaRatio_cpp_test_hamiltonian, 2},

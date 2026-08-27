@@ -1,5 +1,30 @@
 # tulpaRatio 1.7.2
 
+* **A collapsed workspace no longer reads a previous model's structure (#76).**
+  The collapsed GP's per-thread workspace caches the NNGP coefficients for the
+  last `(sigma2, phi)`, the location-to-observation map, and a Newton mode the
+  next call warm-starts from. Its cache key was the number of GP locations, so
+  a thread that had evaluated one model and was then handed another with the
+  same number of locations kept the first model's coefficients and map. Two
+  collapsed-GP fits in one session over a field of the same size was enough:
+  the second fit's chain threads started from the first fit's structure, and
+  the same call with the same seed depended on what had run before it.
+  `CollapsedICARWorkspace` was keyed the same way on `(S, bym2, N)`.
+
+  Both workspaces now carry the id of the `ModelData` their structure was built
+  for and drop every cached quantity when handed a different one. The Newton
+  warm start goes with the rest: the mode of the previous leapfrog step is
+  worth starting from, another model's mode is not, and the search is capped at
+  20 iterations, so a bad enough start is not guaranteed to recover.
+
+  `cpp_gradient_race()` gains `prime_other_model`, which hands the calling
+  thread a second model of the same dimensions at the same point before the
+  race, and clears the Newton warm start before every evaluation so a collapsed
+  gradient is a function of the point alone. The probe read 4.40e-01 for
+  `gp_collapsed` and 8.49e-01 for `gp_collapsed_st4` against the old key and
+  reads 0 against the new one; the eight collapsed fields are now swept by
+  `test-omp-gradient-race.R` alongside every other field.
+
 * **`compute_log_post` is `compute_log_post_impl<double>` (#28).** The two
   densities returned the same number on every structure the templated one
   expressed, so keeping them apart bought nothing and cost the standing risk
