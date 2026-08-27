@@ -924,6 +924,11 @@ T compute_log_post_impl(
     }
 
     // Multiscale temporal parameters and priors
+    // The blocks the sampler moves in, and the effects they contribute to eta.
+    // The two are the same values in the centred coordinate and differ by the
+    // transform in the non-centred one.
+    std::vector<T> ms_trend_block;
+    std::vector<T> ms_seasonal_block;
     std::vector<T> ms_trend;
     std::vector<T> ms_seasonal;
     std::vector<T> ms_short_term;
@@ -942,10 +947,13 @@ T compute_log_post_impl(
             ms_sigma2_trend = safe_exp(log_sigma2_trend);
 
             int n_trend = layout.trend_end - layout.trend_start;
-            ms_trend.resize(n_trend);
+            ms_trend_block.resize(n_trend);
             for (int t = 0; t < n_trend; t++) {
-                ms_trend[t] = params[layout.trend_start + t];
+                ms_trend_block[t] = params[layout.trend_start + t];
             }
+            ratiod_temporal::ms_arm_effects(
+                ms_trend_block, ratiod_temporal::ms_arm_order(ms_data.trend_type),
+                false, ms_sigma2_trend, ms_data.noncentered, ms_trend);
 
             // PC prior on sigma2_trend + Jacobian for log transform
             log_post = log_post + ratiod_temporal::log_prior_sigma2_temporal_pc(
@@ -959,10 +967,13 @@ T compute_log_post_impl(
             ms_sigma2_seasonal = safe_exp(log_sigma2_seasonal);
 
             int n_seasonal = layout.seasonal_end - layout.seasonal_start;
-            ms_seasonal.resize(n_seasonal);
+            ms_seasonal_block.resize(n_seasonal);
             for (int t = 0; t < n_seasonal; t++) {
-                ms_seasonal[t] = params[layout.seasonal_start + t];
+                ms_seasonal_block[t] = params[layout.seasonal_start + t];
             }
+            ratiod_temporal::ms_arm_effects(
+                ms_seasonal_block, 1, true, ms_sigma2_seasonal,
+                ms_data.noncentered, ms_seasonal);
 
             // PC prior on sigma2_seasonal + Jacobian
             log_post = log_post + ratiod_temporal::log_prior_sigma2_temporal_pc(
@@ -1001,7 +1012,7 @@ T compute_log_post_impl(
 
         // GMRF log-likelihood for all components
         log_post = log_post + ratiod_temporal::multiscale_temporal_log_lik(
-            ms_trend, ms_seasonal, ms_short_term,
+            ms_trend_block, ms_seasonal_block, ms_short_term,
             ms_sigma2_trend, ms_sigma2_seasonal, ms_sigma2_short, ms_rho_short,
             ms_data);
 

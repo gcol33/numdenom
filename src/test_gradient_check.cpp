@@ -137,6 +137,8 @@ const char* const KNOWN_FIELDS[] = {
   "icar_collapsed", "bym2_collapsed",
   "icar_collapsed_rw1", "bym2_collapsed_rw1",
   "hsgp",
+  "ms_temporal_nc", "ms_temporal_rw2", "ms_temporal_rw2_nc",
+  "ms_temporal_seasonal", "ms_temporal_seasonal_nc",
   "tvc", "tvc_iid", "tvc_ar1",
   "re", "re_crossed", "re_slopes", "re_slopes_corr",
   "gp", "gp_matern", "gp_gaussian", "gp_spherical",
@@ -265,7 +267,12 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // field is identified.
   const bool want_ms = (field == "icar_ms" || field == "bym2_ms" ||
                         field == "ms_temporal" || field == "svc_ms" ||
-                        field == "car_proper_ms");
+                        field == "car_proper_ms" ||
+                        field == "ms_temporal_nc" ||
+                        field == "ms_temporal_rw2" ||
+                        field == "ms_temporal_rw2_nc" ||
+                        field == "ms_temporal_seasonal" ||
+                        field == "ms_temporal_seasonal_nc");
   const bool want_st = (field == "icar_st" || field == "bym2_st" ||
                         field == "car_proper_st");
   // st4: a spatiotemporal Type IV (Kronecker) interaction with NO accompanying
@@ -787,10 +794,21 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     mst.n_times = n_times;
     mst.n_groups = 1;
     mst.n_obs = n_obs;
-    mst.trend_type = ratiod_temporal::TemporalType::RW1;
-    mst.seasonal_period = 0;
+    // The trend's order and the seasonal arm decide which branch of the
+    // transform runs: RW1 integrates once, RW2 twice and keeps a free linear
+    // direction, and the seasonal arm is the cyclic case.
+    const bool ms_rw2 = (field == "ms_temporal_rw2" ||
+                         field == "ms_temporal_rw2_nc");
+    const bool ms_seasonal = (field == "ms_temporal_seasonal" ||
+                              field == "ms_temporal_seasonal_nc");
+    mst.trend_type = ms_rw2 ? ratiod_temporal::TemporalType::RW2
+                            : ratiod_temporal::TemporalType::RW1;
+    mst.seasonal_period = ms_seasonal ? 4 : 0;
     mst.short_term_type = ratiod_temporal::TemporalType::AR1;
     mst.shared = true;
+    mst.noncentered = (field == "ms_temporal_nc" ||
+                       field == "ms_temporal_rw2_nc" ||
+                       field == "ms_temporal_seasonal_nc");
     mst.time_index.resize(n_obs);
     mst.group_index.assign(n_obs, 1);
     for (int i = 0; i < n_obs; i++) mst.time_index[i] = (i % n_times) + 1;
@@ -1321,4 +1339,52 @@ double cpp_msgp_nc_coordinate_spread(int n_obs = 400,
     hi = std::max(hi, diff);
   }
   return hi - lo;
+}
+
+// The invariant a finite difference cannot see. A transform that builds the
+// WRONG field still leaves the density self-consistent and its gradient still
+// matches its own difference quotient, so the gradient sweep passes on it. What
+// it cannot leave alone is the relationship between the two coordinates:
+//
+//     log N(z; 0, I) = log p_centred(phi(z)) + log|d phi / d z|,
+//
+// and the Jacobian is 0.5 * rank * log(sigma2), a function of the
+// hyperparameter alone. So at fixed sigma2 the two densities differ by ONE
+// number for every z, and the spread of that difference over draws is what this
+// returns. Anything but zero is a transform that does not carry the density it
+// claims to.
+//
+// [[Rcpp::export]]
+double cpp_ms_temporal_nc_coordinate_spread(std::string field = "ms_temporal_nc",
+                                            int n = 12,
+                                            double sigma2 = 0.25,
+                                            int n_draws = 6,
+                                            unsigned int seed = 42) {
+  int order = 1;
+  bool cyclic = false;
+  if (field == "ms_temporal_rw2_nc") order = 2;
+  if (field == "ms_temporal_seasonal_nc") cyclic = true;
+
+  std::mt19937 rng(seed + 7000u);
+  std::normal_distribution<double> rnorm(0.0, 1.0);
+  const double sigma = std::sqrt(sigma2);
+
+  double first = 0.0;
+  double worst = 0.0;
+  for (int d = 0; d < n_draws; d++) {
+    std::vector<double> z(n), phi(n);
+    for (int k = 0; k < n; k++) z[k] = rnorm(rng);
+    ratiod_temporal_nc::rw_nc_forward(z.data(), n, order, cyclic, sigma, phi.data());
+
+    const double lp_nc =
+        ratiod_temporal_nc::rw_nc_log_prior(z.data(), n, order, cyclic);
+    const double lp_centred =
+        (order == 2)
+            ? ratiod_temporal::rw2_log_lik(phi, sigma2, cyclic, true)
+            : ratiod_temporal::rw1_log_lik(phi, sigma2, cyclic, true);
+    const double gap = lp_nc - lp_centred;
+    if (d == 0) first = gap;
+    worst = std::max(worst, std::abs(gap - first));
+  }
+  return worst;
 }

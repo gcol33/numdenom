@@ -565,3 +565,56 @@ test_that("centring a proper CAR field moves the level onto the intercept", {
   expect_error(spatial_car(A, level = "group", group_var = "site", center = FALSE),
                "proper = TRUE")
 })
+
+
+# The centred coordinate cannot reach the neck of a variance shrunk toward zero,
+# so it reports that variance too large. This fixture's trend is exactly zero,
+# which puts the whole posterior in the neck, and the non-centred coordinate is
+# what lets the sampler descend into it (gcol33/tulpaRatio#79).
+
+test_that("the multi-scale trend's non-centred coordinate drains the funnel", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+
+  fit <- function(parameterization) {
+    set.seed(3)
+    f <- tratio(y | trials ~ x, data = sim_data(22), family = ratiod_binomial(),
+                temporal = temporal_multiscale("time", trend = "rw2",
+                                               seasonal = NULL,
+                                               short_term = "none",
+                                               parameterization = parameterization),
+                control = list(iter = 1000, warmup = 500, chains = 4,
+                               verbose = FALSE))
+    dr <- as.matrix(f$draws)
+    per <- nrow(dr) / f$chains
+    log_s2 <- log(dr[, "sigma2_trend"])
+    list(divergent = mean(as.logical(f$diagnostics$divergent)),
+         ess = posterior::ess_bulk(matrix(log_s2, per, f$chains)),
+         rhat = posterior::rhat(matrix(log_s2, per, f$chains)),
+         median = median(dr[, "sigma2_trend"]),
+         intercept = mean(dr[, "beta_num[1]"]),
+         slope = mean(dr[, "beta_num[2]"]))
+  }
+
+  centred <- fit("centered")
+  nc <- fit("noncentered")
+
+  # Measured: 30/2000 divergences -> 3/2000, ESS 21 -> 310, rhat 1.126 -> 1.013.
+  expect_lt(nc$divergent, 0.005)
+  expect_lt(nc$divergent, centred$divergent)
+  expect_gt(nc$ess, 150)
+  expect_gt(nc$ess, 4 * centred$ess)
+  expect_lt(nc$rhat, 1.05)
+
+  # The coordinate the centred sampler could not reach is the small end, so what
+  # it reports is biased upward: 1.6e-04 against 4.2e-05 here. Only the
+  # non-centred run has converged on that parameter, which is what makes it the
+  # one to believe.
+  expect_lt(nc$median, centred$median)
+
+  # Everything the fixture is actually about is unmoved.
+  expect_equal(nc$intercept, centred$intercept, tolerance = 0.05)
+  expect_equal(nc$slope, centred$slope, tolerance = 0.05)
+  expect_equal(nc$intercept, TRUE_INTERCEPT, tolerance = 0.08)
+  expect_equal(nc$slope, TRUE_SLOPE, tolerance = 0.08)
+})

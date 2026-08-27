@@ -120,7 +120,14 @@ ST_GP_FIELDS <- c("stgp", "stgp_matern", "stgp_gneiting", "stgp_latent")
 KERNEL_FIELDS <- c("gp", "gp_matern", "gp_gaussian", "gp_spherical",
                    "gp_temporal", "gp_nc", "msgp", "msgp_temporal",
                    "msgp_hsgp", "msgp_nc", "svc", "svc_hsgp",
-                   "temporal_gp", "ms_temporal", "latent")
+                   "temporal_gp", "ms_temporal", "latent",
+                   # The intrinsic multi-scale arms in either coordinate. The
+                   # non-centred one holds z ~ N(0, I) and reaches eta through
+                   # sigma * A^{-1} z, so sigma2 enters through the transform
+                   # as well as through its own prior, and the RW2 keeps a free
+                   # linear direction the transform has to leave alone.
+                   "ms_temporal_nc", "ms_temporal_rw2", "ms_temporal_rw2_nc",
+                   "ms_temporal_seasonal", "ms_temporal_seasonal_nc")
 # The kernel field the templated density declares a gap for: gp_collapsed
 # marginalizes its field out, as the collapsed areal fields do, so it has no
 # autodiff case and is checked against compute_log_post alone.
@@ -247,6 +254,10 @@ test_that("resolve_gradient_fn sends each model to the function written for it",
     msgp_temporal = "msgp_temporal", hsgp = "hsgp",
     svc = "svc", svc_hsgp = "svc_hsgp", tvc = "tvc",
     temporal_gp = "temporal_gp", ms_temporal = "ms_temporal",
+    ms_temporal_nc = "ms_temporal", ms_temporal_rw2 = "ms_temporal",
+    ms_temporal_rw2_nc = "ms_temporal",
+    ms_temporal_seasonal = "ms_temporal",
+    ms_temporal_seasonal_nc = "ms_temporal",
     latent = "latent", st4 = "spatiotemporal", icar_st = "spatiotemporal",
     icar_collapsed = "icar_collapsed", bym2_collapsed = "icar_collapsed",
     gp_collapsed = "gp_collapsed",
@@ -732,5 +743,30 @@ test_that("a non-centred GP fit keeps its handcoded gradient (gcol33/tulpaRatio#
                             verbose = FALSE, seed = 7)),
       NA
     )
+  }
+})
+
+
+# A finite difference cannot see a transform that builds the wrong field: the
+# density stays self-consistent and its gradient still matches its own
+# difference quotient, so every row above passes on it. What it cannot leave
+# alone is how the two coordinates relate.
+#
+#   log N(z; 0, I) = log p_centred(phi(z)) + log|d phi / d z|
+#
+# and the Jacobian is 0.5 * rank * log(sigma2), a function of the hyperparameter
+# alone. At fixed sigma2 the two densities therefore differ by ONE number for
+# every z, and the spread of that difference over draws is the invariant.
+
+test_that("the multi-scale arms' non-centred coordinate carries its density", {
+  for (field in c("ms_temporal_nc", "ms_temporal_rw2_nc",
+                  "ms_temporal_seasonal_nc")) {
+    for (sigma2 in c(0.01, 0.25, 4)) {
+      for (n in c(7L, 12L, 25L)) {
+        spread <- tulpaRatio:::cpp_ms_temporal_nc_coordinate_spread(
+          field, n, sigma2, n_draws = 8L)
+        expect_lt(spread, 1e-9)
+      }
+    }
   }
 })

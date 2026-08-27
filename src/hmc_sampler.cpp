@@ -6426,9 +6426,13 @@ void compute_gradient_ms_temporal_handcoded(
 
     // Pre-assemble temporal effect per time point (avoids per-obs modulo)
     const int n_times = mst.n_times;
+    // eta reads the arms' effects, which are the blocks themselves unless the
+    // intrinsic arms are sampled in their non-centred coordinate.
+    const auto ms_arms = ratiod_temporal::ms_read_arms(
+        trend, n_trend, seasonal, n_seasonal, sigma2_trend, sigma2_seasonal, mst);
     std::vector<double> ms_effect_by_time(n_times, 0.0);
     ratiod_temporal::compute_ms_effect_by_time(
-        trend, n_trend, seasonal, n_seasonal, short_term, n_short,
+        ms_arms.trend, n_trend, ms_arms.seasonal, n_seasonal, short_term, n_short,
         mst.seasonal_period, n_times, ms_effect_by_time.data());
 
     // Per-obs: add RE + spatial + multiscale temporal effects
@@ -6517,14 +6521,19 @@ void compute_gradient_ms_temporal_handcoded(
         short_term, n_short,
         sigma2_trend, sigma2_seasonal, sigma2_short, rho_short,
         mst, ms_grads);
+    double nc_g_log_s2_trend = 0.0, nc_g_log_s2_seasonal = 0.0;
     ratiod_temporal_grad::project_ms_lik_gradients(
-        grad_trend_lik.data(), n_trend, grad_seasonal_lik.data(), n_seasonal, mst);
+        grad_trend_lik.data(), n_trend, grad_seasonal_lik.data(), n_seasonal, mst,
+        {trend, ms_arms.trend, sigma2_trend, &nc_g_log_s2_trend},
+        {seasonal, ms_arms.seasonal, sigma2_seasonal, &nc_g_log_s2_seasonal});
 
     for (int t = 0; t < n_trend; t++) grad[layout.trend_start + t] = grad_trend_lik[t] + ms_grads.grad_trend[t];
     for (int t = 0; t < n_seasonal; t++) grad[layout.seasonal_start + t] = grad_seasonal_lik[t] + ms_grads.grad_seasonal[t];
     for (int t = 0; t < n_short; t++) grad[layout.short_term_start + t] = grad_short_lik[t] + ms_grads.grad_short_term[t];
-    if (n_trend > 0) grad[layout.log_sigma2_trend_idx] += ms_grads.grad_log_sigma2_trend;
-    if (n_seasonal > 0) grad[layout.log_sigma2_seasonal_idx] += ms_grads.grad_log_sigma2_seasonal;
+    if (n_trend > 0)
+        grad[layout.log_sigma2_trend_idx] += ms_grads.grad_log_sigma2_trend + nc_g_log_s2_trend;
+    if (n_seasonal > 0)
+        grad[layout.log_sigma2_seasonal_idx] += ms_grads.grad_log_sigma2_seasonal + nc_g_log_s2_seasonal;
     if (n_short > 0) grad[layout.log_sigma2_short_idx] += ms_grads.grad_log_sigma2_short;
     if (mst.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0) {
         grad[layout.logit_rho_short_idx] += ms_grads.grad_logit_rho_short;
@@ -7299,6 +7308,7 @@ void compute_gradient_composite(
     double sigma2_trend = 1.0, sigma2_seasonal = 1.0, sigma2_short = 1.0;
     double rho_short = 0.5;
     RATIOD_TLS_WORKSPACE(std::vector<double>, ms_effect_by_time_c);
+    ratiod_temporal::MSArmEffects ms_arms_c;
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_trend_lik_c);
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_seasonal_lik_c);
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_short_lik_c);
@@ -7315,10 +7325,15 @@ void compute_gradient_composite(
             double u = 1.0 / (1.0 + std::exp(-params[layout.logit_rho_short_idx]));
             rho_short = 2.0 * u - 1.0;
         }
-        // Pre-assemble temporal effect per time point
+        // Pre-assemble temporal effect per time point. eta reads the arms'
+        // effects, which are the blocks unless the intrinsic arms are sampled
+        // in their non-centred coordinate.
+        ms_arms_c = ratiod_temporal::ms_read_arms(
+            trend, n_trend, seasonal, n_seasonal, sigma2_trend, sigma2_seasonal, mst);
         ms_effect_by_time_c.assign(mst.n_times, 0.0);
         ratiod_temporal::compute_ms_effect_by_time(
-            trend, n_trend, seasonal, n_seasonal, short_term, n_short,
+            ms_arms_c.trend, n_trend, ms_arms_c.seasonal, n_seasonal,
+            short_term, n_short,
             mst.seasonal_period, mst.n_times, ms_effect_by_time_c.data());
         grad_trend_lik_c.assign(n_trend, 0.0);
         grad_seasonal_lik_c.assign(n_seasonal, 0.0);
@@ -8007,14 +8022,19 @@ void compute_gradient_composite(
             trend, n_trend, seasonal, n_seasonal, short_term, n_short,
             sigma2_trend, sigma2_seasonal, sigma2_short, rho_short,
             data.multiscale_temporal_data, ms_grads);
+        double nc_g_log_s2_trend_c = 0.0, nc_g_log_s2_seasonal_c = 0.0;
         ratiod_temporal_grad::project_ms_lik_gradients(
             grad_trend_lik_c.data(), n_trend, grad_seasonal_lik_c.data(), n_seasonal,
-            data.multiscale_temporal_data);
+            data.multiscale_temporal_data,
+            {trend, ms_arms_c.trend, sigma2_trend, &nc_g_log_s2_trend_c},
+            {seasonal, ms_arms_c.seasonal, sigma2_seasonal, &nc_g_log_s2_seasonal_c});
         for (int t = 0; t < n_trend; t++) grad[layout.trend_start + t] = grad_trend_lik_c[t] + ms_grads.grad_trend[t];
         for (int t = 0; t < n_seasonal; t++) grad[layout.seasonal_start + t] = grad_seasonal_lik_c[t] + ms_grads.grad_seasonal[t];
         for (int t = 0; t < n_short; t++) grad[layout.short_term_start + t] = grad_short_lik_c[t] + ms_grads.grad_short_term[t];
-        if (n_trend > 0) grad[layout.log_sigma2_trend_idx] += ms_grads.grad_log_sigma2_trend;
-        if (n_seasonal > 0) grad[layout.log_sigma2_seasonal_idx] += ms_grads.grad_log_sigma2_seasonal;
+        if (n_trend > 0)
+            grad[layout.log_sigma2_trend_idx] += ms_grads.grad_log_sigma2_trend + nc_g_log_s2_trend_c;
+        if (n_seasonal > 0)
+            grad[layout.log_sigma2_seasonal_idx] += ms_grads.grad_log_sigma2_seasonal + nc_g_log_s2_seasonal_c;
         if (n_short > 0) grad[layout.log_sigma2_short_idx] += ms_grads.grad_log_sigma2_short;
         if (data.multiscale_temporal_data.short_term_type == TemporalType::AR1 && layout.logit_rho_short_idx >= 0)
             grad[layout.logit_rho_short_idx] += ms_grads.grad_logit_rho_short;
@@ -11147,13 +11167,39 @@ HMCResultCpp run_hmc_chain_cpp(
               const auto& mst_store = data.multiscale_temporal_data;
               const int n_trend_store = layout.trend_end - layout.trend_start;
               const int n_seasonal_store = layout.seasonal_end - layout.seasonal_start;
-              if (n_trend_store > 0 &&
+              const bool trend_intrinsic_store =
+                  n_trend_store > 0 &&
                   (mst_store.trend_type == TemporalType::RW1 ||
-                   mst_store.trend_type == TemporalType::RW2)) {
+                   mst_store.trend_type == TemporalType::RW2);
+              const bool seasonal_store =
+                  n_seasonal_store > 0 && mst_store.seasonal_period > 0;
+              // In the non-centred coordinate the row still holds z, so the
+              // effects have to be built before they can be centred.
+              if (mst_store.noncentered) {
+                  const double s2_trend_store = (n_trend_store > 0)
+                      ? std::exp(q[layout.log_sigma2_trend_idx]) : 1.0;
+                  const double s2_seasonal_store = (n_seasonal_store > 0)
+                      ? std::exp(q[layout.log_sigma2_seasonal_idx]) : 1.0;
+                  const auto arms_store = ratiod_temporal::ms_read_arms(
+                      trend_intrinsic_store ? &q[layout.trend_start] : nullptr,
+                      n_trend_store,
+                      seasonal_store ? &q[layout.seasonal_start] : nullptr,
+                      n_seasonal_store,
+                      s2_trend_store, s2_seasonal_store, mst_store);
+                  if (trend_intrinsic_store) {
+                      for (int i = 0; i < n_trend_store; i++)
+                          row[layout.trend_start + i] = arms_store.trend[i];
+                  }
+                  if (seasonal_store) {
+                      for (int i = 0; i < n_seasonal_store; i++)
+                          row[layout.seasonal_start + i] = arms_store.seasonal[i];
+                  }
+              }
+              if (trend_intrinsic_store) {
                   (void)tulpa::s2z_centre_component(row, layout.trend_start,
                                                     n_trend_store);
               }
-              if (n_seasonal_store > 0 && mst_store.seasonal_period > 0) {
+              if (seasonal_store) {
                   (void)tulpa::s2z_centre_component(row, layout.seasonal_start,
                                                     n_seasonal_store);
               }

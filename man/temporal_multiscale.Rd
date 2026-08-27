@@ -10,7 +10,8 @@ temporal_multiscale(
   seasonal = NULL,
   short_term = c("ar1", "iid", "none"),
   group_var = NULL,
-  shared = TRUE
+  shared = TRUE,
+  parameterization = c("centered", "noncentered")
 )
 }
 \arguments{
@@ -30,6 +31,21 @@ correlated), \code{"iid"} (independent), or \code{"none"}.}
 
 \item{shared}{Logical; if TRUE (default), temporal effects enter both
 numerator and denominator.}
+
+\item{parameterization}{Coordinate the intrinsic trend and seasonal arms are
+sampled in. \code{"centered"} (default) samples the effects themselves.
+\code{"noncentered"} samples \code{z ~ N(0, I)} and reaches the effects through
+\verb{sigma * A^-1 z}, where \code{A} stacks the arm's difference operator on
+\verb{1'/sqrt(n)}, so the variance enters the linear predictor through the
+transform rather than through a quadratic form. The two describe the same
+model; what differs is the geometry the sampler sees. Prefer
+\code{"noncentered"} when an arm's variance is shrunk toward zero, where a
+centred coordinate leaves a funnel it cannot descend: on a 500-observation
+fixture whose true trend is zero, the divergence count goes 30 of 2000 to
+3, the bulk ESS of \code{sigma2_trend} 21 to 310 and its rhat 1.13 to 1.01, and
+the centred run reports a posterior median four times larger because it
+never reaches the small end. The short-term arm is proper and is the same
+block either way.}
 }
 \value{
 A \code{ratiod_temporal_multiscale} object

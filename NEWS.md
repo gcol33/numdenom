@@ -1,5 +1,40 @@
 # tulpaRatio 1.7.2
 
+* **A non-centred coordinate for the multi-scale temporal arms (#79).**
+  `temporal_multiscale()` takes `parameterization`, and `"noncentered"` samples
+  the trend and seasonal arms as `z ~ N(0, I)`, reaching the effects through
+  `sigma * A^-1 z`. `A` stacks the arm's difference operator on `1'/sqrt(n)`,
+  which is exactly the augmented precision's factor `Q + 11'/n = A'A`, so the
+  arm's quadratic form and the transform's Jacobian cancel term for term and
+  what is left is `N(0, I)` with the variance reaching the linear predictor
+  through the transform alone. `A^-1` is a cumulative sum, once for RW1 and
+  twice for RW2, so the transform and its adjoint are O(n).
+
+  A non-cyclic RW2 annihilates a linear ramp as well as the constant and only
+  the constant is augmented, so one coordinate stays a free direction under the
+  flat prior it already had. Any right inverse of `A` reproduces the density,
+  but not any right inverse is well conditioned: the double integral's own
+  particular solution carries a large ramp that the free coordinate can undo,
+  which measured 406 divergences of 2000 before the ramp was projected out and
+  3 after.
+
+  Measured on the multiscale RW2 recovery fixture, whose true trend is zero so
+  the whole posterior sits in the funnel's neck, centred -> non-centred: the
+  divergence count goes 30 of 2000 to 3, and by decile of `log sigma2_trend` the
+  neck goes from 12.5% divergent to 0%. The bulk ESS of `sigma2_trend` goes 21
+  to 310 and its rhat 1.126 to 1.013, and the intercept's ESS 596 to 1776. The
+  centred run reports a posterior median of 1.6e-04 against 4.2e-05, biased
+  upward by the part of the neck it never reaches; only the non-centred run has
+  converged on that parameter. The intercept and slope are unmoved.
+
+  `test-gradient-correctness.R` carries the three walks in either coordinate
+  across all four gradient modes, and
+  `cpp_ms_temporal_nc_coordinate_spread()` checks the invariant a finite
+  difference cannot see: a transform that builds the wrong field leaves the
+  density self-consistent and its gradient still matching its own difference
+  quotient, but at fixed hyperparameters the two coordinates' densities have to
+  differ by one number for every `z`. Measured spread 1e-13.
+
 * **A proper CAR field's mean is removed from the linear predictor (#80).**
   `Q(rho) = D - rho*W` is full rank at `rho < 1`, so the prior identifies the
   field's mean, and the field was left uncentred on that reasoning. The

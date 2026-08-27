@@ -563,6 +563,13 @@ inline void apply_temporal_params(ModelData& data, const Rcpp::List& temporal_pa
       ms_short_type = Rcpp::as<std::string>(temporal_params["short_term_type"]);
     data.multiscale_temporal_data.trend_type = ratiod_temporal::parse_temporal_type(ms_trend_type);
     data.multiscale_temporal_data.short_term_type = ratiod_temporal::parse_temporal_type(ms_short_type);
+    // Its own key, beside gp_parameterization and ar1_parameterization: a bare
+    // "parameterization" in this bundle belongs to whichever structure the
+    // model actually carries, and the temporal block carries several.
+    if (temporal_params.containsElementNamed("ms_parameterization")) {
+      data.multiscale_temporal_data.noncentered =
+          (Rcpp::as<std::string>(temporal_params["ms_parameterization"]) == "noncentered");
+    }
 
     data.ms_sigma2_trend_prior_U = 1.0;
     data.ms_sigma2_trend_prior_alpha = 0.01;

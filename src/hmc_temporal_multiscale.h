@@ -17,6 +17,7 @@
 #include "autodiff_utils.h"
 
 #include <tulpa/sum_to_zero.h>  // rw1_rank / rw2_rank / s2z_aug_* / component sums
+#include "hmc_temporal_nc.h"     // the intrinsic arms' non-centred coordinate
 
 namespace ratiod_temporal {
 
@@ -40,7 +41,38 @@ struct MultiscaleTemporalData {
   TemporalType short_term_type = TemporalType::NONE; // ar1, iid, or none
 
   bool shared = true;                // Shared between num/denom
+
+  // Whether the intrinsic arms are sampled in their non-centred coordinate:
+  // the trend and seasonal blocks then hold z ~ N(0, I) and the effects are
+  // sigma * A^{-1} z (hmc_temporal_nc.h). The short-term arm is proper and is
+  // the same block either way.
+  bool noncentered = false;
 };
+
+// The order of an arm's differencing stencil, which is what the transform and
+// its adjoint are written against.
+inline int ms_arm_order(TemporalType type) {
+  return (type == TemporalType::RW2) ? 2 : 1;
+}
+
+// The effects an arm contributes to eta, read from the block the sampler moves
+// in. One reader, called wherever a density, a gradient or the sample store
+// needs the arm, so the coordinate lives in one place rather than a branch per
+// site.
+template <typename T>
+inline void ms_arm_effects(const std::vector<T>& block, int order, bool cyclic,
+                           const T& sigma2, bool noncentered,
+                           std::vector<T>& out) {
+  const int n = static_cast<int>(block.size());
+  out.resize(n);
+  if (n == 0) return;
+  if (!noncentered) {
+    for (int t = 0; t < n; t++) out[t] = block[t];
+    return;
+  }
+  ratiod_temporal_nc::rw_nc_forward(block.data(), n, order, cyclic,
+                                    safe_sqrt(sigma2), out.data());
+}
 
 // -----------------------------------------------------------------------------
 // RW1 log-likelihood (intrinsic first-order random walk)
@@ -211,16 +243,30 @@ inline T multiscale_temporal_log_lik(
   // halves of one construction. The short-term arm is proper (AR1/IID),
   // identifies its own level, and is left alone.
 
+  // In the non-centred coordinate the block IS z: the arm's prior and the
+  // transform's Jacobian cancel term for term, so what is left is N(0, I) and
+  // sigma2 reaches the field through the transform alone.
+  const bool nc = temp_data.noncentered;
+
   // Trend component
   if (temp_data.trend_type == TemporalType::RW1 && !trend.empty()) {
-    log_lik = log_lik + rw1_log_lik(trend, sigma2_trend, false, true);
+    log_lik = log_lik + (nc
+        ? ratiod_temporal_nc::rw_nc_log_prior(
+              trend.data(), static_cast<int>(trend.size()), 1, false)
+        : rw1_log_lik(trend, sigma2_trend, false, true));
   } else if (temp_data.trend_type == TemporalType::RW2 && !trend.empty()) {
-    log_lik = log_lik + rw2_log_lik(trend, sigma2_trend, false, true);
+    log_lik = log_lik + (nc
+        ? ratiod_temporal_nc::rw_nc_log_prior(
+              trend.data(), static_cast<int>(trend.size()), 2, false)
+        : rw2_log_lik(trend, sigma2_trend, false, true));
   }
 
   // Seasonal component (always cyclic RW1)
   if (temp_data.seasonal_period > 0 && !seasonal.empty()) {
-    log_lik = log_lik + rw1_log_lik(seasonal, sigma2_seasonal, true, true);
+    log_lik = log_lik + (nc
+        ? ratiod_temporal_nc::rw_nc_log_prior(
+              seasonal.data(), static_cast<int>(seasonal.size()), 1, true)
+        : rw1_log_lik(seasonal, sigma2_seasonal, true, true));
   }
 
   // Short-term component
@@ -231,6 +277,37 @@ inline T multiscale_temporal_log_lik(
   }
 
   return log_lik;
+}
+
+// The two intrinsic arms' effects, read from the blocks a gradient function
+// holds. The pointers are the blocks themselves in the centred coordinate and
+// the transformed buffers otherwise, so a caller indexes one thing either way.
+struct MSArmEffects {
+  std::vector<double> trend_buf, seasonal_buf;
+  const double* trend = nullptr;
+  const double* seasonal = nullptr;
+};
+
+inline MSArmEffects ms_read_arms(const double* trend, int n_trend,
+                                 const double* seasonal, int n_seasonal,
+                                 double sigma2_trend, double sigma2_seasonal,
+                                 const MultiscaleTemporalData& d) {
+  MSArmEffects out;
+  out.trend = trend;
+  out.seasonal = seasonal;
+  if (!d.noncentered) return out;
+  if (trend != nullptr && n_trend > 0) {
+    const std::vector<double> blk(trend, trend + n_trend);
+    ms_arm_effects(blk, ms_arm_order(d.trend_type), false, sigma2_trend, true,
+                   out.trend_buf);
+    out.trend = out.trend_buf.data();
+  }
+  if (seasonal != nullptr && n_seasonal > 0 && d.seasonal_period > 0) {
+    const std::vector<double> blk(seasonal, seasonal + n_seasonal);
+    ms_arm_effects(blk, 1, true, sigma2_seasonal, true, out.seasonal_buf);
+    out.seasonal = out.seasonal_buf.data();
+  }
+  return out;
 }
 
 // -----------------------------------------------------------------------------

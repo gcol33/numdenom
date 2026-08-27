@@ -341,8 +341,19 @@ inline void multiscale_temporal_prior_gradients(
     // each intrinsic arm is differentiated here, over the same component sum
     // and at the same precision, so the analytic gradient and the log-posterior
     // carry the same terms.
+    // In the non-centred coordinate the arm's prior IS N(0, I) on the
+    // coordinates that carry it -- the quadratic form and the transform's
+    // Jacobian have already cancelled -- so its gradient is -z there, nothing
+    // on the RW2's free linear direction, and nothing at all on sigma2, which
+    // now reaches the field only through the transform.
+    const bool nc = temp_data.noncentered;
+
     if (n_trend > 0) {
-        if (temp_data.trend_type == TemporalType::RW1) {
+        if (nc) {
+            const int order = ms_arm_order(temp_data.trend_type);
+            const int d = ratiod_temporal_nc::nc_normal_dim(n_trend, order, false);
+            for (int k = 0; k < d; k++) grads.grad_trend[k] = -trend[k];
+        } else if (temp_data.trend_type == TemporalType::RW1) {
             rw1_grad_phi(trend, n_trend, sigma2_trend, grads.grad_trend.data(), true);
             grads.grad_log_sigma2_trend = rw1_grad_log_sigma2(trend, n_trend, sigma2_trend, true);
         } else if (temp_data.trend_type == TemporalType::RW2) {
@@ -353,8 +364,13 @@ inline void multiscale_temporal_prior_gradients(
 
     // Seasonal component (cyclic RW1)
     if (n_seasonal > 0 && temp_data.seasonal_period > 0) {
-        rw1_cyclic_grad_phi(seasonal, n_seasonal, sigma2_seasonal, grads.grad_seasonal.data(), true);
-        grads.grad_log_sigma2_seasonal = rw1_cyclic_grad_log_sigma2(seasonal, n_seasonal, sigma2_seasonal, true);
+        if (nc) {
+            const int d = ratiod_temporal_nc::nc_normal_dim(n_seasonal, 1, true);
+            for (int k = 0; k < d; k++) grads.grad_seasonal[k] = -seasonal[k];
+        } else {
+            rw1_cyclic_grad_phi(seasonal, n_seasonal, sigma2_seasonal, grads.grad_seasonal.data(), true);
+            grads.grad_log_sigma2_seasonal = rw1_cyclic_grad_log_sigma2(seasonal, n_seasonal, sigma2_seasonal, true);
+        }
     }
 
     // Short-term component
@@ -388,10 +404,23 @@ inline void multiscale_temporal_prior_gradients(
 // This is the likelihood half of the same construction the augmentation is the
 // prior half of; it lives beside multiscale_temporal_prior_gradients so a path
 // cannot pick up one and miss the other.
+// What one intrinsic arm needs for the second half of the projection: the
+// block the sampler moves in, the effects the forward pass built, and where the
+// transform's own sigma2 derivative lands. Left at its defaults in the centred
+// coordinate, where there is no transform and none of it is read.
+struct MSArmCoordinate {
+    const double* block = nullptr;
+    const double* effects = nullptr;
+    double sigma2 = 1.0;
+    double* grad_log_sigma2 = nullptr;
+};
+
 inline void project_ms_lik_gradients(
     double* grad_trend_lik, int n_trend,
     double* grad_seasonal_lik, int n_seasonal,
-    const MultiscaleTemporalData& temp_data
+    const MultiscaleTemporalData& temp_data,
+    const MSArmCoordinate& trend = MSArmCoordinate(),
+    const MSArmCoordinate& seasonal = MSArmCoordinate()
 ) {
     const bool trend_centred = n_trend > 0 &&
         (temp_data.trend_type == TemporalType::RW1 ||
@@ -399,8 +428,31 @@ inline void project_ms_lik_gradients(
     if (trend_centred) {
         (void)tulpa::s2z_centre_component(grad_trend_lik, 0, n_trend);
     }
-    if (n_seasonal > 0 && temp_data.seasonal_period > 0) {
+    const bool has_seasonal = n_seasonal > 0 && temp_data.seasonal_period > 0;
+    if (has_seasonal) {
         (void)tulpa::s2z_centre_component(grad_seasonal_lik, 0, n_seasonal);
+    }
+    if (!temp_data.noncentered) return;
+
+    // eta reads the centred effects and the effects are a linear map of the
+    // block, so the gradient with respect to what the sampler moves in is the
+    // projection above carried through that map. sigma2 reaches eta the same
+    // way and picks up its own term here rather than in the arm's prior.
+    auto carry = [](double* g, int n, int order, bool cyclic,
+                    const MSArmCoordinate& arm) {
+        if (n <= 0 || arm.block == nullptr) return;
+        std::vector<double> gz(n, 0.0);
+        ratiod_temporal_nc::rw_nc_backward(
+            g, arm.effects, arm.block, n, order, cyclic,
+            std::sqrt(arm.sigma2), gz.data(), arm.grad_log_sigma2);
+        for (int k = 0; k < n; k++) g[k] = gz[k];
+    };
+    if (trend_centred) {
+        carry(grad_trend_lik, n_trend, ms_arm_order(temp_data.trend_type),
+              false, trend);
+    }
+    if (has_seasonal) {
+        carry(grad_seasonal_lik, n_seasonal, 1, true, seasonal);
     }
 }
 

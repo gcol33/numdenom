@@ -367,6 +367,9 @@ fit_hmc <- function(formula,
       temporal_info$parameterization %||% "centered"
     } else "centered",
     # Multiscale temporal fields (only used when type = "multiscale")
+    ms_parameterization = if (identical(temporal_info$type, "multiscale")) {
+      temporal_info$parameterization %||% "centered"
+    } else "centered",
     trend_type = temporal_info$trend %||% "rw1",
     short_term_type = temporal_info$short_term %||% "ar1",
     seasonal_period = as.integer(temporal_info$precision_structure$seasonal_period %||% 0L),
@@ -1526,6 +1529,7 @@ prepare_temporal_for_hmc <- function(temporal, data, N) {
       trend = temporal$trend,
       seasonal = temporal$seasonal,
       short_term = temporal$short_term,
+      parameterization = temporal$parameterization %||% "centered",
       components = temporal$components,
       # TVC fields (not used)
       n_tvc = 0L,
@@ -2586,7 +2590,8 @@ prepare_multiscale_temporal_for_hmc <- function(temporal, data, N) {
     trend_type = temporal$trend,
     seasonal_period = as.integer(temporal$seasonal %||% 0L),
     short_term_type = temporal$short_term,
-    shared = temporal$shared
+    shared = temporal$shared,
+    parameterization = temporal$parameterization %||% "centered"
   )
 }
 
