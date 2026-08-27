@@ -2107,8 +2107,12 @@ ratiod::LaplaceResult laplace_mode_nngp(
 // an RW1 or RW2 precision carries no prior mass and is jointly unidentified
 // with the intercept, which leaves the Newton system singular along it. The
 // penalty -0.5 * lambda * (sum phi)^2 has Hessian lambda * 11', supported
-// entirely on that direction; lambda is the package-wide constant from
-// tulpa/soft_sum_to_zero.h, the same one the HMC temporal blocks read.
+// entirely on that direction; lambda is the constant tulpa/soft_sum_to_zero.h
+// derives. The HMC path identifies the same fields by augmenting the precision
+// and centring the effects instead (tulpa/sum_to_zero.h), which removes the
+// direction from a linear predictor a sampler has to traverse; here the mode
+// and its curvature are what the direction has to be resolved for, so the
+// penalty stands in for the constraint that makes the Newton system solvable.
 inline void add_sum_to_zero_pin_laplace(
     Rcpp::NumericVector& grad,
     Rcpp::NumericMatrix& H,

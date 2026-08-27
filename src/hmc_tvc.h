@@ -8,6 +8,7 @@
 #include <vector>
 #include <cmath>
 #include "hmc_temporal_autodiff.h"  // Templated RW1/RW2/AR1 implementations
+#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
 
 namespace ratiod_tvc {
 

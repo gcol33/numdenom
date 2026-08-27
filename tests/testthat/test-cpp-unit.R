@@ -1122,25 +1122,52 @@ test_that("temporal_log_prior RW1 matches manual computation", {
   expect_equal(result, expected, tolerance = 1e-10)
 })
 
-test_that("sum_to_zero_penalty penalizes sum != 0", {
-  # The penalty derives its own precision from the length of the sum it pins:
-  # sd(sum phi) = kappa * n with kappa = 0.001, so lambda = 1 / (kappa * n)^2.
-  lambda <- 1 / (0.001 * 3)^2
+test_that("the intrinsic arms' augmentation carries both the quadratic and the rank", {
+  # Q -> Q + 11'/n gives the constant direction the field's own precision tau,
+  # which adds (sum phi)^2 / n to the quadratic form AND one to the rank. A
+  # path that took one and not the other would make the tau-marginal wrong.
+  sigma2 <- 0.7
+  phi <- c(1, 2, 3)  # sum = 6
 
-  # Centered phi
-  phi_centered <- c(-1, 0, 1)
-  result_centered <- tulpaRatio:::cpp_test_sum_to_zero_penalty(phi_centered)
-  expect_equal(result_centered, 0.0, tolerance = 1e-10)
+  quad <- (2 - 1)^2 + (3 - 2)^2                      # 2
+  quad_aug <- quad + 6^2 / 3                         # 14
+  rank <- 2                                          # rw1_rank(3, FALSE)
 
-  # Non-centered phi
-  phi_noncentered <- c(1, 2, 3)  # sum = 6
-  result_noncentered <- tulpaRatio:::cpp_test_sum_to_zero_penalty(phi_noncentered)
-  expected <- -0.5 * lambda * 36
-  expect_equal(result_noncentered, expected, tolerance = 1e-10)
+  plain <- tulpaRatio:::cpp_test_ms_rw_log_lik(phi, sigma2, 1L, FALSE, FALSE)
+  expect_equal(plain,
+               -0.5 * quad / sigma2 - 0.5 * rank * log(2 * pi * sigma2),
+               tolerance = 1e-10)
 
-  # A kappa passed where a precision is meant is ~2.5e6 too weak at n = 20;
-  # the constant is derived inside the penalty so no caller can supply one.
-  expect_lt(result_noncentered, -0.5 * 0.001 * 36)
+  augmented <- tulpaRatio:::cpp_test_ms_rw_log_lik(phi, sigma2, 1L, FALSE, TRUE)
+  expect_equal(augmented,
+               -0.5 * quad_aug / sigma2 - 0.5 * (rank + 1) * log(2 * pi * sigma2),
+               tolerance = 1e-10)
+
+  # On the sum-to-zero subspace the quadratic is untouched, so the whole
+  # difference is the one extra rank the full-rank normalizer carries.
+  centred <- c(-1, 0, 1)
+  expect_equal(
+    tulpaRatio:::cpp_test_ms_rw_log_lik(centred, sigma2, 1L, FALSE, TRUE) -
+      tulpaRatio:::cpp_test_ms_rw_log_lik(centred, sigma2, 1L, FALSE, FALSE),
+    -0.5 * log(2 * pi * sigma2),
+    tolerance = 1e-10)
+})
+
+test_that("a non-cyclic RW2 stays deficient by one after the augmentation", {
+  # The augmentation fills the constant direction and nothing else. A non-cyclic
+  # RW2 also annihilates a linear ramp, so its rank goes T-2 -> T-1, not to T;
+  # passing the field length there would bias the variance component.
+  sigma2 <- 1.3
+  phi <- c(0.2, -0.5, 1.1, 0.4)
+  n <- length(phi)
+
+  d2 <- diff(diff(phi))
+  quad_aug <- sum(d2^2) + sum(phi)^2 / n
+
+  expect_equal(
+    tulpaRatio:::cpp_test_ms_rw_log_lik(phi, sigma2, 2L, FALSE, TRUE),
+    -0.5 * quad_aug / sigma2 - 0.5 * (n - 1) * log(2 * pi * sigma2),
+    tolerance = 1e-10)
 })
 
 # ---------------------------------------------------------------------------

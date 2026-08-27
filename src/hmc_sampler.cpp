@@ -882,7 +882,7 @@ static inline void tau_temporal_prior_grad(
 static inline void temporal_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
     double tau_temporal, double rho_ar1,
-    const double* phi_temporal, const double* z_temporal, int T_len,
+    const TemporalView& tview, int T_len,
     const double* grad_temporal_lik, double* grad);
 static inline double read_temporal_rho_ar1(
     const std::vector<double>& params, const ModelData& data,
@@ -2211,7 +2211,7 @@ void compute_gradient_analytical(
   // ============ Temporal GMRF prior gradients ============
   if (layout.has_temporal && T_len > 0) {
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
+                             tview, T_len, grad_temporal_lik.data(), grad.data());
   }
 
   // ============ Spatial GMRF prior gradients (ICAR and BYM2) ============
@@ -2874,19 +2874,25 @@ static inline void temporal_rho_prior_grad(
 // Writes the sampled block's gradients, the tau gradient, and the rho
 // gradient (for AR1).
 //
-// `phi_temporal` holds the effects, from temporal_effects(); `z_temporal` the
-// block the sampler moves in, which is the same pointer unless the field is
-// non-centred. `grad_temporal_lik[0..T_len-1]` holds the likelihood
-// contributions with respect to the effects, and the gradient written out is
-// always with respect to the sampled block.
+// `tview` carries the effects (`phi`, from temporal_effects()), the block the
+// sampler moves in (`z`), and an intrinsic walk's pre-centring sum.
+// `grad_temporal_lik[0..T_len-1]` holds the likelihood contributions with
+// respect to the effects, and the gradient written out is always with respect
+// to the sampled block.
+//
+// It identifies an intrinsic walk the way compute_log_post does -- centring
+// plus the augmented constant direction, see tulpa/sum_to_zero.h -- so that the
+// gradient and the density it is returned alongside describe the same target.
 // =====================================================================
 static inline void temporal_gmrf_prior_grad(
     const ModelData& data, const ParamLayout& layout,
     double tau_temporal, double rho_ar1,
-    const double* phi_temporal, const double* z_temporal, int T_len,
+    const TemporalView& tview, int T_len,
     const double* grad_temporal_lik,
     double* grad
 ) {
+    const double* phi_temporal = tview.phi;
+    const double* z_temporal = tview.z;
     int T = data.n_times;
     int n_groups = data.n_temporal_groups;
 
@@ -2911,10 +2917,27 @@ static inline void temporal_gmrf_prior_grad(
         return;
     }
 
-    // Initialize temporal gradients with likelihood contribution
+    // Initialize temporal gradients with likelihood contribution. An intrinsic
+    // walk enters eta centred, so eta depends on the sampled block only through
+    // phi - mean(phi) and the gradient with respect to that block is the
+    // projection (I - 11'/T_len) of the likelihood gradient: subtract its mean
+    // over the whole field, matching the single global constant the prior
+    // augments below.
     for (int t = 0; t < T_len; t++) {
         grad[layout.temporal_start + t] = grad_temporal_lik[t];
     }
+    if (tview.centred) {
+        (void)tulpa::s2z_centre_component(grad, layout.temporal_start, T_len);
+    }
+
+    // Gradient and quadratic contribution of the freed constant direction. One
+    // global direction, so both are formed from the whole field's raw sum.
+    const double aug_grad = tview.centred
+        ? ratiod_constraints::free_direction_grad(tview.raw_sum, T_len, tau_temporal)
+        : 0.0;
+    const double aug_quad = tview.centred
+        ? ratiod_constraints::free_direction_quad(tview.raw_sum, T_len)
+        : 0.0;
 
     if (data.temporal_type == TemporalType::RW1) {
         double total_qf = 0.0;
@@ -2940,9 +2963,11 @@ static inline void temporal_gmrf_prior_grad(
             }
             total_qf += qf;
             total_rank += tulpa::rw1_rank(T, data.temporal_cyclic);
-            ratiod_temporal::sum_to_zero_penalty_grad(phi_g, T, &grad[base]);
         }
-        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
+        total_rank = tulpa::s2z_aug_rank(total_rank, tview.centred ? 1 : 0);
+        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] += aug_grad;
+        grad[layout.log_tau_temporal_idx] +=
+            0.5 * total_rank - 0.5 * tau_temporal * (total_qf + aug_quad);
 
     } else if (data.temporal_type == TemporalType::RW2) {
         double total_qf = 0.0;
@@ -2975,9 +3000,13 @@ static inline void temporal_gmrf_prior_grad(
             }
             total_qf += qf;
             total_rank += tulpa::rw2_rank(T, data.temporal_cyclic);
-            ratiod_temporal::sum_to_zero_penalty_grad(phi_g, T, &grad[base]);
         }
-        grad[layout.log_tau_temporal_idx] += 0.5 * total_rank - 0.5 * tau_temporal * total_qf;
+        // A non-cyclic RW2 keeps its per-group LINEAR null direction, which the
+        // augmentation does not touch; s2z_aug_rank adds only the one constant.
+        total_rank = tulpa::s2z_aug_rank(total_rank, tview.centred ? 1 : 0);
+        for (int t = 0; t < T_len; t++) grad[layout.temporal_start + t] += aug_grad;
+        grad[layout.log_tau_temporal_idx] +=
+            0.5 * total_rank - 0.5 * tau_temporal * (total_qf + aug_quad);
 
     } else if (data.temporal_type == TemporalType::AR1) {
         double omr2 = ratiod_ar1::one_minus_rho2(rho_ar1);
@@ -4154,7 +4183,7 @@ void compute_gradient_icar_collapsed(
         TemporalView tview;
         tview.read(params, data, layout);
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 tview.phi, tview.z, T_temporal,
+                                 tview, T_temporal,
                                  grad_temporal_lik.data(), grad.data());
     }
 
@@ -4335,7 +4364,7 @@ void compute_gradient_gp_temporal_handcoded(
 
     // Temporal GMRF gradients
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
+                             tview, T_len, grad_temporal_lik.data(), grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -4790,7 +4819,7 @@ void compute_gradient_msgp_temporal_handcoded(
 
     // Temporal GMRF gradients
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
+                             tview, T_len, grad_temporal_lik.data(), grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -5994,7 +6023,7 @@ void compute_gradient_hsgp(
   // Temporal GMRF gradients
   if (layout.has_temporal && T_len > 0) {
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                             phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
+                             tview, T_len, grad_temporal_lik.data(), grad.data());
   }
 
     // Non-centered RE chain rule transformation
@@ -6238,7 +6267,7 @@ void compute_gradient_msgp_hsgp(
     // Temporal GMRF gradients
     if (layout.has_temporal && T_len > 0) {
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 phi_temporal, tview.z, T_len, grad_temporal_lik.data(), grad.data());
+                                 tview, T_len, grad_temporal_lik.data(), grad.data());
     }
 
     // Non-centered RE chain rule transformation
@@ -6396,13 +6425,9 @@ void compute_gradient_ms_temporal_handcoded(
     // Pre-assemble temporal effect per time point (avoids per-obs modulo)
     const int n_times = mst.n_times;
     std::vector<double> ms_effect_by_time(n_times, 0.0);
-    for (int t = 0; t < n_times; t++) {
-        if (trend != nullptr && t < n_trend) ms_effect_by_time[t] += trend[t];
-        if (seasonal != nullptr && mst.seasonal_period > 0) {
-            ms_effect_by_time[t] += seasonal[t % mst.seasonal_period];
-        }
-        if (short_term != nullptr && t < n_short) ms_effect_by_time[t] += short_term[t];
-    }
+    ratiod_temporal::compute_ms_effect_by_time(
+        trend, n_trend, seasonal, n_seasonal, short_term, n_short,
+        mst.seasonal_period, n_times, ms_effect_by_time.data());
 
     // Per-obs: add RE + spatial + multiscale temporal effects
     std::vector<int> obs_s_unit(N, -1);
@@ -6489,6 +6514,8 @@ void compute_gradient_ms_temporal_handcoded(
         short_term, n_short,
         sigma2_trend, sigma2_seasonal, sigma2_short, rho_short,
         mst, ms_grads);
+    ratiod_temporal_grad::project_ms_lik_gradients(
+        grad_trend_lik.data(), n_trend, grad_seasonal_lik.data(), n_seasonal, mst);
 
     for (int t = 0; t < n_trend; t++) grad[layout.trend_start + t] = grad_trend_lik[t] + ms_grads.grad_trend[t];
     for (int t = 0; t < n_seasonal; t++) grad[layout.seasonal_start + t] = grad_seasonal_lik[t] + ms_grads.grad_seasonal[t];
@@ -6818,7 +6845,7 @@ void compute_gradient_spatiotemporal_handcoded(
     // Temporal GMRF prior gradients
     if (layout.has_temporal && T_temporal > 0) {
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 phi_temporal, tview.z, T_temporal, grad_temporal_lik.data(), grad.data());
+                                 tview, T_temporal, grad_temporal_lik.data(), grad.data());
     }
 
     // =========================================================================
@@ -7285,11 +7312,9 @@ void compute_gradient_composite(
         }
         // Pre-assemble temporal effect per time point
         ms_effect_by_time_c.assign(mst.n_times, 0.0);
-        for (int t = 0; t < mst.n_times; t++) {
-            if (trend != nullptr && t < n_trend) ms_effect_by_time_c[t] += trend[t];
-            if (seasonal != nullptr && mst.seasonal_period > 0) ms_effect_by_time_c[t] += seasonal[t % mst.seasonal_period];
-            if (short_term != nullptr && t < n_short) ms_effect_by_time_c[t] += short_term[t];
-        }
+        ratiod_temporal::compute_ms_effect_by_time(
+            trend, n_trend, seasonal, n_seasonal, short_term, n_short,
+            mst.seasonal_period, mst.n_times, ms_effect_by_time_c.data());
         grad_trend_lik_c.assign(n_trend, 0.0);
         grad_seasonal_lik_c.assign(n_seasonal, 0.0);
         grad_short_lik_c.assign(n_short, 0.0);
@@ -7939,7 +7964,7 @@ void compute_gradient_composite(
     // Temporal GMRF prior
     if (has_gmrf_temporal && T_temporal > 0) {
         temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
-                                 phi_temporal, tview.z, T_temporal, grad_temporal_lik.data(), grad.data());
+                                 tview, T_temporal, grad_temporal_lik.data(), grad.data());
     }
 
     // Temporal GP backward pass
@@ -7976,6 +8001,9 @@ void compute_gradient_composite(
             trend, n_trend, seasonal, n_seasonal, short_term, n_short,
             sigma2_trend, sigma2_seasonal, sigma2_short, rho_short,
             data.multiscale_temporal_data, ms_grads);
+        ratiod_temporal_grad::project_ms_lik_gradients(
+            grad_trend_lik_c.data(), n_trend, grad_seasonal_lik_c.data(), n_seasonal,
+            data.multiscale_temporal_data);
         for (int t = 0; t < n_trend; t++) grad[layout.trend_start + t] = grad_trend_lik_c[t] + ms_grads.grad_trend[t];
         for (int t = 0; t < n_seasonal; t++) grad[layout.seasonal_start + t] = grad_seasonal_lik_c[t] + ms_grads.grad_seasonal[t];
         for (int t = 0; t < n_short; t++) grad[layout.short_term_start + t] = grad_short_lik_c[t] + ms_grads.grad_short_term[t];
@@ -11089,12 +11117,31 @@ HMCResultCpp run_hmc_chain_cpp(
                   row[layout.gp_regional_start + i] = msgp_store.regional()[i];
               }
           }
-          if (temporal_ar1_nc(data, layout)) {
+          if (temporal_effects_transformed(data, layout)) {
               std::vector<double> phi_store_buf;
               const double* phi_store = temporal_effects(q, data, layout, phi_store_buf);
               const int T_store = layout.temporal_end - layout.temporal_start;
               for (int i = 0; i < T_store; i++) {
                   row[layout.temporal_start + i] = phi_store[i];
+              }
+          }
+          // The intrinsic multiscale arms enter eta centred, and the R side
+          // adds the stored field straight back into eta, so the stored draw
+          // is the centred one: an uncentred draw would report -- and predict
+          // from -- a different series than the one the likelihood saw.
+          if (layout.has_multiscale_temporal) {
+              const auto& mst_store = data.multiscale_temporal_data;
+              const int n_trend_store = layout.trend_end - layout.trend_start;
+              const int n_seasonal_store = layout.seasonal_end - layout.seasonal_start;
+              if (n_trend_store > 0 &&
+                  (mst_store.trend_type == TemporalType::RW1 ||
+                   mst_store.trend_type == TemporalType::RW2)) {
+                  (void)tulpa::s2z_centre_component(row, layout.trend_start,
+                                                    n_trend_store);
+              }
+              if (n_seasonal_store > 0 && mst_store.seasonal_period > 0) {
+                  (void)tulpa::s2z_centre_component(row, layout.seasonal_start,
+                                                    n_seasonal_store);
               }
           }
       }

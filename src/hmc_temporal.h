@@ -10,8 +10,7 @@
 #include <cmath>
 #include <utility>
 
-#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
-#include <tulpa/sum_to_zero.h>       // rw1_rank / rw2_rank
+#include <tulpa/sum_to_zero.h>  // rw1_rank / rw2_rank / s2z_component_sum
 #include "ar1_shared.h"              // the floored 1 - rho^2
 
 // Fallback definition of M_PI if not provided by <cmath>
@@ -266,33 +265,6 @@ inline double temporal_log_prior(
   }
 
   return log_prior;
-}
-
-// =====================================================================
-// Sum-to-zero constraint (soft)
-// =====================================================================
-
-// Apply the soft sum-to-zero constraint penalty for RW models. The pinned sum
-// runs over all T coefficients of the field, so the precision is
-// s2z_precision(T); it is derived here rather than taken from the caller so no
-// call site can pass a kappa where a precision is meant (tulpa/soft_sum_to_zero.h).
-template <typename T>
-inline T sum_to_zero_penalty(const T* phi, int T_len) {
-  T sum = T(0.0);
-  for (int t = 0; t < T_len; t++) {
-    sum = sum + phi[t];
-  }
-  return T(-0.5 * tulpa::s2z_precision(T_len)) * sum * sum;
-}
-
-// Gradient of sum_to_zero_penalty w.r.t. each phi[t], accumulated into `grad`.
-// Every coefficient sees the same -lambda * sum, since the penalty depends on
-// the field only through its sum.
-inline void sum_to_zero_penalty_grad(const double* phi, int T_len, double* grad) {
-  double sum = 0.0;
-  for (int t = 0; t < T_len; t++) sum += phi[t];
-  const double push = tulpa::s2z_precision(T_len) * sum;
-  for (int t = 0; t < T_len; t++) grad[t] -= push;
 }
 
 } // namespace ratiod_temporal

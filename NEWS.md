@@ -1,5 +1,31 @@
 # tulpaRatio 1.7.2
 
+* **Intrinsic fields identified by augment-and-centre (#22).** The temporal
+  random walks and the multi-scale trend and seasonal arms were identified by a
+  soft penalty on the field's sum, `-0.5 * lambda * (sum phi)^2` at
+  `tulpa::s2z_precision(n)`. That pins the constant direction without removing
+  it: the direction stays in the linear predictor at precision `1 / (kappa*n)^2
+  * n`, five orders of magnitude above the `tau` the field's own directions
+  carry, and a step size that holds it stable is the one the whole field then
+  has to move at.
+
+  These fields now use the engine's construction (`tulpa/sum_to_zero.h`,
+  gcol33/tulpa#241): the precision is augmented, `Q -> Q + 11'/n`, so the
+  constant carries the field's own `tau`, and the effects are centred on their
+  way into `eta`, so the likelihood never sees it. The normalizer takes the
+  augmented rank -- one more pinned direction, except that a non-cyclic RW2
+  keeps its linear null direction and stays deficient by one. Measured on a
+  500-observation binomial fixture, the adapted step size rises from 0.101 to
+  0.351 for `temporal_rw1()` and from 0.105 to 0.255 for `temporal_rw2()`, and
+  the leapfrog steps per iteration fall from 35 to 12 and from 42 to 20; the
+  multi-scale arms move from 0.066 to 0.124 and from 0.040 to 0.056.
+
+  The reported field changes with it. `fitted()`, `ratio()` and `predict()` add
+  the stored field back into `eta`, so an intrinsic field's draws are now stored
+  centred -- the series the likelihood saw, rather than one differing from it by
+  a level. `temporal_ar1()`, `temporal_iid()` and the temporal GP are proper,
+  identify their own level, and are unchanged.
+
 * **`spatial_multiscale(parameterization = "noncentered")` (#75).** The
   multi-scale field was the one continuous field in the package with a single
   coordinate: `spatial_gp()` offers `"centered"`, `"noncentered"` and

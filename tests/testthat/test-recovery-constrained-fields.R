@@ -276,3 +276,40 @@ test_that("a spatial-only model reaches a sampler that reports its chains", {
   expect_identical(as.integer(f$chains), 4L)
   expect_true(any(grepl("^phi_spatial\\[", colnames(as.matrix(f$draws)))))
 })
+
+test_that("an intrinsic field is reported as the field the likelihood saw", {
+  skip_on_cran()
+
+  # The intrinsic fields enter eta centred, and hmc_unpack adds the STORED
+  # field straight back into eta for fitted(), ratio() and predict(). A draw
+  # that kept its constant would report -- and predict from -- a series that
+  # differs from the fitted one by a level the likelihood never saw, so the
+  # constraint has to hold on the stored draws and not only inside the density.
+  block_means <- function(f, prefix) {
+    dr <- as.matrix(f$draws)
+    cols <- which(startsWith(colnames(dr), paste0(prefix, "[")))
+    expect_gt(length(cols), 1L)
+    rowMeans(dr[, cols, drop = FALSE])
+  }
+
+  df <- sim_data(11)
+  ctl <- list(iter = 400, warmup = 200, chains = 2, seed = 3, verbose = FALSE)
+
+  f_rw1 <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
+                  temporal = temporal_rw1("time"), control = ctl)
+  expect_lt(max(abs(block_means(f_rw1, "temporal"))), 1e-9)
+
+  f_ms <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
+                 temporal = temporal_multiscale("time", trend = "rw1",
+                                                seasonal = 4,
+                                                short_term = "none"),
+                 control = ctl)
+  expect_lt(max(abs(block_means(f_ms, "trend"))), 1e-9)
+  expect_lt(max(abs(block_means(f_ms, "seasonal"))), 1e-9)
+
+  # AR1 is proper and identifies its own level, so its draws are NOT centred:
+  # centring it would impose a constraint the model does not carry.
+  f_ar1 <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
+                  temporal = temporal_ar1("time"), control = ctl)
+  expect_gt(max(abs(block_means(f_ar1, "temporal"))), 1e-9)
+})

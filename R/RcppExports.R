@@ -401,8 +401,8 @@ cpp_test_temporal_log_prior <- function(phi, type_str, tau, rho, cyclic) {
     .Call(`_tulpaRatio_cpp_test_temporal_log_prior`, phi, type_str, tau, rho, cyclic)
 }
 
-cpp_test_sum_to_zero_penalty <- function(phi) {
-    .Call(`_tulpaRatio_cpp_test_sum_to_zero_penalty`, phi)
+cpp_test_ms_rw_log_lik <- function(phi, sigma2, order, cyclic, augment) {
+    .Call(`_tulpaRatio_cpp_test_ms_rw_log_lik`, phi, sigma2, order, cyclic, augment)
 }
 
 cpp_test_log1pexp <- function(x) {

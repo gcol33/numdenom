@@ -18,6 +18,18 @@
 #ifndef ratiod_hmc_ICAR_COLLAPSED_H
 #define ratiod_hmc_ICAR_COLLAPSED_H
 
+// The field is identified here by the SOFT pin, not by the augment-and-centre
+// construction the sampled ICAR/BYM2 block uses (tulpa/sum_to_zero.h). What
+// makes the pin the wrong instrument there is that the constant direction stays
+// in a linear predictor the sampler has to traverse, at a precision five orders
+// of magnitude above the field's own. Here phi is MARGINALIZED: no sampler
+// coordinate carries it, the pin acts on the inner mode as the hard constraint,
+// and the marginal that comes out is the hard-constrained one -- which is also
+// what augment-and-centre integrates to, since the freed constant's tau
+// cancels between the extra rank and its own integral. The two constructions
+// agree on this path, and the pin keeps the inner Hessian's rank-1 term
+// sparse-factorizable, where centring would make the likelihood block
+// (I - 11'/J) W (I - 11'/J) and cost a dense rank-2 correction.
 #include <tulpa/soft_sum_to_zero.h>
 
 #include <vector>

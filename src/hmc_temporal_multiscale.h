@@ -16,8 +16,7 @@
 #include "hmc_temporal.h"  // For TemporalType enum
 #include "autodiff_utils.h"
 
-#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
-#include <tulpa/sum_to_zero.h>       // rw1_rank / rw2_rank
+#include <tulpa/sum_to_zero.h>  // rw1_rank / rw2_rank / s2z_aug_* / component sums
 
 namespace ratiod_temporal {
 
@@ -48,39 +47,45 @@ struct MultiscaleTemporalData {
 // -----------------------------------------------------------------------------
 
 // Log-likelihood for RW1: sum of (phi[t] - phi[t-1])^2 / (2*sigma2).
-// `pin` adds the soft sum-to-zero term that identifies the constant null
-// direction against the intercept; see multiscale_temporal_log_lik.
+// `augment` identifies the constant null direction by Q -> Q + 11'/n, the
+// construction tulpa/sum_to_zero.h describes; see multiscale_temporal_log_lik.
 template <typename T>
 inline T rw1_log_lik(
     const std::vector<T>& phi,  // Length T
     const T& sigma2,
     bool cyclic = false,
-    bool pin = false
+    bool augment = false
 ) {
   int n = static_cast<int>(phi.size());
   if (n < 2) return T(0.0);
 
-  T log_lik = T(0.0);
+  T quad = T(0.0);
 
   // First differences
   for (int t = 1; t < n; t++) {
     T diff = phi[t] - phi[t - 1];
-    log_lik = log_lik - T(0.5) * diff * diff / sigma2;
+    quad = quad + diff * diff;
   }
 
   // Cyclic: add connection from last to first
   if (cyclic) {
     T diff = phi[0] - phi[n - 1];
-    log_lik = log_lik - T(0.5) * diff * diff / sigma2;
+    quad = quad + diff * diff;
   }
 
-  // Normalizing constant (improper prior, omit for sampling)
-  log_lik = log_lik
-          - T(0.5 * tulpa::rw1_rank(n, cyclic)) * safe_log(T(2.0 * M_PI) * sigma2);
+  int rank = tulpa::rw1_rank(n, cyclic);
 
-  if (pin) log_lik = log_lik + sum_to_zero_penalty(phi.data(), n);
+  // RW1's null space is the constant alone, so the augmentation fills it and
+  // the field becomes full rank. The quadratic and the rank move together here
+  // rather than the caller adding one and this adding the other.
+  if (augment) {
+    const T s = tulpa::s2z_component_sum(phi.data(), 0, n);
+    quad = quad + tulpa::s2z_aug_coef(T(1.0), n) * s * s;
+    rank = tulpa::s2z_aug_rank(rank, 1);
+  }
 
-  return log_lik;
+  return T(-0.5) * quad / sigma2
+       - T(0.5 * rank) * safe_log(T(2.0 * M_PI) * sigma2);
 }
 
 // -----------------------------------------------------------------------------
@@ -93,37 +98,41 @@ inline T rw2_log_lik(
     const std::vector<T>& phi,  // Length T
     const T& sigma2,
     bool cyclic = false,
-    bool pin = false
+    bool augment = false
 ) {
   int n = static_cast<int>(phi.size());
   if (n < 3) return T(0.0);
 
-  T log_lik = T(0.0);
+  T quad = T(0.0);
 
   // Second differences
   for (int t = 2; t < n; t++) {
     T diff2 = phi[t] - T(2.0) * phi[t - 1] + phi[t - 2];
-    log_lik = log_lik - T(0.5) * diff2 * diff2 / sigma2;
+    quad = quad + diff2 * diff2;
   }
 
   // Cyclic: add wrap-around connections
   if (cyclic) {
     T diff2_1 = phi[0] - T(2.0) * phi[n - 1] + phi[n - 2];
     T diff2_2 = phi[1] - T(2.0) * phi[0] + phi[n - 1];
-    log_lik = log_lik - T(0.5) * diff2_1 * diff2_1 / sigma2;
-    log_lik = log_lik - T(0.5) * diff2_2 * diff2_2 / sigma2;
+    quad = quad + diff2_1 * diff2_1 + diff2_2 * diff2_2;
   }
 
-  // Normalizing constant
-  log_lik = log_lik
-          - T(0.5 * tulpa::rw2_rank(n, cyclic)) * safe_log(T(2.0 * M_PI) * sigma2);
+  int rank = tulpa::rw2_rank(n, cyclic);
 
-  // Only the constant direction is pinned. A non-cyclic RW2 also annihilates a
+  // Only the constant direction is filled. A non-cyclic RW2 also annihilates a
   // linear ramp, which the intercept does not absorb and a slope term does, so
-  // that direction is left to the temporal covariate rather than pinned here.
-  if (pin) log_lik = log_lik + sum_to_zero_penalty(phi.data(), n);
+  // that direction is left to the temporal covariate and the field stays
+  // deficient by one: s2z_aug_rank takes rank(Q) and the number of directions
+  // actually filled rather than assuming the field length.
+  if (augment) {
+    const T s = tulpa::s2z_component_sum(phi.data(), 0, n);
+    quad = quad + tulpa::s2z_aug_coef(T(1.0), n) * s * s;
+    rank = tulpa::s2z_aug_rank(rank, 1);
+  }
 
-  return log_lik;
+  return T(-0.5) * quad / sigma2
+       - T(0.5 * rank) * safe_log(T(2.0 * M_PI) * sigma2);
 }
 
 // -----------------------------------------------------------------------------
@@ -197,9 +206,10 @@ inline T multiscale_temporal_log_lik(
 
   // Trend and seasonal are both intrinsic and both enter the SAME linear
   // predictor, so each carries a constant null direction that is unidentified
-  // against the intercept and against the other component. Both are pinned.
-  // The short-term arm is proper (AR1/IID), identifies its own level, and is
-  // left alone.
+  // against the intercept and against the other component. Both are augmented,
+  // and compute_ms_effect_by_time centres both on the way into eta -- the two
+  // halves of one construction. The short-term arm is proper (AR1/IID),
+  // identifies its own level, and is left alone.
 
   // Trend component
   if (temp_data.trend_type == TemporalType::RW1 && !trend.empty()) {
@@ -227,7 +237,60 @@ inline T multiscale_temporal_log_lik(
 // Compute total temporal effect at each observation
 // -----------------------------------------------------------------------------
 
-// eta_temporal[i] = trend[time_idx[i]] + seasonal[time_idx[i] % period] + short[time_idx[i]]
+// The multiscale effect at each time point, which is what every eta assembly
+// adds. The single source of truth for what the linear predictor sees: the
+// templated density indexes it through compute_temporal_eta below, and each
+// analytic gradient path builds it once per time point and indexes it per
+// observation.
+//
+// The intrinsic arms are centred on their way in. Their augmented prior gives
+// each constant direction the arm's own precision (order 1) rather than the
+// stiff pin that preceded it, so leaving the constant in eta would free the
+// level instead of fixing it -- and trend and seasonal land on the same linear
+// predictor, so their constants are unidentified against each other as well as
+// against the intercept. The short-term arm is proper and keeps its own level.
+template <typename T>
+inline void compute_ms_effect_by_time(
+    const T* trend, int n_trend,
+    const T* seasonal, int n_seasonal,
+    const T* short_term, int n_short,
+    int seasonal_period,
+    int n_times,
+    T* effect_by_time  // Output: length n_times
+) {
+  const T trend_mean = (trend != nullptr && n_trend > 0)
+      ? tulpa::s2z_component_mean(trend, 0, n_trend)
+      : T(0.0);
+  const T seasonal_mean = (seasonal != nullptr && n_seasonal > 0)
+      ? tulpa::s2z_component_mean(seasonal, 0, n_seasonal)
+      : T(0.0);
+
+  for (int t = 0; t < n_times; t++) {
+    T effect = T(0.0);
+
+    // Trend contribution
+    if (trend != nullptr && t < n_trend) {
+      effect = effect + (trend[t] - trend_mean);
+    }
+
+    // Seasonal contribution (wrap around using modulo)
+    if (seasonal != nullptr && seasonal_period > 0) {
+      int s_idx = t % seasonal_period;
+      if (s_idx < n_seasonal) {
+        effect = effect + (seasonal[s_idx] - seasonal_mean);
+      }
+    }
+
+    // Short-term contribution
+    if (short_term != nullptr && t < n_short) {
+      effect = effect + short_term[t];
+    }
+
+    effect_by_time[t] = effect;
+  }
+}
+
+// eta_temporal[i] = the multiscale effect at observation i's time point.
 template <typename T>
 inline void compute_temporal_eta(
     const std::vector<T>& trend,
@@ -236,34 +299,22 @@ inline void compute_temporal_eta(
     const MultiscaleTemporalData& temp_data,
     std::vector<T>& eta_temporal  // Output: length n_obs
 ) {
-  int N = temp_data.n_obs;
-  eta_temporal.resize(N);
+  const int N = temp_data.n_obs;
+  const int n_times = temp_data.n_times > 0 ? temp_data.n_times : 0;
 
+  std::vector<T> effect_by_time(static_cast<std::size_t>(n_times), T(0.0));
+  compute_ms_effect_by_time(
+      trend.empty() ? nullptr : trend.data(), static_cast<int>(trend.size()),
+      seasonal.empty() ? nullptr : seasonal.data(),
+      static_cast<int>(seasonal.size()),
+      short_term.empty() ? nullptr : short_term.data(),
+      static_cast<int>(short_term.size()),
+      temp_data.seasonal_period, n_times, effect_by_time.data());
+
+  eta_temporal.assign(static_cast<std::size_t>(N), T(0.0));
   for (int i = 0; i < N; i++) {
-    T effect = T(0.0);
     int t_idx = temp_data.time_index[i] - 1;  // Convert to 0-based
-
-    // Trend contribution
-    if (!trend.empty() && t_idx >= 0 &&
-        t_idx < static_cast<int>(trend.size())) {
-      effect = effect + trend[t_idx];
-    }
-
-    // Seasonal contribution (wrap around using modulo)
-    if (temp_data.seasonal_period > 0 && !seasonal.empty()) {
-      int s_idx = t_idx % temp_data.seasonal_period;
-      if (s_idx >= 0 && s_idx < static_cast<int>(seasonal.size())) {
-        effect = effect + seasonal[s_idx];
-      }
-    }
-
-    // Short-term contribution
-    if (!short_term.empty() && t_idx >= 0 &&
-        t_idx < static_cast<int>(short_term.size())) {
-      effect = effect + short_term[t_idx];
-    }
-
-    eta_temporal[i] = effect;
+    if (t_idx >= 0 && t_idx < n_times) eta_temporal[i] = effect_by_time[t_idx];
   }
 }
 

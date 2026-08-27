@@ -877,6 +877,7 @@ List cpp_test_compute_linear_predictors(
 // ---------------------------------------------------------------------------
 
 #include "hmc_temporal.h"
+#include "hmc_temporal_multiscale.h"
 
 // [[Rcpp::export]]
 double cpp_test_rw1_quadratic_form(NumericVector phi, bool cyclic) {
@@ -918,8 +919,12 @@ double cpp_test_temporal_log_prior(
 }
 
 // [[Rcpp::export]]
-double cpp_test_sum_to_zero_penalty(NumericVector phi) {
-  return ratiod_temporal::sum_to_zero_penalty(phi.begin(), (int)phi.size());
+double cpp_test_ms_rw_log_lik(NumericVector phi, double sigma2, int order,
+                              bool cyclic, bool augment) {
+  std::vector<double> v(phi.begin(), phi.end());
+  return order == 2
+      ? ratiod_temporal::rw2_log_lik(v, sigma2, cyclic, augment)
+      : ratiod_temporal::rw1_log_lik(v, sigma2, cyclic, augment);
 }
 
 // ---------------------------------------------------------------------------

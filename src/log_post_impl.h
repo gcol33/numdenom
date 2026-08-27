@@ -243,6 +243,11 @@ T compute_log_post_impl(
     // Temporal effects
     std::vector<T> phi_temporal;
     std::vector<T> z_temporal;  // Non-centred AR1's sampled block
+    // Intrinsic walks are centred on their way into eta and their single global
+    // constant direction is augmented in the prior; the analytic side decides
+    // the same thing in temporal_is_intrinsic().
+    bool center_temporal = false;
+    T phi_temporal_mean = T(0.0);
     T tau_temporal = T(1.0);
     T rho_ar1 = T(0.0);
     T sigma2_temporal_gp = T(1.0);
@@ -296,6 +301,14 @@ T compute_log_post_impl(
                                           + z_temporal[off + t] * inv_sqrt_tau;
                 }
             }
+        }
+
+        center_temporal = !layout.is_temporal_gp && !phi_temporal.empty() &&
+            (data.temporal_type == TemporalType::RW1 ||
+             data.temporal_type == TemporalType::RW2);
+        if (center_temporal) {
+            phi_temporal_mean = tulpa::s2z_component_mean(
+                phi_temporal.data(), 0, static_cast<int>(phi_temporal.size()));
         }
     }
 
@@ -793,6 +806,19 @@ T compute_log_post_impl(
             T log_tau = params[layout.log_tau_temporal_idx];
             log_post = log_post + log_prior_gamma(log_tau, data.tau_temporal_shape, data.tau_temporal_rate);
 
+            // The augmented constant direction's contribution to the quadratic
+            // form. Exactly one global direction is filled, so the sum runs
+            // over the whole field rather than per group; see
+            // temporal_is_intrinsic() for why the group contrasts are left
+            // improper.
+            const auto global_aug_quad = [&]() -> T {
+                if (!center_temporal) return T(0.0);
+                const int n_total = static_cast<int>(phi_temporal.size());
+                const T s = tulpa::s2z_component_sum(phi_temporal.data(), 0, n_total);
+                return tulpa::s2z_aug_coef(T(1.0), n_total) * s * s;
+            };
+            const int n_aug_pins = center_temporal ? 1 : 0;
+
             if (data.temporal_type == TemporalType::RW1) {
                 // RW1: sum of (phi[t] - phi[t-1])^2
                 T quad_form = T(0.0);
@@ -807,21 +833,14 @@ T compute_log_post_impl(
                         quad_form = quad_form + diff_cyclic * diff_cyclic;
                     }
                 }
-                // Rank: T for cyclic, T-1 for non-cyclic
-                int rank_rw1 = tulpa::rw1_rank(T_times, data.temporal_cyclic);
-                log_post = log_post + T(0.5 * rank_rw1 * data.n_temporal_groups) * log_tau;
+                // Rank: T for cyclic, T-1 for non-cyclic, per group, plus the
+                // one global constant the augmentation fills.
+                quad_form = quad_form + global_aug_quad();
+                int rank_rw1 = tulpa::s2z_aug_rank(
+                    tulpa::rw1_rank(T_times, data.temporal_cyclic)
+                        * data.n_temporal_groups, n_aug_pins);
+                log_post = log_post + T(0.5 * rank_rw1) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
-
-                // Soft sum-to-zero, per group; matches the analytic log posterior.
-                {
-                    const T s2z = T(tulpa::s2z_precision(T_times));
-                    for (int g = 0; g < data.n_temporal_groups; g++) {
-                        T grp_sum = T(0.0);
-                        for (int t = 0; t < T_times; t++)
-                            grp_sum = grp_sum + phi_temporal[g * T_times + t];
-                        log_post = log_post - T(0.5) * s2z * grp_sum * grp_sum;
-                    }
-                }
 
             } else if (data.temporal_type == TemporalType::RW2) {
                 // RW2: sum of (phi[t] - 2*phi[t-1] + phi[t-2])^2
@@ -844,21 +863,15 @@ T compute_log_post_impl(
                         quad_form = quad_form + d2_a * d2_a + d2_b * d2_b;
                     }
                 }
-                // Rank: T for cyclic, T-2 for non-cyclic
-                int rank_rw2 = tulpa::rw2_rank(T_times, data.temporal_cyclic);
-                log_post = log_post + T(0.5 * rank_rw2 * data.n_temporal_groups) * log_tau;
+                // Rank: T for cyclic, T-2 for non-cyclic, per group, plus the
+                // one global constant. A non-cyclic RW2 also keeps its
+                // per-group LINEAR null direction, which this does not touch.
+                quad_form = quad_form + global_aug_quad();
+                int rank_rw2 = tulpa::s2z_aug_rank(
+                    tulpa::rw2_rank(T_times, data.temporal_cyclic)
+                        * data.n_temporal_groups, n_aug_pins);
+                log_post = log_post + T(0.5 * rank_rw2) * log_tau;
                 log_post = log_post - T(0.5) * tau_temporal * quad_form;
-
-                // Soft sum-to-zero, per group; matches the analytic log posterior.
-                {
-                    const T s2z = T(tulpa::s2z_precision(T_times));
-                    for (int g = 0; g < data.n_temporal_groups; g++) {
-                        T grp_sum = T(0.0);
-                        for (int t = 0; t < T_times; t++)
-                            grp_sum = grp_sum + phi_temporal[g * T_times + t];
-                        log_post = log_post - T(0.5) * s2z * grp_sum * grp_sum;
-                    }
-                }
 
             } else if (data.temporal_type == TemporalType::AR1) {
                 // Beta(a, b) on u = (rho + 1) / 2, logit Jacobian folded in
@@ -1469,7 +1482,11 @@ T compute_log_post_impl(
         if (layout.has_temporal && !data.temporal_time_idx.empty() && data.temporal_time_idx[i] > 0) {
             int t = data.temporal_time_idx[i] - 1;
             int g = data.temporal_group_idx[i] - 1;
-            T temporal_effect = phi_temporal[g * data.n_times + t];
+            // Intrinsic walks are centred on the way in; their augmented
+            // constant carries tau, so leaving it in eta would free the level.
+            T temporal_effect = center_temporal
+                ? phi_temporal[g * data.n_times + t] - phi_temporal_mean
+                : phi_temporal[g * data.n_times + t];
 
             if (data.temporal_shared) {
                 eta_num = eta_num + temporal_effect;

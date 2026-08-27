@@ -2055,9 +2055,41 @@ inline bool temporal_ar1_nc(const ModelData& data, const ParamLayout& layout) {
          data.temporal_parameterization == 1;
 }
 
-// The temporal effects at `params`: read in place when the field is sampled
-// centred, reconstructed into `buf` when it is not. Every density and every
-// gradient reads the effects, so the transform lives here and nowhere else.
+// Whether the standalone temporal field is an intrinsic walk. RW1 and RW2 have
+// a constant null direction that is unidentified against the intercept; the
+// prior augments it (Q -> Q + 11'/n) and the effects are centred on their way
+// into eta, the two halves of tulpa/sum_to_zero.h's construction. AR1, IID and
+// the temporal GP are proper and identify their own level.
+//
+// Exactly ONE direction is treated: the single GLOBAL constant. With several
+// groups the walks are disconnected, so the prior's null space is G constants,
+// but a per-group level shifts eta only for that group's observations and the
+// likelihood identifies it. Augmenting per group would put a proper
+// N(0, 1/tau) prior on those G - 1 contrasts and shrink them, which is a
+// different model.
+inline bool temporal_is_intrinsic(const ModelData& data,
+                                  const ParamLayout& layout) {
+  return layout.has_temporal && !layout.is_temporal_gp &&
+         (data.temporal_type == TemporalType::RW1 ||
+          data.temporal_type == TemporalType::RW2);
+}
+
+// Whether the temporal effects differ from the block the sampler moves in, so
+// a stored draw has to carry the transform rather than the coordinate: a
+// non-centred AR1 samples innovations, and an intrinsic walk's level is
+// removed on the way into eta. The reported field is then the one the
+// likelihood saw, which is what the R side adds back into eta.
+inline bool temporal_effects_transformed(const ModelData& data,
+                                         const ParamLayout& layout) {
+  return temporal_ar1_nc(data, layout) || temporal_is_intrinsic(data, layout);
+}
+
+// The temporal effects at `params`: the values that enter the linear
+// predictor. Read in place when the sampled block already holds them,
+// reconstructed into `buf` when a non-centred AR1 holds innovations instead,
+// and centred into `buf` when an intrinsic walk's constant has to be removed.
+// Every density and every gradient reads the effects, so the transform lives
+// here and nowhere else.
 inline const double* temporal_effects(
     const std::vector<double>& params,
     const ModelData& data,
@@ -2065,6 +2097,14 @@ inline const double* temporal_effects(
     std::vector<double>& buf
 ) {
   const double* z = &params[layout.temporal_start];
+
+  if (temporal_is_intrinsic(data, layout)) {
+    const int n = layout.temporal_end - layout.temporal_start;
+    buf.assign(z, z + n);
+    (void)tulpa::s2z_centre_component(buf.data(), 0, n);
+    return buf.data();
+  }
+
   if (!temporal_ar1_nc(data, layout)) return z;
 
   const int T = data.n_times;
@@ -2081,16 +2121,25 @@ inline const double* temporal_effects(
 
 // The temporal block as a density or a gradient needs it: `phi`, the effects
 // that enter the linear predictor, and `z`, the coordinate the sampler moves
-// in. The two are the same pointer unless the field is non-centred, and the
-// buffer backing a reconstruction lives as long as the view does.
+// in. The two are the same pointer unless the field is non-centred or centred,
+// and the buffer backing either lives as long as the view does. `raw_sum`
+// carries the freed constant direction of an intrinsic walk, which the
+// augmented quadratic form needs and centring has removed from `phi`.
 struct TemporalView {
   std::vector<double> buf;
   const double* phi = nullptr;
   const double* z = nullptr;
+  double raw_sum = 0.0;
+  bool centred = false;
 
   void read(const std::vector<double>& params, const ModelData& data,
             const ParamLayout& layout) {
     z = &params[layout.temporal_start];
+    centred = temporal_is_intrinsic(data, layout);
+    if (centred) {
+      raw_sum = tulpa::s2z_component_sum(
+          z, 0, layout.temporal_end - layout.temporal_start);
+    }
     phi = temporal_effects(params, data, layout, buf);
   }
 };

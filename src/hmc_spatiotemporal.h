@@ -13,6 +13,7 @@
 #include "hmc_svc.h"
 #include "autodiff_utils.h"
 #include "ar1_shared.h"
+#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
 #include "hmc_temporal_autodiff.h"
 #include "hmc_svc_autodiff.h"
 

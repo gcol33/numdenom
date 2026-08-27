@@ -10,10 +10,41 @@
 #include <cstring>
 #include "hmc_temporal_multiscale.h"
 
+#include <tulpa/sum_to_zero.h>  // s2z_aug_quad / _quad_grad / _rank
+
 namespace ratiod_temporal_grad {
 
 using ratiod_temporal::MultiscaleTemporalData;
 using ratiod_temporal::TemporalType;
+
+// The sum-to-zero augmentation, as the intrinsic VALUE functions apply it
+// (ratiod_temporal::rw1_log_lik / rw2_log_lik with `augment`), split into the
+// three places a gradient has to follow it: the normalizer's rank, the
+// quadratic form the normalizer's tau multiplies, and the constant every
+// coordinate picks up. The three live together so they cannot move apart.
+
+// Rank of the normalizer: the augmentation fills exactly the component's
+// constant direction, so it adds one pinned direction.
+inline int aug_rank(int rank_Q, bool augment) {
+    return augment ? tulpa::s2z_aug_rank(rank_Q, 1) : rank_Q;
+}
+
+// The quadratic form the normalizer's tau multiplies: the structure's own plus
+// the augmentation's squared component sum over the component size.
+inline double aug_quad(const double* phi, int n, double quad, bool augment) {
+    if (!augment) return quad;
+    return quad + tulpa::s2z_aug_quad(phi, 0, n, 1.0);
+}
+
+// The augmentation's contribution to d(log p)/d(phi_t): the same constant at
+// every coordinate, since the augmentation couples the component through its
+// sum and through nothing else.
+inline void add_s2z_aug_grad(const double* phi, int n, double tau,
+                             double* grad_phi, bool augment) {
+    if (!augment || n < 1) return;
+    const double g = tulpa::s2z_aug_quad_grad(phi, 0, n, tau);
+    for (int t = 0; t < n; t++) grad_phi[t] -= g;
+}
 
 // Structure to hold multiscale temporal gradient results
 // Pre-allocate with init() and reuse across iterations to avoid heap churn
@@ -39,7 +70,8 @@ struct MultiscaleTemporalGradients {
 
 // RW1: log p(phi|sigma2) = -0.5 * (T-1) * log(2*pi*sigma2)
 //                        - 0.5 / sigma2 * sum((phi[t] - phi[t-1])^2)
-inline void rw1_grad_phi(const double* phi, int n, double sigma2, double* grad_phi) {
+inline void rw1_grad_phi(const double* phi, int n, double sigma2,
+                         double* grad_phi, bool augment = false) {
     double inv_sigma2 = 1.0 / (sigma2 + 1e-10);
 
     for (int t = 0; t < n; t++) {
@@ -51,9 +83,11 @@ inline void rw1_grad_phi(const double* phi, int n, double sigma2, double* grad_p
             grad_phi[t] = -inv_sigma2 * (2.0 * phi[t] - phi[t-1] - phi[t+1]);
         }
     }
+    add_s2z_aug_grad(phi, n, inv_sigma2, grad_phi, augment);
 }
 
-inline double rw1_grad_log_sigma2(const double* phi, int n, double sigma2) {
+inline double rw1_grad_log_sigma2(const double* phi, int n, double sigma2,
+                                  bool augment = false) {
     double quad = 0.0;
     for (int t = 1; t < n; t++) {
         double diff = phi[t] - phi[t-1];
@@ -62,7 +96,8 @@ inline double rw1_grad_log_sigma2(const double* phi, int n, double sigma2) {
     // d/d(sigma2) [log_GMRF] = -0.5*rank/sigma2 + 0.5*quad/sigma2^2
     // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
     //           = -0.5*rank + 0.5*quad/sigma2
-    return -0.5 * tulpa::rw1_rank(n, false) + 0.5 * quad / (sigma2 + 1e-10);
+    return -0.5 * aug_rank(tulpa::rw1_rank(n, false), augment)
+         + 0.5 * aug_quad(phi, n, quad, augment) / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -70,7 +105,8 @@ inline double rw1_grad_log_sigma2(const double* phi, int n, double sigma2) {
 // =============================================================================
 
 // Cyclic RW1: adds connection from last to first
-inline void rw1_cyclic_grad_phi(const double* phi, int n, double sigma2, double* grad_phi) {
+inline void rw1_cyclic_grad_phi(const double* phi, int n, double sigma2,
+                                double* grad_phi, bool augment = false) {
     if (n < 2) {
         for (int t = 0; t < n; t++) grad_phi[t] = 0.0;
         return;
@@ -96,9 +132,12 @@ inline void rw1_cyclic_grad_phi(const double* phi, int n, double sigma2, double*
         grad_phi[0]   += neg_inv_d;
         grad_phi[n-1] -= neg_inv_d;
     }
+
+    add_s2z_aug_grad(phi, n, inv_sigma2, grad_phi, augment);
 }
 
-inline double rw1_cyclic_grad_log_sigma2(const double* phi, int n, double sigma2) {
+inline double rw1_cyclic_grad_log_sigma2(const double* phi, int n, double sigma2,
+                                         bool augment = false) {
     double quad = 0.0;
     // Interior diffs
     for (int t = 1; t < n; t++) {
@@ -110,14 +149,16 @@ inline double rw1_cyclic_grad_log_sigma2(const double* phi, int n, double sigma2
         double diff = phi[0] - phi[n-1];
         quad += diff * diff;
     }
-    return -0.5 * tulpa::rw1_rank(n, true) + 0.5 * quad / (sigma2 + 1e-10);
+    return -0.5 * aug_rank(tulpa::rw1_rank(n, true), augment)
+         + 0.5 * aug_quad(phi, n, quad, augment) / (sigma2 + 1e-10);
 }
 
 // =============================================================================
 // RW2 gradients
 // =============================================================================
 
-inline void rw2_grad_phi(const double* phi, int n, double sigma2, double* grad_phi) {
+inline void rw2_grad_phi(const double* phi, int n, double sigma2,
+                         double* grad_phi, bool augment = false) {
     if (n < 3) {
         for (int t = 0; t < n; t++) grad_phi[t] = 0.0;
         return;
@@ -137,9 +178,12 @@ inline void rw2_grad_phi(const double* phi, int n, double sigma2, double* grad_p
         grad_phi[t-1] += neg_inv_d * (-2.0); // coef = -2
         grad_phi[t-2] += neg_inv_d;          // coef = 1  (note: -inv*d * 1 = same sign reversal)
     }
+
+    add_s2z_aug_grad(phi, n, inv_sigma2, grad_phi, augment);
 }
 
-inline double rw2_grad_log_sigma2(const double* phi, int n, double sigma2) {
+inline double rw2_grad_log_sigma2(const double* phi, int n, double sigma2,
+                                  bool augment = false) {
     double quad = 0.0;
     for (int t = 2; t < n; t++) {
         double d = phi[t] - 2.0 * phi[t-1] + phi[t-2];
@@ -147,7 +191,8 @@ inline double rw2_grad_log_sigma2(const double* phi, int n, double sigma2) {
     }
     // d/d(sigma2) = -0.5*rank/sigma2 + 0.5*quad/sigma2^2
     // Chain rule: d/d(log_sigma2) = d/d(sigma2) * sigma2
-    return -0.5 * tulpa::rw2_rank(n, false) + 0.5 * quad / (sigma2 + 1e-10);
+    return -0.5 * aug_rank(tulpa::rw2_rank(n, false), augment)
+         + 0.5 * aug_quad(phi, n, quad, augment) / (sigma2 + 1e-10);
 }
 
 // =============================================================================
@@ -292,27 +337,24 @@ inline void multiscale_temporal_prior_gradients(
     grads.grad_log_sigma2_short = 0.0;
     grads.grad_logit_rho_short = 0.0;
 
-    // Trend component. The soft sum-to-zero term multiscale_temporal_log_lik
-    // adds to each intrinsic arm is differentiated here, on the same sum and at
-    // the same derived precision, so the analytic gradient and the
-    // log-posterior carry the same terms.
+    // Trend component. The augmentation multiscale_temporal_log_lik applies to
+    // each intrinsic arm is differentiated here, over the same component sum
+    // and at the same precision, so the analytic gradient and the log-posterior
+    // carry the same terms.
     if (n_trend > 0) {
         if (temp_data.trend_type == TemporalType::RW1) {
-            rw1_grad_phi(trend, n_trend, sigma2_trend, grads.grad_trend.data());
-            grads.grad_log_sigma2_trend = rw1_grad_log_sigma2(trend, n_trend, sigma2_trend);
-            ratiod_temporal::sum_to_zero_penalty_grad(trend, n_trend, grads.grad_trend.data());
+            rw1_grad_phi(trend, n_trend, sigma2_trend, grads.grad_trend.data(), true);
+            grads.grad_log_sigma2_trend = rw1_grad_log_sigma2(trend, n_trend, sigma2_trend, true);
         } else if (temp_data.trend_type == TemporalType::RW2) {
-            rw2_grad_phi(trend, n_trend, sigma2_trend, grads.grad_trend.data());
-            grads.grad_log_sigma2_trend = rw2_grad_log_sigma2(trend, n_trend, sigma2_trend);
-            ratiod_temporal::sum_to_zero_penalty_grad(trend, n_trend, grads.grad_trend.data());
+            rw2_grad_phi(trend, n_trend, sigma2_trend, grads.grad_trend.data(), true);
+            grads.grad_log_sigma2_trend = rw2_grad_log_sigma2(trend, n_trend, sigma2_trend, true);
         }
     }
 
     // Seasonal component (cyclic RW1)
     if (n_seasonal > 0 && temp_data.seasonal_period > 0) {
-        rw1_cyclic_grad_phi(seasonal, n_seasonal, sigma2_seasonal, grads.grad_seasonal.data());
-        grads.grad_log_sigma2_seasonal = rw1_cyclic_grad_log_sigma2(seasonal, n_seasonal, sigma2_seasonal);
-        ratiod_temporal::sum_to_zero_penalty_grad(seasonal, n_seasonal, grads.grad_seasonal.data());
+        rw1_cyclic_grad_phi(seasonal, n_seasonal, sigma2_seasonal, grads.grad_seasonal.data(), true);
+        grads.grad_log_sigma2_seasonal = rw1_cyclic_grad_log_sigma2(seasonal, n_seasonal, sigma2_seasonal, true);
     }
 
     // Short-term component
@@ -325,6 +367,40 @@ inline void multiscale_temporal_prior_gradients(
             iid_grad_phi(short_term, n_short, sigma2_short, grads.grad_short_term.data());
             grads.grad_log_sigma2_short = iid_grad_log_sigma2(short_term, n_short, sigma2_short);
         }
+    }
+}
+
+// =============================================================================
+// Likelihood-side projection for the centred intrinsic arms
+// =============================================================================
+
+// compute_ms_effect_by_time subtracts each intrinsic arm's mean on the way into
+// eta, so eta depends on that arm's coefficients only through phi - mean(phi):
+//
+//     d eta_i / d phi[k] = delta(k, t_i) - 1/n.
+//
+// The gradient with respect to the sampled coefficients is therefore the
+// projection (I - 11'/n) of the gradient the observation loop accumulated,
+// which is that gradient minus its own mean. Applied to the arms
+// multiscale_temporal_prior_gradients augments and to no others -- the
+// short-term arm enters uncentred and its gradient passes through.
+//
+// This is the likelihood half of the same construction the augmentation is the
+// prior half of; it lives beside multiscale_temporal_prior_gradients so a path
+// cannot pick up one and miss the other.
+inline void project_ms_lik_gradients(
+    double* grad_trend_lik, int n_trend,
+    double* grad_seasonal_lik, int n_seasonal,
+    const MultiscaleTemporalData& temp_data
+) {
+    const bool trend_centred = n_trend > 0 &&
+        (temp_data.trend_type == TemporalType::RW1 ||
+         temp_data.trend_type == TemporalType::RW2);
+    if (trend_centred) {
+        (void)tulpa::s2z_centre_component(grad_trend_lik, 0, n_trend);
+    }
+    if (n_seasonal > 0 && temp_data.seasonal_period > 0) {
+        (void)tulpa::s2z_centre_component(grad_seasonal_lik, 0, n_seasonal);
     }
 }
 
