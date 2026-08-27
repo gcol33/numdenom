@@ -363,7 +363,9 @@ fit_hmc <- function(formula,
     gp_phi_prior_upper = priors$temporal_gp_phi_prior_upper %||% 10.0,
     gp_parameterization = temporal_info$parameterization %||% "noncentered",
     # AR1's own coordinate, read only when type = "ar1"
-    ar1_parameterization = if (identical(temporal_info$type, "ar1")) {
+    # The standalone temporal block's own coordinate, read for the structures
+    # that offer one: AR1's innovations and the intrinsic walks' z.
+    ar1_parameterization = if (temporal_info$type %in% c("ar1", "rw1", "rw2")) {
       temporal_info$parameterization %||% "centered"
     } else "centered",
     # Multiscale temporal fields (only used when type = "multiscale")

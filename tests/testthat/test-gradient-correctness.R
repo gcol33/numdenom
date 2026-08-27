@@ -15,7 +15,13 @@
 # recursion, which is a factor no finite difference of the density agrees with
 # (gcol33/tulpaRatio#40).
 FIELDS <- c("icar", "bym2", "rw1", "rw2", "temporal_ar1", "temporal_iid",
-            "temporal_ar1_nc", "icar_rw1")
+            "temporal_ar1_nc", "icar_rw1",
+            # The intrinsic walks in their non-centred coordinate, where the
+            # block holds z ~ N(0, I) and tau reaches the field through
+            # sigma * A^{-1} z. rw2_nc keeps a free linear direction the
+            # transform leaves alone, and the cyclic pair inverts
+            # B = C + 11'/n rather than a triangular stack.
+            "rw1_nc", "rw2_nc", "rw1_cyclic", "rw1_cyclic_nc")
 # The spatial field carried alongside a second structure, which routes to the
 # multi-feature gradient paths rather than the main one. Those paths identified
 # the field by a soft penalty while the log posterior hard-centred it, so their
@@ -769,4 +775,26 @@ test_that("the multi-scale arms' non-centred coordinate carries its density", {
       }
     }
   }
+})
+
+
+# make_model() builds a structure per field name, by a chain of flags each
+# naming the fields it covers. A name added to KNOWN_FIELDS but to no flag falls
+# through every branch and yields a model with no structured field at all: the
+# gradient check then passes on a two-parameter regression while claiming to
+# cover the structure. Caught exactly that on rw1_nc, which came back with 2
+# parameters against the 13 its siblings carry.
+
+test_that("every gradient fixture builds the structure its name claims", {
+  fields <- tulpaRatio:::cpp_gradient_fields()
+  bare <- tulpaRatio:::cpp_gradient_check("none", n_obs = 200L, n_units = 8L,
+                                          n_times = 10L)$n_params
+
+  structureless <- character()
+  for (field in setdiff(fields, "none")) {
+    n <- tulpaRatio:::cpp_gradient_check(field, n_obs = 200L, n_units = 8L,
+                                         n_times = 10L)$n_params
+    if (n <= bare) structureless <- c(structureless, field)
+  }
+  expect_equal(structureless, character())
 })

@@ -130,7 +130,8 @@ const char* const KNOWN_FIELDS[] = {
   "none",
   "icar", "bym2", "car_proper", "car_proper_ms", "car_proper_st",
   "car_proper_raw",
-  "rw1", "rw2", "temporal_ar1", "temporal_ar1_nc", "temporal_iid", "icar_rw1",
+  "rw1", "rw2", "rw1_nc", "rw2_nc", "rw1_cyclic", "rw1_cyclic_nc",
+  "temporal_ar1", "temporal_ar1_nc", "temporal_iid", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
   "st4_ar1_nc", "st2", "st2_rw2", "st2_ar1", "st3",
   "stgp", "stgp_matern", "stgp_gneiting", "stgp_latent",
@@ -327,11 +328,13 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                                 field == "car_proper_ms" ||
                                 field == "car_proper_st" ||
                                 field == "car_proper_raw");
-  const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st ||
+  const bool want_rw1  = (field == "rw1"  || field == "rw1_nc" ||
+                          field == "rw1_cyclic" || field == "rw1_cyclic_nc" ||
+                          field == "icar_rw1" || want_st ||
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1" ||
                           field == "gp_temporal" || field == "msgp_temporal" ||
                           field == "gp_temporal_st4");
-  const bool want_rw2  = (field == "rw2");
+  const bool want_rw2  = (field == "rw2" || field == "rw2_nc");
   // The temporal block's own AR1 arm, which carries a rho of its own. rw1 and
   // rw2 reach the same kernels without it. temporal_ar1_nc samples the same
   // field in its non-centred coordinate, where the block holds the N(0, I)
@@ -771,11 +774,16 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                        : want_temporal_iid  ? TemporalType::IID
                        : want_rw2           ? TemporalType::RW2
                                             : TemporalType::RW1;
-    data.temporal_parameterization = (field == "temporal_ar1_nc") ? 1 : 0;
+    data.temporal_parameterization =
+        (field == "temporal_ar1_nc" || field == "rw1_nc" || field == "rw2_nc" ||
+         field == "rw1_cyclic_nc") ? 1 : 0;
     data.n_times = n_times;
     data.n_temporal_groups = 1;
     data.n_temporal_params = n_times;
-    data.temporal_cyclic = false;
+    // The cyclic walk inverts B = C + 11'/n rather than a triangular stack, so
+    // it is its own branch of the transform.
+    data.temporal_cyclic =
+        (field == "rw1_cyclic" || field == "rw1_cyclic_nc");
     data.temporal_shared = temporal_shared;
     data.temporal_time_idx.resize(n_obs);
     data.temporal_group_idx.assign(n_obs, 1);

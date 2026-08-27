@@ -1,5 +1,33 @@
 # tulpaRatio 1.7.2
 
+* **The standalone intrinsic walks take the same coordinate (#79).**
+  `temporal_rw1()` and `temporal_rw2()` take `parameterization`, reading the
+  same transform the multi-scale arms do. `temporal_effects()` and
+  `temporal_gmrf_prior_grad()` are the two places it lives -- the one chokepoint
+  every eta assembly reads and the one all eight gradient functions reach -- so
+  the coordinate is a branch in each rather than a change to any caller.
+
+  Measured on a 500-observation fixture with no temporal signal, centred ->
+  non-centred: an RW1's bulk ESS for `tau_temporal` goes 409 to 805 at 0 and 1
+  divergences, and an RW2 picks up 23 divergences of 2000 for no ESS gain. Both
+  return the same posterior, the intercept and slope agreeing to four decimals.
+  Non-centred helps where the variance is shrunk toward zero and can cost where
+  the data pin the field, which is why it is an argument rather than a default.
+
+  A single temporal group. The prior augments ONE global constant, so with
+  several groups the G - 1 group contrasts stay improper and the transform has
+  to carry them beside the scaled directions; the constructors refuse the
+  combination rather than sample the wrong model.
+
+* **Every gradient fixture is checked to build the structure its name claims.**
+  `make_model()` selects a structure by a chain of flags, each naming the fields
+  it covers, so a name added to `KNOWN_FIELDS` but to no flag falls through every
+  branch and yields a model with no structured field: the gradient check then
+  passes on a two-parameter regression while reporting the structure's name.
+  `rw1_nc` did exactly that, coming back with 2 parameters against the 13 its
+  siblings carry. `test-gradient-correctness.R` now asserts every field builds
+  more than the structureless model.
+
 * **A non-centred coordinate for the multi-scale temporal arms (#79).**
   `temporal_multiscale()` takes `parameterization`, and `"noncentered"` samples
   the trend and seasonal arms as `z ~ N(0, I)`, reaching the effects through

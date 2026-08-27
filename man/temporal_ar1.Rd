@@ -25,6 +25,13 @@ numerator and denominator linear predictors identically.}
 \item{rho_prior}{Prior on the autocorrelation, as a \code{\link[=prior_beta]{prior_beta()}} on
 \code{(rho + 1) / 2}. \code{NULL} takes the model-wide
 \code{ratiod_priors(rho_temporal = )}, which defaults to \code{Beta(2, 2)}.}
+
+\item{parameterization}{Coordinate the field is sampled in. \code{"centered"}
+(default) samples the effects themselves; \code{"noncentered"} samples the
+\code{N(0, I)} innovations the AR1 recursion builds the effects from, so both
+the precision and rho reach the linear predictor through the transform.
+AR1 is proper and stationary, so this is a different construction from the
+intrinsic walks' \verb{sigma * A^-1 z}.}
 }
 \value{
 A \code{ratiod_temporal} object

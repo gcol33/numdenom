@@ -2918,6 +2918,34 @@ static inline void temporal_gmrf_prior_grad(
         return;
     }
 
+    if (temporal_rw_nc(data, layout)) {
+        // Non-centred walk: eta reads the centred effects, so the likelihood
+        // gradient is projected as in the centred coordinate and then carried
+        // through phi = sigma * A^{-1} z. tau reaches eta only through that
+        // transform, and the arm's own prior in this coordinate is N(0, I), so
+        // -z is the whole of it.
+        const int order = (data.temporal_type == TemporalType::RW2) ? 2 : 1;
+        const double sigma = 1.0 / std::sqrt(tau_temporal);
+        std::vector<double> g_proj(grad_temporal_lik,
+                                   grad_temporal_lik + T_len);
+        (void)tulpa::s2z_centre_component(g_proj.data(), 0, T_len);
+
+        std::vector<double> gz(T_len, 0.0);
+        double g_log_sigma2 = 0.0;
+        ratiod_temporal_nc::rw_nc_backward(
+            g_proj.data(), phi_temporal, z_temporal, T_len, order,
+            data.temporal_cyclic, sigma, gz.data(), &g_log_sigma2);
+
+        const int d = ratiod_temporal_nc::nc_normal_dim(
+            T_len, order, data.temporal_cyclic);
+        for (int t = 0; t < T_len; t++) {
+            grad[layout.temporal_start + t] = gz[t] + (t < d ? -z_temporal[t] : 0.0);
+        }
+        // sigma2 = 1 / tau, so d/d(log tau) = -d/d(log sigma2).
+        grad[layout.log_tau_temporal_idx] += -g_log_sigma2;
+        return;
+    }
+
     // Initialize temporal gradients with likelihood contribution. An intrinsic
     // walk enters eta centred, so eta depends on the sampled block only through
     // phi - mean(phi) and the gradient with respect to that block is the

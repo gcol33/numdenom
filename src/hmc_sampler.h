@@ -2095,6 +2095,26 @@ inline bool temporal_ar1_nc(const ModelData& data, const ParamLayout& layout) {
          data.temporal_parameterization == 1;
 }
 
+// Whether an intrinsic standalone walk is sampled in its non-centred
+// coordinate: the block holds z ~ N(0, I) and the effects are
+// sigma * A^{-1} z (hmc_temporal_nc.h).
+//
+// One temporal group only. The prior augments ONE global constant, so with
+// several groups the G - 1 group contrasts stay improper and the transform has
+// to carry them beside the scaled directions; temporal_rw1() and
+// temporal_rw2() refuse the combination rather than sample the wrong one.
+inline bool temporal_rw_nc(const ModelData& data, const ParamLayout& layout) {
+  return layout.has_temporal && !layout.is_temporal_gp &&
+         (data.temporal_type == TemporalType::RW1 ||
+          data.temporal_type == TemporalType::RW2) &&
+         data.temporal_parameterization == 1 &&
+         data.n_temporal_groups == 1 &&
+         ratiod_temporal_nc::nc_applies(
+             data.n_times,
+             data.temporal_type == TemporalType::RW2 ? 2 : 1,
+             data.temporal_cyclic);
+}
+
 // Whether the standalone temporal field is an intrinsic walk. RW1 and RW2 have
 // a constant null direction that is unidentified against the intercept; the
 // prior augments it (Q -> Q + 11'/n) and the effects are centred on their way
@@ -2138,6 +2158,20 @@ inline const double* temporal_effects(
 ) {
   const double* z = &params[layout.temporal_start];
 
+  if (temporal_rw_nc(data, layout)) {
+    // The block holds z; the effects are sigma * A^{-1} z, then centred on
+    // their way into eta as the centred coordinate's are.
+    const int n = layout.temporal_end - layout.temporal_start;
+    const double sigma =
+        1.0 / std::sqrt(std::exp(params[layout.log_tau_temporal_idx]));
+    buf.assign(n, 0.0);
+    ratiod_temporal_nc::rw_nc_forward(
+        z, n, data.temporal_type == TemporalType::RW2 ? 2 : 1,
+        data.temporal_cyclic, sigma, buf.data());
+    (void)tulpa::s2z_centre_component(buf.data(), 0, n);
+    return buf.data();
+  }
+
   if (temporal_is_intrinsic(data, layout)) {
     const int n = layout.temporal_end - layout.temporal_start;
     buf.assign(z, z + n);
@@ -2171,12 +2205,17 @@ struct TemporalView {
   const double* z = nullptr;
   double raw_sum = 0.0;
   bool centred = false;
+  bool nc = false;
 
   void read(const std::vector<double>& params, const ModelData& data,
             const ParamLayout& layout) {
     z = &params[layout.temporal_start];
     centred = temporal_is_intrinsic(data, layout);
-    if (centred) {
+    nc = temporal_rw_nc(data, layout);
+    // In the non-centred coordinate the block is z, not the field, and the
+    // augmented quadratic that raw_sum feeds has already cancelled against the
+    // transform's Jacobian, so there is nothing for it to carry.
+    if (centred && !nc) {
       raw_sum = tulpa::s2z_component_sum(
           z, 0, layout.temporal_end - layout.temporal_start);
     }

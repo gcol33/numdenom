@@ -113,6 +113,21 @@ temporal_var_name <- function(x, arg) {
 #'   last time points are neighbors). Useful for seasonal data.
 #' @param shared Logical; if TRUE (default), temporal effect enters both
 #'   numerator and denominator linear predictors identically.
+#' @param parameterization Coordinate the walk is sampled in. `"centered"`
+#'   (default) samples the effects themselves; `"noncentered"` samples
+#'   `z ~ N(0, I)` and reaches the effects through `sigma * A^-1 z`, where `A`
+#'   stacks the walk's difference operator on `1'/sqrt(n)`, so the variance
+#'   enters the linear predictor through the transform rather than through a
+#'   quadratic form. The two describe the same model and differ in the geometry
+#'   the sampler sees: non-centred helps where the variance is shrunk toward
+#'   zero and leaves a funnel the centred coordinate cannot descend, and can be
+#'   worse where the data pin the field. Measured on a 500-observation fixture
+#'   with no temporal signal, an RW1's bulk ESS for `tau_temporal` goes 409 to
+#'   805, while an RW2 picks up 23 divergences of 2000 for no gain, which is
+#'   why this is an argument rather than a default. Requires a single temporal
+#'   group: the prior augments one global constant, so several groups leave the
+#'   group contrasts improper and the transform would have to carry them
+#'   alongside the scaled directions.
 #'
 #' @return A `ratiod_temporal` object
 #'
@@ -189,9 +204,21 @@ temporal_var_name <- function(x, arg) {
 #'
 #' @export
 temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
-                         shared = TRUE) {
+                         shared = TRUE,
+                         parameterization = c("centered", "noncentered")) {
+  parameterization <- match.arg(parameterization)
+  if (parameterization == "noncentered" && !is.null(group_var)) {
+    stop("`parameterization = \"noncentered\"` carries a single temporal group.
+",
+         "The prior augments ONE global constant, so several groups leave the
+",
+         "group contrasts improper and the transform has to carry them beside
+",
+         "the scaled directions (gcol33/tulpaRatio#79).", call. = FALSE)
+  }
   new_ratiod_temporal("rw1", time_var, group_var, cyclic = cyclic,
-                      shared = shared)
+                      shared = shared,
+                      extra = list(parameterization = parameterization))
 }
 
 
@@ -239,9 +266,21 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #'
 #' @export
 temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
-                         shared = TRUE) {
+                         shared = TRUE,
+                         parameterization = c("centered", "noncentered")) {
+  parameterization <- match.arg(parameterization)
+  if (parameterization == "noncentered" && !is.null(group_var)) {
+    stop("`parameterization = \"noncentered\"` carries a single temporal group.
+",
+         "The prior augments ONE global constant, so several groups leave the
+",
+         "group contrasts improper and the transform has to carry them beside
+",
+         "the scaled directions (gcol33/tulpaRatio#79).", call. = FALSE)
+  }
   new_ratiod_temporal("rw2", time_var, group_var, cyclic = cyclic,
-                      shared = shared)
+                      shared = shared,
+                      extra = list(parameterization = parameterization))
 }
 
 
@@ -256,6 +295,12 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 #' autocorrelation parameter rho.
 #'
 #' @inheritParams temporal_rw1
+#' @param parameterization Coordinate the field is sampled in. `"centered"`
+#'   (default) samples the effects themselves; `"noncentered"` samples the
+#'   `N(0, I)` innovations the AR1 recursion builds the effects from, so both
+#'   the precision and rho reach the linear predictor through the transform.
+#'   AR1 is proper and stationary, so this is a different construction from the
+#'   intrinsic walks' `sigma * A^-1 z`.
 #' @param rho_prior Prior on the autocorrelation, as a [prior_beta()] on
 #'   `(rho + 1) / 2`. `NULL` takes the model-wide
 #'   `ratiod_priors(rho_temporal = )`, which defaults to `Beta(2, 2)`.

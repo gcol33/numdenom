@@ -253,6 +253,7 @@ T compute_log_post_impl(
     // constant direction is augmented in the prior; the analytic side decides
     // the same thing in temporal_is_intrinsic().
     bool center_temporal = false;
+    const bool rw_nc_temporal = ratiod_hmc::temporal_rw_nc(data, layout);
     T phi_temporal_mean = T(0.0);
     T tau_temporal = T(1.0);
     T rho_ar1 = T(0.0);
@@ -307,6 +308,22 @@ T compute_log_post_impl(
                                           + z_temporal[off + t] * inv_sqrt_tau;
                 }
             }
+        }
+
+        // Non-centred intrinsic walk: the block holds z ~ N(0, I), so the
+        // effects are reconstructed here and z kept for the prior, mirroring
+        // temporal_effects() on the analytic side.
+        if (rw_nc_temporal) {
+            z_temporal = phi_temporal;
+            const int n_rw = static_cast<int>(phi_temporal.size());
+            const int order_rw =
+                (data.temporal_type == TemporalType::RW2) ? 2 : 1;
+            const T sigma_rw = T(1.0) / safe_sqrt(tau_temporal);
+            std::vector<T> eff_rw(n_rw, T(0.0));
+            ratiod_temporal_nc::rw_nc_forward(
+                z_temporal.data(), n_rw, order_rw, data.temporal_cyclic,
+                sigma_rw, eff_rw.data());
+            phi_temporal = eff_rw;
         }
 
         center_temporal = !layout.is_temporal_gp && !phi_temporal.empty() &&
@@ -825,7 +842,19 @@ T compute_log_post_impl(
             };
             const int n_aug_pins = center_temporal ? 1 : 0;
 
-            if (data.temporal_type == TemporalType::RW1) {
+            if (rw_nc_temporal) {
+                // The walk's quadratic form and the transform's Jacobian have
+                // already cancelled, so what is left is N(0, I) on the
+                // coordinates that carry it -- a non-cyclic RW2's free linear
+                // direction keeps the flat prior it had -- and tau reaches the
+                // field through the transform alone.
+                const int n_rw = static_cast<int>(z_temporal.size());
+                const int order_rw =
+                    (data.temporal_type == TemporalType::RW2) ? 2 : 1;
+                log_post = log_post + ratiod_temporal_nc::rw_nc_log_prior(
+                    z_temporal.data(), n_rw, order_rw, data.temporal_cyclic);
+
+            } else if (data.temporal_type == TemporalType::RW1) {
                 // RW1: sum of (phi[t] - phi[t-1])^2
                 T quad_form = T(0.0);
                 for (int g = 0; g < data.n_temporal_groups; g++) {
