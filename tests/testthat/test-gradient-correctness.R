@@ -21,7 +21,15 @@ FIELDS <- c("icar", "bym2", "rw1", "rw2", "temporal_ar1", "temporal_iid",
             # sigma * A^{-1} z. rw2_nc keeps a free linear direction the
             # transform leaves alone, and the cyclic pair inverts
             # B = C + 11'/n rather than a triangular stack.
-            "rw1_nc", "rw2_nc", "rw1_cyclic", "rw1_cyclic_nc")
+            "rw1_nc", "rw2_nc", "rw1_cyclic", "rw1_cyclic_nc",
+            # Panel data: several disconnected walks under ONE augmented
+            # global constant, so the G - 1 group contrasts are improper and
+            # the likelihood identifies each group's level. In the non-centred
+            # coordinate the transform reaches that by re-mixing its per-group
+            # sum coordinates, which is a different map from running the
+            # single-group one per group (gcol33/tulpaRatio#81).
+            "rw1_panel", "rw1_nc_panel", "rw2_nc_panel",
+            "rw1_cyclic_nc_panel")
 # The spatial field carried alongside a second structure, which routes to the
 # multi-feature gradient paths rather than the main one. Those paths identified
 # the field by a soft penalty while the log posterior hard-centred it, so their
@@ -772,6 +780,47 @@ test_that("the multi-scale arms' non-centred coordinate carries its density", {
         spread <- tulpaRatio:::cpp_ms_temporal_nc_coordinate_spread(
           field, n, sigma2, n_draws = 8L)
         expect_lt(spread, 1e-9)
+      }
+    }
+  }
+})
+
+# The same invariant with several temporal groups, where the centred density
+# is the per-group quadratic forms plus ONE augmented global direction and the
+# transform has to re-mix its per-group sum coordinates to match it. Running
+# the single-group transform per group augments each group's own constant
+# instead: a different model, whose density is self-consistent and whose
+# gradient still matches its own difference quotient.
+test_that("the non-centred coordinate carries its density over groups", {
+  for (field in c("ms_temporal_nc", "ms_temporal_rw2_nc",
+                  "ms_temporal_seasonal_nc")) {
+    for (sigma2 in c(0.01, 0.25, 4)) {
+      for (n in c(7L, 12L)) {
+        for (n_groups in c(2L, 3L, 5L)) {
+          spread <- tulpaRatio:::cpp_ms_temporal_nc_coordinate_spread(
+            field, n, sigma2, n_draws = 8L, n_groups = n_groups)
+          expect_lt(spread, 1e-9)
+        }
+      }
+    }
+  }
+})
+
+# Whether the G - 1 group contrasts are still improper. Augmenting per group
+# would shrink the group levels toward each other, and both coordinates would
+# stay consistent with THAT model, so the spread above cannot see it. Moving
+# the contrast directions alone must leave the prior where it is and shift
+# group g's field by exactly the unscaled offset -- a transform that dropped
+# the contrasts would leave the field alone and pass flatness by itself.
+test_that("the grouped transform leaves the group contrasts improper", {
+  for (field in c("ms_temporal_nc", "ms_temporal_rw2_nc",
+                  "ms_temporal_seasonal_nc")) {
+    for (n_groups in c(2L, 4L)) {
+      for (sigma2 in c(0.05, 1)) {
+        violation <- tulpaRatio:::cpp_ms_temporal_nc_group_contrast_flat(
+          field, n = 12L, n_groups = n_groups, sigma2 = sigma2,
+          n_draws = 8L)
+        expect_lt(violation, 1e-9)
       }
     }
   }

@@ -131,6 +131,7 @@ const char* const KNOWN_FIELDS[] = {
   "icar", "bym2", "car_proper", "car_proper_ms", "car_proper_st",
   "car_proper_raw",
   "rw1", "rw2", "rw1_nc", "rw2_nc", "rw1_cyclic", "rw1_cyclic_nc",
+  "rw1_panel", "rw1_nc_panel", "rw2_nc_panel", "rw1_cyclic_nc_panel",
   "temporal_ar1", "temporal_ar1_nc", "temporal_iid", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
   "st4_ar1_nc", "st2", "st2_rw2", "st2_ar1", "st3",
@@ -330,11 +331,14 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                                 field == "car_proper_raw");
   const bool want_rw1  = (field == "rw1"  || field == "rw1_nc" ||
                           field == "rw1_cyclic" || field == "rw1_cyclic_nc" ||
+                          field == "rw1_panel" || field == "rw1_nc_panel" ||
+                          field == "rw1_cyclic_nc_panel" ||
                           field == "icar_rw1" || want_st ||
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1" ||
                           field == "gp_temporal" || field == "msgp_temporal" ||
                           field == "gp_temporal_st4");
-  const bool want_rw2  = (field == "rw2" || field == "rw2_nc");
+  const bool want_rw2  = (field == "rw2" || field == "rw2_nc" ||
+                          field == "rw2_nc_panel");
   // The temporal block's own AR1 arm, which carries a rho of its own. rw1 and
   // rw2 reach the same kernels without it. temporal_ar1_nc samples the same
   // field in its non-centred coordinate, where the block holds the N(0, I)
@@ -776,18 +780,32 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                                             : TemporalType::RW1;
     data.temporal_parameterization =
         (field == "temporal_ar1_nc" || field == "rw1_nc" || field == "rw2_nc" ||
-         field == "rw1_cyclic_nc") ? 1 : 0;
+         field == "rw1_cyclic_nc" || field == "rw1_nc_panel" ||
+         field == "rw2_nc_panel" || field == "rw1_cyclic_nc_panel") ? 1 : 0;
     data.n_times = n_times;
-    data.n_temporal_groups = 1;
-    data.n_temporal_params = n_times;
+    // Panel data: G disconnected walks under ONE augmented global constant, so
+    // the G - 1 group contrasts are improper and the level of each group is
+    // the likelihood's to identify. The non-centred coordinate re-mixes its
+    // per-group sum coordinates to reach that; the centred one is the same
+    // model in the other coordinate and pairs against it here.
+    const bool temporal_panel =
+        (field == "rw1_panel" || field == "rw1_nc_panel" ||
+         field == "rw2_nc_panel" || field == "rw1_cyclic_nc_panel");
+    data.n_temporal_groups = temporal_panel ? 3 : 1;
+    data.n_temporal_params = n_times * data.n_temporal_groups;
     // The cyclic walk inverts B = C + 11'/n rather than a triangular stack, so
     // it is its own branch of the transform.
     data.temporal_cyclic =
-        (field == "rw1_cyclic" || field == "rw1_cyclic_nc");
+        (field == "rw1_cyclic" || field == "rw1_cyclic_nc" ||
+         field == "rw1_cyclic_nc_panel");
     data.temporal_shared = temporal_shared;
     data.temporal_time_idx.resize(n_obs);
     data.temporal_group_idx.assign(n_obs, 1);
-    for (int i = 0; i < n_obs; i++) data.temporal_time_idx[i] = (i % n_times) + 1;
+    for (int i = 0; i < n_obs; i++) {
+      data.temporal_time_idx[i] = (i % n_times) + 1;
+      data.temporal_group_idx[i] =
+          (i / n_times) % data.n_temporal_groups + 1;
+    }
   } else {
     data.temporal_type = TemporalType::NONE;
     data.n_times = 0;
@@ -1349,6 +1367,29 @@ double cpp_msgp_nc_coordinate_spread(int n_obs = 400,
   return hi - lo;
 }
 
+// The centred density the transform claims to carry, for G walks under one
+// augmented global constant: each group's own quadratic form, the single
+// augmented direction taken over the whole field, and a rank that counts the
+// per-group ranks plus that one direction. G = 1 is rw1_log_lik / rw2_log_lik
+// with `augment`.
+inline double nc_reference_log_prior(const double* phi, int n, int n_groups,
+                                     int order, bool cyclic, double sigma2) {
+  const int n_total = n * n_groups;
+  double quad = 0.0;
+  for (int g = 0; g < n_groups; g++) {
+    quad += (order == 2)
+                ? ratiod_temporal::rw2_quadratic_form(phi + g * n, n, cyclic)
+                : ratiod_temporal::rw1_quadratic_form(phi + g * n, n, cyclic);
+  }
+  const double s = tulpa::s2z_component_sum(phi, 0, n_total);
+  quad += tulpa::s2z_aug_coef(1.0, n_total) * s * s;
+
+  const int rank_g = (order == 2) ? tulpa::rw2_rank(n, cyclic)
+                                  : tulpa::rw1_rank(n, cyclic);
+  const int rank = tulpa::s2z_aug_rank(rank_g * n_groups, 1);
+  return -0.5 * quad / sigma2 - 0.5 * rank * std::log(2.0 * M_PI * sigma2);
+}
+
 // The invariant a finite difference cannot see. A transform that builds the
 // WRONG field still leaves the density self-consistent and its gradient still
 // matches its own difference quotient, so the gradient sweep passes on it. What
@@ -1362,12 +1403,16 @@ double cpp_msgp_nc_coordinate_spread(int n_obs = 400,
 // returns. Anything but zero is a transform that does not carry the density it
 // claims to.
 //
+// With `n_groups` above 1 the centred side is the grouped density: each
+// group's own quadratic form and ONE augmented global direction.
+//
 // [[Rcpp::export]]
 double cpp_ms_temporal_nc_coordinate_spread(std::string field = "ms_temporal_nc",
                                             int n = 12,
                                             double sigma2 = 0.25,
                                             int n_draws = 6,
-                                            unsigned int seed = 42) {
+                                            unsigned int seed = 42,
+                                            int n_groups = 1) {
   int order = 1;
   bool cyclic = false;
   if (field == "ms_temporal_rw2_nc") order = 2;
@@ -1376,23 +1421,90 @@ double cpp_ms_temporal_nc_coordinate_spread(std::string field = "ms_temporal_nc"
   std::mt19937 rng(seed + 7000u);
   std::normal_distribution<double> rnorm(0.0, 1.0);
   const double sigma = std::sqrt(sigma2);
+  const int n_total = n * n_groups;
 
   double first = 0.0;
   double worst = 0.0;
   for (int d = 0; d < n_draws; d++) {
-    std::vector<double> z(n), phi(n);
-    for (int k = 0; k < n; k++) z[k] = rnorm(rng);
-    ratiod_temporal_nc::rw_nc_forward(z.data(), n, order, cyclic, sigma, phi.data());
+    std::vector<double> z(n_total), phi(n_total);
+    for (int k = 0; k < n_total; k++) z[k] = rnorm(rng);
+    ratiod_temporal_nc::rw_nc_grouped_forward(z.data(), n, n_groups, order,
+                                              cyclic, sigma, phi.data());
 
-    const double lp_nc =
-        ratiod_temporal_nc::rw_nc_log_prior(z.data(), n, order, cyclic);
+    const double lp_nc = ratiod_temporal_nc::rw_nc_grouped_log_prior(
+        z.data(), n, n_groups, order, cyclic);
     const double lp_centred =
-        (order == 2)
-            ? ratiod_temporal::rw2_log_lik(phi, sigma2, cyclic, true)
-            : ratiod_temporal::rw1_log_lik(phi, sigma2, cyclic, true);
+        nc_reference_log_prior(phi.data(), n, n_groups, order, cyclic, sigma2);
     const double gap = lp_nc - lp_centred;
     if (d == 0) first = gap;
     worst = std::max(worst, std::abs(gap - first));
+  }
+  return worst;
+}
+
+// What the spread above cannot separate: whether the G - 1 group contrasts are
+// still improper. Augmenting per group instead of once would put a proper
+// N(0, 1/tau) prior on them and shrink the group levels, which is a different
+// model, and both coordinates would still be consistent with THAT model.
+//
+// So this perturbs the contrast directions alone -- the group sum coordinates
+// moved by a mean-zero w -- and asks for the two things that say the model is
+// the intended one: the prior does not move, and group g's field moves by
+// exactly the unscaled w_g / sqrt(n), no more (a transform that dropped the
+// contrasts would leave the field alone and pass a flatness check by itself).
+// The returned number is the worst violation of either.
+//
+// [[Rcpp::export]]
+double cpp_ms_temporal_nc_group_contrast_flat(
+    std::string field = "ms_temporal_nc", int n = 12, int n_groups = 3,
+    double sigma2 = 0.25, int n_draws = 6, unsigned int seed = 42) {
+  int order = 1;
+  bool cyclic = false;
+  if (field == "ms_temporal_rw2_nc") order = 2;
+  if (field == "ms_temporal_seasonal_nc") cyclic = true;
+
+  std::mt19937 rng(seed + 9100u);
+  std::normal_distribution<double> rnorm(0.0, 1.0);
+  const double sigma = std::sqrt(sigma2);
+  const int n_total = n * n_groups;
+  const double sqrt_n = std::sqrt(static_cast<double>(n));
+
+  double worst = 0.0;
+  for (int d = 0; d < n_draws; d++) {
+    std::vector<double> z(n_total), z2(n_total), phi(n_total), phi2(n_total);
+    for (int k = 0; k < n_total; k++) z[k] = rnorm(rng);
+
+    std::vector<double> w(n_groups);
+    double wbar = 0.0;
+    for (int g = 0; g < n_groups; g++) { w[g] = rnorm(rng); wbar += w[g]; }
+    wbar /= static_cast<double>(n_groups);
+    for (int g = 0; g < n_groups; g++) w[g] -= wbar;
+
+    for (int g = 0; g < n_groups; g++) {
+      const double c = ratiod_temporal_nc::nc_sum_coord(z.data() + g * n, n,
+                                                        order, cyclic);
+      ratiod_temporal_nc::nc_with_sum_coord(z.data() + g * n, n, order, cyclic,
+                                            c + w[g], z2.data() + g * n);
+    }
+
+    ratiod_temporal_nc::rw_nc_grouped_forward(z.data(), n, n_groups, order,
+                                              cyclic, sigma, phi.data());
+    ratiod_temporal_nc::rw_nc_grouped_forward(z2.data(), n, n_groups, order,
+                                              cyclic, sigma, phi2.data());
+
+    worst = std::max(
+        worst,
+        std::abs(ratiod_temporal_nc::rw_nc_grouped_log_prior(
+                     z2.data(), n, n_groups, order, cyclic) -
+                 ratiod_temporal_nc::rw_nc_grouped_log_prior(
+                     z.data(), n, n_groups, order, cyclic)));
+
+    for (int g = 0; g < n_groups; g++) {
+      for (int t = 0; t < n; t++) {
+        const double moved = phi2[g * n + t] - phi[g * n + t];
+        worst = std::max(worst, std::abs(moved - w[g] / sqrt_n));
+      }
+    }
   }
   return worst;
 }

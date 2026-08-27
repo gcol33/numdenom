@@ -36,10 +36,10 @@ zero and leaves a funnel the centred coordinate cannot descend, and can be
 worse where the data pin the field. Measured on a 500-observation fixture
 with no temporal signal, an RW1's bulk ESS for \code{tau_temporal} goes 409 to
 805, while an RW2 picks up 23 divergences of 2000 for no gain, which is
-why this is an argument rather than a default. Requires a single temporal
-group: the prior augments one global constant, so several groups leave the
-group contrasts improper and the transform would have to carry them
-alongside the scaled directions.}
+why this is an argument rather than a default. With \code{group_var} the prior
+still augments one global constant, so the transform carries the group
+contrasts as free directions beside the scaled ones and the group levels
+stay unshrunk, as they are in the centred coordinate.}
 }
 \value{
 A \code{ratiod_temporal} object

@@ -1099,8 +1099,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_ms_temporal_nc_coordinate_spread
-double cpp_ms_temporal_nc_coordinate_spread(std::string field, int n, double sigma2, int n_draws, unsigned int seed);
-RcppExport SEXP _tulpaRatio_cpp_ms_temporal_nc_coordinate_spread(SEXP fieldSEXP, SEXP nSEXP, SEXP sigma2SEXP, SEXP n_drawsSEXP, SEXP seedSEXP) {
+double cpp_ms_temporal_nc_coordinate_spread(std::string field, int n, double sigma2, int n_draws, unsigned int seed, int n_groups);
+RcppExport SEXP _tulpaRatio_cpp_ms_temporal_nc_coordinate_spread(SEXP fieldSEXP, SEXP nSEXP, SEXP sigma2SEXP, SEXP n_drawsSEXP, SEXP seedSEXP, SEXP n_groupsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -1109,7 +1109,24 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type sigma2(sigma2SEXP);
     Rcpp::traits::input_parameter< int >::type n_draws(n_drawsSEXP);
     Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_ms_temporal_nc_coordinate_spread(field, n, sigma2, n_draws, seed));
+    Rcpp::traits::input_parameter< int >::type n_groups(n_groupsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_ms_temporal_nc_coordinate_spread(field, n, sigma2, n_draws, seed, n_groups));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_ms_temporal_nc_group_contrast_flat
+double cpp_ms_temporal_nc_group_contrast_flat(std::string field, int n, int n_groups, double sigma2, int n_draws, unsigned int seed);
+RcppExport SEXP _tulpaRatio_cpp_ms_temporal_nc_group_contrast_flat(SEXP fieldSEXP, SEXP nSEXP, SEXP n_groupsSEXP, SEXP sigma2SEXP, SEXP n_drawsSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type field(fieldSEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< int >::type n_groups(n_groupsSEXP);
+    Rcpp::traits::input_parameter< double >::type sigma2(sigma2SEXP);
+    Rcpp::traits::input_parameter< int >::type n_draws(n_drawsSEXP);
+    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_ms_temporal_nc_group_contrast_flat(field, n, n_groups, sigma2, n_draws, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -2190,7 +2207,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_gradient_race", (DL_FUNC) &_tulpaRatio_cpp_gradient_race, 10},
     {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 8},
     {"_tulpaRatio_cpp_msgp_nc_coordinate_spread", (DL_FUNC) &_tulpaRatio_cpp_msgp_nc_coordinate_spread, 4},
-    {"_tulpaRatio_cpp_ms_temporal_nc_coordinate_spread", (DL_FUNC) &_tulpaRatio_cpp_ms_temporal_nc_coordinate_spread, 5},
+    {"_tulpaRatio_cpp_ms_temporal_nc_coordinate_spread", (DL_FUNC) &_tulpaRatio_cpp_ms_temporal_nc_coordinate_spread, 6},
+    {"_tulpaRatio_cpp_ms_temporal_nc_group_contrast_flat", (DL_FUNC) &_tulpaRatio_cpp_ms_temporal_nc_group_contrast_flat, 6},
     {"_tulpaRatio_cpp_test_leapfrog", (DL_FUNC) &_tulpaRatio_cpp_test_leapfrog, 4},
     {"_tulpaRatio_cpp_test_hamiltonian", (DL_FUNC) &_tulpaRatio_cpp_test_hamiltonian, 2},
     {"_tulpaRatio_cpp_test_log_sum_exp", (DL_FUNC) &_tulpaRatio_cpp_test_log_sum_exp, 1},

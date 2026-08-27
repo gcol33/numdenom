@@ -124,10 +124,10 @@ temporal_var_name <- function(x, arg) {
 #'   worse where the data pin the field. Measured on a 500-observation fixture
 #'   with no temporal signal, an RW1's bulk ESS for `tau_temporal` goes 409 to
 #'   805, while an RW2 picks up 23 divergences of 2000 for no gain, which is
-#'   why this is an argument rather than a default. Requires a single temporal
-#'   group: the prior augments one global constant, so several groups leave the
-#'   group contrasts improper and the transform would have to carry them
-#'   alongside the scaled directions.
+#'   why this is an argument rather than a default. With `group_var` the prior
+#'   still augments one global constant, so the transform carries the group
+#'   contrasts as free directions beside the scaled ones and the group levels
+#'   stay unshrunk, as they are in the centred coordinate.
 #'
 #' @return A `ratiod_temporal` object
 #'
@@ -207,15 +207,6 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
                          shared = TRUE,
                          parameterization = c("centered", "noncentered")) {
   parameterization <- match.arg(parameterization)
-  if (parameterization == "noncentered" && !is.null(group_var)) {
-    stop("`parameterization = \"noncentered\"` carries a single temporal group.
-",
-         "The prior augments ONE global constant, so several groups leave the
-",
-         "group contrasts improper and the transform has to carry them beside
-",
-         "the scaled directions (gcol33/tulpaRatio#81).", call. = FALSE)
-  }
   new_ratiod_temporal("rw1", time_var, group_var, cyclic = cyclic,
                       shared = shared,
                       extra = list(parameterization = parameterization))
@@ -269,15 +260,6 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
                          shared = TRUE,
                          parameterization = c("centered", "noncentered")) {
   parameterization <- match.arg(parameterization)
-  if (parameterization == "noncentered" && !is.null(group_var)) {
-    stop("`parameterization = \"noncentered\"` carries a single temporal group.
-",
-         "The prior augments ONE global constant, so several groups leave the
-",
-         "group contrasts improper and the transform has to carry them beside
-",
-         "the scaled directions (gcol33/tulpaRatio#81).", call. = FALSE)
-  }
   new_ratiod_temporal("rw2", time_var, group_var, cyclic = cyclic,
                       shared = shared,
                       extra = list(parameterization = parameterization))

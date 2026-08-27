@@ -205,8 +205,12 @@ cpp_msgp_nc_coordinate_spread <- function(n_obs = 400L, n_units = 25L, n_draws =
     .Call(`_tulpaRatio_cpp_msgp_nc_coordinate_spread`, n_obs, n_units, n_draws, seed)
 }
 
-cpp_ms_temporal_nc_coordinate_spread <- function(field = "ms_temporal_nc", n = 12L, sigma2 = 0.25, n_draws = 6L, seed = 42L) {
-    .Call(`_tulpaRatio_cpp_ms_temporal_nc_coordinate_spread`, field, n, sigma2, n_draws, seed)
+cpp_ms_temporal_nc_coordinate_spread <- function(field = "ms_temporal_nc", n = 12L, sigma2 = 0.25, n_draws = 6L, seed = 42L, n_groups = 1L) {
+    .Call(`_tulpaRatio_cpp_ms_temporal_nc_coordinate_spread`, field, n, sigma2, n_draws, seed, n_groups)
+}
+
+cpp_ms_temporal_nc_group_contrast_flat <- function(field = "ms_temporal_nc", n = 12L, n_groups = 3L, sigma2 = 0.25, n_draws = 6L, seed = 42L) {
+    .Call(`_tulpaRatio_cpp_ms_temporal_nc_group_contrast_flat`, field, n, n_groups, sigma2, n_draws, seed)
 }
 
 cpp_test_leapfrog <- function(q_init, p_init, epsilon, L) {

@@ -320,9 +320,9 @@ T compute_log_post_impl(
                 (data.temporal_type == TemporalType::RW2) ? 2 : 1;
             const T sigma_rw = T(1.0) / safe_sqrt(tau_temporal);
             std::vector<T> eff_rw(n_rw, T(0.0));
-            ratiod_temporal_nc::rw_nc_forward(
-                z_temporal.data(), n_rw, order_rw, data.temporal_cyclic,
-                sigma_rw, eff_rw.data());
+            ratiod_temporal_nc::rw_nc_grouped_forward(
+                z_temporal.data(), data.n_times, data.n_temporal_groups,
+                order_rw, data.temporal_cyclic, sigma_rw, eff_rw.data());
             phi_temporal = eff_rw;
         }
 
@@ -846,13 +846,14 @@ T compute_log_post_impl(
                 // The walk's quadratic form and the transform's Jacobian have
                 // already cancelled, so what is left is N(0, I) on the
                 // coordinates that carry it -- a non-cyclic RW2's free linear
-                // direction keeps the flat prior it had -- and tau reaches the
-                // field through the transform alone.
-                const int n_rw = static_cast<int>(z_temporal.size());
+                // direction and the G - 1 group contrasts keep the flat prior
+                // they had -- and tau reaches the field through the transform
+                // alone.
                 const int order_rw =
                     (data.temporal_type == TemporalType::RW2) ? 2 : 1;
-                log_post = log_post + ratiod_temporal_nc::rw_nc_log_prior(
-                    z_temporal.data(), n_rw, order_rw, data.temporal_cyclic);
+                log_post = log_post + ratiod_temporal_nc::rw_nc_grouped_log_prior(
+                    z_temporal.data(), data.n_times, data.n_temporal_groups,
+                    order_rw, data.temporal_cyclic);
 
             } else if (data.temporal_type == TemporalType::RW1) {
                 // RW1: sum of (phi[t] - phi[t-1])^2

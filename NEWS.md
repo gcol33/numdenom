@@ -14,10 +14,25 @@
   Non-centred helps where the variance is shrunk toward zero and can cost where
   the data pin the field, which is why it is an argument rather than a default.
 
-  A single temporal group. The prior augments ONE global constant, so with
-  several groups the G - 1 group contrasts stay improper and the transform has
-  to carry them beside the scaled directions; the constructors refuse the
-  combination rather than sample the wrong model.
+* **The non-centred walks take `group_var` (#81).** The prior augments ONE
+  global constant whatever the number of groups, so G - 1 group contrasts stay
+  improper: a per-group level shifts eta only for that group's observations and
+  the likelihood identifies it. Running the single-group transform per group
+  would augment each group's own constant and shrink those contrasts, which is
+  a different model, so the transform re-mixes instead. Each group's coordinate
+  splits into its increments and one sum coordinate; the G sum coordinates
+  split in turn into the global direction the augmentation fills and G - 1
+  contrasts, which stay unscaled because they are flat and scaling them would
+  couple the group levels to `tau`. The cyclic branch reads its mean coordinate
+  the same way, so one map covers RW1, RW2 and the seasonal walk.
+
+  `cpp_ms_temporal_nc_coordinate_spread()` now runs over groups, and
+  `cpp_ms_temporal_nc_group_contrast_flat()` moves the contrast directions
+  alone: it asks that the prior stay where it is and that group g's field move
+  by exactly the unscaled offset. A finite difference cannot separate a
+  transform that augments per group -- that density is self-consistent and its
+  gradient matches its own difference quotient -- and neither can a flatness
+  check on its own, which a transform that dropped the contrasts would pass.
 
 * **Every gradient fixture is checked to build the structure its name claims.**
   `make_model()` selects a structure by a chain of flags, each naming the fields

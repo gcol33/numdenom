@@ -2099,16 +2099,15 @@ inline bool temporal_ar1_nc(const ModelData& data, const ParamLayout& layout) {
 // coordinate: the block holds z ~ N(0, I) and the effects are
 // sigma * A^{-1} z (hmc_temporal_nc.h).
 //
-// One temporal group only. The prior augments ONE global constant, so with
-// several groups the G - 1 group contrasts stay improper and the transform has
-// to carry them beside the scaled directions; temporal_rw1() and
-// temporal_rw2() refuse the combination rather than sample the wrong one.
+// The prior augments ONE global constant whatever the number of groups, so
+// with several groups the transform carries the G - 1 improper group contrasts
+// beside the scaled directions rather than augmenting each group's own
+// constant.
 inline bool temporal_rw_nc(const ModelData& data, const ParamLayout& layout) {
   return layout.has_temporal && !layout.is_temporal_gp &&
          (data.temporal_type == TemporalType::RW1 ||
           data.temporal_type == TemporalType::RW2) &&
          data.temporal_parameterization == 1 &&
-         data.n_temporal_groups == 1 &&
          ratiod_temporal_nc::nc_applies(
              data.n_times,
              data.temporal_type == TemporalType::RW2 ? 2 : 1,
@@ -2165,8 +2164,9 @@ inline const double* temporal_effects(
     const double sigma =
         1.0 / std::sqrt(std::exp(params[layout.log_tau_temporal_idx]));
     buf.assign(n, 0.0);
-    ratiod_temporal_nc::rw_nc_forward(
-        z, n, data.temporal_type == TemporalType::RW2 ? 2 : 1,
+    ratiod_temporal_nc::rw_nc_grouped_forward(
+        z, data.n_times, data.n_temporal_groups,
+        data.temporal_type == TemporalType::RW2 ? 2 : 1,
         data.temporal_cyclic, sigma, buf.data());
     (void)tulpa::s2z_centre_component(buf.data(), 0, n);
     return buf.data();
