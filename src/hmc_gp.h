@@ -9,6 +9,7 @@
 #include <cmath>
 #include <random>
 #include <type_traits>
+#include <tuple>
 #include "tls_workspace.h"
 #include <RcppEigen.h>
 #include "hmc_cov.h"  // Shared kernels and neighbour-block factorization
@@ -23,9 +24,8 @@ using ratiod_svc::CovType;
 using ratiod_svc::compute_cov;
 
 // How the multi-scale GP blocks' mass matrix is adapted during warmup. This
-// selects an adaptation strategy, not a parameterization of the field: the
-// field is centred, and spatial_multiscale() offers no other coordinate for
-// it.
+// selects an adaptation strategy, not a parameterization of the field; the
+// coordinate the field is sampled in is spatial_multiscale(parameterization =).
 enum class MSGPSampler {
   AUTO,   // The sampler's own warmup adaptation
   LBFGS   // L-BFGS quasi-Newton mass matrix adaptation - O(md) per step
@@ -767,13 +767,60 @@ inline void nngp_nc_forward(
     }
 }
 
-// This thread's workspace for the transform, one per scalar type. The forward
-// pass runs on every leapfrog step, and its buffers are O(N * nn^2).
-template <typename T>
+// This thread's workspace for the transform, one per scalar type and slot. The
+// forward pass runs on every leapfrog step, and its buffers are O(N * nn^2),
+// so a workspace is held rather than allocated. `Slot` separates fields that
+// are live at the same time: the single-scale field holds slot 0, the
+// multi-scale field's two scales hold one slot each, and a gradient pass holds
+// slots of its own because it evaluates the density after its backward pass
+// has read the cached factors.
+template <typename T, int Slot = 0>
 inline NNGPNCWorkspaceT<T>& nngp_nc_ws() {
     RATIOD_TLS_WORKSPACE(NNGPNCWorkspaceT<T>, ws);
     return ws;
 }
+
+// The multi-scale field's two scales at the sampled coordinate.
+//
+// Centred, each scale's parameter block holds the effects and `local` /
+// `regional` point straight at it. Non-centred, each block holds z ~ N(0, I)
+// and the effects are w = L(sigma2, phi) z through the same NNGP
+// autoregression the single-scale field uses -- one workspace per scale, since
+// the local field's adjoint reads its cached factors after the regional
+// field's forward pass has run. Every density and every gradient reads the
+// effects, so the transform lives here and nowhere else.
+//
+// `Slot` is the first of the two workspace slots the transform claims.
+template <typename T, int Slot>
+struct MultiscaleGPFieldT {
+    GPData gp_local, gp_regional;
+    const T* local = nullptr;
+    const T* regional = nullptr;
+    bool noncentered = false;
+
+    void read(const T* block_local, const T* block_regional,
+              const T& sigma2_local, const T& phi_local,
+              const T& sigma2_regional, const T& phi_regional,
+              const MultiscaleGPData& ms_data, bool nc) {
+        std::tie(gp_local, gp_regional) = make_msgp_gp_views(ms_data);
+        noncentered = nc;
+        if (!nc) {
+            local = block_local;
+            regional = block_regional;
+            return;
+        }
+        NNGPNCWorkspaceT<T>& ws_l = nngp_nc_ws<T, Slot>();
+        NNGPNCWorkspaceT<T>& ws_r = nngp_nc_ws<T, Slot + 1>();
+        nngp_nc_forward(block_local, sigma2_local, phi_local, gp_local, ws_l);
+        nngp_nc_forward(block_regional, sigma2_regional, phi_regional,
+                        gp_regional, ws_r);
+        local = ws_l.w.data();
+        regional = ws_r.w.data();
+    }
+
+    NNGPNCWorkspaceT<T>& ws_local() const { return nngp_nc_ws<T, Slot>(); }
+    NNGPNCWorkspaceT<T>& ws_regional() const { return nngp_nc_ws<T, Slot + 1>(); }
+};
 
 // Backward pass: given dL/dw from likelihood, compute gradients for z, log_sigma2, log_phi.
 // z and grad_z are indexed by LOCATION (matching parameter layout).

@@ -140,7 +140,7 @@ const char* const KNOWN_FIELDS[] = {
   "re", "re_crossed", "re_slopes", "re_slopes_corr",
   "gp", "gp_matern", "gp_gaussian", "gp_spherical",
   "gp_nc", "gp_collapsed", "gp_temporal",
-  "msgp", "msgp_temporal", "msgp_hsgp",
+  "msgp", "msgp_nc", "msgp_temporal", "msgp_hsgp",
   "svc", "svc_hsgp",
   "temporal_gp", "ms_temporal", "latent",
   // Combinations a specialized gradient used to be selected for while writing
@@ -344,8 +344,14 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                         field == "gp_temporal_st4" || field == "gp_tgp" ||
                         field == "gp_slopes" || field == "gp_slopes_corr" ||
                         field == "gp_crossed");
+  // spatial_multiscale(parameterization = "noncentered"): each scale's block
+  // holds z ~ N(0, I) and its field is w = L(sigma2, phi) z, so all four
+  // hyperparameters reach eta through the transforms as well as through the
+  // priors.
+  const bool want_msgp_nc = (field == "msgp_nc");
   const bool want_msgp = (field == "msgp" || field == "msgp_temporal" ||
-                          field == "msgp_st4" || field == "msgp_hsgp");
+                          field == "msgp_st4" || field == "msgp_hsgp" ||
+                          want_msgp_nc);
   // The multi-scale field on a shared spectral basis rather than two neighbour
   // sets, with a PC prior on each scale's sigma and a LogNormal on its
   // lengthscale in place of an NNGP density.
@@ -591,6 +597,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
       ms.nu = 1.5;
       ms.shared = true;
       ms.sampler = ratiod_gp::MSGPSampler::AUTO;
+      // spatial_multiscale() offers "centered" and "noncentered" and defaults
+      // to centered, which is the coordinate these fields build; msgp_nc is
+      // the non-centred one.
+      data.msgp_parameterization = want_msgp_nc ? 1 : 0;
 
       if (want_msgp_hsgp) {
         // Both scales read one basis built over the observation locations, so
@@ -1167,8 +1177,8 @@ double cpp_gradient_race(std::string field,
   // while the workers of the concurrent pass build the current one's. The two
   // models differ only in their data, so a workspace keyed on size alone finds
   // its cache valid -- same number of locations, same (sigma2, phi) -- and
-  // returns the other model's NNGP coefficients. That is gcol33/tulpaRatio#76;
-  // a workspace keyed on the model rebuilds and the two passes agree.
+  // returns the other model's NNGP coefficients. A workspace keyed on the
+  // model rebuilds instead, and the two passes agree.
   if (prime_other_model) {
     ModelData other = make_model(field, n_obs, n_units, n_times, seed + 977u,
                                  family, /*temporal_shared=*/true, "none");
@@ -1237,4 +1247,64 @@ double cpp_logpost_at(std::string field,
   std::vector<double> params(n_params);
   for (int i = 0; i < n_params; i++) params[i] = rnorm(rng);
   return compute_log_post(params, data, layout);
+}
+
+// The two coordinates of the multi-scale field describe one posterior.
+//
+// With w = L(sigma2, phi) z the NNGP density and the Jacobian satisfy
+// log N(z; 0, I) = log NNGP(w; sigma2, phi) + log|det L|, and log|det L| is a
+// function of the hyperparameters alone. So at fixed hyperparameters the
+// difference between the non-centred density at z and the centred density at
+// w(z) is the same number for every z, and this returns how far apart those
+// numbers are across several draws.
+//
+// Finite differences cannot see this: a transform that built some other field
+// would leave the non-centred density self-consistent, and its gradient would
+// still match its own difference quotient. What that would break is the
+// posterior, which is what this reads.
+// [[Rcpp::export]]
+double cpp_msgp_nc_coordinate_spread(int n_obs = 400,
+                                     int n_units = 25,
+                                     int n_draws = 5,
+                                     unsigned int seed = 42) {
+  ModelData data_nc = make_model("msgp_nc", n_obs, n_units, 10, seed);
+  ModelData data_c = make_model("msgp", n_obs, n_units, 10, seed);
+  ParamLayout layout = compute_param_layout(data_nc);
+  const int n_params = get_n_params(data_nc);
+  const int n_loc = data_nc.multiscale_gp_data.n_obs;
+
+  std::mt19937 rng(seed + 2000u);
+  std::normal_distribution<double> rnorm(0.0, 0.35);
+  std::vector<double> params_nc(n_params);
+  for (int i = 0; i < n_params; i++) params_nc[i] = rnorm(rng);
+
+  double lo = R_PosInf, hi = R_NegInf;
+  for (int d = 0; d < n_draws; d++) {
+    // The hyperparameters stay where the first draw put them; only the field
+    // blocks move, since it is their coordinate that is under test.
+    for (int i = 0; i < n_loc; i++) {
+      params_nc[layout.gp_local_start + i] = rnorm(rng);
+      params_nc[layout.gp_regional_start + i] = rnorm(rng);
+    }
+    const double lp_nc = compute_log_post(params_nc, data_nc, layout);
+
+    ratiod_gp::MultiscaleGPFieldT<double, 5> field;
+    field.read(&params_nc[layout.gp_local_start],
+               &params_nc[layout.gp_regional_start],
+               std::exp(params_nc[layout.log_sigma2_gp_local_idx]),
+               std::exp(params_nc[layout.log_phi_gp_local_idx]),
+               std::exp(params_nc[layout.log_sigma2_gp_regional_idx]),
+               std::exp(params_nc[layout.log_phi_gp_regional_idx]),
+               data_nc.multiscale_gp_data, /*nc=*/true);
+
+    std::vector<double> params_c = params_nc;
+    for (int i = 0; i < n_loc; i++) {
+      params_c[layout.gp_local_start + i] = field.local[i];
+      params_c[layout.gp_regional_start + i] = field.regional[i];
+    }
+    const double diff = lp_nc - compute_log_post(params_c, data_c, layout);
+    lo = std::min(lo, diff);
+    hi = std::max(hi, diff);
+  }
+  return hi - lo;
 }

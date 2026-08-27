@@ -4673,12 +4673,6 @@ void compute_gradient_msgp_temporal_handcoded(
     double sigma2_regional = std::exp(params[layout.log_sigma2_gp_regional_idx]);
     double phi_regional = std::exp(params[layout.log_phi_gp_regional_idx]);
 
-    std::vector<double> w_local(N_gp), w_regional(N_gp);
-    for (int i = 0; i < N_gp; i++) {
-        w_local[i] = params[layout.gp_local_start + i];
-        w_regional[i] = params[layout.gp_regional_start + i];
-    }
-
     // Temporal parameters
     double tau_temporal = std::exp(params[layout.log_tau_temporal_idx]);
     int T_len = layout.temporal_end - layout.temporal_start;
@@ -4694,6 +4688,13 @@ void compute_gradient_msgp_temporal_handcoded(
         phi_regional > data.multiscale_gp_data.range_regional_upper) {
         return;
     }
+
+    // The field, in whichever coordinate it is sampled in
+    MultiscaleGPView msgp;
+    msgp.read(params, data, layout);
+    const double* w_local = msgp.local();
+    const double* w_regional = msgp.regional();
+    std::vector<double> dL_dw_ms(N_gp, 0.0);
 
     // =========================================================================
     // Prior gradients
@@ -4713,24 +4714,6 @@ void compute_gradient_msgp_temporal_handcoded(
     // Temporal prior
     tau_temporal_prior_grad(data, layout, tau_temporal, grad.data());
     temporal_rho_prior_grad(data, layout, rho_ar1, grad.data());
-
-    // =========================================================================
-    // NNGP prior gradients for multi-scale GP
-    // =========================================================================
-    auto [gp_local, gp_regional] = make_msgp_gp_views(data.multiscale_gp_data);
-
-    ratiod_gp::NNGPGradients nngp_grads_local, nngp_grads_regional;
-    ratiod_gp::gp_nngp_gradients(w_local, sigma2_local, phi_local, gp_local, nngp_grads_local);
-    ratiod_gp::gp_nngp_gradients(w_regional, sigma2_regional, phi_regional, gp_regional, nngp_grads_regional);
-
-    for (int i = 0; i < N_gp; i++) {
-        grad[layout.gp_local_start + i] += nngp_grads_local.grad_w[i];
-        grad[layout.gp_regional_start + i] += nngp_grads_regional.grad_w[i];
-    }
-    grad[layout.log_sigma2_gp_local_idx] += nngp_grads_local.grad_log_sigma2;
-    grad[layout.log_phi_gp_local_idx] += nngp_grads_local.grad_log_phi;
-    grad[layout.log_sigma2_gp_regional_idx] += nngp_grads_regional.grad_log_sigma2;
-    grad[layout.log_phi_gp_regional_idx] += nngp_grads_regional.grad_log_phi;
 
     // =========================================================================
     // Likelihood loop (vectorized eta + per-obs scatter)
@@ -4798,10 +4781,12 @@ void compute_gradient_msgp_temporal_handcoded(
         }
         int loc_i = data.multiscale_gp_data.obs_to_loc[i];
         double dLL_dspatial = data.multiscale_gp_data.shared ? (dLL_num + dLL_denom) : dLL_num;
-        grad[layout.gp_local_start + loc_i] += dLL_dspatial;
-        grad[layout.gp_regional_start + loc_i] += dLL_dspatial;
+        dL_dw_ms[loc_i] += dLL_dspatial;
         if (obs_t_idx[i] >= 0) grad_temporal_lik[obs_t_idx[i]] += data.temporal_shared ? (dLL_num + dLL_denom) : dLL_num;
     }
+
+    // The field's prior and the likelihood scatter, onto the sampled coordinate
+    msgp.accumulate(dL_dw_ms.data(), data, layout, grad.data());
 
     // Temporal GMRF gradients
     temporal_gmrf_prior_grad(data, layout, tau_temporal, rho_ar1,
@@ -5712,13 +5697,6 @@ void compute_gradient_msgp_handcoded(
     double sigma2_regional = std::exp(log_sigma2_regional);
     double phi_regional = std::exp(log_phi_regional);
 
-    // Extract spatial effects
-    std::vector<double> w_local(N_gp), w_regional(N_gp);
-    for (int i = 0; i < N_gp; i++) {
-        w_local[i] = params[layout.gp_local_start + i];
-        w_regional[i] = params[layout.gp_regional_start + i];
-    }
-
     // Bounds check for phi
     if (phi_local < data.multiscale_gp_data.range_local_lower ||
         phi_local > data.multiscale_gp_data.range_local_upper ||
@@ -5726,6 +5704,13 @@ void compute_gradient_msgp_handcoded(
         phi_regional > data.multiscale_gp_data.range_regional_upper) {
         return; // Out of bounds - return zero gradient
     }
+
+    // The field, in whichever coordinate it is sampled in
+    MultiscaleGPView msgp;
+    msgp.read(params, data, layout);
+    const double* w_local = msgp.local();
+    const double* w_regional = msgp.regional();
+    std::vector<double> dL_dw_ms(N_gp, 0.0);
 
     // =========================================================================
     // Prior gradients
@@ -5744,27 +5729,6 @@ void compute_gradient_msgp_handcoded(
     // Jacobians for log-transforms
     grad[layout.log_phi_gp_local_idx] = 1.0;    // Uniform prior, just Jacobian
     grad[layout.log_phi_gp_regional_idx] = 1.0;
-
-    // =========================================================================
-    // Compute NNGP gradients w.r.t. spatial effects (analytical)
-    // =========================================================================
-    auto [gp_local, gp_regional] = make_msgp_gp_views(data.multiscale_gp_data);
-
-    ratiod_gp::NNGPGradients nngp_grads_local, nngp_grads_regional;
-    ratiod_gp::gp_nngp_gradients(w_local, sigma2_local, phi_local, gp_local, nngp_grads_local);
-    ratiod_gp::gp_nngp_gradients(w_regional, sigma2_regional, phi_regional, gp_regional, nngp_grads_regional);
-
-    // Add NNGP prior gradient contributions for w
-    for (int i = 0; i < N_gp; i++) {
-        grad[layout.gp_local_start + i] += nngp_grads_local.grad_w[i];
-        grad[layout.gp_regional_start + i] += nngp_grads_regional.grad_w[i];
-    }
-
-    // Add NNGP gradient contributions for GP hyperparameters
-    grad[layout.log_sigma2_gp_local_idx] += nngp_grads_local.grad_log_sigma2;
-    grad[layout.log_phi_gp_local_idx] += nngp_grads_local.grad_log_phi;
-    grad[layout.log_sigma2_gp_regional_idx] += nngp_grads_regional.grad_log_sigma2;
-    grad[layout.log_phi_gp_regional_idx] += nngp_grads_regional.grad_log_phi;
 
     // =========================================================================
     // Data likelihood loop
@@ -5808,11 +5772,13 @@ void compute_gradient_msgp_handcoded(
         // Gradients for GP spatial effects (from likelihood, mapped to unique location)
         double dLL_dspatial = data.multiscale_gp_data.shared ?
                               (dLL_deta_num + dLL_deta_denom) : dLL_deta_num;
-        grad[layout.gp_local_start + loc_i] += dLL_dspatial;
-        grad[layout.gp_regional_start + loc_i] += dLL_dspatial;
+        dL_dw_ms[loc_i] += dLL_dspatial;
 
         accumulate_phi_likelihood_grad(data, layout, i, eta_num, eta_denom, phi_num, phi_denom, grad.data());
     }
+
+    // The field's prior and the likelihood scatter, onto the sampled coordinate
+    msgp.accumulate(dL_dw_ms.data(), data, layout, grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -7021,7 +6987,8 @@ void compute_gradient_composite(
     const int N_msgp = has_msgp_nngp ? data.multiscale_gp_data.n_obs : 0;
     double ms_sigma2_local = 0.0, ms_phi_local = 0.0;
     double ms_sigma2_regional = 0.0, ms_phi_regional = 0.0;
-    std::vector<double> ms_w_local, ms_w_regional;
+    MultiscaleGPView msgp;
+    std::vector<double> grad_ms_w_lik;
     if (has_msgp_nngp) {
         ms_sigma2_local = std::exp(params[layout.log_sigma2_gp_local_idx]);
         ms_phi_local = std::exp(params[layout.log_phi_gp_local_idx]);
@@ -7035,12 +7002,8 @@ void compute_gradient_composite(
                 *log_post_out = compute_log_post(params_in, data, layout);
             return;
         }
-        ms_w_local.resize(N_msgp);
-        ms_w_regional.resize(N_msgp);
-        for (int i = 0; i < N_msgp; i++) {
-            ms_w_local[i] = params[layout.gp_local_start + i];
-            ms_w_regional[i] = params[layout.gp_regional_start + i];
-        }
+        msgp.read(params, data, layout);
+        grad_ms_w_lik.assign(N_msgp, 0.0);
     }
 
     // --- HSGP spatial ---
@@ -7376,9 +7339,9 @@ void compute_gradient_composite(
     }
 
     // Multi-scale GP priors: PC on each scale's variance, uniform on each
-    // range (log-transform Jacobian only), plus both NNGP field priors.
+    // range (log-transform Jacobian only). Each field's own prior reaches the
+    // sampled coordinate through the view's adjoint, below.
     if (has_msgp_nngp) {
-        auto [ms_gp_local, ms_gp_regional] = make_msgp_gp_views(data.multiscale_gp_data);
         grad[layout.log_sigma2_gp_local_idx] += gp_pc_prior_grad_log_sigma2(
             ms_sigma2_local, data.ms_sigma2_local_prior_U, data.ms_sigma2_local_prior_alpha);
         grad[layout.log_sigma2_gp_regional_idx] += gp_pc_prior_grad_log_sigma2(
@@ -7386,20 +7349,6 @@ void compute_gradient_composite(
             data.ms_sigma2_regional_prior_alpha);
         grad[layout.log_phi_gp_local_idx] += 1.0;
         grad[layout.log_phi_gp_regional_idx] += 1.0;
-
-        ratiod_gp::NNGPGradients ms_grads_local, ms_grads_regional;
-        ratiod_gp::gp_nngp_gradients(ms_w_local, ms_sigma2_local, ms_phi_local,
-                                     ms_gp_local, ms_grads_local);
-        ratiod_gp::gp_nngp_gradients(ms_w_regional, ms_sigma2_regional, ms_phi_regional,
-                                     ms_gp_regional, ms_grads_regional);
-        for (int i = 0; i < N_msgp; i++) {
-            grad[layout.gp_local_start + i] += ms_grads_local.grad_w[i];
-            grad[layout.gp_regional_start + i] += ms_grads_regional.grad_w[i];
-        }
-        grad[layout.log_sigma2_gp_local_idx] += ms_grads_local.grad_log_sigma2;
-        grad[layout.log_phi_gp_local_idx] += ms_grads_local.grad_log_phi;
-        grad[layout.log_sigma2_gp_regional_idx] += ms_grads_regional.grad_log_sigma2;
-        grad[layout.log_phi_gp_regional_idx] += ms_grads_regional.grad_log_phi;
     }
 
     // SVC (NNGP) priors: half-Cauchy on each sigma, uniform on each range, and
@@ -7622,7 +7571,7 @@ void compute_gradient_composite(
         // Multi-scale GP spatial
         if (has_msgp_nngp) {
             const int loc_i = data.multiscale_gp_data.obs_to_loc[i];
-            const double ms_eff = ms_w_local[loc_i] + ms_w_regional[loc_i];
+            const double ms_eff = msgp.local()[loc_i] + msgp.regional()[loc_i];
             eta_num_i += ms_eff;
             if (!is_binomial && data.multiscale_gp_data.shared) eta_denom_i += ms_eff;
         }
@@ -7826,9 +7775,8 @@ void compute_gradient_composite(
         // Scatter to the multi-scale GP field, by location rather than by row
         if (has_msgp_nngp) {
             const int loc_i = data.multiscale_gp_data.obs_to_loc[i];
-            const double dLL_ms = data.multiscale_gp_data.shared ? dLL_shared : dLL_num;
-            grad[layout.gp_local_start + loc_i] += dLL_ms;
-            grad[layout.gp_regional_start + loc_i] += dLL_ms;
+            grad_ms_w_lik[loc_i] +=
+                data.multiscale_gp_data.shared ? dLL_shared : dLL_num;
         }
 
         // Scatter to the GP field, by location rather than by row
@@ -7940,6 +7888,12 @@ void compute_gradient_composite(
                                 centering.active(), tau_spatial,
                                 sigma_s_bym2, sigma_u_bym2, rho_bym2, rho_car, theta_bym2,
                                 grad_spatial_lik.data(), grad.data());
+    }
+
+    // Multi-scale GP field: its own prior and the likelihood scatter, onto
+    // whichever coordinate the two scales are sampled in.
+    if (has_msgp_nngp) {
+        msgp.accumulate(grad_ms_w_lik.data(), data, layout, grad.data());
     }
 
     // GP (NNGP) field: the likelihood scatter reaches the sampled parameters
@@ -11126,6 +11080,15 @@ HMCResultCpp run_hmc_chain_cpp(
                   row[layout.gp_w_start + i] = nc_ws_store.w[i];
               }
           }
+          if (msgp_nc(data, layout)) {
+              MultiscaleGPView msgp_store;
+              msgp_store.read(q, data, layout);
+              const int N_msgp_store = data.multiscale_gp_data.n_obs;
+              for (int i = 0; i < N_msgp_store; i++) {
+                  row[layout.gp_local_start + i] = msgp_store.local()[i];
+                  row[layout.gp_regional_start + i] = msgp_store.regional()[i];
+              }
+          }
           if (temporal_ar1_nc(data, layout)) {
               std::vector<double> phi_store_buf;
               const double* phi_store = temporal_effects(q, data, layout, phi_store_buf);
@@ -12033,6 +11996,18 @@ Rcpp::List cpp_hmc_fit_gp(
     }
 
     data.multiscale_gp_data.shared = gp_shared;
+
+    // Multi-scale GP parameterization: centered (default) or noncentered. The
+    // HSGP arm samples basis coefficients, which are already the non-centred
+    // coordinate, so msgp_nc() reads this for the two-neighbour-set arm alone.
+    {
+        std::string msgp_param_str = "centered";
+        if (gp_params.containsElementNamed("parameterization")) {
+            msgp_param_str = Rcpp::as<std::string>(gp_params["parameterization"]);
+        }
+        data.msgp_parameterization = (msgp_param_str == "noncentered") ? 1 : 0;
+    }
+
     data.ms_sigma2_local_prior_U = ms_sigma2_local_prior_U;
     data.ms_sigma2_local_prior_alpha = ms_sigma2_local_prior_alpha;
     data.ms_sigma2_regional_prior_U = ms_sigma2_regional_prior_U;

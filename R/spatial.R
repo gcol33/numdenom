@@ -928,6 +928,13 @@ validate_hsgp <- function(spatial, data) {
 #' @param sampler Warmup mass-matrix adaptation for the two GP blocks:
 #'   `"auto"` (default) leaves the sampler's own adaptation in place, `"lbfgs"`
 #'   runs an L-BFGS pass during warmup to initialize it.
+#' @param parameterization Coordinate the two fields are sampled in. One of
+#'   `"centered"` (default), where each block holds the effects themselves, or
+#'   `"noncentered"`, where each block holds \eqn{z \sim N(0, I)} and its scale's
+#'   effects are \eqn{w = L(\sigma^2, \phi) z}. Both scales carry a variance
+#'   parameter over the same locations, so the non-centred coordinate is worth
+#'   trying when the variances are weakly informed by the data. Ignored for
+#'   `approx = "hsgp"`, whose basis coefficients are already that coordinate.
 #'
 #' @return A `ratiod_multiscale` object
 #'
@@ -1003,11 +1010,13 @@ spatial_multiscale <- function(coords,
                                c_boundary = 1.5,
                                shared = TRUE,
                                scale_coords = TRUE,
-                               sampler = c("auto", "lbfgs")) {
+                               sampler = c("auto", "lbfgs"),
+                               parameterization = c("centered", "noncentered")) {
 
   cov <- match.arg(cov)
   approx <- match.arg(approx)
   sampler <- match.arg(sampler)
+  parameterization <- match.arg(parameterization)
 
   # Parse coordinate specification
   if (inherits(coords, "formula")) {
@@ -1089,6 +1098,7 @@ spatial_multiscale <- function(coords,
       shared = shared,
       scale_coords = scale_coords,
       sampler = sampler,
+      parameterization = parameterization,
       # Filled in during validation
       n_obs = NULL,
       n_spatial = NULL,

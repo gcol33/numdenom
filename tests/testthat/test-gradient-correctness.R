@@ -97,12 +97,16 @@ ST_GP_FIELDS <- c("stgp", "stgp_matern", "stgp_gneiting", "stgp_latent")
 #                Hilbert-space basis rather than two neighbour sets, and each
 #                carries a PC prior on sigma with a LogNormal on its
 #                lengthscale rather than an NNGP density.
+#   msgp_nc   -- spatial_multiscale(parameterization = "noncentered"): each
+#                scale's block holds z ~ N(0, I) and its field is
+#                w = L(sigma2, phi) z, so all four hyperparameters reach eta
+#                through the transforms as well as through the priors.
 # Both were declared gaps in the templated density until gcol33/tulpaRatio#26;
 # the autodiff modes now differentiate a density that expresses them, so they
 # belong here rather than with the collapsed fields.
 KERNEL_FIELDS <- c("gp", "gp_matern", "gp_gaussian", "gp_spherical",
                    "gp_temporal", "gp_nc", "msgp", "msgp_temporal",
-                   "msgp_hsgp", "svc", "svc_hsgp",
+                   "msgp_hsgp", "msgp_nc", "svc", "svc_hsgp",
                    "temporal_gp", "ms_temporal", "latent")
 # The kernel field the templated density declares a gap for: gp_collapsed
 # marginalizes its field out, as the collapsed areal fields do, so it has no
@@ -484,6 +488,21 @@ for (field in KERNEL_FIELDS) {
     })
   }
 }
+
+# What a finite difference cannot reach on msgp_nc. The non-centred field is
+# w = L(sigma2, phi) z, and a transform that built some OTHER field would leave
+# the non-centred density self-consistent: its gradient would still match its
+# own difference quotient, and the sweep above would stay green while the
+# posterior being sampled was not the multi-scale GP.
+#
+# What ties the two coordinates together is
+# log N(z; 0, I) = log NNGP(w; sigma2, phi) + log|det L|, whose last term is a
+# function of the hyperparameters alone. So at fixed hyperparameters the
+# difference between the two densities is one number for every z, and a
+# transform that disagrees with the NNGP density makes it move.
+test_that("both coordinates of the multi-scale field carry one posterior", {
+  expect_lt(tulpaRatio:::cpp_msgp_nc_coordinate_spread(), 1e-8)
+})
 
 for (field in KERNEL_COLLAPSED_FIELDS) {
   test_that(sprintf("analytic gradient matches finite differences (%s, handcoded)", field), {

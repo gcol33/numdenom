@@ -223,28 +223,7 @@ T multiscale_gp_log_lik_t(
     const T& phi_regional,
     const MultiscaleGPData& ms_data
 ) {
-    // Create temporary GPData structures for each scale
-    GPData gp_local;
-    gp_local.n_obs = ms_data.n_obs;
-    gp_local.nn = ms_data.nn_local;
-    gp_local.coords = ms_data.coords;
-    gp_local.nn_idx = ms_data.nn_idx_local;
-    gp_local.nn_dist = ms_data.nn_dist_local;
-    gp_local.nn_neighbor_dist = ms_data.nn_neighbor_dist_local;
-    gp_local.nn_order = ms_data.nn_order_local;
-    gp_local.nn_order_inv = ms_data.nn_order_inv_local;
-    gp_local.cov_type = ms_data.cov_type;
-
-    GPData gp_regional;
-    gp_regional.n_obs = ms_data.n_obs;
-    gp_regional.nn = ms_data.nn_regional;
-    gp_regional.coords = ms_data.coords;
-    gp_regional.nn_idx = ms_data.nn_idx_regional;
-    gp_regional.nn_dist = ms_data.nn_dist_regional;
-    gp_regional.nn_neighbor_dist = ms_data.nn_neighbor_dist_regional;
-    gp_regional.nn_order = ms_data.nn_order_regional;
-    gp_regional.nn_order_inv = ms_data.nn_order_inv_regional;
-    gp_regional.cov_type = ms_data.cov_type;
+    auto [gp_local, gp_regional] = make_msgp_gp_views(ms_data);
 
     // Compute log-likelihood for each scale
     T ll_local = gp_nngp_log_lik_t(w_local, sigma2_local, phi_local, gp_local);

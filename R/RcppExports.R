@@ -201,6 +201,10 @@ cpp_logpost_at <- function(field, n_obs = 400L, n_units = 25L, n_times = 10L, se
     .Call(`_tulpaRatio_cpp_logpost_at`, field, n_obs, n_units, n_times, seed, family, temporal_shared, zi)
 }
 
+cpp_msgp_nc_coordinate_spread <- function(n_obs = 400L, n_units = 25L, n_draws = 5L, seed = 42L) {
+    .Call(`_tulpaRatio_cpp_msgp_nc_coordinate_spread`, n_obs, n_units, n_draws, seed)
+}
+
 cpp_test_leapfrog <- function(q_init, p_init, epsilon, L) {
     .Call(`_tulpaRatio_cpp_test_leapfrog`, q_init, p_init, epsilon, L)
 }

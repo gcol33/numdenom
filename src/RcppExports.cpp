@@ -1084,6 +1084,20 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_msgp_nc_coordinate_spread
+double cpp_msgp_nc_coordinate_spread(int n_obs, int n_units, int n_draws, unsigned int seed);
+RcppExport SEXP _tulpaRatio_cpp_msgp_nc_coordinate_spread(SEXP n_obsSEXP, SEXP n_unitsSEXP, SEXP n_drawsSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_obs(n_obsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_units(n_unitsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_draws(n_drawsSEXP);
+    Rcpp::traits::input_parameter< unsigned int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_msgp_nc_coordinate_spread(n_obs, n_units, n_draws, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_test_leapfrog
 List cpp_test_leapfrog(NumericVector q_init, NumericVector p_init, double epsilon, int L);
 RcppExport SEXP _tulpaRatio_cpp_test_leapfrog(SEXP q_initSEXP, SEXP p_initSEXP, SEXP epsilonSEXP, SEXP LSEXP) {
@@ -2156,6 +2170,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_tulpaRatio_cpp_gradient_check", (DL_FUNC) &_tulpaRatio_cpp_gradient_check, 13},
     {"_tulpaRatio_cpp_gradient_race", (DL_FUNC) &_tulpaRatio_cpp_gradient_race, 10},
     {"_tulpaRatio_cpp_logpost_at", (DL_FUNC) &_tulpaRatio_cpp_logpost_at, 8},
+    {"_tulpaRatio_cpp_msgp_nc_coordinate_spread", (DL_FUNC) &_tulpaRatio_cpp_msgp_nc_coordinate_spread, 4},
     {"_tulpaRatio_cpp_test_leapfrog", (DL_FUNC) &_tulpaRatio_cpp_test_leapfrog, 4},
     {"_tulpaRatio_cpp_test_hamiltonian", (DL_FUNC) &_tulpaRatio_cpp_test_hamiltonian, 2},
     {"_tulpaRatio_cpp_test_log_sum_exp", (DL_FUNC) &_tulpaRatio_cpp_test_log_sum_exp, 1},

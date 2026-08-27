@@ -18,7 +18,8 @@ spatial_multiscale(
   c_boundary = 1.5,
   shared = TRUE,
   scale_coords = TRUE,
-  sampler = c("auto", "lbfgs")
+  sampler = c("auto", "lbfgs"),
+  parameterization = c("centered", "noncentered")
 )
 }
 \arguments{
@@ -66,6 +67,14 @@ unit variance before computing distances.}
 \item{sampler}{Warmup mass-matrix adaptation for the two GP blocks:
 \code{"auto"} (default) leaves the sampler's own adaptation in place, \code{"lbfgs"}
 runs an L-BFGS pass during warmup to initialize it.}
+
+\item{parameterization}{Coordinate the two fields are sampled in. One of
+\code{"centered"} (default), where each block holds the effects themselves, or
+\code{"noncentered"}, where each block holds \eqn{z \sim N(0, I)} and its scale's
+effects are \eqn{w = L(\sigma^2, \phi) z}. Both scales carry a variance
+parameter over the same locations, so the non-centred coordinate is worth
+trying when the variances are weakly informed by the data. Ignored for
+\code{approx = "hsgp"}, whose basis coefficients are already that coordinate.}
 }
 \value{
 A \code{ratiod_multiscale} object

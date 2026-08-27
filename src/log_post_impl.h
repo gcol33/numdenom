@@ -622,41 +622,70 @@ T compute_log_post_impl(
         }
         log_post = log_post + log_phi_regional;  // Jacobian
 
-        // Extract local GP effects
-        int n_gp_local = layout.gp_local_end - layout.gp_local_start;
-        ms_gp_w_local.resize(n_gp_local);
-        for (int k = 0; k < n_gp_local; k++) {
-            ms_gp_w_local[k] = params[layout.gp_local_start + k];
-        }
+        const int n_gp_local = layout.gp_local_end - layout.gp_local_start;
+        const int n_gp_regional = layout.gp_regional_end - layout.gp_regional_start;
 
-        // Extract regional GP effects
-        int n_gp_regional = layout.gp_regional_end - layout.gp_regional_start;
-        ms_gp_w_regional.resize(n_gp_regional);
-        for (int k = 0; k < n_gp_regional; k++) {
-            ms_gp_w_regional[k] = params[layout.gp_regional_start + k];
-        }
-
-        // Apply RSR projection if enabled
-        if (data.has_rsr && !data.rsr_projection.empty()) {
-            std::vector<T> local_proj(data.rsr_n, T(0.0));
-            std::vector<T> regional_proj(data.rsr_n, T(0.0));
-            for (int ii = 0; ii < data.rsr_n; ii++) {
-                for (int jj = 0; jj < data.rsr_n; jj++) {
-                    local_proj[ii] = local_proj[ii]
-                        + T(data.rsr_projection[ii * data.rsr_n + jj]) * ms_gp_w_local[jj];
-                    regional_proj[ii] = regional_proj[ii]
-                        + T(data.rsr_projection[ii * data.rsr_n + jj]) * ms_gp_w_regional[jj];
-                }
+        if (ratiod_hmc::msgp_nc(data, layout)) {
+            // Non-centred: each block holds z, and that scale's field is
+            // w = L(sigma2, phi) z built by the NNGP autoregression. Per scale
+            // the NNGP prior on w and the Jacobian |dw/dz| cancel exactly, so
+            // what is left of the two fields' own density is N(0, I) on each
+            // block, and all four hyperparameters reach eta through the
+            // transforms instead. RSR does not apply: the projection is
+            // defined on the centred coordinate.
+            std::vector<T> z_local(n_gp_local), z_regional(n_gp_regional);
+            T z_sq_sum = T(0.0);
+            for (int k = 0; k < n_gp_local; k++) {
+                z_local[k] = params[layout.gp_local_start + k];
+                z_sq_sum = z_sq_sum + z_local[k] * z_local[k];
             }
-            ms_gp_w_local = local_proj;
-            ms_gp_w_regional = regional_proj;
-        }
+            for (int k = 0; k < n_gp_regional; k++) {
+                z_regional[k] = params[layout.gp_regional_start + k];
+                z_sq_sum = z_sq_sum + z_regional[k] * z_regional[k];
+            }
+            log_post = log_post - T(0.5) * z_sq_sum;
 
-        // Multiscale NNGP log-likelihood for both scales
-        log_post = log_post + ratiod_gp::multiscale_gp_log_lik_t(
-            ms_gp_w_local, ms_gp_w_regional,
-            sigma2_local, phi_local, sigma2_regional, phi_regional,
-            data.multiscale_gp_data);
+            ratiod_gp::MultiscaleGPFieldT<T, 1> ms_field;
+            ms_field.read(z_local.data(), z_regional.data(),
+                          sigma2_local, phi_local, sigma2_regional, phi_regional,
+                          data.multiscale_gp_data, /*nc=*/true);
+            ms_gp_w_local.assign(ms_field.local, ms_field.local + n_gp_local);
+            ms_gp_w_regional.assign(ms_field.regional,
+                                    ms_field.regional + n_gp_regional);
+        } else {
+            // Centred: each block holds the effects, which carry that scale's
+            // NNGP prior directly.
+            ms_gp_w_local.resize(n_gp_local);
+            for (int k = 0; k < n_gp_local; k++) {
+                ms_gp_w_local[k] = params[layout.gp_local_start + k];
+            }
+            ms_gp_w_regional.resize(n_gp_regional);
+            for (int k = 0; k < n_gp_regional; k++) {
+                ms_gp_w_regional[k] = params[layout.gp_regional_start + k];
+            }
+
+            // Apply RSR projection if enabled
+            if (data.has_rsr && !data.rsr_projection.empty()) {
+                std::vector<T> local_proj(data.rsr_n, T(0.0));
+                std::vector<T> regional_proj(data.rsr_n, T(0.0));
+                for (int ii = 0; ii < data.rsr_n; ii++) {
+                    for (int jj = 0; jj < data.rsr_n; jj++) {
+                        local_proj[ii] = local_proj[ii]
+                            + T(data.rsr_projection[ii * data.rsr_n + jj]) * ms_gp_w_local[jj];
+                        regional_proj[ii] = regional_proj[ii]
+                            + T(data.rsr_projection[ii * data.rsr_n + jj]) * ms_gp_w_regional[jj];
+                    }
+                }
+                ms_gp_w_local = local_proj;
+                ms_gp_w_regional = regional_proj;
+            }
+
+            // Multiscale NNGP log-likelihood for both scales
+            log_post = log_post + ratiod_gp::multiscale_gp_log_lik_t(
+                ms_gp_w_local, ms_gp_w_regional,
+                sigma2_local, phi_local, sigma2_regional, phi_regional,
+                data.multiscale_gp_data);
+        }
 
         // Precompute combined effect at observation level
         ms_gp_effect.resize(data.N, T(0.0));

@@ -241,6 +241,7 @@ struct ModelData {
   MultiscaleGPData multiscale_gp_data;
   bool has_multiscale_gp = false;
   bool msgp_is_hsgp = false;                    // HSGP approximation for MSGP
+  int msgp_parameterization = 0;                // 0=centered, 1=non-centered
   ratiod_hsgp::HSGPData msgp_hsgp_data;         // Shared HSGP basis for both scales
   double ms_sigma2_local_prior_U = 1.0;
   double ms_sigma2_local_prior_alpha = 0.01;
@@ -2091,6 +2092,107 @@ struct TemporalView {
             const ParamLayout& layout) {
     z = &params[layout.temporal_start];
     phi = temporal_effects(params, data, layout, buf);
+  }
+};
+
+// =====================================================================
+// The multi-scale GP field's effects
+// =====================================================================
+
+// Whether the multi-scale GP field is sampled in its non-centred coordinate:
+// each scale's parameter block holds z ~ N(0, I) rather than the effects. The
+// HSGP arm's basis coefficients are already such a coordinate, so the flag
+// governs the two-neighbour-set arm alone.
+inline bool msgp_nc(const ModelData& data, const ParamLayout& layout) {
+  return layout.is_multiscale_gp && data.has_multiscale_gp &&
+         !data.msgp_is_hsgp && data.msgp_parameterization == 1;
+}
+
+// The multi-scale field as a gradient path needs it: the effects each scale
+// contributes to eta, and the adjoint that carries the likelihood back onto
+// whichever coordinate is being sampled.
+//
+// The gradient slots (3, 4) are not the density's (1, 2): a fused gradient
+// evaluates the density once its own backward pass has read the cached
+// factors, and the two would otherwise share a workspace.
+struct MultiscaleGPView {
+  ratiod_gp::MultiscaleGPFieldT<double, 3> field;
+  const double* z_local = nullptr;
+  const double* z_regional = nullptr;
+  double sigma2_local = 0.0, phi_local = 0.0;
+  double sigma2_regional = 0.0, phi_regional = 0.0;
+
+  const double* local() const { return field.local; }
+  const double* regional() const { return field.regional; }
+
+  void read(const std::vector<double>& params, const ModelData& data,
+            const ParamLayout& layout) {
+    z_local = &params[layout.gp_local_start];
+    z_regional = &params[layout.gp_regional_start];
+    sigma2_local = std::exp(params[layout.log_sigma2_gp_local_idx]);
+    phi_local = std::exp(params[layout.log_phi_gp_local_idx]);
+    sigma2_regional = std::exp(params[layout.log_sigma2_gp_regional_idx]);
+    phi_regional = std::exp(params[layout.log_phi_gp_regional_idx]);
+    field.read(z_local, z_regional, sigma2_local, phi_local,
+               sigma2_regional, phi_regional, data.multiscale_gp_data,
+               msgp_nc(data, layout));
+  }
+
+  // The field's own prior and the likelihood's derivative with respect to the
+  // effects, onto the sampled coordinate.
+  //
+  // Both scales enter eta through the same sum w_local[loc] + w_regional[loc],
+  // so the likelihood's derivative with respect to either is the one vector
+  // `dL_dw`, indexed by location.
+  //
+  // Centred, that vector lands on each block and the NNGP density supplies the
+  // prior. Non-centred, each scale runs the same adjoint the single-scale
+  // field runs: it returns the FULL z gradient -- it seeds each entry with
+  // -z before adding the likelihood's -- and the two contributions the
+  // transform carries to that scale's variance and range.
+  void accumulate(const double* dL_dw, const ModelData& data,
+                  const ParamLayout& layout, double* grad) const {
+    const int n = data.multiscale_gp_data.n_obs;
+    if (field.noncentered) {
+      std::vector<double> grad_z(n, 0.0);
+      double grad_log_sigma2_lik = 0.0, grad_log_phi_lik = 0.0, grad_log_phi_jac = 0.0;
+
+      ratiod_gp::nngp_nc_backward(z_local, sigma2_local, phi_local,
+                                  field.gp_local, field.ws_local(),
+                                  dL_dw, grad_z.data(),
+                                  grad_log_sigma2_lik, grad_log_phi_lik,
+                                  grad_log_phi_jac);
+      for (int i = 0; i < n; i++) grad[layout.gp_local_start + i] += grad_z[i];
+      grad[layout.log_sigma2_gp_local_idx] += grad_log_sigma2_lik;
+      grad[layout.log_phi_gp_local_idx] += grad_log_phi_lik;
+
+      std::fill(grad_z.begin(), grad_z.end(), 0.0);
+      ratiod_gp::nngp_nc_backward(z_regional, sigma2_regional, phi_regional,
+                                  field.gp_regional, field.ws_regional(),
+                                  dL_dw, grad_z.data(),
+                                  grad_log_sigma2_lik, grad_log_phi_lik,
+                                  grad_log_phi_jac);
+      for (int i = 0; i < n; i++) grad[layout.gp_regional_start + i] += grad_z[i];
+      grad[layout.log_sigma2_gp_regional_idx] += grad_log_sigma2_lik;
+      grad[layout.log_phi_gp_regional_idx] += grad_log_phi_lik;
+      return;
+    }
+
+    std::vector<double> w_local(field.local, field.local + n);
+    std::vector<double> w_regional(field.regional, field.regional + n);
+    ratiod_gp::NNGPGradients prior_local, prior_regional;
+    ratiod_gp::gp_nngp_gradients(w_local, sigma2_local, phi_local,
+                                 field.gp_local, prior_local);
+    ratiod_gp::gp_nngp_gradients(w_regional, sigma2_regional, phi_regional,
+                                 field.gp_regional, prior_regional);
+    for (int i = 0; i < n; i++) {
+      grad[layout.gp_local_start + i] += prior_local.grad_w[i] + dL_dw[i];
+      grad[layout.gp_regional_start + i] += prior_regional.grad_w[i] + dL_dw[i];
+    }
+    grad[layout.log_sigma2_gp_local_idx] += prior_local.grad_log_sigma2;
+    grad[layout.log_phi_gp_local_idx] += prior_local.grad_log_phi;
+    grad[layout.log_sigma2_gp_regional_idx] += prior_regional.grad_log_sigma2;
+    grad[layout.log_phi_gp_regional_idx] += prior_regional.grad_log_phi;
   }
 };
 

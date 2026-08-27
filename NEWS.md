@@ -1,5 +1,36 @@
 # tulpaRatio 1.7.2
 
+* **`spatial_multiscale(parameterization = "noncentered")` (#75).** The
+  multi-scale field was the one continuous field in the package with a single
+  coordinate: `spatial_gp()` offers `"centered"`, `"noncentered"` and
+  `"collapsed"`, and `temporal_gp()` and `temporal_ar1()` each offer a second
+  coordinate, while the multi-scale block carried two variance parameters over
+  the same locations with no alternative to the effects themselves. #36 removed
+  the name that selected nothing; it now selects a coordinate.
+
+  Non-centred, each scale's block holds `z ~ N(0, I)` and its field is
+  `w = L(sigma2, phi) z` through the NNGP autoregression the single-scale field
+  already uses, so all four hyperparameters reach the linear predictor through
+  the transforms as well as through the priors. Stored draws are the effects in
+  either coordinate. `approx = "hsgp"` ignores the argument: its basis
+  coefficients are already that coordinate.
+
+  `MultiscaleGPFieldT` is the reader and `MultiscaleGPView::accumulate` the
+  adjoint, one of each rather than a branch at each of the six sites that read
+  the field -- the templated density, the three gradient functions that write
+  the block, and the sample-storage transform. Both scales enter the linear
+  predictor through the same sum, so the likelihood's derivative with respect
+  to either is the one vector, and the adjoint carries it onto whichever
+  coordinate is being sampled. `multiscale_gp_log_lik_t()` built its own copy
+  of the two `GPData` views beside `make_msgp_gp_views()`; it now calls it.
+
+  `msgp_nc` joins the finite-difference sweep in all four gradient modes. A
+  finite difference cannot see a transform that builds the wrong field -- the
+  density would stay self-consistent and its gradient would still match its own
+  difference quotient -- so `cpp_msgp_nc_coordinate_spread()` reads the
+  invariant that does: at fixed hyperparameters the two densities differ by
+  `log|det L|`, one number for every `z`. It measures 2e-13.
+
 * **A collapsed workspace no longer reads a previous model's structure (#76).**
   The collapsed GP's per-thread workspace caches the NNGP coefficients for the
   last `(sigma2, phi)`, the location-to-observation map, and a Newton mode the

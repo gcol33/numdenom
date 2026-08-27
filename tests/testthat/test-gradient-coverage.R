@@ -380,7 +380,7 @@ test_that("negbin_negbin with MSGP runs correctly (row 44)", {
     ~ x + y,
     nn_local = 5,
     nn_regional = 10,
-    sampler = "noncentered"
+    parameterization = "noncentered"
   )
 
   fit <- suppressWarnings(
@@ -395,9 +395,7 @@ test_that("negbin_negbin with MSGP runs correctly (row 44)", {
   )
 
   expect_s3_class(fit, "ratiod_fit")
-
-  # Check for reasonable acceptance
-  expect_true(!is.null(fit$fit$diagnostics) || !is.null(fit$fit))
+  expect_false(is.null(fit$diagnostics))
 })
 
 
@@ -412,7 +410,7 @@ test_that("binomial with MSGP runs correctly (row 45)", {
     ~ x + y,
     nn_local = 5,
     nn_regional = 10,
-    sampler = "noncentered"
+    parameterization = "noncentered"
   )
 
   fit <- suppressWarnings(
