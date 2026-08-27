@@ -173,8 +173,20 @@ void compute_svc_eta(
     }
 }
 
-// The sum-to-zero constraint is ratiod_svc::svc_sum_to_zero_penalty in
-// hmc_svc.h, templated over the scalar type and shared with the plain sampler.
+// Identify each term's global level by centring it on its way into eta, then
+// build eta from the centred field. One function so no path can compute
+// svc_eta from an uncentred field; the gradient counterpart is
+// ratiod_svc::svc_center_project_lik_grad in hmc_svc.h, whose comment carries
+// the derivation.
+template<typename T>
+void svc_center_eta(
+    std::vector<T>& w_flat,        // n_obs x n_svc, term-major; centred in place
+    const SVCData& svc_data,
+    std::vector<T>& eta_svc        // Output: length n_obs
+) {
+    tulpa::s2z_centre_blocks(w_flat.data(), svc_data.n_svc, svc_data.n_obs);
+    compute_svc_eta(w_flat, svc_data, eta_svc);
+}
 
 // =============================================================================
 // SVC prior on hyperparameters

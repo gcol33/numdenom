@@ -10,7 +10,7 @@
 #include <cmath>
 #include <algorithm>
 
-#include <tulpa/soft_sum_to_zero.h>  // s2z_precision
+#include <tulpa/sum_to_zero.h>  // s2z_centre_blocks / s2z_component_mean
 #include "hmc_cov.h"
 
 // Fallback definition of M_PI if not provided by <cmath>
@@ -163,92 +163,61 @@ inline double nngp_log_lik(
 // SVC contribution to linear predictor
 // -----------------------------------------------------------------------------
 
-// Compute SVC contribution to linear predictor for all observations
-// eta_svc[i] = sum_j X_svc[i,j] * w_j[i]
-inline void compute_svc_eta(
-    const std::vector<double>& w_flat,  // n_obs x n_svc flattened
-    const SVCData& svc_data,
-    std::vector<double>& eta_svc         // Output: length n_obs
-) {
-  int N = svc_data.n_obs;
-  int n_svc = svc_data.n_svc;
-
-  std::fill(eta_svc.begin(), eta_svc.end(), 0.0);
-
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < n_svc; j++) {
-      // w_flat is stored as [w1[1..N], w2[1..N], ...]
-      double w_ij = w_flat[j * N + i];
-      double x_ij = svc_data.X_svc[i * n_svc + j];
-      eta_svc[i] += x_ij * w_ij;
-    }
-  }
-}
+// The linear predictor contribution and the level identification that goes
+// with it are templated in hmc_svc_autodiff.h (compute_svc_eta /
+// svc_center_eta): (sigma2, phi) are sampled, so every path through them
+// carries an autodiff scalar and a plain-double copy would only be a second
+// version of the same function.
 
 // -----------------------------------------------------------------------------
-// Sum-to-zero constraint for identifiability
+// Identification of each term's global level
 // -----------------------------------------------------------------------------
 
-// Soft ridge on the mean of each SVC term's weights, which trades off against
-// the fixed coefficient on the same covariate. Written on the sum: the earlier
-// mean form -0.5 * lambda_mean * n_obs * mean(w)^2 is the identity
-// -0.5 * (lambda_mean / n_obs) * sum^2, so the two are the same penalty and
-// svc_sum_to_zero_ridge() is the one constant both this and its gradient read.
+// beta_j and mean(w_j) are not separately identifiable: term j contributes
+// eta_i += X_svc[i,j] * w_j(s_i), so w_j -> w_j + c together with
+// beta_j -> beta_j - c leaves eta EXACTLY unchanged, for any covariate. The
+// level is identified by CENTRING w_j on its way into eta (svc_center_eta in
+// hmc_svc_autodiff.h), which removes that direction from the likelihood.
 //
-// This does NOT take s2z_precision(n_obs). An NNGP field has a PROPER prior --
-// its mean is identified, just weakly -- so what is wanted here is a ridge, not
-// the identification constraint an intrinsic (rank-deficient) field needs.
-// s2z_precision(80) is 156.25 against this ridge's 0.0125, and at that
-// stiffness the sampler stops moving: same data, same code, only the constant
-// changed, 4 chains x 1000 iterations returns in 9s with per-chain posterior SD
-// 0, Rhat 15 and the slope at 0.095 against a truth of 0.3, where the ridge
-// runs for minutes and samples.
-inline double svc_sum_to_zero_ridge(int n_obs) {
-  return 1.0 / static_cast<double>(n_obs > 0 ? n_obs : 1);
-}
-
-template <typename T>
-inline T svc_sum_to_zero_penalty(
-    const std::vector<T>& w_flat,
-    const SVCData& svc_data
-) {
-  int n_obs = svc_data.n_obs;
-  int n_svc = svc_data.n_svc;
-
-  const double lambda = svc_sum_to_zero_ridge(n_obs);
-  T penalty = T(0.0);
-
-  for (int j = 0; j < n_svc; j++) {
-    T sum = T(0.0);
-    for (int i = 0; i < n_obs; i++) {
-      sum = sum + w_flat[j * n_obs + i];
-    }
-    penalty = penalty - T(0.5 * lambda) * sum * sum;
-  }
-
-  return penalty;
-}
-
-// Gradient of svc_sum_to_zero_penalty w.r.t. each weight, accumulated into
-// `grad` at `base_idx` in the same j-major layout the penalty reads. Every
-// weight of a term sees the same -lambda * sum, since the penalty depends on
-// the term only through its sum.
-inline void svc_sum_to_zero_penalty_grad(
+// An NNGP field is PROPER, so its constant direction already carries a prior
+// -- precision 1' Sigma^-1 1 -- and needs no penalty supplying one. See
+// tulpa/sum_to_zero.h for why a penalty on the sum is the wrong instrument on
+// a proper field: it stiffens a direction the sampler still has to traverse,
+// where centring removes it.
+//
+// The likelihood gradient follows the centring: with w_c = P w and
+// P = I - 11'/n, dL/dw = P' dL/dw_c = dL/dw_c - mean(dL/dw_c), the SAME
+// projection applied to the accumulated per-term block. The field prior's own
+// gradient is NOT projected -- the NNGP density is placed on the uncentred w.
+// So the likelihood contribution is accumulated apart from the prior one and
+// added here, which is what keeps the two from being projected together.
+// Per-term means of a term-major field block: the quantity the centring
+// removes. A gradient path keeps the UNCENTRED w for the field prior and
+// subtracts these on its way into eta, so one buffer serves both readers.
+inline void svc_term_means(
     const double* w_flat,
+    const SVCData& svc_data,
+    double* means_out
+) {
+  for (int j = 0; j < svc_data.n_svc; j++)
+    means_out[j] = tulpa::s2z_component_mean(w_flat, j * svc_data.n_obs,
+                                             svc_data.n_obs);
+}
+
+inline void svc_center_project_lik_grad(
+    const double* lik_grad,      // n_svc x n_obs, term-major: dL/dw_c
     const SVCData& svc_data,
     int base_idx,
     double* grad
 ) {
-  int n_obs = svc_data.n_obs;
-  int n_svc = svc_data.n_svc;
-
-  const double lambda = svc_sum_to_zero_ridge(n_obs);
+  const int n_obs = svc_data.n_obs;
+  const int n_svc = svc_data.n_svc;
 
   for (int j = 0; j < n_svc; j++) {
-    double sum = 0.0;
-    for (int i = 0; i < n_obs; i++) sum += w_flat[j * n_obs + i];
-    const double push = lambda * sum;
-    for (int i = 0; i < n_obs; i++) grad[base_idx + j * n_obs + i] -= push;
+    const int off = j * n_obs;
+    const double m = tulpa::s2z_component_mean(lik_grad, off, n_obs);
+    for (int i = 0; i < n_obs; i++)
+      grad[base_idx + off + i] += lik_grad[off + i] - m;
   }
 }
 
@@ -301,6 +270,10 @@ struct SVCGradWorkspace {
   std::vector<double> phi;      // size n_svc
   std::vector<double> w_flat;   // size n_obs * n_svc
   std::vector<double> w_j;      // size n_obs (reused per term)
+  // dL/dw_c, accumulated apart from the field prior's gradient so
+  // svc_center_project_lik_grad projects the likelihood part alone.
+  std::vector<double> lik_grad; // size n_obs * n_svc
+  std::vector<double> term_mean; // size n_svc
   SVCGradients grads;           // grad_w sized n_obs, reused per term
 
   void resize(int n_svc, int n_obs) {
@@ -308,6 +281,8 @@ struct SVCGradWorkspace {
     phi.resize(n_svc);
     w_flat.resize(static_cast<size_t>(n_obs) * n_svc);
     w_j.resize(n_obs);
+    lik_grad.assign(static_cast<size_t>(n_obs) * n_svc, 0.0);
+    term_mean.assign(n_svc, 0.0);
     grads.grad_w.resize(n_obs);
   }
 };

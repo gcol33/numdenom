@@ -4856,9 +4856,13 @@ void compute_gradient_svc_handcoded(
         svc_sigma2[j] = std::exp(params[layout.log_sigma2_svc_start + j]);
         svc_phi[j] = std::exp(params[layout.log_phi_svc_start + j]);
 
-        // Bounds check for phi
+        // Outside the uniform prior's support the density is -Inf, so the
+        // gradient is zero -- but the fused log posterior has to be written
+        // too, or the caller reads whatever was in it and cannot tell the
+        // proposal left the support.
         if (svc_phi[j] < data.svc_phi_prior_lower || svc_phi[j] > data.svc_phi_prior_upper) {
-            return;  // Out of bounds - return zero gradient
+            if (log_post_out) *log_post_out = compute_log_post(params, data, layout);
+            return;
         }
     }
 
@@ -4897,10 +4901,18 @@ void compute_gradient_svc_handcoded(
         layout.svc_w_start, layout.log_sigma2_svc_start, layout.log_phi_svc_start,
         svc_scratch, grad.data());
 
-    // Sum-to-zero gradient, over all terms at once, from the same helper the
-    // log-posterior's penalty is written in, so the two share one constant.
-    ratiod_svc::svc_sum_to_zero_penalty_grad(svc_w_flat, data.svc_data,
-                                             layout.svc_w_start, grad.data());
+    // The field prior's gradient above is placed on the uncentred w and is
+    // NOT projected. The likelihood's is: eta reads the CENTRED field, so its
+    // gradient is accumulated apart in svc_scratch.lik_grad and projected onto
+    // the sum-to-zero subspace by svc_center_project_lik_grad below.
+    double* svc_lik_grad = svc_scratch.lik_grad.data();
+    std::fill(svc_scratch.lik_grad.begin(), svc_scratch.lik_grad.end(), 0.0);
+
+    // The field the likelihood reads is w minus its per-term mean; the field
+    // the NNGP prior above reads is w itself. Holding the means rather than a
+    // centred copy lets one buffer serve both.
+    double* svc_term_mean = svc_scratch.term_mean.data();
+    ratiod_svc::svc_term_means(svc_w_flat, data.svc_data, svc_term_mean);
 
     // =========================================================================
     // Data likelihood loop (vectorized eta + per-obs scatter)
@@ -4933,7 +4945,8 @@ void compute_gradient_svc_handcoded(
         }
         double svc_effect = 0.0;
         for (int j = 0; j < n_svc; j++) {
-            svc_effect += data.svc_data.X_svc[i * n_svc + j] * svc_w_flat[j * N_obs + i];
+            svc_effect += data.svc_data.X_svc[i * n_svc + j] *
+                          (svc_w_flat[j * N_obs + i] - svc_term_mean[j]);
         }
         vec_grad_ws().eta_num[i] += svc_effect;
         if (!is_binomial && data.svc_data.shared) vec_grad_ws().eta_denom[i] += svc_effect;
@@ -4957,9 +4970,12 @@ void compute_gradient_svc_handcoded(
         }
         double dLL_dsvc = data.svc_data.shared ? (dLL_num + dLL_denom) : dLL_num;
         for (int j = 0; j < n_svc; j++) {
-            grad[layout.svc_w_start + j * N_obs + i] += dLL_dsvc * data.svc_data.X_svc[i * n_svc + j];
+            svc_lik_grad[j * N_obs + i] += dLL_dsvc * data.svc_data.X_svc[i * n_svc + j];
         }
     }
+
+    ratiod_svc::svc_center_project_lik_grad(svc_lik_grad, data.svc_data,
+                                            layout.svc_w_start, grad.data());
 
     // Non-centered RE chain rule transformation
     re_gradient_nc_transform(data, layout, params.data(), grad.data(), sigma_re);
@@ -7144,6 +7160,7 @@ void compute_gradient_composite(
     const bool has_svc_nngp = layout.has_svc && data.has_svc && !data.svc_is_hsgp;
     const int N_svc = has_svc_nngp ? data.svc_data.n_obs : 0;
     std::vector<double> svc_w_nngp;
+    std::vector<double> svc_term_mean;
     if (has_svc_nngp) {
         n_svc = data.svc_data.n_svc;
         svc_w_nngp.resize(static_cast<size_t>(N_svc) * n_svc);
@@ -7157,11 +7174,16 @@ void compute_gradient_composite(
         }
         for (int k = 0; k < N_svc * n_svc; k++)
             svc_w_nngp[k] = params[layout.svc_w_start + k];
+        // eta reads the CENTRED field, the NNGP prior below reads w itself.
+        svc_term_mean.assign(n_svc, 0.0);
+        ratiod_svc::svc_term_means(svc_w_nngp.data(), data.svc_data,
+                                   svc_term_mean.data());
         svc_eta_precomp.assign(N, 0.0);
         for (int i = 0; i < N; i++) {
             double eff = 0.0;
             for (int j = 0; j < n_svc; j++)
-                eff += data.svc_data.X_svc[i * n_svc + j] * svc_w_nngp[j * N_svc + i];
+                eff += data.svc_data.X_svc[i * n_svc + j] *
+                       (svc_w_nngp[j * N_svc + i] - svc_term_mean[j]);
             svc_eta_precomp[i] = eff;
         }
     }
@@ -7380,9 +7402,9 @@ void compute_gradient_composite(
         grad[layout.log_phi_gp_regional_idx] += ms_grads_regional.grad_log_phi;
     }
 
-    // SVC (NNGP) priors: half-Cauchy on each sigma, uniform on each range, the
-    // NNGP field prior, and the sum-to-zero penalty from the same helper the
-    // log posterior writes it in.
+    // SVC (NNGP) priors: half-Cauchy on each sigma, uniform on each range, and
+    // the NNGP field prior, which is placed on the UNCENTRED w and so is not
+    // projected. The likelihood's gradient is (grad_svc_w_lik, applied below).
     if (has_svc_nngp) {
         RATIOD_TLS_WORKSPACE(ratiod_svc::SVCGradWorkspace, svc_scratch);
         svc_scratch.resize(n_svc, N_svc);
@@ -7401,8 +7423,6 @@ void compute_gradient_composite(
             svc_w_nngp.data(), svc_scratch.sigma2.data(), svc_scratch.phi.data(),
             data.svc_data, layout.svc_w_start, layout.log_sigma2_svc_start,
             layout.log_phi_svc_start, svc_scratch, grad.data());
-        ratiod_svc::svc_sum_to_zero_penalty_grad(svc_w_nngp.data(), data.svc_data,
-                                                 layout.svc_w_start, grad.data());
     }
 
     // HSGP priors (must match hardcoded rate=4.6 in compute_log_post)
@@ -7546,6 +7566,7 @@ void compute_gradient_composite(
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_tvc_w);
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_factors_c);
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_svc_f);
+    RATIOD_TLS_WORKSPACE(std::vector<double>, grad_svc_w_lik);
     RATIOD_TLS_WORKSPACE(std::vector<double>, grad_gp_w_lik);
 
     if (has_icar_bym2) grad_spatial_lik.assign(data.n_spatial_units, 0.0);
@@ -7558,6 +7579,7 @@ void compute_gradient_composite(
     if (layout.has_tvc && data.has_tvc) grad_tvc_w.assign(n_w, 0.0);
     if (K_latent > 0) grad_factors_c.assign(N * K_latent, 0.0);
     if (layout.has_svc && data.has_svc && data.svc_is_hsgp) grad_svc_f.assign(n_svc * N, 0.0);
+    if (has_svc_nngp) grad_svc_w_lik.assign(static_cast<size_t>(n_svc) * N_svc, 0.0);
 
     // Phi likelihood gradient accumulators
     double grad_phi_num_lik_comp = 0.0;
@@ -7855,7 +7877,7 @@ void compute_gradient_composite(
         if (has_svc_nngp) {
             const double dLL_svc = data.svc_data.shared ? dLL_shared : dLL_num;
             for (int j = 0; j < n_svc; j++)
-                grad[layout.svc_w_start + j * N_svc + i] +=
+                grad_svc_w_lik[j * N_svc + i] +=
                     dLL_svc * data.svc_data.X_svc[i * n_svc + j];
         }
 
@@ -7938,6 +7960,12 @@ void compute_gradient_composite(
             for (int i = 0; i < N_gp_comp; i++)
                 grad[layout.gp_w_start + i] += grad_gp_w_lik[i];
         }
+    }
+
+    if (has_svc_nngp) {
+        ratiod_svc::svc_center_project_lik_grad(grad_svc_w_lik.data(),
+                                                data.svc_data,
+                                                layout.svc_w_start, grad.data());
     }
 
     // HSGP spectral density gradients

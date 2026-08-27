@@ -144,11 +144,22 @@ test_that("a TVC term with structure = 'iid' recovers the intercept and slope (g
   expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.1)
 })
 
-# No SVC case here. An NNGP field's prior is proper, so its mean constraint is a
-# ridge rather than an identification pin, and its constant is still the
-# unexplained 1/n_obs it has always had (gcol33/tulpaRatio#25). A fit small
-# enough to belong in a test file takes minutes, so the case belongs with the
-# constant it is meant to check.
+test_that("an SVC term recovers the intercept and its own slope (gcol33/tulpaRatio#25)", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+
+  # An NNGP field's prior is PROPER, so unlike the intrinsic fields above its
+  # mean needs no pin supplying a prior -- it needs removing from the
+  # likelihood, where it aliases with the coefficient on the covariate the
+  # field rides on. The engine centres it on its way into eta, so the quantity
+  # that moves when the identification is wrong is the SLOPE.
+  r <- fit_one(sim_data(11, N = 80),
+               spatial = spatial_svc(~ lon + lat, terms = ~ x - 1, nn = 8))
+  expect_lt(r$intercept$rhat, 1.05)
+  expect_lt(r$slope$rhat, 1.05)
+  expect_equal(r$intercept$mean, TRUE_INTERCEPT, tolerance = 0.15)
+  expect_equal(r$slope$mean, TRUE_SLOPE, tolerance = 0.15)
+})
 
 test_that("a spatiotemporal interaction recovers the intercept", {
   skip_on_cran()
