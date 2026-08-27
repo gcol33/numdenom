@@ -2050,6 +2050,24 @@ bool compute_softabs_metric(
 // The standalone temporal field's effects
 // =====================================================================
 
+// Whether the spatial block's mean is removed on its way into eta.
+//
+// An intrinsic ICAR/BYM2 precision is rank-deficient on the constant
+// direction: the prior augments it and the likelihood never sees it
+// (spatial_field_constraint.h). Proper CAR is full rank at rho < 1, so its
+// mean is identified by its own prior, and centring would impose a constraint
+// the model does not carry. A collapsed field has no sampled phi to centre.
+//
+// Every density and every gradient that reads the spatial block asks here, so
+// a gradient and the log posterior it is evaluated against cannot disagree
+// about which field the likelihood saw.
+inline bool spatial_block_is_centred(const ModelData& data,
+                                     const ParamLayout& layout) {
+  return layout.has_spatial && layout.spatial_start >= 0 &&
+         !data.icar_collapsed && !data.bym2_collapsed &&
+         !layout.is_car_proper;
+}
+
 // Whether the AR1 temporal field is sampled in its non-centred coordinate:
 // the parameter block holds z ~ N(0, I) rather than the effects themselves.
 inline bool temporal_ar1_nc(const ModelData& data, const ParamLayout& layout) {

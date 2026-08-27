@@ -1,5 +1,54 @@
 # tulpaRatio 1.7.2
 
+* **A proper CAR field reaches only gradients written for it.** `GF_AREAL`
+  covered a proper CAR field as much as an intrinsic one, so
+  `spatial_car(proper = TRUE)` alongside `temporal_multiscale()` or a
+  spatiotemporal interaction selected
+  `compute_gradient_ms_temporal_handcoded` or
+  `compute_gradient_spatiotemporal_handcoded`. Neither writes proper CAR's
+  `rho` gradient or its log-determinant, and both centred a field the log
+  posterior leaves alone, so the gradient they returned was the gradient of a
+  different density. Measured against central differences of the log posterior
+  on a 400-observation, 25-unit fixture: 210 on the regression coefficients,
+  where every field in the sweep agrees to better than 1e-04 relative.
+
+  Proper CAR now carries `GF_AREAL_PROPER`, so a function whose `covers()` mask
+  does not name it falls through to the composite -- the path
+  `spatial_car(proper = TRUE)` on its own already took, and the one that
+  carries the `rho` block. The same combinations now agree with finite
+  differences to 2e-07 and 3e-06. `car_proper_ms` and `car_proper_st` join
+  `test-gradient-correctness.R`, which is what nothing reached before.
+
+* **One predicate decides whether the spatial block is centred.** The rule was
+  written out at five sites, and three spellings had drifted from the log
+  posterior's. `spatial_block_is_centred()` (`hmc_sampler.h`) is now the only
+  one, so a gradient and the density it is evaluated against cannot disagree
+  about which field the likelihood saw.
+
+* **Recovery assertions read the quantity their model identifies.** The SVC
+  recovery test compared a single 80-observation realization's posterior mean
+  against the value the data were simulated from, where the maximum likelihood
+  slope carries a standard error near 0.05: seed 11's sample implies 0.2533 and
+  seed 22's implies 0.2062, so the assertion failed on sampling noise. It now
+  runs the three seeds the RW1 test runs, asserts the posterior mean against the
+  same sample's unpenalized MLE -- measured agreement within 0.002, an order of
+  magnitude sharper than a tolerance against 0.3 can be -- and keeps recovery of
+  the simulated values as interval coverage across seeds.
+
+  The proper CAR test asserted `rhat < 1.05` on the intercept, which that model
+  does not identify on its own: the intercept and the field's mean correlate at
+  -0.977 and their sum carries a fifth of either one's posterior sd. It now
+  asserts on the sum, which converges (ESS 1970 of 2000, rhat 1.002), and on the
+  intercept's interval coverage.
+
+* **The multiscale RW2 fixture's divergences are pinned where they belong.**
+  They sit in the neck of `sigma2_trend`, whose true value on that fixture is
+  zero: 12.5% of draws in the lowest decile of `log sigma2_trend` diverge and
+  none above the third, and the divergent draws sit 1.96 posterior sd below the
+  clean ones. `test-recovery-constrained-fields.R` asserts that location rather
+  than a bare count, which is what separates the known centred-parameterisation
+  funnel from a fault elsewhere. The trend arm's non-centred coordinate is #79.
+
 * **The SVC range prior a spec declares is the one the fit runs (#78).**
   `prepare_svc_for_hmc()` wrote `phi_prior_lower = 0.3`, `phi_prior_upper = 30`
   as literals into each of its three branches, so every SVC fit ran on that

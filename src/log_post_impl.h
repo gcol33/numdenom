@@ -118,12 +118,8 @@ T compute_log_post_impl(
     // compute_log_post. See spatial_field_constraint.h.
     std::vector<T> params_centered;
     T phi_spatial_raw_sum = T(0.0);
-    // Proper CAR has a full-rank precision (rho < 1), so its mean is already
-    // identified by the prior; centring it would impose a constraint the model
-    // does not need, unlike ICAR/BYM2's rank-deficient Q.
-    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                                && !data.icar_collapsed && !data.bym2_collapsed
-                                && !layout.is_car_proper;
+    const bool center_spatial =
+        ratiod_hmc::spatial_block_is_centred(data, layout);
     if (center_spatial) {
         params_centered = params_in;
         phi_spatial_raw_sum = ratiod_constraints::center_spatial_block(

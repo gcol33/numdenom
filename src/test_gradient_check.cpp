@@ -128,7 +128,7 @@ NNGPNeighbors build_nngp(const std::vector<double>& coords, int n, int k) {
 // field at all, so the check would pass while testing nothing.
 const char* const KNOWN_FIELDS[] = {
   "none",
-  "icar", "bym2", "car_proper",
+  "icar", "bym2", "car_proper", "car_proper_ms", "car_proper_st",
   "rw1", "rw2", "temporal_ar1", "temporal_ar1_nc", "temporal_iid", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
   "st4_ar1_nc", "st2", "st2_rw2", "st2_ar1", "st3",
@@ -263,8 +263,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // therefore the ones that must agree with the log posterior about how that
   // field is identified.
   const bool want_ms = (field == "icar_ms" || field == "bym2_ms" ||
-                        field == "ms_temporal" || field == "svc_ms");
-  const bool want_st = (field == "icar_st" || field == "bym2_st");
+                        field == "ms_temporal" || field == "svc_ms" ||
+                        field == "car_proper_ms");
+  const bool want_st = (field == "icar_st" || field == "bym2_st" ||
+                        field == "car_proper_st");
   // st4: a spatiotemporal Type IV (Kronecker) interaction with NO accompanying
   // additive spatial or temporal field -- the only structured term is the
   // interaction itself. icar_st/bym2_st above exercise
@@ -306,10 +308,16 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
                           field == "bym2_st" || field == "bym2_collapsed" ||
                           field == "bym2_collapsed_rw1" ||
                           field == "bym2_collapsed_st4");
-  // Proper CAR (rho estimated): exercises
-  // compute_gradient_composite's is_car_proper branch, the only gradient
-  // path it reaches under H/AUTO (can_use_analytical_gradient excludes it).
-  const bool want_car_proper = (field == "car_proper");
+  // Proper CAR (rho estimated). can_use_analytical_gradient() excludes it, so
+  // it never reaches compute_gradient_analytical, but GF_AREAL covers a proper
+  // CAR field as much as an intrinsic one: paired with a multi-scale temporal
+  // block or a spatiotemporal interaction it reaches the two specialized
+  // functions those masks admit, not only the composite. Those are the paths
+  // that have to agree with the log posterior about whether the field's mean
+  // is removed, and car_proper_ms / car_proper_st are what checks them.
+  const bool want_car_proper = (field == "car_proper" ||
+                                field == "car_proper_ms" ||
+                                field == "car_proper_st");
   const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st ||
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1" ||
                           field == "gp_temporal" || field == "msgp_temporal" ||

@@ -920,8 +920,7 @@ void compute_gradient_analytical(
   // parameters, which is why the spatial likelihood gradient is projected below.
   std::vector<double> params_centered;
   double phi_raw_sum = 0.0;
-  const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                              && !data.icar_collapsed && !data.bym2_collapsed;
+  const bool center_spatial = spatial_block_is_centred(data, layout);
   if (center_spatial) {
     params_centered = params_in;
     phi_raw_sum = ratiod_constraints::center_spatial_block(
@@ -6292,8 +6291,7 @@ void compute_gradient_ms_temporal_handcoded(
     // Centre the spatial block once, matching compute_log_post; see
     // spatial_field_constraint.h. The returned gradient is with respect to the
     // raw parameters, which is what spatial_gmrf_prior_grad projects for.
-    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                                && !data.icar_collapsed && !data.bym2_collapsed;
+    const bool center_spatial = spatial_block_is_centred(data, layout);
     ratiod_constraints::CenteredSpatialParams centering(
         params_in, center_spatial, layout.spatial_start, data.n_spatial_units);
     const std::vector<double>& params = centering.params();
@@ -6550,8 +6548,7 @@ void compute_gradient_spatiotemporal_handcoded(
     // Centre the spatial block once, matching compute_log_post; see
     // spatial_field_constraint.h. The returned gradient is with respect to the
     // raw parameters, which is what spatial_gmrf_prior_grad projects for.
-    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                                && !data.icar_collapsed && !data.bym2_collapsed;
+    const bool center_spatial = spatial_block_is_centred(data, layout);
     ratiod_constraints::CenteredSpatialParams centering(
         params_in, center_spatial, layout.spatial_start, data.n_spatial_units);
     const std::vector<double>& params = centering.params();
@@ -6912,9 +6909,7 @@ void compute_gradient_composite(
     // raw parameters, which is what spatial_gmrf_prior_grad projects for.
     // Proper CAR is full rank (rho < 1) and already identified, so it is not
     // centered like ICAR/BYM2's rank-deficient Q.
-    const bool center_spatial = layout.has_spatial && layout.spatial_start >= 0
-                                && !data.icar_collapsed && !data.bym2_collapsed
-                                && !layout.is_car_proper;
+    const bool center_spatial = spatial_block_is_centred(data, layout);
     ratiod_constraints::CenteredSpatialParams centering(
         params_in, center_spatial, layout.spatial_start, data.n_spatial_units);
     const std::vector<double>& params = centering.params();
@@ -8169,7 +8164,7 @@ void compute_gradient(
 // =====================================================================
 
 enum GradFeature : unsigned {
-  GF_AREAL          = 1u << 0,   // ICAR / BYM2 / proper CAR field
+  GF_AREAL          = 1u << 0,   // intrinsic ICAR / BYM2 field
   GF_GP             = 1u << 1,
   GF_MULTISCALE_GP  = 1u << 2,
   GF_HSGP           = 1u << 3,
@@ -8190,14 +8185,22 @@ enum GradFeature : unsigned {
   // single-term block (data.re_group, layout.re_start), which holds one term
   // of several, so a model carrying more than one needs its own bit to fall
   // through to the composite on.
-  GF_RE_MULTI        = 1u << 14
+  GF_RE_MULTI        = 1u << 14,
+  // Proper CAR carries a rho of its own and a log-determinant that moves with
+  // it, and its full-rank precision leaves the field's mean in the likelihood
+  // where an intrinsic field's is removed. A function written for the
+  // intrinsic field writes neither, so proper CAR gets its own bit rather than
+  // GF_AREAL and reaches only what names it.
+  GF_AREAL_PROPER    = 1u << 15
 };
 
 inline unsigned model_grad_features(const ModelData& data, const ParamLayout& layout) {
   unsigned f = 0u;
   const bool areal_collapsed = layout.is_icar_collapsed || layout.is_bym2_collapsed;
   if (layout.has_spatial)
-    f |= areal_collapsed ? GF_AREAL_COLLAPSED : GF_AREAL;
+    f |= areal_collapsed  ? GF_AREAL_COLLAPSED
+       : layout.is_car_proper ? GF_AREAL_PROPER
+                              : GF_AREAL;
   if (layout.is_gp && data.has_gp)
     f |= (layout.is_gp_collapsed && data.gp_collapsed) ? GF_GP_COLLAPSED : GF_GP;
   if (layout.is_multiscale_gp && data.has_multiscale_gp) f |= GF_MULTISCALE_GP;

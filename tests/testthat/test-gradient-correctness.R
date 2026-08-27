@@ -52,7 +52,14 @@ COLLAPSED_TEMPORAL_FIELDS <- c("icar_collapsed_rw1", "bym2_collapsed_rw1")
 # same as every other spatial type but ICAR/BYM2), and its log-determinant
 # has no templated expression, so -- like the collapsed fields -- it has no
 # "arena" case.
-CAR_PROPER_FIELDS <- c("car_proper")
+#
+# car_proper_ms and car_proper_st pair it with the two structures whose
+# specialized functions the areal feature bit used to admit it to. Neither
+# writes proper CAR's rho gradient or its log-determinant, and both centre a
+# field the log posterior leaves alone, so what they produced was the gradient
+# of a different density: 210 against a finite difference of the same, on the
+# regression coefficients. GF_AREAL_PROPER is what they now fall through on.
+CAR_PROPER_FIELDS <- c("car_proper", "car_proper_ms", "car_proper_st")
 # A Type IV (Kronecker) spatiotemporal interaction with no accompanying
 # additive spatial or temporal field -- the only structured term is the
 # interaction itself, matching gcol33/tulpaRatio#24's repro. MULTI_FIELDS'
@@ -239,6 +246,7 @@ test_that("resolve_gradient_fn sends each model to the function written for it",
     gp_collapsed = "gp_collapsed",
     icar_collapsed_rw1 = "icar_collapsed", bym2_collapsed_rw1 = "icar_collapsed",
     # Two blocks no specialized function writes together.
+    car_proper_ms = "composite", car_proper_st = "composite",
     gp_st4 = "composite", gp_stgp = "composite",
     gp_temporal_st4 = "composite", msgp_st4 = "composite",
     tvc_st4 = "composite", temporal_gp_st4 = "composite",
