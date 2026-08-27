@@ -129,6 +129,7 @@ NNGPNeighbors build_nngp(const std::vector<double>& coords, int n, int k) {
 const char* const KNOWN_FIELDS[] = {
   "none",
   "icar", "bym2", "car_proper", "car_proper_ms", "car_proper_st",
+  "car_proper_raw",
   "rw1", "rw2", "temporal_ar1", "temporal_ar1_nc", "temporal_iid", "icar_rw1",
   "icar_ms", "bym2_ms", "icar_st", "bym2_st", "st4", "st4_nc", "st4_ar1",
   "st4_ar1_nc", "st2", "st2_rw2", "st2_ar1", "st3",
@@ -317,7 +318,8 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
   // is removed, and car_proper_ms / car_proper_st are what checks them.
   const bool want_car_proper = (field == "car_proper" ||
                                 field == "car_proper_ms" ||
-                                field == "car_proper_st");
+                                field == "car_proper_st" ||
+                                field == "car_proper_raw");
   const bool want_rw1  = (field == "rw1"  || field == "icar_rw1" || want_st ||
                           field == "icar_collapsed_rw1" || field == "bym2_collapsed_rw1" ||
                           field == "gp_temporal" || field == "msgp_temporal" ||
@@ -514,6 +516,10 @@ ModelData make_model(const std::string& field, int n_obs, int n_units,
     data.car_rho_upper = 1.0;
     data.car_rho_prior_a = 1.0;
     data.car_rho_prior_b = 1.0;
+    // eta reads the centred field and the prior reads the raw one, which for a
+    // full-rank Q(rho) are two different quadratic forms; car_proper_raw is the
+    // same model with the mean left in the likelihood.
+    data.car_center = (field != "car_proper_raw");
   } else if (want_hsgp) {
     // HSGP is an observation-level spectral field: m_per_dim^2 basis
     // coefficients plus a variance and a lengthscale. Kept at m = 3 so the

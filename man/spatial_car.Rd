@@ -10,7 +10,8 @@ spatial_car(
   group_var = NULL,
   proper = FALSE,
   shared = TRUE,
-  parameterization = c("standard", "collapsed")
+  parameterization = c("standard", "collapsed"),
+  center = TRUE
 )
 }
 \arguments{
@@ -36,6 +37,16 @@ numerator and denominator linear predictors identically.}
 \item{parameterization}{Parameterization of the spatial random effect.
 Either \code{"standard"} (default) or \code{"collapsed"} to marginalize the spatial
 variance for improved mixing in sparse-graph regimes.}
+
+\item{center}{Logical; if TRUE (default), the field's mean is removed on its
+way into the linear predictor, so the intercept carries the level and the
+field carries deviations from it. The prior still reads the uncentred
+field. \code{center = FALSE} requires \code{proper = TRUE} and leaves the mean in the
+linear predictor, where it is jointly identified with the intercept: on a
+36-unit fixture the two then correlate at -0.977 and the intercept's bulk
+ESS is 71 of 2000 against 1953 under the default, for the same posterior on
+the level. An intrinsic field (\code{proper = FALSE}) has no such choice, since
+its mean is unidentified until it is removed.}
 }
 \value{
 A \code{ratiod_spatial} object

@@ -30,6 +30,15 @@ NULL
 #' @param parameterization Parameterization of the spatial random effect.
 #'   Either `"standard"` (default) or `"collapsed"` to marginalize the spatial
 #'   variance for improved mixing in sparse-graph regimes.
+#' @param center Logical; if TRUE (default), the field's mean is removed on its
+#'   way into the linear predictor, so the intercept carries the level and the
+#'   field carries deviations from it. The prior still reads the uncentred
+#'   field. `center = FALSE` requires `proper = TRUE` and leaves the mean in the
+#'   linear predictor, where it is jointly identified with the intercept: on a
+#'   36-unit fixture the two then correlate at -0.977 and the intercept's bulk
+#'   ESS is 71 of 2000 against 1953 under the default, for the same posterior on
+#'   the level. An intrinsic field (`proper = FALSE`) has no such choice, since
+#'   its mean is unidentified until it is removed.
 #'
 #' @return A `ratiod_spatial` object
 #'
@@ -126,10 +135,26 @@ NULL
 #' @export
 spatial_car <- function(adjacency, level = c("group", "obs"),
                         group_var = NULL, proper = FALSE, shared = TRUE,
-                        parameterization = c("standard", "collapsed")) {
+                        parameterization = c("standard", "collapsed"),
+                        center = TRUE) {
 
   level <- match.arg(level)
   parameterization <- match.arg(parameterization)
+
+  if (!is.logical(center) || length(center) != 1 || is.na(center)) {
+    stop("`center` must be TRUE or FALSE", call. = FALSE)
+  }
+  # An intrinsic Q is rank-deficient on the constant direction, so the field's
+  # mean is not identified at all until it is removed from the likelihood.
+  # There is no model on the other side of that switch.
+  if (!center && !proper) {
+    stop("`center = FALSE` needs `proper = TRUE`. An intrinsic CAR field's
+",
+         "mean is unidentified against the intercept, so removing it from the
+",
+         "linear predictor is what identifies the model rather than a choice.",
+         call. = FALSE)
+  }
 
   # Validate adjacency matrix
   if (!is.matrix(adjacency) && !inherits(adjacency, "Matrix")) {
@@ -181,6 +206,7 @@ spatial_car <- function(adjacency, level = c("group", "obs"),
       rho_bounds = rho_bounds,
       shared = shared,
       parameterization = parameterization,
+      center = center,
       n_spatial = nrow(adjacency)
     ),
     class = c("ratiod_spatial", "list")

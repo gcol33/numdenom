@@ -59,7 +59,13 @@ COLLAPSED_TEMPORAL_FIELDS <- c("icar_collapsed_rw1", "bym2_collapsed_rw1")
 # field the log posterior leaves alone, so what they produced was the gradient
 # of a different density: 210 against a finite difference of the same, on the
 # regression coefficients. GF_AREAL_PROPER is what they now fall through on.
-CAR_PROPER_FIELDS <- c("car_proper", "car_proper_ms", "car_proper_st")
+#
+# car_proper_raw is the same field with `center = FALSE`, where the mean stays
+# in the likelihood. Q(rho) does not annihilate the constant, so the centred
+# model's prior has to read the raw values while eta reads the centred ones, and
+# a quadratic form taken at the wrong one of the two is what this pairs against.
+CAR_PROPER_FIELDS <- c("car_proper", "car_proper_raw",
+                       "car_proper_ms", "car_proper_st")
 # A Type IV (Kronecker) spatiotemporal interaction with no accompanying
 # additive spatial or temporal field -- the only structured term is the
 # interaction itself, matching gcol33/tulpaRatio#24's repro. MULTI_FIELDS'

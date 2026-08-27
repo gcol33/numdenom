@@ -164,8 +164,12 @@ T compute_log_post_impl(
         phi_denom = safe_exp(log_phi);
     }
 
-    // Spatial effects — pointer views into params (no copy, read-only access)
+    // Spatial effects — pointer views into params (no copy, read-only access).
+    // phi_spatial is what eta reads; phi_spatial_prior is what the prior reads,
+    // and the two differ only where the field is centred and its precision does
+    // not annihilate the constant (spatial_prior_reads_raw).
     const T* phi_spatial = nullptr;
+    const T* phi_spatial_prior = nullptr;
     T tau_spatial = T(1.0);
     T sigma_s_bym2 = T(1.0);
     T sigma_u_bym2 = T(1.0);
@@ -193,6 +197,12 @@ T compute_log_post_impl(
             if (spatial_in_params) {
                 phi_spatial = &params[layout.spatial_start];
             }
+        }
+        if (spatial_in_params) {
+            phi_spatial_prior =
+                ratiod_hmc::spatial_prior_reads_raw(data, layout)
+                    ? &params_in[layout.spatial_start]
+                    : phi_spatial;
         }
     }
 
@@ -401,7 +411,7 @@ T compute_log_post_impl(
                     J, data.adj_row_ptr, data.adj_col_idx, data.n_neighbors, rho_car);
                 const double log_det_Q = ratiod_car_proper::car_log_det(J, Q);
                 const double quad = ratiod_car_proper::car_quadratic_form(
-                    phi_spatial, J, data.adj_row_ptr, data.adj_col_idx,
+                    phi_spatial_prior, J, data.adj_row_ptr, data.adj_col_idx,
                     data.n_neighbors, rho_car);
                 log_post += 0.5 * log_det_Q + 0.5 * J * log_tau_sp
                           - 0.5 * tau_spatial * quad;

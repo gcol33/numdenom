@@ -294,30 +294,22 @@ test_that("proper CAR recovers rho and the intercept (gcol33/tulpaRatio#31)", {
     list(mean = mean(dr[, v]),
          lo = unname(quantile(dr[, v], 0.025)),
          hi = unname(quantile(dr[, v], 0.975)),
-         rhat = posterior::rhat(m))
+         rhat = posterior::rhat(m),
+         ess = posterior::ess_bulk(m))
   }
   r_int <- summarise("beta_num[1]")
   r_rho <- summarise("rho_spatial")
   r_tau <- summarise("tau_spatial")
 
-  # Proper CAR is full rank, so its mean is identified by its own prior and the
-  # field is NOT centred on its way into eta (spatial_block_is_centred()).
-  # The mean therefore stays in the likelihood, where it aliases with the
-  # intercept: measured on this fixture the two correlate at -0.977, each
-  # carries a posterior sd near 0.06, and their SUM carries 0.013. The data
-  # identify the sum; the intercept alone is a coordinate along a ridge.
-  #
-  # So rhat and ESS on the intercept alone measure the ridge, not convergence,
-  # and no warmup fixes it -- lengthening warmup from 1500 to 3500 moves the
-  # intercept's rhat 1.053 -> 1.112 and its ESS 71 -> 32 while rho and tau stay
-  # at 1.01. What has to have converged is the identified direction, and it
-  # does: ESS 1970 of 2000 at rhat 1.002. Whether the field should be centred
-  # here, as an SVC term is, is gcol33/tulpaRatio#80.
-  phi_cols <- grep("^phi_spatial", colnames(dr))
-  identified <- dr[, "beta_num[1]"] + rowMeans(dr[, phi_cols, drop = FALSE])
-  ident_m <- matrix(identified, nrow = per, ncol = f$chains)
-  expect_lt(posterior::rhat(ident_m), 1.01)
-  expect_gt(posterior::ess_bulk(ident_m), 1000)
+  # Q(rho) is full rank, so the prior identifies the field's mean, but the
+  # LIKELIHOOD cannot see it apart from the intercept: eta reads beta_0 + phi_s,
+  # and moving the intercept by c against every phi by -c leaves eta alone. With
+  # the mean left in, the two correlate at -0.977, each carries a posterior sd
+  # near 0.06 while their sum carries 0.013, and the intercept is a coordinate
+  # along a ridge rather than a quantity the data pin. spatial_car() removes it
+  # from eta by default now, so the intercept IS the level and converges.
+  expect_lt(r_int$rhat, 1.05)
+  expect_gt(r_int$ess, 1000)
 
   expect_lt(r_rho$rhat, 1.1)
   expect_equal(r_int$mean, TRUE_INTERCEPT, tolerance = 0.15)
@@ -502,4 +494,74 @@ test_that("multiscale RW2 divergences stay in the sigma2_trend funnel neck", {
   dr <- as.matrix(f$draws)
   expect_equal(mean(dr[, "beta_num[1]"]), TRUE_INTERCEPT, tolerance = 0.08)
   expect_equal(mean(dr[, "beta_num[2]"]), TRUE_SLOPE, tolerance = 0.08)
+})
+
+
+# center = FALSE keeps the field's mean in the linear predictor, which is what
+# spatial_car(proper = TRUE) did before. The two parameterisations describe the
+# same identified posterior and differ in how the level is attributed, so this
+# asserts both halves: the level agrees, and the intercept alone only converges
+# under centring.
+
+test_that("centring a proper CAR field moves the level onto the intercept", {
+  skip_on_cran()
+  skip_if_not_installed("posterior")
+  skip_if_not_installed("MASS")
+
+  S <- 36L
+  A <- grid_adj(S)
+  rho_true <- 0.5
+  tau_true <- 3.0
+  set.seed(44)
+  phi_true <- as.numeric(MASS::mvrnorm(
+    1, mu = rep(0, S),
+    Sigma = solve(tau_true * (diag(rowSums(A)) - rho_true * A))))
+
+  n_per <- 25L
+  N <- S * n_per
+  site <- rep(seq_len(S), each = n_per)
+  x <- rnorm(N)
+  trials <- sample(15:50, N, replace = TRUE)
+  df <- data.frame(
+    y = rbinom(N, trials, plogis(TRUE_INTERCEPT + TRUE_SLOPE * x + phi_true[site])),
+    trials = trials, x = x, site = factor(site))
+
+  fit <- function(center) {
+    f <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(), mode = "hmc",
+                spatial = spatial_car(A, level = "group", group_var = "site",
+                                      proper = TRUE, center = center),
+                control = list(iter = 2000, warmup = 1500, chains = 4, seed = 5,
+                               verbose = FALSE))
+    dr <- as.matrix(f$draws)
+    per <- nrow(dr) / f$chains
+    b0 <- dr[, "beta_num[1]"]
+    field_mean <- rowMeans(dr[, grep("^phi_spatial", colnames(dr)), drop = FALSE])
+    # The level eta actually carries, written in each parameterisation's terms.
+    level <- if (center) b0 else b0 + field_mean
+    list(intercept_ess = posterior::ess_bulk(matrix(b0, per, f$chains)),
+         intercept_rhat = posterior::rhat(matrix(b0, per, f$chains)),
+         level = mean(level),
+         slope = mean(dr[, "beta_num[2]"]),
+         rho = mean(dr[, "rho_spatial"]))
+  }
+
+  raw <- fit(FALSE)
+  centred <- fit(TRUE)
+
+  # Same identified posterior. Centring is a change of coordinates on the level,
+  # not a change of model fit.
+  expect_equal(centred$level, raw$level, tolerance = 0.02)
+  expect_equal(centred$slope, raw$slope, tolerance = 0.02)
+  expect_equal(centred$rho, raw$rho, tolerance = 0.15)
+
+  # What it buys. Measured on this fixture: ESS 71 -> 1953, rhat 1.053 -> 1.001.
+  expect_lt(raw$intercept_ess, 400)
+  expect_gt(centred$intercept_ess, 1000)
+  expect_gt(centred$intercept_ess, 4 * raw$intercept_ess)
+  expect_lt(centred$intercept_rhat, 1.05)
+
+  # An intrinsic field has no such choice: its mean is unidentified until it is
+  # removed, so there is no model on the other side of the switch.
+  expect_error(spatial_car(A, level = "group", group_var = "site", center = FALSE),
+               "proper = TRUE")
 })

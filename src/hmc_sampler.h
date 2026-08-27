@@ -176,6 +176,14 @@ struct ModelData {
   double car_rho_upper = 1.0;
   double car_rho_prior_a = 1.0;      // Beta(a, b) on rho, scaled to (lower, upper)
   double car_rho_prior_b = 1.0;
+  // Whether a proper CAR field's mean is removed from eta. Q(rho) is full rank,
+  // so the prior identifies the mean, but the LIKELIHOOD cannot see it apart
+  // from the intercept: eta reads beta_0 + phi_s, and moving the intercept by c
+  // against every phi by -c leaves eta where it was. Removing the direction from
+  // eta leaves the intercept carrying the level and the field carrying
+  // deviations, with the prior still reading the raw field, which is the
+  // treatment an SVC term already takes.
+  bool car_center = true;
   // Precision mass matrix data (precomputed from Q)
   std::vector<double> spatial_Q_inv;    // (Q + lambda*I)^{-1}, column-major [S×S]
   std::vector<double> spatial_L_Q;      // Cholesky L of (Q + lambda*I), column-major [S×S]
@@ -2063,9 +2071,20 @@ bool compute_softabs_metric(
 // about which field the likelihood saw.
 inline bool spatial_block_is_centred(const ModelData& data,
                                      const ParamLayout& layout) {
-  return layout.has_spatial && layout.spatial_start >= 0 &&
-         !data.icar_collapsed && !data.bym2_collapsed &&
-         !layout.is_car_proper;
+  if (!layout.has_spatial || layout.spatial_start < 0) return false;
+  if (data.icar_collapsed || data.bym2_collapsed) return false;
+  if (layout.is_car_proper) return data.car_center;
+  return true;
+}
+
+// Whether the spatial PRIOR reads a field the likelihood no longer sees whole.
+// An intrinsic Q annihilates the constant, so its quadratic form is the same at
+// the raw field and the centred one and either pointer does. Q(rho) does not,
+// so a centred proper CAR field has to hand its prior the raw values or the
+// constant direction would carry no prior at all.
+inline bool spatial_prior_reads_raw(const ModelData& data,
+                                    const ParamLayout& layout) {
+  return layout.is_car_proper && spatial_block_is_centred(data, layout);
 }
 
 // Whether the AR1 temporal field is sampled in its non-centred coordinate:

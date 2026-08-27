@@ -650,7 +650,8 @@ fit_hmc <- function(formula,
       rho_lower = spatial_info$rho_lower %||% 0.0,
       rho_upper = spatial_info$rho_upper %||% 1.0,
       rho_prior_a = spatial_info$rho_prior_a %||% 1.0,
-      rho_prior_b = spatial_info$rho_prior_b %||% 1.0
+      rho_prior_b = spatial_info$rho_prior_b %||% 1.0,
+      center = spatial_info$center %||% TRUE
     )
 
     prior_params <- list(
@@ -1437,7 +1438,8 @@ prepare_spatial_for_hmc <- function(spatial, data, N) {
     rho_lower = if (spatial_type == "car_proper") unname(rho_bounds["lower"]) %||% 0.0 else NULL,
     rho_upper = if (spatial_type == "car_proper") unname(rho_bounds["upper"]) %||% 1.0 else NULL,
     rho_prior_a = 1.0,
-    rho_prior_b = 1.0
+    rho_prior_b = 1.0,
+    center = spatial$center %||% TRUE
   )
 }
 

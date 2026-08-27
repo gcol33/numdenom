@@ -1,5 +1,33 @@
 # tulpaRatio 1.7.2
 
+* **A proper CAR field's mean is removed from the linear predictor (#80).**
+  `Q(rho) = D - rho*W` is full rank at `rho < 1`, so the prior identifies the
+  field's mean, and the field was left uncentred on that reasoning. The
+  likelihood cannot see that mean apart from the intercept though: `eta` reads
+  `beta_0 + phi_s`, and moving the intercept by `c` against every `phi` by `-c`
+  leaves `eta` where it was. Measured on a 36-unit fixture, the two correlated
+  at -0.977, each carried a posterior sd near 0.06 while their sum carried
+  0.013, and the intercept's bulk ESS was 71 of 2000 at rhat 1.053. Longer
+  warmup made it worse, not better: 1.053 -> 1.112 and ESS 71 -> 32 going from
+  1500 to 3500, because adaptation tunes for the bulk and the ridge is not in
+  it.
+
+  `spatial_car()` now takes `center`, TRUE by default, and an SVC term's
+  treatment is what it applies: `eta` reads the centred field and the prior
+  still reads the raw one. Since `Q(rho)` does not annihilate the constant, the
+  two are different quadratic forms, and the density and every gradient now
+  take the prior's view of the field separately from `eta`'s.
+
+  The identified posterior does not move. On that fixture the level comes back
+  at 0.5200 against 0.5204, the slope at 0.3003 against 0.3004, with rho and tau
+  inside their own uncertainty. What changes is that the level is the intercept:
+  ESS 71 -> 1953 and rhat 1.053 -> 1.001.
+
+  `center = FALSE` keeps the previous parameterization and requires
+  `proper = TRUE`; an intrinsic field's mean is unidentified until it is
+  removed, so there is no model on the other side of that switch.
+  `car_proper_raw` covers it in `test-gradient-correctness.R`.
+
 * **A proper CAR field reaches only gradients written for it.** `GF_AREAL`
   covered a proper CAR field as much as an intrinsic one, so
   `spatial_car(proper = TRUE)` alongside `temporal_multiscale()` or a
