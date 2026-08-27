@@ -214,7 +214,7 @@ temporal_rw1 <- function(time_var, group_var = NULL, cyclic = FALSE,
 ",
          "group contrasts improper and the transform has to carry them beside
 ",
-         "the scaled directions (gcol33/tulpaRatio#79).", call. = FALSE)
+         "the scaled directions (gcol33/tulpaRatio#81).", call. = FALSE)
   }
   new_ratiod_temporal("rw1", time_var, group_var, cyclic = cyclic,
                       shared = shared,
@@ -276,7 +276,7 @@ temporal_rw2 <- function(time_var, group_var = NULL, cyclic = FALSE,
 ",
          "group contrasts improper and the transform has to carry them beside
 ",
-         "the scaled directions (gcol33/tulpaRatio#79).", call. = FALSE)
+         "the scaled directions (gcol33/tulpaRatio#81).", call. = FALSE)
   }
   new_ratiod_temporal("rw2", time_var, group_var, cyclic = cyclic,
                       shared = shared,

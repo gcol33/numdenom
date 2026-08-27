@@ -2102,7 +2102,8 @@ inline bool temporal_ar1_nc(const ModelData& data, const ParamLayout& layout) {
 // One temporal group only. The prior augments ONE global constant, so with
 // several groups the G - 1 group contrasts stay improper and the transform has
 // to carry them beside the scaled directions; temporal_rw1() and
-// temporal_rw2() refuse the combination rather than sample the wrong one.
+// temporal_rw2() refuse the combination rather than sample the wrong one
+// (gcol33/tulpaRatio#81).
 inline bool temporal_rw_nc(const ModelData& data, const ParamLayout& layout) {
   return layout.has_temporal && !layout.is_temporal_gp &&
          (data.temporal_type == TemporalType::RW1 ||
