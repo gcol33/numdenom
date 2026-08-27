@@ -220,8 +220,6 @@ Rcpp::List cpp_ess_fit(
     data.svc_data.n_obs = N;
     data.svc_data.nn = 0;
     data.svc_sigma2_prior_scale = 1.0;
-    data.svc_phi_prior_lower = 0.1;
-    data.svc_phi_prior_upper = 10.0;
 
     // Multi-scale temporal not supported
     data.has_multiscale_temporal = false;

@@ -1241,6 +1241,17 @@ validate_gp <- function(gp, data) {
 }
 
 
+#' Default range prior for an SVC term
+#'
+#' The one place the bounds live. `spatial_svc()` takes them as its `range`
+#' default and `prepare_svc_for_hmc()` reads them off the spec, so a fit's
+#' range prior is the one the spec prints.
+#'
+#' @return Numeric `c(lower, upper)`.
+#' @keywords internal
+svc_default_range <- function() c(0.3, 30)
+
+
 #' Spatially-Varying Coefficients (SVC)
 #'
 #' @description
@@ -1275,6 +1286,13 @@ validate_gp <- function(gp, data) {
 #' @param c_boundary Boundary scaling factor for HSGP. The HSGP domain is
 #'   extended to `c_boundary` times the half-range of scaled coordinates.
 #'   Default 1.5.
+#' @param range Prior range for the SVC range parameter \eqn{\phi} as
+#'   `c(lower, upper)`, in the units of the scaled coordinates. The prior is
+#'   uniform on that interval and the density is `-Inf` outside it, so a
+#'   posterior that piles up against either end is reporting that the data
+#'   want a range the interval excludes. Default `c(0.3, 30)`. Applies to
+#'   `approx = "nngp"`; the HSGP arm carries a LogNormal(0, 1) prior on its
+#'   lengthscale instead and rejects a `range` set here.
 #'
 #' @return A `ratiod_svc` object
 #'
@@ -1356,7 +1374,8 @@ spatial_svc <- function(coords,
                         scale_coords = TRUE,
                         approx = c("nngp", "hsgp"),
                         m = 6,
-                        c_boundary = 1.5) {
+                        c_boundary = 1.5,
+                        range = svc_default_range()) {
 
   cov <- match.arg(cov)
   approx <- match.arg(approx)
@@ -1407,6 +1426,20 @@ spatial_svc <- function(coords,
     }
   }
 
+  # Validate the range prior
+  if (!is.numeric(range) || length(range) != 2 || anyNA(range) ||
+      range[1] <= 0 || range[1] >= range[2]) {
+    stop("`range` must be c(lower, upper) with 0 < lower < upper", call. = FALSE)
+  }
+  range <- as.numeric(range)
+  # The HSGP arm parameterises a lengthscale under LogNormal(0, 1), not a
+  # range under this uniform, so a value set here would be read by nothing.
+  if (approx == "hsgp" && !identical(range, svc_default_range())) {
+    stop("`range` applies to `approx = \"nngp\"`. The HSGP arm carries a\n",
+         "LogNormal(0, 1) prior on its lengthscale, which `range` does not set.",
+         call. = FALSE)
+  }
+
   # Warning for non-shared SVCs
   if (!shared) {
     warning(
@@ -1429,6 +1462,7 @@ spatial_svc <- function(coords,
       approx = approx,
       m = m,
       c_boundary = c_boundary,
+      range = range,
       # Filled in during validation
       n_obs = NULL,
       n_svc = NULL,
@@ -1456,6 +1490,12 @@ print.ratiod_svc <- function(x, ...) {
   cat("Covariance:", x$cov, "\n")
   cat("Neighbors (NNGP):", x$nn, "\n")
   cat("Shared:", if (x$shared) "Yes (enters both processes)" else "No", "\n")
+  if (identical(x$approx %||% "nngp", "hsgp")) {
+    cat("Lengthscale prior: LogNormal(0, 1)\n")
+  } else {
+    rng <- x$range %||% svc_default_range()
+    cat("Range prior: [", rng[1], ", ", rng[2], "]\n", sep = "")
+  }
 
   if (!is.null(x$n_svc)) {
     cat("\nSVC terms:", x$n_svc, "\n")

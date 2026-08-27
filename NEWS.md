@@ -1,5 +1,29 @@
 # tulpaRatio 1.7.2
 
+* **The SVC range prior a spec declares is the one the fit runs (#78).**
+  `prepare_svc_for_hmc()` wrote `phi_prior_lower = 0.3`, `phi_prior_upper = 30`
+  as literals into each of its three branches, so every SVC fit ran on that
+  interval and nothing a caller set could change it. `spatial_svc()` carried no
+  field for the bounds at all, and the `%||% 0.01` / `%||% 10.0` fallbacks in
+  `fit_hmc()` -- the numbers `?spatial_svc` and the `ModelData` defaults both
+  named -- were unreachable, because `svc_info` always supplied a value for the
+  `%||%` to pass through.
+
+  `spatial_svc()` now takes `range = c(lower, upper)`, validated as
+  `0 < lower < upper` the way `spatial_multiscale()` validates `range_local`
+  and `range_regional`, and `prepare_svc_for_hmc()` reads it off the spec.
+  `svc_default_range()` is the one place the default lives; the `ModelData`
+  defaults carry the same pair, and the print method reports the interval in
+  force. Fits that set nothing are unchanged: the default is the `[0.3, 30]`
+  those fits already ran under, and the draws are bit-identical.
+
+  The bounds apply to `approx = "nngp"`. The HSGP arm parameterises a
+  lengthscale under LogNormal(0, 1), which this uniform does not set, so a
+  `range` passed alongside it is an error rather than a value nothing reads.
+  `ess_sampler.cpp` and `vi_sampler.cpp` each wrote a third and fourth pair of
+  bounds into a block they declare unsupported (`has_svc = false`); both are
+  gone.
+
 * **Intrinsic fields identified by augment-and-centre (#22).** The temporal
   random walks and the multi-scale trend and seasonal arms were identified by a
   soft penalty on the field's sum, `-0.5 * lambda * (sum phi)^2` at

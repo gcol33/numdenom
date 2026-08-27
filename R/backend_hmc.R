@@ -475,8 +475,8 @@ fit_hmc <- function(formula,
     nn_order = as.integer(svc_info$nn_order %||% integer(0)),
     nn_order_inv = as.integer(svc_info$nn_order_inv %||% integer(0)),
     sigma2_prior_scale = svc_info$sigma2_prior_scale %||% 1.0,
-    phi_prior_lower = svc_info$phi_prior_lower %||% 0.01,
-    phi_prior_upper = svc_info$phi_prior_upper %||% 10.0,
+    phi_prior_lower = svc_info$phi_prior_lower,
+    phi_prior_upper = svc_info$phi_prior_upper,
     tau_shape = priors$svc_tau_shape %||% 1.0,
     tau_rate = priors$svc_tau_rate %||% 0.01,
     svc_approx = svc_info$svc_approx %||% "nngp",
@@ -1619,8 +1619,8 @@ prepare_svc_for_hmc <- function(svc, data, N, X_num) {
       nn_order = integer(0),
       nn_order_inv = integer(0),
       sigma2_prior_scale = 1.0,
-      phi_prior_lower = 0.3,
-      phi_prior_upper = 10.0,
+      phi_prior_lower = svc_default_range()[1],
+      phi_prior_upper = svc_default_range()[2],
       tau_shape = 1.0,
       tau_rate = 0.01
     ))
@@ -1646,6 +1646,9 @@ prepare_svc_for_hmc <- function(svc, data, N, X_num) {
   coords_flat <- as.numeric(t(coords_matrix))
 
   approx <- svc$approx %||% "nngp"
+  # A spec built before `range` existed carries none; the default is the value
+  # those fits already ran under.
+  svc_range <- svc$range %||% svc_default_range()
 
   if (approx == "hsgp") {
     list(
@@ -1665,8 +1668,8 @@ prepare_svc_for_hmc <- function(svc, data, N, X_num) {
       nn_order = integer(0),
       nn_order_inv = integer(0),
       sigma2_prior_scale = 1.0,
-      phi_prior_lower = 0.3,
-      phi_prior_upper = 30.0,
+      phi_prior_lower = svc_range[1],
+      phi_prior_upper = svc_range[2],
       tau_shape = 1.0,
       tau_rate = 0.01,
       hsgp_m = as.integer(svc$m %||% 6L),
@@ -1694,8 +1697,8 @@ prepare_svc_for_hmc <- function(svc, data, N, X_num) {
       nn_order = as.integer(neighbor_info$nn_order - 1L),
       nn_order_inv = as.integer(neighbor_info$nn_order_inv - 1L),
       sigma2_prior_scale = 1.0,
-      phi_prior_lower = 0.3,
-      phi_prior_upper = 30.0,
+      phi_prior_lower = svc_range[1],
+      phi_prior_upper = svc_range[2],
       tau_shape = 1.0,
       tau_rate = 0.01,
       hsgp_m = 0L,

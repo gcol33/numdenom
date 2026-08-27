@@ -219,8 +219,11 @@ struct ModelData {
   int svc_hsgp_m_per_dim = 6;           // Basis functions per dimension for SVC-HSGP
   double svc_hsgp_boundary_factor = 1.5;
   double svc_sigma2_prior_scale = 1.0;  // Half-Cauchy scale for sigma2
-  double svc_phi_prior_lower = 0.01;    // Uniform prior lower bound for phi
-  double svc_phi_prior_upper = 10.0;    // Uniform prior upper bound for phi
+  // Uniform prior bounds for phi. apply_svc_params() overwrites both from the
+  // spec's `range` whenever has_svc, so these carry the same numbers as
+  // svc_default_range() in R rather than a second pair a model could run under.
+  double svc_phi_prior_lower = 0.3;
+  double svc_phi_prior_upper = 30.0;
 
   // GP spatial structure (single-scale)
   GPData gp_data;

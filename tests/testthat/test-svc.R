@@ -143,3 +143,59 @@ test_that("validate_spatial() skips SVC objects",
   # Should not error - SVC validation is separate
   expect_silent(tulpaRatio:::validate_spatial(svc, df))
 })
+
+
+# The range prior was unreachable from spatial_svc(): prepare_svc_for_hmc()
+# hardcoded the bounds, so every fit ran on [0.3, 30] whatever the spec said and
+# two specs differing only in their range produced bit-identical draws.
+
+test_that("spatial_svc() validates the range prior", {
+  expect_equal(spatial_svc(~ lon + lat, terms = 1)$range, c(0.3, 30))
+  expect_equal(spatial_svc(~ lon + lat, terms = 1, range = c(1, 4))$range, c(1, 4))
+
+  expect_error(spatial_svc(~ lon + lat, terms = 1, range = c(5, 1)),
+               "lower < upper")
+  expect_error(spatial_svc(~ lon + lat, terms = 1, range = c(0, 5)),
+               "lower < upper")
+  expect_error(spatial_svc(~ lon + lat, terms = 1, range = 5),
+               "lower < upper")
+  # The HSGP arm reads a LogNormal(0, 1) lengthscale, not this uniform, so a
+  # range set alongside it would be carried by nothing.
+  expect_error(spatial_svc(~ lon + lat, terms = 1, approx = "hsgp",
+                           range = c(1, 5)),
+               "approx")
+  expect_silent(spatial_svc(~ lon + lat, terms = 1, approx = "hsgp"))
+})
+
+test_that("the SVC range prior a spec declares is the one the sampler runs", {
+  skip_on_cran()
+
+  set.seed(1)
+  N <- 80
+  x <- rnorm(N)
+  trials <- sample(10:50, N, replace = TRUE)
+  df <- data.frame(y = rbinom(N, trials, plogis(0.5 + 0.3 * x)), trials = trials,
+                   x = x, lon = runif(N), lat = runif(N))
+
+  phi_draws <- function(range) {
+    set.seed(99)
+    fit <- tratio(y | trials ~ x, data = df, family = ratiod_binomial(),
+                  spatial = spatial_svc(~ lon + lat, terms = ~ x - 1, nn = 8,
+                                        range = range),
+                  control = list(iter = 300, warmup = 150, chains = 2,
+                                 verbose = FALSE))
+    as.matrix(fit$draws)[, "phi_svc[1]"]
+  }
+
+  tight <- phi_draws(c(0.3, 3))
+  wide <- phi_draws(c(0.3, 30))
+
+  # Every draw inside the declared support, on either bound.
+  expect_true(all(tight >= 0.3 & tight <= 3))
+  expect_true(all(wide >= 0.3 & wide <= 30))
+
+  # The bound is what separates the two: same data, same seed, same everything
+  # else. Identical draws here is the defect this asserts against.
+  expect_gt(max(wide), 3)
+  expect_false(isTRUE(all.equal(unname(tight), unname(wide))))
+})

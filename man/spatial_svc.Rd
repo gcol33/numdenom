@@ -13,7 +13,8 @@ spatial_svc(
   scale_coords = TRUE,
   approx = c("nngp", "hsgp"),
   m = 6,
-  c_boundary = 1.5
+  c_boundary = 1.5,
+  range = svc_default_range()
 )
 }
 \arguments{
@@ -50,6 +51,14 @@ when \code{approx = "hsgp"}). Default 6.}
 \item{c_boundary}{Boundary scaling factor for HSGP. The HSGP domain is
 extended to \code{c_boundary} times the half-range of scaled coordinates.
 Default 1.5.}
+
+\item{range}{Prior range for the SVC range parameter \eqn{\phi} as
+\code{c(lower, upper)}, in the units of the scaled coordinates. The prior is
+uniform on that interval and the density is \code{-Inf} outside it, so a
+posterior that piles up against either end is reporting that the data
+want a range the interval excludes. Default \code{c(0.3, 30)}. Applies to
+\code{approx = "nngp"}; the HSGP arm carries a LogNormal(0, 1) prior on its
+lengthscale instead and rejects a \code{range} set here.}
 }
 \value{
 A \code{ratiod_svc} object
